@@ -38,6 +38,7 @@ void Workspace::connectLocalEngine() {
     // transport command behind a library query would wait for it.
     localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
     watchFileWork(localEngine());
+    followContinuations(localEngine());
     transport_ = localPlayback();
     connect(localPlayback(), &EnginePlayback::changed, this, [this] {
         followIfStartedElsewhere(localPlayback());
@@ -256,6 +257,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
             view_->refreshTransport();
         }
     });
+    followContinuations(*link);
     connect(link->playback, &EnginePlayback::ratingChanged, this,
             [this, link](const QString& hash, const unsigned rating) {
                 adoptEngineRating(link->key, hash, rating);

@@ -45,6 +45,7 @@ class DynamicPlaylistDialog final : public QDialog {
     void resultsChanged();
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
     void libraryChosen(const trackknife::ui::EngineKey& engine);
+    void definitionsSaved();
 
   protected:
     void showEvent(QShowEvent* event) override;

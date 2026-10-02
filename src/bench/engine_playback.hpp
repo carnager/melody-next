@@ -9,6 +9,7 @@
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/protocol/client.hpp"
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QThreadPool>
@@ -132,8 +133,27 @@ class EnginePlayback final : public QObject {
 
     // Hands the engine a queue without starting anything: an edit to the list
     // that is playing, rather than a new thing to play.
+    // ADR-0253: `list` names the list the queue is played from, for its
+    // continuation; empty when it is no list's.
     void replaceQueue(const std::vector<LocalTrackRow>& rows,
-                      const std::vector<std::optional<formats::ReplayGainInfo>>& overrides);
+                      const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                      const QString& list = {});
+
+    // ADR-0253: the lists that continue on this engine, and with what -- its
+    // copy of each dynamic playlist rule. Asked for on connecting and told
+    // again whenever any client changes one.
+    struct Continuation {
+        QString rule_id;
+        QString name;
+        QString query;
+        friend bool operator==(const Continuation&, const Continuation&) = default;
+    };
+    [[nodiscard]] const QHash<QString, Continuation>& continuations() const noexcept {
+        return continuations_;
+    }
+    // Sets a list's continuation, or with nothing ends it.
+    void setContinuation(const QString& list, const std::optional<Continuation>& rule);
+    void refreshContinuations();
 
     // Hands the engine a queue and starts one of its entries. The rows carry
     // their own identities (ADR-0221), so the engine's queue and the model
@@ -145,7 +165,7 @@ class EnginePlayback final : public QObject {
     // or a CUE sheet's REM lines, which is why they travel.
     void play(const std::vector<LocalTrackRow>& rows,
               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
-              const core::StableId& entry);
+              const core::StableId& entry, const QString& list = {});
 
     // The up-next order, stated rather than rebuilt one request at a time.
     // Entries not already in the engine's queue are added to it: an engine
@@ -206,8 +226,14 @@ class EnginePlayback final : public QObject {
     // ADR-0233: a list on this engine was written or deleted, by any client
     // -- this one included. Emitted on this object's thread.
     void listChanged(const QString& id, quint64 revision, bool deleted);
+    // The lists that continue changed, by any client (ADR-0253).
+    void continuationsChanged();
 
   private:
+    // Parsed from list.continuations' answer or event.
+    [[nodiscard]] static QHash<QString, Continuation> continuationsOf(const protocol::Json& data);
+    void adoptContinuations(QHash<QString, Continuation> continuations);
+    QHash<QString, Continuation> continuations_;
     // `playback.queue`'s answer as rows.
     [[nodiscard]] static std::vector<LocalTrackRow> queueRows(const protocol::Json& answer);
     // Connects if one is configured. Answers whether a connection now exists.

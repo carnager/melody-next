@@ -146,6 +146,8 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     layout->addWidget(view_, 1);
 
     connect(session_, &DynamicPlaylistSession::changed, this, &DynamicPlaylistDialog::sync);
+    connect(session_, &DynamicPlaylistSession::definitionsSaved, this,
+            &DynamicPlaylistDialog::definitionsSaved);
     connect(session_, &DynamicPlaylistSession::catalogChanged, this,
             &DynamicPlaylistDialog::syncCatalog);
     connect(session_, &DynamicPlaylistSession::resultsAboutToChange, this,

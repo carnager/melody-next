@@ -27,6 +27,7 @@
 
 #include <QAbstractItemView>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
@@ -915,7 +916,62 @@ void BenchMainWindow::showTabContextMenu(const QPoint& position) {
     }
     tabs_->setCurrentIndex(index);
     refreshTabActions();
+    fillContinueMenu();
     tab_context_menu_->popup(tabs_->tabBar()->mapToGlobal(position));
+}
+
+void BenchMainWindow::fillContinueMenu() {
+    if (continue_menu_ == nullptr) {
+        return;
+    }
+    continue_menu_->clear();
+    const auto* tab = currentListTab();
+    continue_menu_->setEnabled(tab != nullptr);
+    if (tab == nullptr) {
+        return;
+    }
+    const auto id = QString::fromStdString(tab->document.id.to_string());
+    const auto current = workspace_.continuationOf(*tab);
+    auto* group = new QActionGroup(continue_menu_);
+    const auto choose = [this, id](const QString& rule_id) {
+        if (auto* chosen = workspace_.tabForDocument(id); chosen != nullptr) {
+            workspace_.setContinuation(*chosen, rule_id);
+        }
+    };
+    auto* nothing = continue_menu_->addAction(tr("Nothing — the list ends"));
+    nothing->setObjectName(QStringLiteral("continue-nothing"));
+    nothing->setCheckable(true);
+    nothing->setChecked(!current);
+    group->addAction(nothing);
+    connect(nothing, &QAction::triggered, this, [choose] { choose({}); });
+    const auto choices = workspace_.continuationChoices();
+    if (!choices.empty()) {
+        continue_menu_->addSeparator();
+    }
+    bool listed = !current;
+    for (const auto& choice : choices) {
+        auto* action = continue_menu_->addAction(
+            choice.name.isEmpty() ? tr("Unnamed dynamic playlist") : choice.name);
+        action->setObjectName(QStringLiteral("continue-rule-") + choice.rule_id);
+        action->setCheckable(true);
+        action->setChecked(current && current->rule_id == choice.rule_id);
+        listed = listed || action->isChecked();
+        group->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [choose, rule = choice.rule_id] { choose(rule); });
+    }
+    // Chosen elsewhere, from a rule this window does not have: shown, kept.
+    if (!listed) {
+        auto* other = continue_menu_->addAction(current->name);
+        other->setCheckable(true);
+        other->setChecked(true);
+        other->setEnabled(false);
+        group->addAction(other);
+    }
+    if (choices.empty()) {
+        auto* none = continue_menu_->addAction(tr("No rule-based dynamic playlists yet"));
+        none->setEnabled(false);
+    }
 }
 
 void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& position) {

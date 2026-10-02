@@ -240,6 +240,7 @@ void DynamicPlaylistSession::save() {
     catalog_index_ = found == definitions_.end() ? 0
                                                  : static_cast<int>(found - definitions_.begin()) + 1;
     status_ = QStringLiteral("Definition saved");
+    emit definitionsSaved();
     emit catalogChanged();
     emit changed();
 }
@@ -258,6 +259,7 @@ void DynamicPlaylistSession::remove() {
     }
     definitions_ = std::move(next);
     catalog_index_ = 0;
+    emit definitionsSaved();
     loadSelection();
 }
 

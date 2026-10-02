@@ -87,6 +87,20 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
             }
             return;
         }
+        if (event.name == "list.continuations") {
+            auto continuations = continuationsOf(event.data);
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, continuations = std::move(continuations)]() mutable {
+                        if (self) {
+                            self->adoptContinuations(std::move(continuations));
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "list.changed") {
             const auto id = QString::fromStdString(event.data.value("id", std::string{}));
             const auto revision = static_cast<quint64>(event.data.value("revision", std::uint64_t{0}));
@@ -167,6 +181,7 @@ void EnginePlayback::takeArrived() {
         return;
     }
     client_ = std::move(client);
+    refreshContinuations();
     emit connected();
     emit changed();
 }
@@ -194,6 +209,7 @@ void EnginePlayback::maintain() {
     if (!open() && !(revive_ && revive_() && open())) {
         return;
     }
+    refreshContinuations();
     emit connected();
     emit changed();
 }
@@ -642,26 +658,87 @@ void EnginePlayback::setRequests(const std::vector<LocalTrackRow>& rows,
 
 void EnginePlayback::replaceQueue(
     const std::vector<LocalTrackRow>& rows,
-    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides) {
+    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides, const QString& list) {
     auto entries = protocol::Json::array();
     for (std::size_t index = 0; index < rows.size(); ++index) {
         entries.push_back(
             entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
     }
-    send(QStringLiteral("playback.replace_queue"), protocol::Json{{"entries", std::move(entries)}});
+    protocol::Json params{{"entries", std::move(entries)}};
+    if (!list.isEmpty()) {
+        params["list"] = list.toStdString();
+    }
+    send(QStringLiteral("playback.replace_queue"), std::move(params));
+}
+
+QHash<QString, EnginePlayback::Continuation>
+EnginePlayback::continuationsOf(const protocol::Json& data) {
+    QHash<QString, Continuation> found;
+    const auto lists = data.find("continuations");
+    if (lists == data.end() || !lists->is_array()) {
+        return found;
+    }
+    for (const auto& value : *lists) {
+        if (!value.is_object()) {
+            continue;
+        }
+        const auto list = QString::fromStdString(value.value("list", std::string{}));
+        if (!list.isEmpty()) {
+            found.insert(list,
+                         Continuation{.rule_id = QString::fromStdString(value.value("rule", std::string{})),
+                                      .name = QString::fromStdString(value.value("name", std::string{})),
+                                      .query = QString::fromStdString(value.value("query", std::string{}))});
+        }
+    }
+    return found;
+}
+
+void EnginePlayback::adoptContinuations(QHash<QString, Continuation> continuations) {
+    if (continuations == continuations_) {
+        return;
+    }
+    continuations_ = std::move(continuations);
+    emit continuationsChanged();
+}
+
+void EnginePlayback::refreshContinuations() {
+    request(QStringLiteral("list.continuations"), protocol::Json::object(),
+            [this](const core::Result<protocol::Json>& answer) {
+                if (answer) {
+                    adoptContinuations(continuationsOf(*answer));
+                }
+            });
+}
+
+void EnginePlayback::setContinuation(const QString& list, const std::optional<Continuation>& rule) {
+    protocol::Json params{{"list", list.toStdString()}};
+    if (rule) {
+        params["rule"] = protocol::Json{{"id", rule->rule_id.toStdString()},
+                                        {"name", rule->name.toStdString()},
+                                        {"query", rule->query.toStdString()}};
+    }
+    request(QStringLiteral("list.continuation.set"), std::move(params),
+            [this](const core::Result<protocol::Json>& answer) {
+                if (!answer) {
+                    emit failed(QString::fromStdString(answer.error().message));
+                }
+            });
 }
 
 void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
                           const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
-                          const core::StableId& entry) {
+                          const core::StableId& entry, const QString& list) {
     auto entries = protocol::Json::array();
     for (std::size_t index = 0; index < rows.size(); ++index) {
         entries.push_back(
             entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
     }
     std::vector<std::pair<QString, protocol::Json>> calls;
-    calls.emplace_back(QStringLiteral("playback.replace_queue"),
-                       protocol::Json{{"entries", std::move(entries)}});
+    protocol::Json queue{{"entries", std::move(entries)}};
+    if (!list.isEmpty()) {
+        queue["list"] = list.toStdString();
+    }
+    calls.emplace_back(QStringLiteral("playback.replace_queue"), std::move(queue));
     calls.emplace_back(QStringLiteral("playback.play"),
                        protocol::Json{{"entry", entry.to_string()}});
     send(std::move(calls));

@@ -101,6 +101,8 @@ class DynamicPlaylistSession final : public QObject {
   signals:
     void changed();
     void catalogChanged();
+    // The definitions were written: a rule saved, edited or removed.
+    void definitionsSaved();
     // The results are about to be replaced, and were.
     void resultsAboutToChange();
     void resultsChanged();

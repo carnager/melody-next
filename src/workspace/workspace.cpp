@@ -44,6 +44,7 @@ void Workspace::start() {
     const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
+    rememberContinuationRules();
     connectLocalEngine();
     persistence_ = new ui::ListPersistenceService(database_path_, this);
     persistence_timer_ = new QTimer(this);

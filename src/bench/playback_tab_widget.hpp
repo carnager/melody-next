@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "uicommon/application_style.hpp"
+
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCursor>
@@ -19,26 +21,34 @@
 namespace trackknife::bench {
 
 inline QIcon playbackSpeakerIcon(const QPalette& palette) {
-    QPixmap pixmap(32, 32);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    const auto color = palette.color(QPalette::Highlight);
-    painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap));
-    painter.setBrush(color);
-    QPainterPath speaker;
-    speaker.moveTo(5, 12);
-    speaker.lineTo(11, 12);
-    speaker.lineTo(18, 6);
-    speaker.lineTo(18, 26);
-    speaker.lineTo(11, 20);
-    speaker.lineTo(5, 20);
-    speaker.closeSubpath();
-    painter.drawPath(speaker);
-    painter.setBrush(Qt::NoBrush);
-    painter.drawArc(QRectF(16, 8, 10, 16), -60 * 16, 120 * 16);
-    painter.drawArc(QRectF(15, 3, 16, 26), -60 * 16, 120 * 16);
-    return QIcon(pixmap);
+    // Drawn on a 32-unit grid at 32 and 64 px, so it is sharp on a HiDPI
+    // screen too (ADR-0251).
+    QIcon icon;
+    for (const int size : {32, 64}) {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.scale(size / 32.0, size / 32.0);
+        const auto color = palette.color(QPalette::Highlight);
+        painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap));
+        painter.setBrush(color);
+        QPainterPath speaker;
+        speaker.moveTo(5, 12);
+        speaker.lineTo(11, 12);
+        speaker.lineTo(18, 6);
+        speaker.lineTo(18, 26);
+        speaker.lineTo(11, 20);
+        speaker.lineTo(5, 20);
+        speaker.closeSubpath();
+        painter.drawPath(speaker);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawArc(QRectF(16, 8, 10, 16), -60 * 16, 120 * 16);
+        painter.drawArc(QRectF(15, 3, 16, 26), -60 * 16, 120 * 16);
+        painter.end();
+        icon.addPixmap(pixmap);
+    }
+    return icon;
 }
 
 // A tab's close button: a small cross, brighter when pointed at. Drawn here
@@ -93,7 +103,7 @@ class PlaybackTabBar final : public QTabBar {
         // On the style the application uses: a proxy made without one would
         // wrap the desktop's default instead.
         auto* placement =
-            new ButtonPlacement(QStyleFactory::create(QApplication::style()->name()));
+            new ButtonPlacement(ui::createApplicationStyle());
         placement->setParent(this);
         setStyle(placement);
     }

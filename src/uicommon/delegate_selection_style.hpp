@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "uicommon/application_style.hpp"
+
 #include <QApplication>
 #include <QProxyStyle>
 #include <QStyleFactory>
@@ -36,7 +38,7 @@ class DelegateSelectionStyle final : public QProxyStyle {
     // wrap the desktop's default instead.
     static void install(QWidget* view) {
         auto* style =
-            new DelegateSelectionStyle(QStyleFactory::create(QApplication::style()->name()));
+            new DelegateSelectionStyle(createApplicationStyle());
         style->setParent(view);
         view->setStyle(style);
     }

@@ -2,6 +2,8 @@
 
 qt_add_library(
     trackknife_ui_common STATIC
+    application_style.cpp
+    application_style.hpp
     command_palette.cpp
     command_palette.hpp
     eliding_label.cpp

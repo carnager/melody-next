@@ -10,6 +10,10 @@ qt_add_library(
     bench_playlists.cpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
+    themed_icon.cpp
+    themed_icon.hpp
+    trackknife_style.cpp
+    trackknife_style.hpp
     widget_color_scheme.cpp
     widget_color_scheme.hpp
     search_dialog.cpp

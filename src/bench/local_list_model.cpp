@@ -970,10 +970,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return discStart(index.row());
     case ui::track_album_group_start_role: {
         const auto row_index = static_cast<std::size_t>(index.row());
-        const auto begins_group = (row_index == 0U || !same_album(rows_[row_index - 1U], row)) &&
-                                  row_index + 1U < rows_.size() &&
-                                  same_album(row, rows_[row_index + 1U]);
-        return begins_group;
+        // A lone track is an album of its own (ADR-0250).
+        return row_index == 0U || !same_album(rows_[row_index - 1U], row);
     }
     default:
         break;

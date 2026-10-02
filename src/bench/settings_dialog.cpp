@@ -7,6 +7,7 @@
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/interface_scale.hpp"
 
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -195,6 +196,22 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "desktop is dark but gives Qt no dark colours."));
     bind(color_scheme_, SettingsSession::colorSchemes(), color_scheme_key);
     general_form->addRow(QStringLiteral("Colours:"), color_scheme_);
+    // ADR-0251: larger or smaller than the desktop's own scaling.
+    auto* interface_scale = new QComboBox(general);
+    interface_scale->setObjectName(QStringLiteral("bench-settings-interface-scale"));
+    interface_scale->setToolTip(
+        QStringLiteral("How large Trackknife draws itself, on top of the scaling your desktop "
+                       "already applies (a Retina or 5K display's, a 125% Linux desktop's). "
+                       "Takes effect when Trackknife starts again."));
+    bind(interface_scale, SettingsSession::interfaceScales(), interface_scale_key);
+    auto* interface_scale_row = new QWidget(general);
+    auto* interface_scale_layout = new QHBoxLayout(interface_scale_row);
+    interface_scale_layout->setContentsMargins(0, 0, 0, 0);
+    interface_scale_layout->addWidget(interface_scale);
+    auto* restart_note = new QLabel(QStringLiteral("after a restart"), interface_scale_row);
+    restart_note->setForegroundRole(QPalette::PlaceholderText);
+    interface_scale_layout->addWidget(restart_note, 1);
+    general_form->addRow(QStringLiteral("Interface size:"), interface_scale_row);
     // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
     lists_display_ = new QComboBox(general);
     lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));

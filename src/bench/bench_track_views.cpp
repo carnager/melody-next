@@ -94,8 +94,14 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         const auto logical = trackColumnLogical(column.id);
         const auto spec = std::ranges::find(track_column_specs, logical, &TrackColumnSpec::logical);
         if (logical >= 0 && spec != track_column_specs.end()) {
-            preferred_widths.insert(logical, column.width);
-            minimum_widths.insert(logical, spec->minimum_width);
+            // Covers beside the rows: the cover gutter and the numbers fixed,
+            // as the Qt Quick window has them (ADR-0250).
+            const auto fixed = !side_artwork                          ? 0
+                               : logical == local_artwork_column      ? ui::side_cover_gutter
+                               : logical == local_track_number_column ? ui::side_number_width
+                                                                      : 0;
+            preferred_widths.insert(logical, fixed > 0 ? fixed : column.width);
+            minimum_widths.insert(logical, fixed > 0 ? fixed : spec->minimum_width);
         }
     }
     queue_view->setAutoFillColumns({local_artist_column, local_title_column, local_album_column},
@@ -124,7 +130,12 @@ BenchMainWindow::captureTrackViewLayout(const QTableView* view,
         const auto saved = std::ranges::find(state.columns, id, &ui::TrackViewColumnLayout::id);
         // Qt reports zero for hidden sections. Preserve the preferred width so
         // toggling a column on does not collapse it to the minimum width.
-        const auto width = view->isColumnHidden(logical) && saved != state.columns.end()
+        // Beside-the-rows covers fix the gutter and number widths; what the
+        // user chose for them stays for the other presentations.
+        const bool fixed =
+            state.presentation == ui::TrackViewPresentation::albums_side_artwork &&
+            (logical == local_artwork_column || logical == local_track_number_column);
+        const auto width = (view->isColumnHidden(logical) || fixed) && saved != state.columns.end()
                                ? saved->width
                                : header->sectionSize(logical);
         layout.columns.push_back(ui::TrackViewColumnLayout{

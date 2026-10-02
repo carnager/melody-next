@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+
 #include "workspace/panel_arrangement.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
@@ -8,6 +9,7 @@
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/quick_pick_popup.hpp"
+#include "bench/trackknife_style.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "trackknife/audio/local_audition.hpp"
@@ -127,30 +129,17 @@ void BenchMainWindow::buildWorkspace() {
     folders_layout->setContentsMargins(0, 0, 0, 0);
     folders_layout->setSpacing(0);
     auto* heading_row = new QHBoxLayout;
-    heading_row->setContentsMargins(6, 4, 6, 0);
+    heading_row->setContentsMargins(6, 6, 6, 4);
     heading_row->setSpacing(2);
     // One-click source switching (ADR-0130): a flat tab bar per authority
     // replaces the dropdown and static heading.
     const auto make_source_tabs = [this](const QString& object_name,
                                          const QString& accessible_name) {
-        auto* bar = new QTabBar(folders_panel_);
+        // As the Qt Quick window's: one box split into its sources, the
+        // chosen one lifted out of it (ADR-0250).
+        auto* bar = new SegmentedTabBar(folders_panel_);
         bar->setObjectName(object_name);
         bar->setAccessibleName(accessible_name);
-        bar->setExpanding(false);
-        bar->setDrawBase(false);
-        bar->setDocumentMode(true);
-        // As the track tabs: plain text, the chosen one filled with the
-        // ground of what it shows below, a hovered one faintly.
-        auto hover = palette().color(QPalette::Base);
-        hover.setAlpha(110);
-        bar->setStyleSheet(
-            QStringLiteral(
-                "QTabBar::tab { background: transparent; border: none; margin: 3px 1px 0 1px;"
-                " padding: 5px 12px; border-top-left-radius: 5px; border-top-right-radius: 5px;"
-                " color: palette(placeholder-text); }"
-                "QTabBar::tab:hover { background: %1; }"
-                "QTabBar::tab:selected { background: palette(base); color: palette(text); }")
-                .arg(hover.name(QColor::HexArgb)));
         return bar;
     };
     local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),

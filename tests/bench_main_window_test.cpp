@@ -2,8 +2,10 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/trackknife_style.hpp"
 #include "bench/widget_color_scheme.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/interface_scale.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -393,6 +395,7 @@ class BenchMainWindowTest final : public QObject {
     void deleteInUpNextTakesItsTrackNotTheLists();
     void settingsLeftOffReadAsOff();
     void colorSchemesAreChosenAndApplied();
+    void interfaceSizeIsChosenForTheNextStart();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -10665,7 +10668,10 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QVERIFY(pending != nullptr);
     QTRY_VERIFY(!pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>().isNull());
     const auto preview = pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>();
-    QVERIFY(preview.width() <= 60 && preview.height() <= 60);
+    // Shown at 60 px or less, in more device pixels for HiDPI (ADR-0251).
+    const auto shown = preview.deviceIndependentSize();
+    QVERIFY(shown.width() <= 60.0 && shown.height() <= 60.0);
+    QVERIFY(preview.devicePixelRatio() > 1.0);
     QCOMPARE(preview.pixelColor(0, 0), QColor{Qt::darkCyan});
     QCOMPARE(pending->model()->index(0, 4).data().toString(), QStringLiteral("None"));
     QVERIFY(!observed.has_value());
@@ -12202,6 +12208,35 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
 // ADR-0247: Trackknife's own light and dark schemes, chosen in Settings,
 // applied at once -- with Fusion, which paints with the palette -- and the
 // system's colours back again.
+// ADR-0251: the interface size is offered in Settings, stored, and read back
+// before the application exists -- through the settings file alone, as the
+// next start reads it -- for QT_SCALE_FACTOR; anything unusable is 100%.
+void BenchMainWindowTest::interfaceSizeIsChosenForTheNextStart() {
+    QSettings{}.remove(QLatin1String(interface_scale_key));
+    QCOMPARE(chosenInterfaceScale(), 1.0);
+    BenchMainWindow window;
+    window.show();
+    window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+    auto* dialog = window.findChild<SettingsDialog*>();
+    QVERIFY(dialog != nullptr);
+    auto* combo = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-interface-scale"));
+    QVERIFY(combo != nullptr);
+    QCOMPARE(combo->count(), static_cast<int>(interfaceScales().size()));
+    QCOMPARE(combo->currentData().toString(), QStringLiteral("1"));
+    combo->setCurrentIndex(combo->findData(QStringLiteral("1.5")));
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    QSettings{}.sync();
+    QCOMPARE(chosenInterfaceScale(), 1.5);
+    QSettings{}.setValue(QLatin1String(interface_scale_key), QStringLiteral("7"));
+    QSettings{}.sync();
+    QCOMPARE(chosenInterfaceScale(), 1.0);
+    QSettings{}.remove(QLatin1String(interface_scale_key));
+}
+
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
     // Complete schemes: an unfocused window keeps its accent, disabled text
     // reads as disabled.
@@ -12256,7 +12291,8 @@ void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
     choose(QStringLiteral("dark"));
     QCOMPARE(QApplication::palette().color(QPalette::Window),
              darkPalette().color(QPalette::Window));
-    QCOMPARE(QApplication::style()->name().toLower(), QStringLiteral("fusion"));
+    // ADR-0250: Trackknife's own style under every scheme, as Quick's.
+    QVERIFY(qobject_cast<TrackknifeStyle*>(QApplication::style()) != nullptr);
     QVERIFY(ColorSchemes::instance().ownPalette());
     QCOMPARE(window.palette().color(QPalette::Base), darkPalette().color(QPalette::Base));
 
@@ -12266,6 +12302,7 @@ void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
 
     choose(QStringLiteral("system"));
     QVERIFY(!ColorSchemes::instance().ownPalette());
+    QVERIFY(qobject_cast<TrackknifeStyle*>(QApplication::style()) != nullptr);
     QVERIFY(QApplication::palette().color(QPalette::Window) !=
             darkPalette().color(QPalette::Window));
     QSettings{}.remove(QLatin1String(color_scheme_key));
@@ -12613,37 +12650,16 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         auto* local_model = qobject_cast<LocalListModel*>(view->model());
         QVERIFY(local_model != nullptr);
         local_model->appendRows({std::move(singleton)});
-        // A lone track after an album: a gap above it, where its hairline goes.
+        // A lone track is an album of its own (ADR-0250): its header above it.
         QTRY_COMPARE(view->rowHeight(2),
-                     view->rowHeight(1) + ui::QueueItemDelegate::loose_run_gap);
+                     view->rowHeight(1) + ui::QueueItemDelegate::album_header_height);
         QImage singleton_cover{12, 12, QImage::Format_RGB32};
         singleton_cover.fill(Qt::red);
         local_model->setArtwork(local_model->groupKey(2), singleton_cover);
         QCoreApplication::processEvents();
-        // Its cover stands where an album track's number does, just before
-        // the title; the cover column stays empty.
-        QVERIFY(!view->isColumnHidden(local_track_number_column));
+        // Its cover beside its header, in the cover gutter, as any album's.
         const auto artwork_rect =
-            view->visualRect(local_model->index(2, local_track_number_column));
-        const auto artwork_render = view->viewport()->grab(artwork_rect).toImage();
-        bool found_inline_cover = false;
-        auto leftmost_cover_pixel = artwork_render.width();
-        for (int y = 0; y < artwork_render.height(); ++y) {
-            for (int x = 0; x < artwork_render.width(); ++x) {
-                if (artwork_render.pixelColor(x, y) == QColor(Qt::red)) {
-                    found_inline_cover = true;
-                    leftmost_cover_pixel = std::min(leftmost_cover_pixel, x);
-                }
-            }
-        }
-        QVERIFY(found_inline_cover);
-        // Against the title side of the cell, as a number would be.
-        QVERIFY(leftmost_cover_pixel >= artwork_render.width() - 20 - 8);
-
-        view->selectionModel()->select(local_model->index(2, 0),
-                                       QItemSelectionModel::ClearAndSelect |
-                                           QItemSelectionModel::Rows);
-        QCoreApplication::processEvents();
+            view->visualRect(local_model->index(2, local_artwork_column));
         const auto shows_cover = [](const QImage& render) {
             for (int y = 0; y < render.height(); ++y) {
                 for (int x = 0; x < render.width(); ++x) {
@@ -12654,6 +12670,12 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
             }
             return false;
         };
+        QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
+
+        view->selectionModel()->select(local_model->index(2, 0),
+                                       QItemSelectionModel::ClearAndSelect |
+                                           QItemSelectionModel::Rows);
+        QCoreApplication::processEvents();
         // Selected or playing, the cover stays on top of the row's tint.
         QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
         view->clearSelection();

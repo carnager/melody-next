@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "uicommon/application_style.hpp"
+
 #include <QApplication>
 #include <QHeaderView>
 #include <QPainter>
@@ -74,7 +76,13 @@ class FlatHeaderStyle final : public QProxyStyle {
         const auto font = labelFont(widget);
         painter->setFont(font);
         painter->setPen(blend(header->palette, label_share));
-        painter->drawText(label, static_cast<int>(header->textAlignment | Qt::AlignVCenter),
+        // Labels read from the left, as the Qt Quick window's do, unless the
+        // model places one otherwise.
+        auto alignment = header->textAlignment;
+        if (alignment.testFlag(Qt::AlignHCenter)) {
+            alignment = (alignment & ~Qt::AlignHorizontal_Mask) | Qt::AlignLeft;
+        }
+        painter->drawText(label, static_cast<int>(alignment | Qt::AlignVCenter),
                           QFontMetrics(font).elidedText(header->text, Qt::ElideRight,
                                                         label.width()));
         painter->restore();
@@ -98,7 +106,7 @@ class FlatHeaderStyle final : public QProxyStyle {
     // On the style the application uses: a proxy made without one would
     // wrap the desktop's default instead.
     static void install(QHeaderView* header) {
-        auto* style = new FlatHeaderStyle(QStyleFactory::create(QApplication::style()->name()));
+        auto* style = new FlatHeaderStyle(createApplicationStyle());
         style->setParent(header);
         header->setStyle(style);
     }

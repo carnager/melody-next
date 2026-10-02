@@ -35,8 +35,9 @@ enum TrackRowRole : int {
     track_album_artist_role,              // grouping artist with fallbacks
     track_album_artwork_role,             // QImage cover for the group header
     track_album_artwork_key_role,         // artwork cache identity
-    // Optional fast path: bool, true only for the first row of a group with
-    // at least two members. Views fall back to adjacent group-key comparison.
+    // Optional fast path: bool, true for the first row of each album -- a
+    // lone track being an album of its own, as both windows group them
+    // (ADR-0250). Views fall back to adjacent group-key comparison.
     track_album_group_start_role,
     track_rating_role,       // uint 0-10 track rating (ADR-0179); 0/absent unrated
     track_album_rating_role, // uint 0-10 album rating painted over covers

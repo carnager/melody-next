@@ -44,9 +44,12 @@ constexpr int artwork_padding = side_artwork_padding;
     return view->property(property).isValid() ? view->property(property).toInt() : fallback;
 }
 
+// A lone track is an album of its own, its header and cover as any album's,
+// as the Qt Quick window draws it (ADR-0250).
 [[nodiscard]] TrackGroupColumns groupColumns(const QTableView* view) {
     return {.album = viewColumn(view, track_album_column_property, track_album_column),
-            .date = viewColumn(view, track_date_column_property, track_date_column)};
+            .date = viewColumn(view, track_date_column_property, track_date_column),
+            .lone_tracks_grouped = true};
 }
 
 [[nodiscard]] QString groupKey(const QTableView* view, const int row) {
@@ -108,83 +111,47 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
     const auto date_column = viewColumn(view, track_date_column_property, track_date_column);
     const auto& palette = view->palette();
     for (int row = first_candidate; row <= last_candidate; ++row) {
-        if (row > 0 && groupKey(view, row) == groupKey(view, row - 1)) {
+        if (!beginsAlbum(view, row)) {
             continue;
         }
         const auto top = view->rowViewportPosition(row);
         if (top >= view->viewport()->height()) {
             break;
         }
-        const auto key = groupKey(view, row);
-        if (row + 1 >= model->rowCount() || groupKey(view, row + 1) != key) {
-            continue;
-        }
-        const auto cover_top = cover_leads ? top : top + QueueItemDelegate::album_header_height;
-        auto group_bottom = top + view->rowHeight(row);
-        for (int next = row + 1;
-             next < model->rowCount() && groupKey(view, next) == key &&
-             group_bottom < cover_top + maximum_side_artwork_extent + artwork_padding * 2;
-             ++next) {
-            group_bottom = view->rowViewportPosition(next) + view->rowHeight(next);
-        }
-
         // The album's name starts where the rows' text does, so the titles
         // sit under it.
         const auto header_left = cover_leads ? artwork_left + artwork_width : 0;
         const auto text_indent = cover_leads ? text_left - header_left : 0;
         const QRect header{header_left, top, view->viewport()->width() - header_left,
                            QueueItemDelegate::album_header_height};
+        const auto text = albumHeaderText(*model, row, album_column, date_column);
         painter->fillRect(header, palette.base());
         paintAlbumHeader(painter, header.adjusted(std::max(0, text_indent), 0, 0, 0), palette,
-                         view->font(), albumHeaderText(*model, row, album_column, date_column),
-                         false);
-        if (row > 0) {
-            // The hairline between albums runs the full width, over the
-            // cover column too.
-            const auto y = top + QueueItemDelegate::hairline_offset;
-            painter->setPen(groupHairline(palette));
-            painter->drawLine(QPoint{0, y}, QPoint{view->viewport()->width(), y});
-        }
+                         view->font(), text, false);
 
-        const QRect available =
-            QRect{artwork_left, cover_top, artwork_width, std::max(0, group_bottom - cover_top)}
-                .adjusted(artwork_padding, artwork_padding + 2, -artwork_padding,
-                          -artwork_padding);
-        const auto extent = std::max(
-            0, std::min({available.width(), available.height(), maximum_side_artwork_extent}));
-        if (extent <= 0 || available.bottom() < 0) {
-            continue;
-        }
-        const QRect target{available.left(), available.top(), extent, extent};
+        // Every album's cover the same size at its top left, beside its
+        // header -- the Qt Quick window's (ADR-0250) -- or its initials.
+        const QRect target{artwork_left + side_cover_left, top + side_cover_top, side_cover_extent,
+                           side_cover_extent};
         const auto cover = model->index(row, column).data(track_album_artwork_role).value<QImage>();
         const auto album_rating = model->index(row, column).data(track_album_rating_role).toUInt();
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->setRenderHint(QPainter::SmoothPixmapTransform);
         if (!cover.isNull()) {
-            const auto fitted = cover.size().scaled(target.size(), Qt::KeepAspectRatio);
-            const QRect centered{target.left(), target.top(), fitted.width(), fitted.height()};
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+            // The middle square of the cover, filling the tile, as Quick's
+            // PreserveAspectCrop does.
+            const auto side = std::min(cover.width(), cover.height());
+            const QRect middle{(cover.width() - side) / 2, (cover.height() - side) / 2, side, side};
             QPainterPath rounded;
-            rounded.addRoundedRect(centered, 3, 3);
+            rounded.addRoundedRect(target, 3, 3);
             painter->setClipPath(rounded, Qt::IntersectClip);
-            painter->drawImage(centered, cover);
+            painter->drawImage(target, cover, middle);
             painter->restore();
-            paintRatingOverlay(painter, centered, album_rating);
         } else {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(palette.color(QPalette::Mid));
-            painter->drawRoundedRect(target, 3, 3);
-            const auto icon =
-                QIcon::fromTheme(QStringLiteral("media-optical-audio"),
-                                 QApplication::style()->standardIcon(QStyle::SP_FileIcon));
-            const auto glyph = std::max(16, extent / 3);
-            icon.paint(painter,
-                       QRect{target.center().x() - glyph / 2, target.center().y() - glyph / 2,
-                             glyph, glyph},
-                       Qt::AlignCenter, QIcon::Disabled);
-            painter->restore();
-            paintRatingOverlay(painter, target, album_rating);
+            paintInitialsTile(painter, target, text.album, palette);
         }
+        paintRatingOverlay(painter, target, album_rating);
     }
 }
 
@@ -464,7 +431,8 @@ void QueueTableView::rebuildAlbumRowGeometry() {
         }
     }
     row_header->hide();
-    if (!album_grouping_enabled_ || model() == nullptr || model()->rowCount() < 2) {
+    // One track is an album of its own too, with its header (ADR-0250).
+    if (!album_grouping_enabled_ || model() == nullptr || model()->rowCount() < 1) {
         updateGeometries();
         return;
     }
@@ -522,9 +490,7 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
     const auto default_height = verticalHeader()->defaultSectionSize();
     const QSignalBlocker blocker{verticalHeader()};
     for (int row = first; row <= last; ++row) {
-        verticalHeader()->resizeSection(
-            row,
-            default_height + groupSpacing(this, row));
+        verticalHeader()->resizeSection(row, default_height + groupSpacing(this, row));
     }
     // Section-size signals are deliberately batched above. QTableView therefore
     // needs one explicit scroll-range update after the final header heights.
@@ -791,21 +757,26 @@ void QueueTableView::startDrag(const Qt::DropActions supported_actions) {
     auto summary_font = font();
     summary_font.setBold(true);
     const QFontMetrics summary_metrics{summary_font};
-    QPixmap summary_pixmap{summary_metrics.horizontalAdvance(summary) + 24,
-                           summary_metrics.height() + 12};
+    // In device pixels, so the pill is sharp on a HiDPI screen.
+    const QSize summary_size{summary_metrics.horizontalAdvance(summary) + 24,
+                             summary_metrics.height() + 12};
+    const auto ratio = devicePixelRatioF();
+    QPixmap summary_pixmap{summary_size * ratio};
+    summary_pixmap.setDevicePixelRatio(ratio);
     summary_pixmap.fill(Qt::transparent);
     {
         QPainter painter{&summary_pixmap};
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
         painter.setBrush(palette().highlight());
-        painter.drawRoundedRect(summary_pixmap.rect().adjusted(1, 1, -1, -1), 6, 6);
+        const QRect area{QPoint{}, summary_size};
+        painter.drawRoundedRect(area.adjusted(1, 1, -1, -1), 6, 6);
         painter.setPen(palette().highlightedText().color());
         painter.setFont(summary_font);
-        painter.drawText(summary_pixmap.rect(), Qt::AlignCenter, summary);
+        painter.drawText(area, Qt::AlignCenter, summary);
     }
     drag.setPixmap(summary_pixmap);
-    drag.setHotSpot(QPoint{12, summary_pixmap.height() / 2});
+    drag.setHotSpot(QPoint{12, summary_size.height() / 2});
 
     auto actions = supported_actions;
     if (copy_only)
@@ -938,8 +909,8 @@ void QueueTableView::paintEvent(QPaintEvent* event) {
         title_font.setWeight(QFont::DemiBold);
         const QFontMetrics title_metrics{title_font};
         const auto area = viewport()->rect().adjusted(24, 0, -24, 0);
-        const auto hint_rect =
-            QFontMetrics{font()}.boundingRect(area, Qt::AlignHCenter | Qt::TextWordWrap, empty_hint_);
+        const auto hint_rect = QFontMetrics{font()}.boundingRect(
+            area, Qt::AlignHCenter | Qt::TextWordWrap, empty_hint_);
         const auto block = title_metrics.height() + 6 + hint_rect.height();
         const auto top = std::max(12, area.height() * 2 / 5 - block / 2);
         painter.setFont(title_font);

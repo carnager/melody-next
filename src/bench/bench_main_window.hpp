@@ -3,9 +3,6 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
-#include "workspace/folder_browser.hpp"
-#include "workspace/workspace.hpp"
-#include "workspace/workspace_view.hpp"
 #include "bench/engine_key.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
@@ -30,6 +27,9 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/panel_layout.hpp"
 #include "uicommon/track_view_layout.hpp"
+#include "workspace/folder_browser.hpp"
+#include "workspace/workspace.hpp"
+#include "workspace/workspace_view.hpp"
 
 #include <QElapsedTimer>
 #include <QFutureWatcher>
@@ -133,7 +133,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // In the window's object tree, so what it holds is found through it.
     Workspace workspace_{this};
     std::vector<std::unique_ptr<ListTab>>& list_tabs_{workspace_.list_tabs_};
-    QHash<QString, QByteArray>& restored_track_view_layouts_{workspace_.restored_track_view_layouts_};
+    QHash<QString, QByteArray>& restored_track_view_layouts_{
+        workspace_.restored_track_view_layouts_};
     MprisService*& mpris_{workspace_.mpris_};
     DesktopNotifier*& notifier_{workspace_.notifier_};
     ui::ListPersistenceService*& persistence_{workspace_.persistence_};
@@ -166,11 +167,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::deque<ArtworkJob>& artwork_queue_{workspace_.artwork_queue_};
     QHash<QString, QImage>& artwork_cache_{workspace_.artwork_cache_};
     QSet<QString>& artwork_pending_{workspace_.artwork_pending_};
-    QSet<QString>& artwork_invalidated_while_loading_{workspace_.artwork_invalidated_while_loading_};
+    QSet<QString>& artwork_invalidated_while_loading_{
+        workspace_.artwork_invalidated_while_loading_};
     bool& artwork_running_{workspace_.artwork_running_};
     std::optional<CrossTabMoveEdit>& cross_tab_move_edit_{workspace_.cross_tab_move_edit_};
     std::vector<EngineInterruption>& engine_interruptions_{workspace_.engine_interruptions_};
-    std::vector<persistence::SavedDestinationProfile>& local_destinations_{workspace_.local_destinations_};
+    std::vector<persistence::SavedDestinationProfile>& local_destinations_{
+        workspace_.local_destinations_};
     QThreadPool& layout_pushes_{workspace_.layout_pushes_};
     std::vector<std::string>& pending_open_paths_{workspace_.pending_open_paths_};
     bool& lists_restored_{workspace_.lists_restored_};
@@ -201,6 +204,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void openLocalPaths(std::vector<std::string> raw_paths) {
         workspace_.openLocalPaths(std::move(raw_paths));
     }
+    // QA hook (--open): what to show before a screenshot -- "tagger", the
+    // tag editor on every row of the open list; "settings[-page]";
+    // "quickpick", the quick add popup.
+    void openForScreenshot(const QString& name);
 
     // WorkspaceView
     void showMessage(const QString& text, int timeout_ms) override;
@@ -286,7 +293,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] int engineRank(const QWidget* view) const;
     bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
-    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(const EngineKey& engine) const {
+    [[nodiscard]] std::vector<std::pair<QString, QString>>
+    listTargets(const EngineKey& engine) const {
         return workspace_.listTargets(engine);
     }
     // Then, whatever is to be done with it once it is open.
@@ -365,7 +373,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
                               const QString& name);
-    [[nodiscard]] bool canReplayCrossTabMove(bool undo) { return workspace_.canReplayCrossTabMove(undo); }
+    [[nodiscard]] bool canReplayCrossTabMove(bool undo) {
+        return workspace_.canReplayCrossTabMove(undo);
+    }
     bool replayCrossTabMove(bool undo) { return workspace_.replayCrossTabMove(undo); }
     void refreshTabChrome(ListTab& tab) override;
     void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
@@ -452,9 +462,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void flushEngineRelocations() { workspace_.flushEngineRelocations(); }
     void removeSelectedRows();
     void transferSelectedRows(QTableView* source, const QString& target_id, bool move);
-    [[nodiscard]] static ui::TrackViewLayout
-    defaultTrackViewLayout(ui::TrackViewPresentation presentation =
-                               ui::TrackViewPresentation::albums_side_artwork) {
+    [[nodiscard]] static ui::TrackViewLayout defaultTrackViewLayout(
+        ui::TrackViewPresentation presentation = ui::TrackViewPresentation::albums_side_artwork) {
         return Workspace::defaultTrackViewLayout(presentation);
     }
     void applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout);
@@ -479,10 +488,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void addFolderRoot();
     void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
                         int insertion_row, bool replace_and_play = false) {
-        workspace_.startDiscovery(std::move(raw_paths), std::move(target_document_id), insertion_row,
-                                  replace_and_play);
+        workspace_.startDiscovery(std::move(raw_paths), std::move(target_document_id),
+                                  insertion_row, replace_and_play);
     }
-
 
     void enqueueUnprobedRows(ListTab& tab) { workspace_.enqueueUnprobedRows(tab); }
     // ADR-0226: this computer's engine outlives the window, so a rebuilt or
@@ -499,7 +507,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         return workspace_.emptyListHint(engine);
     }
     // How an engine is named to the user: "this computer", or its name.
-    [[nodiscard]] QString engineName(const EngineKey& engine) const { return workspace_.engineName(engine); }
+    [[nodiscard]] QString engineName(const EngineKey& engine) const {
+        return workspace_.engineName(engine);
+    }
     // Shows the source the user last chose, or a library by default.
     void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;
@@ -511,19 +521,21 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // as the other engine sees them (RemoteMount). What cannot be -- not
     // reachable here, or not in the remote's library -- is left out, and the
     // status bar says how much and why.
-    [[nodiscard]] std::optional<std::string> crossEnginePath(const std::string& path, const EngineKey& from,
-                                                           const EngineKey& to) const {
+    [[nodiscard]] std::optional<std::string>
+    crossEnginePath(const std::string& path, const EngineKey& from, const EngineKey& to) const {
         return workspace_.crossEnginePath(path, from, to);
     }
-    [[nodiscard]] std::vector<std::string> crossEnginePaths(std::vector<std::string> paths,
-                                                          const EngineKey& from, const EngineKey& to) {
+    [[nodiscard]] std::vector<std::string>
+    crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to) {
         return workspace_.crossEnginePaths(std::move(paths), from, to);
     }
     // An engine's library folders, asked of it; empty when it is not
     // reachable, and then nothing is known to cross to it.
     // Where an engine's music is reachable here, as Settings say now: a change
     // there applies at once, as the one remote's always did.
-    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const { return workspace_.mountOf(engine); }
+    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const {
+        return workspace_.mountOf(engine);
+    }
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
     void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row) {
@@ -541,7 +553,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showReplayGainPreampDialog();
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
-    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const { return workspace_.resolvePlaybackRow(tab); }
+    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const {
+        return workspace_.resolvePlaybackRow(tab);
+    }
     // Adopts whatever the engine is already playing. An engine outlives the
     // window, so a window that only learns about playback by having started it
     // shows nothing after a restart while the music is still going.
@@ -571,7 +585,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     }
     // Another client -- a script, the phone, a picker -- started the engine
     // this window does not follow: the window follows the music there.
-    void followIfStartedElsewhere(EnginePlayback* playback) { workspace_.followIfStartedElsewhere(playback); }
+    void followIfStartedElsewhere(EnginePlayback* playback) {
+        workspace_.followIfStartedElsewhere(playback);
+    }
     // What each engine was last seen doing, so a start is told from a state
     // the window already knew of.
     void rememberEngineState(EnginePlayback* playback) { workspace_.rememberEngineState(playback); }
@@ -597,7 +613,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void refreshOutputControls(const EnginePlayback::State& state);
     // The row for the entry the engine is playing, wherever this window holds
     // it: the list it was played from, Up Next, or another open list.
-    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry) { return workspace_.playingRow(entry); }
+    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry) {
+        return workspace_.playingRow(entry);
+    }
     // The cover of the playing entry's album, from a tab that has it.
     void refreshHeaderCover(const QString& entry);
     // An album's cover from the lists or the cache; fetched when neither has
@@ -732,7 +750,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         return nullptr;
     }
     // The link a connection belongs to; null for none of this window's.
-    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const { return workspace_.linkOf(playback); }
+    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const {
+        return workspace_.linkOf(playback);
+    }
     // The engine that does the file work for a view's files, if one does.
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
     // That engine, or -- having said in the status bar why `what` cannot be
@@ -769,11 +789,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     }
     QTimer* transport_timer_{nullptr};
 
-
-
-
     QPointer<QDialog> interrupted_operations_dialog_;
-
 
     QAction* local_repeat_action_{nullptr};
     QAction* local_random_action_{nullptr};

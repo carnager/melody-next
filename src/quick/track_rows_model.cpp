@@ -17,9 +17,9 @@ namespace {
 // This window's albums (kept from the first Qt Quick window, at the user's
 // asking): every cover the same size at the album's top left, the header
 // beside it, where the titles start.
-constexpr int album_header_height = 30;
-constexpr int cover_gutter = 66;
-constexpr int number_width = 36;
+constexpr int album_header_height = ui::album_header_height;
+constexpr int cover_gutter = ui::side_cover_gutter;
+constexpr int number_width = ui::side_number_width;
 
 // Qt::KeyboardModifiers as QML hands them over.
 [[nodiscard]] bool has(const int modifiers, const Qt::KeyboardModifier modifier) {

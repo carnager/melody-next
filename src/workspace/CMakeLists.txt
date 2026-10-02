@@ -52,6 +52,8 @@ qt_add_library(
     replaygain_job.hpp
     color_scheme.cpp
     color_scheme.hpp
+    interface_scale.cpp
+    interface_scale.hpp
     language_reference.cpp
     language_reference.hpp
     script_session.cpp

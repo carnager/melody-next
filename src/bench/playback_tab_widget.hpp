@@ -261,6 +261,10 @@ class PlaybackTabWidget final : public QTabWidget {
   public:
     explicit PlaybackTabWidget(QWidget* parent = nullptr) : QTabWidget(parent) {
         setTabBar(new PlaybackTabBar(this));
+        // The bar's own close buttons ask it; QTabWidget passes that on only
+        // while it is set closable -- which would give each tab the style's
+        // button as well -- so the request is passed on here.
+        connect(tabBar(), &QTabBar::tabCloseRequested, this, &QTabWidget::tabCloseRequested);
     }
     // Told of every tab added or removed.
     std::function<void()> tabs_changed;

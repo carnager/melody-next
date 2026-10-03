@@ -98,6 +98,10 @@ def encode(text):
 a, b = Client(), Client()
 b.call("playback.state")  # b listens from here on
 
+# ADR-0260: what the engine speaks, for a client to decide once.
+info = a.call("engine.info")["result"]
+check(info["protocol"] == 1 and info["level"] >= 1 and isinstance(info["release"], str),
+      "the engine says its protocol, level and release")
 check(a.call("list.all")["result"]["lists"] == [], "no lists at first")
 items = [{"path": encode(f"{work}/one.wav"), "title": "One", "artist": "Someone", "album": "Album"},
          {"path": encode(f"{work}/two.wav"), "segment": {"start_sample": 0, "end_sample": 44100},

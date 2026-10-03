@@ -3,6 +3,7 @@
 #include "bench/engine_playback.hpp"
 
 #include "trackknife/protocol/message.hpp"
+#include "trackknife/protocol/version.hpp"
 
 #include <QMetaObject>
 #include <QPointer>
@@ -63,6 +64,34 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
         return nullptr;
     }
     auto client = std::move(*connected);
+    // ADR-0260: decided once, on connecting. An engine of another protocol
+    // is not used; one that is older is, and said so.
+    if (auto info = client->call("engine.info")) {
+        const auto peer = protocol::peer_version(*info);
+        auto said = protocol::compatibility_message(
+            peer, protocol::displayable_text(info->value("name", std::string{})), "Trackknife");
+        bool tell = false;
+        {
+            const std::lock_guard guard{mutex_};
+            tell = said != version_said_;
+            version_said_ = said;
+        }
+        if (tell && !said.empty()) {
+            const QPointer self{this};
+            QMetaObject::invokeMethod(
+                this,
+                [self, message = QString::fromStdString(said)] {
+                    if (self) {
+                        emit self->versionNotice(message);
+                    }
+                },
+                Qt::QueuedConnection);
+        }
+        if (protocol::compatibility(peer) == protocol::Compatibility::incompatible) {
+            client->close();
+            return nullptr;
+        }
+    }
     {
         const std::lock_guard guard{mutex_};
         sequence_ = 0;

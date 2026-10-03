@@ -226,6 +226,13 @@ target_link_libraries(
 )
 add_test(NAME dynamic-selection COMMAND trackknife_dynamic_selection_tests)
 
+add_executable(trackknife_protocol_version_tests protocol_version_test.cpp)
+target_link_libraries(
+    trackknife_protocol_version_tests
+    PRIVATE Trackknife::Protocol trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME protocol-version COMMAND trackknife_protocol_version_tests)
+
 add_executable(trackknife_musicbrainz_cache_tests musicbrainz_cache_test.cpp)
 target_link_libraries(
     trackknife_musicbrainz_cache_tests

@@ -36,6 +36,7 @@
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/formats/probe.hpp"
 #include "trackknife/protocol/client.hpp"
+#include "trackknife/protocol/version.hpp"
 
 #include <fcntl.h>
 #include <sys/file.h>
@@ -512,8 +513,14 @@ int main(int argc, char** argv) {
     dispatcher.on("engine.info",
                   [&engine_name, engine_id](const trackknife::protocol::Json&)
                       -> trackknife::core::Result<trackknife::protocol::Json> {
+                      // ADR-0260: what it speaks, for a client to decide
+                      // once whether and how it can work with it.
                       return trackknife::protocol::Json{
-                          {"name", engine_name}, {"id", engine_id}, {"protocol", 1}};
+                          {"name", engine_name},
+                          {"id", engine_id},
+                          {"protocol", trackknife::protocol::protocol_version},
+                          {"level", trackknife::protocol::protocol_level},
+                          {"release", TRACKKNIFE_RELEASE}};
                   });
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);

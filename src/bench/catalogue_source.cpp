@@ -3,6 +3,7 @@
 #include "bench/catalogue_source.hpp"
 
 #include "trackknife/protocol/message.hpp"
+#include "trackknife/protocol/version.hpp"
 
 #include "bench/engine_launcher.hpp"
 #include "bench/settings_keys.hpp"
@@ -336,6 +337,17 @@ std::shared_ptr<protocol::Client> CatalogueSource::Link::connectLocked() {
         }
         if (info->contains("id") && info->at("id").is_string()) {
             id = QString::fromStdString(info->at("id").get<std::string>());
+        }
+        // ADR-0260: an engine of another protocol is not used.
+        const auto peer = protocol::peer_version(*info);
+        if (protocol::compatibility(peer) == protocol::Compatibility::incompatible) {
+            made->close();
+            const std::lock_guard guard{mutex};
+            client.reset();
+            failure = QString::fromStdString(
+                protocol::compatibility_message(peer, name.toStdString(), "Trackknife"));
+            refused = true;
+            return nullptr;
         }
     }
     const std::lock_guard guard{mutex};

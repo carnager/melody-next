@@ -103,9 +103,13 @@ unreadable -- and a tab whose engine is away shows its cached rows.
   build): a kept search of 66,841 rows is a 103 MB cache, written in 0.7 s
   and read in 1.0 s, against 3.6 s for all of `load_all`. Its size is the
   full tags of every row; compressing it is left for when it matters.
-- Not yet: a tab whose engine is away is still editable, its edits sent
-  when the engine is back, as before; drafts (step 2) and
-  `list.from_query` (step 3) are not used by the window yet.
+- Deferred past 1.0 (2026-10-03): the window does not use drafts or
+  `list.from_query`, and a tab whose engine is away stays editable, its
+  edits sent when the engine is back, as before. A saved list's unsaved
+  edits already survive a restart in the tab cache, and a kept search's
+  rows, collected by the window anyway, would still travel once either way
+  (24 MB of entries for the whole library); both methods serve `melody-cli`
+  and the phone as they are.
 - Measured on a copy of gemenon's library (66,841 tracks, debug build,
   2026-10-03): `list.from_query ALL` 2.4 s; `list.get` of it 1.6 s for
   24 MB; described whole 9.3 s for 99 MB; described in parts of 2,000, the

@@ -19,8 +19,9 @@ import java.io.IOException
 sealed interface ConnectionState {
     data object Idle : ConnectionState
     data class Connecting(val endpoint: Endpoint, val lastError: String = "") : ConnectionState
-    data class Connected(val endpoint: Endpoint, val name: String) : ConnectionState
-    /** Refused -- a wrong password -- and not retried until changed. */
+    /** [notice]: what the engine's version means for working with it (ADR-0260), if anything. */
+    data class Connected(val endpoint: Endpoint, val name: String, val notice: String = "") : ConnectionState
+    /** Refused -- a wrong password, another protocol -- and not retried until changed. */
     data class Refused(val endpoint: Endpoint, val reason: String) : ConnectionState
 }
 
@@ -98,12 +99,20 @@ class EngineClient(
                 control = opened
                 val listening = scope.launch { opened.events.collect { handle(it) } }
                 try {
-                    val name = opened.call("engine.info").optString("name").ifEmpty { to.host }
+                    val info = opened.call("engine.info")
+                    val name = info.optString("name").ifEmpty { to.host }
+                    // ADR-0260: another protocol is not used, nor asked again
+                    // until the app is; an older engine is, and said so.
+                    val verdict = ProtocolVersion.of(info, name)
+                    if (verdict.incompatible) {
+                        _connection.value = ConnectionState.Refused(to, verdict.message)
+                        return
+                    }
                     queueRevision = -1
                     sequence = 0
                     adoptState(opened.call("playback.state"))
                     refreshOutputs()
-                    _connection.value = ConnectionState.Connected(to, name)
+                    _connection.value = ConnectionState.Connected(to, name, verdict.message)
                     lastError = ""
                     val polling = scope.launch { keepTime(opened) }
                     val why = opened.awaitClosed()

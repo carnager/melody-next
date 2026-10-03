@@ -248,6 +248,10 @@ class EnginePlayback final : public QObject {
     // The engine refused a command, with its reason -- a track the output
     // could not play, say. Emitted on this object's thread.
     void failed(const QString& message);
+    // ADR-0260: what the engine's version means for working with it -- it is
+    // older, or speaks another protocol and is not used -- said once until
+    // it changes. Emitted on this object's thread.
+    void versionNotice(const QString& message);
     // A rating was set on this engine, by any client: a track's or an
     // album's, by its rating hash. Emitted on this object's thread.
     void ratingChanged(const QString& hash, unsigned rating);
@@ -304,6 +308,8 @@ class EnginePlayback final : public QObject {
     // stays silent when nothing is.
     QTimer* position_timer_{nullptr};
     mutable std::mutex mutex_;
+    // The last versionNotice, so that it is said once.
+    std::string version_said_;
     State state_;
     // The engine's sequence of the state adopted last. States come on two
     // threads -- events, and the answers to commands -- so one made earlier

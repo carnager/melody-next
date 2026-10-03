@@ -54,7 +54,8 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                 },
                 supportingContent = {
                     Text(when (val state = connection) {
-                        is ConnectionState.Connected -> "Connected · ${state.endpoint}"
+                        is ConnectionState.Connected ->
+                            "Connected · ${state.endpoint}" + state.notice.let { if (it.isEmpty()) "" else "\n$it" }
                         is ConnectionState.Connecting -> "Connecting…"
                         is ConnectionState.Refused -> state.reason
                         ConnectionState.Idle -> "Not connected"

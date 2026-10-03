@@ -415,6 +415,14 @@ class TaggerSession final : public QObject {
     void persistFieldLayouts();
     void captureSources();
     void startSelection();
+    // ADR-0257: the cached tags, shown while the files are read.
+    void showProvisional(metadata::StagedMetadataSelection selection);
+    // The selection's counts, for the summary line.
+    void describeSelection(const metadata::StagedMetadataSelection& selection);
+    // Every row chosen, as when the grid first opens.
+    void selectAllRows();
+    // Which files could not be read, said in the status line.
+    void reportUnreadable();
     void finishSelection();
     void buildGrid(metadata::StagedMetadataSelection selection);
     void updateSelectionProjection();
@@ -547,6 +555,9 @@ class TaggerSession final : public QObject {
     std::size_t replaygain_total_{0U};
     QTimer replaygain_progress_timer_;
     std::shared_ptr<Reading> reading_;
+    // ADR-0257: the grid shows cached tags while the files are read; scripts,
+    // suggestions and Save wait for the files' own.
+    bool provisional_{false};
     // The files that could not be read, one a line, for a tooltip.
     QString unreadable_details_;
     QTimer reading_progress_timer_;

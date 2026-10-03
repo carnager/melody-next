@@ -210,9 +210,96 @@ void newlyAddedFieldsUseTheOrdinaryPatchContract() {
 
 } // namespace
 
+// ADR-0257: drafts staged on a provisional selection -- cached tags -- carry
+// onto the selection built from the files' own, by row and field name.
+void draftsCarryOntoTheTagsRead() {
+    using trackknife::metadata::MetadataDocument;
+    using trackknife::metadata::StagedMetadataPatchKind;
+    using trackknife::metadata::StagedMetadataPatchSet;
+    using trackknife::metadata::StagedMetadataSelection;
+    using trackknife::metadata::StagedMetadataSource;
+    const std::vector<std::string_view> preferred{"Title"};
+    // What the library cached: titles and an artist.
+    auto cached = StagedMetadataSelection::create(
+        {StagedMetadataSource{.raw_path = "/music/one.flac",
+                              .source_revision = std::nullopt,
+                              .baseline = MetadataDocument{.fields = {field("TITLE", {"One"}),
+                                                                      field("ARTIST", {"A"})},
+                                                           .unsupported_native_objects = {}}},
+         StagedMetadataSource{.raw_path = "/music/two.flac",
+                              .source_revision = std::nullopt,
+                              .baseline = MetadataDocument{.fields = {field("TITLE", {"Two"}),
+                                                                      field("ARTIST", {"A"})},
+                                                           .unsupported_native_objects = {}}}},
+        preferred);
+    CHECK(cached.has_value());
+    // What the files say: a field the cache did not have, in another order,
+    // and the second title already what the draft makes it.
+    auto read = StagedMetadataSelection::create(
+        {StagedMetadataSource{.raw_path = "/music/one.flac",
+                              .source_revision = trackknife::core::LocalSourceRevision{},
+                              .baseline = MetadataDocument{.fields = {field("COMMENT", {"x"}),
+                                                                      field("TITLE", {"One"}),
+                                                                      field("ARTIST", {"A"})},
+                                                           .unsupported_native_objects = {}}},
+         StagedMetadataSource{.raw_path = "/music/two.flac",
+                              .source_revision = trackknife::core::LocalSourceRevision{},
+                              .baseline = MetadataDocument{.fields = {field("TITLE", {"New"})},
+                                                           .unsupported_native_objects = {}}}},
+        preferred);
+    CHECK(read.has_value());
+    if (!cached || !read) {
+        return;
+    }
+    StagedMetadataPatchSet drafts;
+    const auto title = *cached->field_index("title");
+    const auto artist = *cached->field_index("artist");
+    CHECK(drafts.replace_values(*cached, 0U, title, {"New"}).value_or(false));
+    CHECK(drafts.replace_values(*cached, 1U, title, {"New"}).value_or(false));
+    CHECK(drafts.remove_field(*cached, 1U, artist).value_or(false));
+    const auto genre = cached->ensure_missing_field("genre", "Genre");
+    CHECK(genre.has_value());
+    CHECK(drafts.replace_values(*cached, 0U, *genre, {"Rock"}).value_or(false));
+
+    auto onto = *read;
+    const auto carried = trackknife::metadata::carry_staged_patches(*cached, drafts, onto);
+    CHECK(carried.has_value());
+    if (!carried) {
+        return;
+    }
+    // One's title and genre carry; two's title is already "New" and two has
+    // no artist to remove: both dropped, and counted.
+    CHECK(carried->carried == 2U && carried->dropped == 2U);
+    const auto read_title = *onto.field_index("title");
+    const auto* one_title = carried->patches.patch(0U, read_title);
+    CHECK(one_title != nullptr && one_title->values == std::vector<std::string>{"New"} &&
+          one_title->kind == StagedMetadataPatchKind::replace_values);
+    const auto read_genre = onto.field_index("genre");
+    CHECK(read_genre.has_value());
+    CHECK(read_genre && carried->patches.patch(0U, *read_genre) != nullptr);
+    CHECK(onto.field_index("comment").has_value());
+
+    // Other rows -- another selection altogether -- are refused.
+    auto other = StagedMetadataSelection::create(
+        {StagedMetadataSource{.raw_path = "/music/else.flac",
+                              .source_revision = std::nullopt,
+                              .baseline = MetadataDocument{.fields = {},
+                                                           .unsupported_native_objects = {}}},
+         StagedMetadataSource{.raw_path = "/music/two.flac",
+                              .source_revision = std::nullopt,
+                              .baseline = MetadataDocument{.fields = {},
+                                                           .unsupported_native_objects = {}}}},
+        preferred);
+    CHECK(other.has_value());
+    if (other) {
+        CHECK(!trackknife::metadata::carry_staged_patches(*cached, drafts, *other));
+    }
+}
+
 int main() {
     patchesAreSparseExplicitAndDeterministic();
     patchesRejectInvalidAndExcessiveDrafts();
     newlyAddedFieldsUseTheOrdinaryPatchContract();
+    draftsCarryOntoTheTagsRead();
     return failures == 0 ? 0 : 1;
 }

@@ -118,9 +118,19 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         if (reading_ == nullptr || reading_->total.load() == 0U) {
             return;
         }
-        loading_text_ = QStringLiteral("Reading tags · %L1 of %L2 files · <a href=\"stop\">Stop</a>")
-                            .arg(reading_->read.load())
-                            .arg(reading_->total.load());
+        if (provisional_) {
+            // The grid is open on cached tags: the status line carries it.
+            setStatus(QStringLiteral("Reading tags · %L1 of %L2 files · scripts and Save wait "
+                                     "for them · <a href=\"stop-reading\">Stop</a>")
+                          .arg(reading_->read.load())
+                          .arg(reading_->total.load()),
+                      true);
+        } else {
+            loading_text_ =
+                QStringLiteral("Reading tags · %L1 of %L2 files · <a href=\"stop\">Stop</a>")
+                    .arg(reading_->read.load())
+                    .arg(reading_->total.load());
+        }
         emit changed();
     });
     connect(&selection_watcher_, &QFutureWatcherBase::finished, this,
@@ -473,10 +483,35 @@ void TaggerSession::startSelection() {
     // it has got is shown, with a way to stop.
     reading_ = std::make_shared<Reading>();
     reading_progress_timer_.start();
+    // ADR-0257: rows a list holds cached tags for are shown on those at once,
+    // while the files are read behind them.
+    const bool unread = std::ranges::any_of(sources_, [](const auto& source) {
+        return source.needs_metadata_capture && !source.source_revision && !source.logical_track;
+    });
+    const QPointer<TaggerSession> self{this};
     selection_watcher_.setFuture(QtConcurrent::run(
         [sources = std::move(sources_), preferred = std::move(preferred_fields_),
          access = services_.tools.access, token = technical_cancellation_.token(),
-         reading = reading_]() mutable {
+         reading = reading_, unread, self]() mutable {
+            std::vector<std::string_view> cached_views;
+            for (const auto& field : preferred) {
+                cached_views.emplace_back(field);
+            }
+            if (unread) {
+                auto cached = metadata::StagedMetadataSelection::create(sources, cached_views);
+                if (cached) {
+                    auto shared = std::make_shared<metadata::StagedMetadataSelection>(
+                        std::move(*cached));
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, shared] {
+                            if (self) {
+                                self->showProvisional(std::move(*shared));
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            }
             auto captured = metadata::capture_metadata_sources(
                 std::move(sources), access, token,
                 [&reading](const std::size_t read, const std::size_t total) {
@@ -500,9 +535,97 @@ void TaggerSession::startSelection() {
 
 void TaggerSession::stopReading() { technical_cancellation_.request_cancellation(); }
 
+void TaggerSession::showProvisional(metadata::StagedMetadataSelection selection) {
+    // Already over: the files' own tags came first after all.
+    if (grid_model_ != nullptr || selection_watcher_.isFinished()) {
+        return;
+    }
+    provisional_ = true;
+    buildGrid(std::move(selection));
+    emit changed();
+}
+
+void TaggerSession::describeSelection(const metadata::StagedMetadataSelection& selection) {
+    const auto item_count = selection.item_count();
+    const auto source_count = selection.distinct_source_count();
+    const auto field_count = selection.field_count();
+    const auto revision_count = selection.item_revision_count();
+    loaded_item_count_ = item_count;
+    selected_item_count_ = item_count;
+    loaded_source_count_ = source_count;
+    loaded_field_count_ = field_count;
+    selection_summary_ =
+        QStringLiteral("%1 of %2 files selected · %3 %4 · %5 fields")
+            .arg(item_count)
+            .arg(item_count)
+            .arg(source_count)
+            .arg(pluralized(source_count, QStringLiteral("source"), QStringLiteral("sources")))
+            .arg(field_count);
+    revision_summary_ = revision_count == item_count
+                            ? QStringLiteral("source revisions captured")
+                            : QStringLiteral("%1 rows have no captured source revision")
+                                  .arg(item_count - revision_count);
+}
+
+void TaggerSession::selectAllRows() {
+    if (grid_model_ == nullptr || grid_model_->rowCount() == 0) {
+        return;
+    }
+    file_selection_->setCurrentIndex(grid_model_->index(0, 0), QItemSelectionModel::NoUpdate);
+    const QItemSelection all{
+        grid_model_->index(0, 0),
+        grid_model_->index(grid_model_->rowCount() - 1, grid_model_->columnCount() - 1)};
+    file_selection_->select(all, QItemSelectionModel::ClearAndSelect);
+    updateSelectionProjection();
+}
+
 void TaggerSession::finishSelection() {
     reading_progress_timer_.stop();
     const auto result = selection_watcher_.result();
+    if (provisional_ && grid_model_ != nullptr) {
+        // ADR-0257: the grid is open on cached tags. Read, the files' own
+        // take their place, drafts and all; not read, the cached ones stay
+        // to be looked at, and nothing is saved from them.
+        if (!result || !*result) {
+            const auto why = !result ? QStringLiteral("The selection task returned no result")
+                             : (*result).error().code == core::ErrorCode::cancelled
+                                 ? QStringLiteral("Reading stopped")
+                                 : display_utf8((*result).error().message);
+            sticky_status_ = QStringLiteral("%1 · the tags shown are cached; scripts and Save need "
+                                            "them read -- open the editor again to read them")
+                                 .arg(why);
+            setStatus(sticky_status_);
+            emit changed();
+            return;
+        }
+        auto adopted = grid_model_->adoptReadSelection(std::move(**result));
+        if (!adopted) {
+            sticky_status_ = QStringLiteral("The tags read could not replace the cached ones · %1")
+                                 .arg(display_utf8(adopted.error().message));
+            setStatus(sticky_status_);
+            emit changed();
+            return;
+        }
+        provisional_ = false;
+        describeSelection(grid_model_->selection());
+        selectAllRows();
+        const auto [kept, unchanged] = *adopted;
+        sticky_status_ =
+            kept + unchanged == 0U
+                ? QStringLiteral("Tags read")
+                : QStringLiteral("Tags read · %L1 %2 kept%3")
+                      .arg(kept)
+                      .arg(kept == 1U ? QStringLiteral("draft") : QStringLiteral("drafts"))
+                      .arg(unchanged == 0U
+                               ? QString{}
+                               : QStringLiteral(", %L1 already so in the files").arg(unchanged));
+        setStatus(sticky_status_);
+        reportUnreadable();
+        stageAutomaticTransformations();
+        updateTechnicalSummary();
+        emit changed();
+        return;
+    }
     if (result && !*result && (*result).error().code == core::ErrorCode::cancelled) {
         summary_ = QStringLiteral("Properties unavailable");
         setStatus(QStringLiteral("Read-only metadata preview"));
@@ -521,6 +644,10 @@ void TaggerSession::finishSelection() {
         return;
     }
     buildGrid(std::move(**result));
+    reportUnreadable();
+}
+
+void TaggerSession::reportUnreadable() {
     // Shown, but as cached and never written: said, with which and why.
     if (reading_ != nullptr && !reading_->unreadable.empty()) {
         const auto& unreadable = reading_->unreadable;
@@ -545,25 +672,7 @@ void TaggerSession::finishSelection() {
 }
 
 void TaggerSession::buildGrid(metadata::StagedMetadataSelection selection) {
-    const auto item_count = selection.item_count();
-    const auto source_count = selection.distinct_source_count();
-    const auto field_count = selection.field_count();
-    const auto revision_count = selection.item_revision_count();
-    loaded_item_count_ = item_count;
-    selected_item_count_ = item_count;
-    loaded_source_count_ = source_count;
-    loaded_field_count_ = field_count;
-    selection_summary_ =
-        QStringLiteral("%1 of %2 files selected · %3 %4 · %5 fields")
-            .arg(item_count)
-            .arg(item_count)
-            .arg(source_count)
-            .arg(pluralized(source_count, QStringLiteral("source"), QStringLiteral("sources")))
-            .arg(field_count);
-    revision_summary_ = revision_count == item_count
-                            ? QStringLiteral("source revisions captured")
-                            : QStringLiteral("%1 rows have no captured source revision")
-                                  .arg(item_count - revision_count);
+    describeSelection(selection);
 
     grid_model_ = new MetadataGridModel(std::move(selection), std::move(track_labels_), this);
     aggregate_model_ = new MetadataAggregateModel(grid_model_, this);
@@ -602,14 +711,7 @@ void TaggerSession::buildGrid(metadata::StagedMetadataSelection selection) {
                 emit changed();
             });
     emit gridReady();
-    if (grid_model_->rowCount() > 0) {
-        file_selection_->setCurrentIndex(grid_model_->index(0, 0), QItemSelectionModel::NoUpdate);
-        const QItemSelection all{
-            grid_model_->index(0, 0),
-            grid_model_->index(grid_model_->rowCount() - 1, grid_model_->columnCount() - 1)};
-        file_selection_->select(all, QItemSelectionModel::ClearAndSelect);
-        updateSelectionProjection();
-    }
+    selectAllRows();
     stageAutomaticTransformations();
     updateTechnicalSummary();
     emit gridFilled();
@@ -865,7 +967,8 @@ bool TaggerSession::canEditValues() const {
 }
 
 bool TaggerSession::canTransform() const {
-    return !transformation_dialog_open_ && grid_model_ != nullptr && selectionReady() &&
+    return !provisional_ && !transformation_dialog_open_ && grid_model_ != nullptr &&
+           selectionReady() &&
            !exact_values_dialog_open_ && !field_name_dialog_open_ && !write_plan_running_ &&
            !apply_running_ && !artwork_operation_running_;
 }
@@ -879,7 +982,7 @@ bool TaggerSession::canScanReplayGain() const { return canSuggest() && !replayga
 bool TaggerSession::canApply() const {
     const auto has_metadata_effect = save_tags_ && draft_count_ > 0;
     const auto has_path_effect = rename_files_ || move_files_;
-    return grid_model_ != nullptr &&
+    return grid_model_ != nullptr && !provisional_ &&
            (has_metadata_effect || has_path_effect ||
             (artwork_ != nullptr && artwork_->hasPendingChanges())) &&
            !transformation_catalog_loading_ && !write_plan_running_ && !apply_running_ &&
@@ -946,6 +1049,9 @@ void TaggerSession::statusLinkActivated(const QString& link) {
     }
     if (link == QStringLiteral("cancel-replaygain")) {
         replaygain_cancellation_.request_cancellation();
+    }
+    if (link == QStringLiteral("stop-reading")) {
+        stopReading();
     }
     if (link == QStringLiteral("retry-replaygain") && !replaygain_retry_items_.empty()) {
         startReplayGainScan(replaygain_retry_items_);
@@ -1235,7 +1341,9 @@ void TaggerSession::toggleAutomaticScript(const QString& script_id, const bool e
 // user's model: automatic scripts also stage over plain local baselines,
 // so every write is what the grid shows — never a hidden apply-time pass.
 void TaggerSession::stageAutomaticTransformations() {
-    if (grid_model_ == nullptr || automatic_stage_running_ || proposal_running_ ||
+    // ADR-0257: scripts read the files' own tags; with cached ones shown they
+    // run once those are in.
+    if (grid_model_ == nullptr || provisional_ || automatic_stage_running_ || proposal_running_ ||
         write_plan_running_ || apply_running_) {
         return;
     }
@@ -1340,7 +1448,8 @@ std::optional<TaggerSession::AutomaticChainPlan> TaggerSession::combinedAutomati
 // Suggestions and MusicBrainz.
 
 void TaggerSession::startProposals() {
-    if (grid_model_ == nullptr || proposal_running_ || write_plan_running_ || apply_running_) {
+    if (grid_model_ == nullptr || provisional_ || proposal_running_ || write_plan_running_ ||
+        apply_running_) {
         return;
     }
     auto items = itemsOrAll();
@@ -1925,6 +2034,12 @@ void TaggerSession::invalidateWritePlan() {
 }
 
 void TaggerSession::startWritePlan() {
+    // ADR-0257: never a plan from cached tags.
+    if (provisional_) {
+        setStatus(QStringLiteral("Save waits for the tags to be read"));
+        emit changed();
+        return;
+    }
     const auto artwork_intents = artwork_ != nullptr
                                      ? artwork_->pendingIntents()
                                      : std::vector<metadata::ArtworkWritePlanIntent>{};

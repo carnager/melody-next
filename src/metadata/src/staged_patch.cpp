@@ -358,4 +358,51 @@ void StagedMetadataPatchSet::detach() {
     }
 }
 
+core::Result<CarriedMetadataPatches>
+carry_staged_patches(const StagedMetadataSelection& from, const StagedMetadataPatchSet& patches,
+                     StagedMetadataSelection& onto) {
+    if (from.item_count() != onto.item_count()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invariant,
+                                           .message = "a selection read anew has other rows",
+                                           .context = {}});
+    }
+    CarriedMetadataPatches carried;
+    for (const auto& patch : patches.patches()) {
+        if (from.source(patch.item_index).raw_path != onto.source(patch.item_index).raw_path) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::invariant,
+                                               .message = "a selection read anew has other rows",
+                                               .context = {}});
+        }
+        const auto& field = from.field(patch.field_index);
+        auto target = field.exact_native_name
+                          ? onto.exact_native_field_index(*field.exact_native_name)
+                          : onto.field_index(field.canonical_name);
+        if (!target) {
+            auto added = field.exact_native_name
+                             ? onto.ensure_exact_native_field(*field.exact_native_name,
+                                                              field.display_name)
+                             : onto.ensure_missing_field(field.canonical_name, field.display_name);
+            if (!added) {
+                return std::unexpected(std::move(added.error()));
+            }
+            target = *added;
+        }
+        const auto stored =
+            patch.kind == StagedMetadataPatchKind::remove_field
+                ? (onto.cell(patch.item_index, *target) == nullptr
+                       ? core::Result<bool>{false}
+                       : carried.patches.remove_field(onto, patch.item_index, *target))
+                : carried.patches.replace_values(onto, patch.item_index, *target, patch.values);
+        if (!stored) {
+            return std::unexpected(std::move(stored.error()));
+        }
+        if (*stored) {
+            ++carried.carried;
+        } else {
+            ++carried.dropped;
+        }
+    }
+    return carried;
+}
+
 } // namespace trackknife::metadata

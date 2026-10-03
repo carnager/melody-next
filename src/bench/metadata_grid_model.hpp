@@ -78,6 +78,12 @@ class MetadataGridModel final : public QAbstractTableModel {
                                     const std::vector<std::size_t>& field_indexes);
     [[nodiscard]] bool stageTransformation(const metadata::MetadataTransformationPreview& preview,
                                            const QStringList& step_sources = {});
+    // ADR-0257: the selection built from the files' own tags, taking the place
+    // of the provisional one built from cached tags. Drafts carry over by row
+    // and field name; the undo history before it is dropped. Answers how many
+    // drafts carried and how many were no change against the real tags.
+    [[nodiscard]] core::Result<std::pair<std::size_t, std::size_t>>
+    adoptReadSelection(metadata::StagedMetadataSelection read);
 
   signals:
     void draftStateChanged(int patch_count, bool can_undo, bool can_redo);

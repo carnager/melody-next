@@ -903,3 +903,22 @@ if(TRACKKNIFE_ENABLE_UPNP)
     target_link_libraries(trackknife_upnp_tests PRIVATE Trackknife::Output trackknife_project_warnings)
     add_test(NAME upnp COMMAND trackknife_upnp_tests)
 endif()
+
+# Every test runs with a runtime directory of its own, not the user's: the
+# engines tests start leave their socket locks there, one per state
+# directory, and a test must not find -- or be found by -- the engine the
+# user is running. Owner-only, as a runtime directory has to be.
+set(trackknife_test_runtime "${CMAKE_BINARY_DIR}/test-runtime")
+file(MAKE_DIRECTORY "${trackknife_test_runtime}")
+file(CHMOD "${trackknife_test_runtime}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE
+     OWNER_EXECUTE)
+set(trackknife_test_environment "XDG_RUNTIME_DIR=set:${trackknife_test_runtime}")
+# Audio is still the machine's: PipeWire is found where it was.
+if(DEFINED ENV{PIPEWIRE_RUNTIME_DIR})
+    list(APPEND trackknife_test_environment "PIPEWIRE_RUNTIME_DIR=set:$ENV{PIPEWIRE_RUNTIME_DIR}")
+elseif(DEFINED ENV{XDG_RUNTIME_DIR})
+    list(APPEND trackknife_test_environment "PIPEWIRE_RUNTIME_DIR=set:$ENV{XDG_RUNTIME_DIR}")
+endif()
+get_property(trackknife_tests DIRECTORY PROPERTY TESTS)
+set_tests_properties(${trackknife_tests} PROPERTIES ENVIRONMENT_MODIFICATION
+                     "${trackknife_test_environment}")

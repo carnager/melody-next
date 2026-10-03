@@ -118,7 +118,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     setObjectName(QStringLiteral("bench-identify-albums"));
     setWindowTitle(QStringLiteral("Identify albums"));
     setAttribute(Qt::WA_DeleteOnClose);
-    resize(1100, 700);
+    resize(880, 620);
     auto* layout = new QVBoxLayout(this);
 
     heading_ = new QLabel(this);
@@ -132,6 +132,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     progress_->setMaximumWidth(280);
     progress_text_ = new QLabel(this);
     progress_text_->setObjectName(QStringLiteral("bench-identify-albums-progress-text"));
+    progress_text_->setWordWrap(true);
     stop_ = new QPushButton(QStringLiteral("Stop"), this);
     stop_->setObjectName(QStringLiteral("bench-identify-albums-stop"));
     progress_row->addWidget(progress_);
@@ -209,13 +210,15 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
                        "files · Alt+↑/↓ move a file · U leave a file unmatched"),
         review_page);
     keys->setObjectName(QStringLiteral("bench-identify-albums-review-keys"));
+    keys->setWordWrap(true);
     auto* back = new QPushButton(QStringLiteral("Back to the list"), review_page);
     back->setObjectName(QStringLiteral("bench-identify-albums-review-back"));
     auto* skip_button = new QPushButton(QStringLiteral("Skip"), review_page);
     skip_button->setObjectName(QStringLiteral("bench-identify-albums-review-skip"));
     auto* accept_button = new QPushButton(QStringLiteral("Accept and next"), review_page);
     accept_button->setObjectName(QStringLiteral("bench-identify-albums-review-accept"));
-    review_keys->addWidget(keys, 1);
+    review_layout->addWidget(keys);
+    review_keys->addStretch(1);
     review_keys->addWidget(back);
     review_keys->addWidget(skip_button);
     review_keys->addWidget(accept_button);
@@ -250,7 +253,11 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
                                   QStringLiteral("Changes"), QStringLiteral("State")});
     apply_list_->setRootIsDecorated(false);
     apply_list_->setUniformRowHeights(true);
+    apply_list_->header()->setStretchLastSection(false);
     apply_list_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (const int column : {1, 2, 3}) {
+        apply_list_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    }
     apply_layout->addWidget(apply_list_, 1);
     auto* options_row = new QHBoxLayout;
     auto* options_label =
@@ -310,8 +317,8 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     replaygain_row->addWidget(replaygain_hint_, 1);
     options->addWidget(replaygain_, 2, 0);
     options->addWidget(replaygain_mode_, 2, 1);
-    options->addLayout(replaygain_row, 2, 2, 1, 2);
-    options->setColumnStretch(2, 1);
+    options->addLayout(replaygain_row, 2, 2, 1, 3);
+    options->setColumnStretch(4, 1);
     apply_layout->addLayout(options);
     auto* write_row = new QHBoxLayout;
     apply_note_ = new QLabel(apply_page);
@@ -384,6 +391,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     bottom->setContentsMargins(0, 0, 0, 0);
     summary_ = new QLabel(this);
     summary_->setObjectName(QStringLiteral("bench-identify-albums-summary"));
+    summary_->setWordWrap(true);
     auto* close = new QPushButton(QStringLiteral("Close"), this);
     look_up_ = new QPushButton(this);
     look_up_->setObjectName(QStringLiteral("bench-identify-albums-look-up"));

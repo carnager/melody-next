@@ -17,3 +17,6 @@ install(TARGETS trackknife_engine_daemon RUNTIME DESTINATION ${CMAKE_INSTALL_BIN
         COMPONENT engine)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/systemd/melodyd.service
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user COMPONENT engine)
+# ADR-0260: the release engine.info reports, for logs and bug reports.
+target_compile_definitions(trackknife_engine_daemon PRIVATE
+    TRACKKNIFE_RELEASE="${PROJECT_VERSION}")

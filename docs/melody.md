@@ -197,3 +197,24 @@ the list that plays, or replaces that list and plays it (`melody-rofi tracks
   on the LAN and that the renderer can reach the engine's HTTP stream port.
 - **Converted tracks** are kept in `transcodes/` in the engine's state
   directory. Deleting that folder is safe.
+- **"… speaks protocol 2; this Trackknife speaks protocol 1"**, or **"…'s
+  melodyd is older than this Trackknife"**: the engine and the client are
+  of releases too far apart (ADR-0260). Update the side the message names.
+  Within 1.x any client works with any engine, without what an older engine
+  lacks.
+
+## Going back to an older melodyd
+
+A newer `melodyd` moves its database forward on start, and an older one
+then refuses it ("created by a newer application version"). To go back:
+
+1. Stop the engine and copy its `lists.sqlite` somewhere safe.
+2. Read the schema the database is at:
+   `sqlite3 lists.sqlite "SELECT version FROM schema_version"`.
+3. For every migration above the one the older release knows, newest
+   first, apply its down file from `src/persistence/migrations` of the
+   newer release: `sqlite3 lists.sqlite < 0051_engine_list_drafts.down.sql`.
+4. Start the older engine.
+
+A down migration loses only what its release added -- drafts, say, become
+ordinary working lists.

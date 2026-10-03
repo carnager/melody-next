@@ -8,6 +8,7 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/protocol/client.hpp"
+#include "trackknife/protocol/version.hpp"
 
 #include <unistd.h>
 
@@ -185,6 +186,20 @@ look_around(const std::string& wanted = {}) {
         if (!client) {
             fail("cannot reach the engine at " + endpoint.describe() + ": " +
                  client.error().message);
+        }
+        // ADR-0260: another protocol is not used; an older engine is, and
+        // said so.
+        if (auto info = (*client)->call("engine.info")) {
+            const auto peer = trackknife::protocol::peer_version(*info);
+            const auto said =
+                trackknife::protocol::compatibility_message(peer, text_of(*info, "name"), "melody-cli");
+            if (trackknife::protocol::compatibility(peer) ==
+                trackknife::protocol::Compatibility::incompatible) {
+                fail(said);
+            }
+            if (!said.empty()) {
+                std::cerr << "melody-cli: " << said << "\n";
+            }
         }
         return std::move(*client);
     };

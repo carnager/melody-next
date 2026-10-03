@@ -29,6 +29,12 @@
 
 namespace trackknife::bench {
 
+void Workspace::sayVersion(EnginePlayback& playback) {
+    // ADR-0260: an engine too old, or of another protocol, said plainly.
+    connect(&playback, &EnginePlayback::versionNotice, this,
+            [this](const QString& message) { view_->showMessage(message, 15'000); });
+}
+
 void Workspace::connectLocalEngine() {
     // Built once, before anything that needs a catalogue: the panel, the
     // search dialog and dynamic playlists all take this rather than a path.
@@ -37,6 +43,7 @@ void Workspace::connectLocalEngine() {
     // Its own connection: the engine serves one connection in order, so a
     // transport command behind a library query would wait for it.
     localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
+    sayVersion(*localEngine().playback);
     watchFileWork(localEngine());
     followContinuations(localEngine());
     transport_ = localPlayback();
@@ -235,6 +242,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
         return;
     }
     added->playback = new EnginePlayback(*added->catalogue, this);
+    sayVersion(*added->playback);
     auto* link = added.get();
     engines_.push_back(std::move(added));
     watchFileWork(*link);

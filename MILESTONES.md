@@ -73,6 +73,12 @@ hold:
 - **Optimised builds pass** the suite the way debug builds do, on the compilers
   the packages are built with.
 
+Where they stand (2026-10-03): M11's step 3d is done as ADR-0259 has it --
+the window keeps its tabs, not the lists; drafts in the window and kept
+searches made on the engine are deferred past 1.0 -- and the version check
+and compatibility policy are ADR-0260 (`docs/protocol-levels.md`). The quiet
+period starts from the last level bump.
+
 Flathub and other distribution beyond the AUR come after 1.0.
 
 ### Requested workspace addition — optional local library (ADR-0115)

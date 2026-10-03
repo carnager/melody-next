@@ -29,6 +29,8 @@
 #include "trackknife/protocol/message.hpp"
 #include "uicommon/track_row_roles.hpp"
 
+#include <QSignalSpy>
+#include <QStatusBar>
 #include <QAction>
 #include <QComboBox>
 #include <QDir>
@@ -174,6 +176,7 @@ class EnginePlaybackTest final : public QObject {
     void withoutAnEngineNothingChanges();
     void anOlderStateIsNotTakenOverANewerOne();
     void aListContinuesWithADynamicPlaylist();
+    void anEngineOfAnotherProtocolIsNotUsedAndAnOlderOneIsSaidToBe();
 
   private:
     QTemporaryDir settings_directory_;
@@ -1373,6 +1376,52 @@ void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
                               5'000);
 
     (*server)->stop();
+}
+
+// ADR-0260: decided once, on connecting, from engine.info.
+void EnginePlaybackTest::anEngineOfAnotherProtocolIsNotUsedAndAnOlderOneIsSaidToBe() {
+    for (const int protocol : {2, 1}) {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const std::filesystem::path socket{
+            (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+        auto player = engine::Player::create_without_audio();
+        RecordingEngine recorder{*player};
+        // Protocol 2, or protocol 1 from before levels were said.
+        recorder.dispatcher().on("engine.info", [protocol](const protocol::Json&) {
+            return core::Result<protocol::Json>{
+                protocol::Json{{"name", "elsewhere"}, {"protocol", protocol}}};
+        });
+        auto server = engine::Server::listen(socket, recorder.dispatcher());
+        QVERIFY(server.has_value());
+        (*server)->start();
+        QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
+                             QString::fromStdString(socket.string()));
+
+        BenchMainWindow window;
+        window.show();
+        EnginePlayback* playback = nullptr;
+        QTRY_VERIFY((playback = window.findChild<EnginePlayback*>()) != nullptr);
+        QSignalSpy said{playback, &EnginePlayback::versionNotice};
+        if (protocol == 2) {
+            QTRY_VERIFY(window.statusBar()->currentMessage().contains(
+                QStringLiteral("elsewhere speaks protocol 2; this Trackknife speaks protocol 1. "
+                               "Update Trackknife.")));
+            QVERIFY(!playback->active());
+            // Tried again as any lost connection is, and not said again.
+            QTest::qWait(300);
+            const auto once = said.count();
+            QVERIFY(once <= 1);
+            QTest::qWait(1'500);
+            QVERIFY(!playback->active());
+            QCOMPARE(said.count(), once);
+        } else {
+            QTRY_VERIFY(playback->active());
+            QTRY_VERIFY(window.statusBar()->currentMessage().contains(
+                QStringLiteral("elsewhere's melodyd is older than this Trackknife")));
+        }
+        (*server)->stop();
+    }
 }
 
 } // namespace trackknife::bench

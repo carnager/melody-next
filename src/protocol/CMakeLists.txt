@@ -2,7 +2,7 @@
 
 find_package(Threads REQUIRED)
 
-add_library(trackknife_protocol STATIC src/client.cpp src/dispatch.cpp src/message.cpp)
+add_library(trackknife_protocol STATIC src/client.cpp src/dispatch.cpp src/message.cpp src/version.cpp)
 add_library(Trackknife::Protocol ALIAS trackknife_protocol)
 
 target_include_directories(

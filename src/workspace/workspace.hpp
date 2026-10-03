@@ -522,6 +522,7 @@ class Workspace final : public QObject {
     // ADR-0259: the tabs as this window keeps them, each from its cache --
     // or, its cache gone, empty until its engine answers.
     void restoreFromTabStore();
+    void sayVersion(EnginePlayback& playback);
     // What a start does once the lists are restored.
     void restoredWorkspace(const QString& error);
     // What is saved of each open list, in the order they are shown.

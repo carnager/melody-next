@@ -66,6 +66,13 @@ class ReplayGainJob final : public QObject {
             metadata::StagedMetadataSelection{}};
         std::vector<MetadataPropertiesAudioSource> audio;
         QStringList groups;
+        // Files whose tags could not be read: not scanned, not written.
+        std::vector<std::pair<std::string, core::Error>> unreadable;
+    };
+    // How far reading the selection's tags has got, told by the worker.
+    struct Reading {
+        std::atomic_size_t read{0U};
+        std::atomic_size_t total{0U};
     };
     struct ApplyOutcome {
         core::Result<operations::MetadataApplyResult> result{operations::MetadataApplyResult{}};
@@ -76,6 +83,10 @@ class ReplayGainJob final : public QObject {
     void groupsChanged();
     void setStatusText(const QString& text);
     void startCapture();
+    // The rows, collected on this thread a few milliseconds at a time: they
+    // are the window's list, which only its thread may read.
+    void collectSlice();
+    void startReading();
     void finishCapture();
     void finishScan();
     void finishApply();
@@ -105,6 +116,10 @@ class ReplayGainJob final : public QObject {
     QFutureWatcher<std::shared_ptr<ApplyOutcome>> apply_watcher_;
     core::CancellationSource cancellation_;
     std::shared_ptr<std::atomic_size_t> completed_;
+    std::shared_ptr<Reading> reading_;
+    std::size_t collect_next_{0U};
+    std::vector<metadata::StagedMetadataSource> collected_sources_;
+    std::vector<MetadataPropertiesAudioSource> collected_audio_;
     QTimer progress_timer_;
 
     std::shared_ptr<const metadata::StagedMetadataSelection> selection_;

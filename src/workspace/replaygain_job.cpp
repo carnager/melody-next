@@ -7,10 +7,12 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
+#include <QElapsedTimer>
 #include <QSettings>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <map>
+#include <set>
 #include <utility>
 
 namespace trackknife::bench {
@@ -42,6 +44,13 @@ ReplayGainJob::ReplayGainJob(const std::size_t item_count,
                   .arg(tracks(static_cast<long long>(item_count_)));
     progress_timer_.setInterval(100);
     connect(&progress_timer_, &QTimer::timeout, this, [this] {
+        if (!completed_ && reading_ && reading_->total.load() > 0U) {
+            status_ = QStringLiteral("Reading tags · %L1 of %L2 files…")
+                          .arg(reading_->read.load())
+                          .arg(reading_->total.load());
+            emit changed();
+            return;
+        }
         if (completed_) {
             progress_value_ = static_cast<int>(completed_->load());
             status_ = QStringLiteral("Measuring loudness · %1 of %2 files…")
@@ -188,36 +197,66 @@ void ReplayGainJob::startCapture() {
     progress_maximum_ = 0;
     progress_value_ = 0;
     setRunning(true);
-    capture_watcher_.setFuture(QtConcurrent::run([reader = source_reader_, count = item_count_,
-                                                  grouping = settings_.grouping,
-                                                  access = tools_.access,
-                                                  token = cancellation_.token()] {
-        auto capture = std::make_shared<Capture>();
-        std::vector<metadata::StagedMetadataSource> sources;
-        sources.reserve(count);
-        capture->audio.reserve(count);
-        for (std::size_t index = 0U; index < count; ++index) {
-            if (token.is_cancellation_requested()) {
-                capture->selection =
-                    std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
-                                                .message = "ReplayGain capture cancelled",
-                                                .context = {}});
-                return capture;
-            }
-            auto source = reader(index);
-            if (!source) {
-                continue;
-            }
-            sources.push_back(std::move(source->source));
-            capture->audio.push_back(source->audio);
+    completed_.reset();
+    reading_.reset();
+    collect_next_ = 0U;
+    collected_sources_.clear();
+    collected_audio_.clear();
+    collected_sources_.reserve(item_count_);
+    collected_audio_.reserve(item_count_);
+    collectSlice();
+}
+
+void ReplayGainJob::collectSlice() {
+    if (cancellation_.is_cancellation_requested()) {
+        setRunning(false);
+        setStatusText(QStringLiteral("Stopped. No tags written."));
+        return;
+    }
+    QElapsedTimer slice;
+    slice.start();
+    while (collect_next_ < item_count_ && slice.elapsed() < 4) {
+        if (auto source = source_reader_(collect_next_)) {
+            collected_sources_.push_back(std::move(source->source));
+            collected_audio_.push_back(source->audio);
         }
-        auto prepared =
-            metadata::capture_uncached_metadata_sources(std::move(sources), access, token);
-        if (!prepared) {
-            capture->selection = std::unexpected(prepared.error());
+        ++collect_next_;
+    }
+    if (collect_next_ < item_count_) {
+        setStatusText(QStringLiteral("Reading the selection · %L1 of %L2…")
+                          .arg(collect_next_)
+                          .arg(item_count_));
+        QTimer::singleShot(0, this, &ReplayGainJob::collectSlice);
+        return;
+    }
+    startReading();
+}
+
+void ReplayGainJob::startReading() {
+    reading_ = std::make_shared<Reading>();
+    progress_timer_.start();
+    capture_watcher_.setFuture(QtConcurrent::run([sources = std::move(collected_sources_),
+                                                  audio = std::move(collected_audio_),
+                                                  grouping = settings_.grouping,
+                                                  access = tools_.access, reading = reading_,
+                                                  token = cancellation_.token()]() mutable {
+        auto capture = std::make_shared<Capture>();
+        capture->audio = std::move(audio);
+        // Every file's own tags, read in batches -- the engine reads a batch
+        // at once -- with how far it has got told as it goes.
+        auto captured = metadata::capture_metadata_sources(
+            std::move(sources), access, token,
+            [&reading](const std::size_t read, const std::size_t total) {
+                reading->total.store(total);
+                reading->read.store(read);
+            });
+        if (!captured) {
+            capture->selection = std::unexpected(captured.error());
             return capture;
         }
-        capture->selection = metadata::StagedMetadataSelection::create(std::move(*prepared), {});
+        capture->unreadable = std::move(captured->unreadable);
+        capture->selection =
+            metadata::StagedMetadataSelection::create(std::move(captured->sources), {});
         if (!capture->selection)
             return capture;
         std::vector<const metadata::MetadataDocument*> documents;
@@ -265,6 +304,7 @@ void ReplayGainJob::startCapture() {
 }
 
 void ReplayGainJob::finishCapture() {
+    progress_timer_.stop();
     auto capture = capture_watcher_.result();
     if (!capture || !capture->selection) {
         setRunning(false);
@@ -278,6 +318,15 @@ void ReplayGainJob::finishCapture() {
         std::move(capture->audio));
     item_count_ = selection_->item_count();
     groups_ = capture->groups;
+    // Said, and left out of the scan: a file whose tags were not read has no
+    // baseline to write gains onto, and would hold up the rest.
+    std::set<std::string> unreadable;
+    for (const auto& [raw_path, error] : capture->unreadable) {
+        unreadable.insert(raw_path);
+        scan_problems_ << QStringLiteral("%1: %2 (not read, left out)")
+                              .arg(display_utf8(core::display_raw_path(raw_path)),
+                                   display_utf8(error.message));
+    }
     if (item_count_ == 0U) {
         setRunning(false);
         setStatusText(QStringLiteral("Nothing to scan."));
@@ -300,7 +349,9 @@ void ReplayGainJob::finishCapture() {
     std::vector<std::size_t> items;
     items.reserve(item_count_);
     for (std::size_t index = 0U; index < item_count_; ++index) {
-        items.push_back(index);
+        if (!unreadable.contains(selection_->source(index).raw_path)) {
+            items.push_back(index);
+        }
     }
     scan_watcher_.setFuture(
         QtConcurrent::run([selection = selection_, items = std::move(items), audio = audio_sources_,

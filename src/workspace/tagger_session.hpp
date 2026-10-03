@@ -211,6 +211,10 @@ class TaggerSession final : public QObject {
     // What is shown.
     [[nodiscard]] bool ready() const { return grid_model_ != nullptr; }
     [[nodiscard]] QString loadingText() const { return loading_text_; }
+    // Stops reading the selection's tags, before the grid is shown.
+    void stopReading();
+    // Which files could not be read, and why; empty when all were.
+    [[nodiscard]] QString unreadableDetails() const { return unreadable_details_; }
     [[nodiscard]] QString summary() const { return summary_; }
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] bool statusRich() const { return status_rich_; }
@@ -387,6 +391,13 @@ class TaggerSession final : public QObject {
 
   private:
     using SelectionResult = core::Result<metadata::StagedMetadataSelection>;
+    // Where the worker reading a selection's tags says how far it has got,
+    // and which files it could not read.
+    struct Reading {
+        std::atomic<std::size_t> read{0};
+        std::atomic<std::size_t> total{0};
+        std::vector<std::pair<std::string, core::Error>> unreadable;
+    };
     using WritePlanResult = core::Result<operations::PreparationPlan>;
     struct AutomaticChainPlan {
         metadata::MetadataTransformationChain chain;
@@ -535,6 +546,10 @@ class TaggerSession final : public QObject {
     std::shared_ptr<std::atomic_size_t> replaygain_completed_;
     std::size_t replaygain_total_{0U};
     QTimer replaygain_progress_timer_;
+    std::shared_ptr<Reading> reading_;
+    // The files that could not be read, one a line, for a tooltip.
+    QString unreadable_details_;
+    QTimer reading_progress_timer_;
     int draft_count_{0};
     bool can_undo_{false};
     bool can_redo_{false};

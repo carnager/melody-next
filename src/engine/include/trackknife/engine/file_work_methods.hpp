@@ -28,6 +28,8 @@ class Workspace;
 // file exists but has no tags to read, which can still take gains in a
 // sidecar. At most metadata_read_limit paths per call.
 inline constexpr std::size_t metadata_read_limit = 256U;
+// How many files of one metadata.read are read at once.
+inline constexpr std::size_t metadata_read_threads = 8U;
 //
 // media.probe {paths: [encoded]} answers {files: [...]}, one per path: its
 // best audio stream as {codec, sample_rate, bits, channels, bit_rate,

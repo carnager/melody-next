@@ -353,6 +353,12 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     loading_ = new QLabel(this);
     loading_->setObjectName(QStringLiteral("bench-metadata-loading"));
     loading_->setAlignment(Qt::AlignCenter);
+    // "Stop" while the tags are being read.
+    connect(loading_, &QLabel::linkActivated, this, [this](const QString& link) {
+        if (link == QStringLiteral("stop") && session_ != nullptr) {
+            session_->stopReading();
+        }
+    });
     root_layout_->addWidget(loading_, 1);
 
     grid_tools_ = new QWidget(this);
@@ -624,6 +630,7 @@ void MetadataPropertiesDialog::sync() {
     summary_->setText(session.summary());
     read_only_->setTextFormat(session.statusRich() ? Qt::RichText : Qt::PlainText);
     read_only_->setText(session.status());
+    read_only_->setToolTip(session.unreadableDetails());
     technical_status_->setText(session.technical());
     technical_status_->setToolTip(session.technical());
     apply_summary_->setText(session.applySummary());

@@ -20,10 +20,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <ctime>
 
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace trackknife::engine {
@@ -271,7 +273,8 @@ void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesyste
                 .message = "at most " + std::to_string(metadata_read_limit) + " paths per read",
                 .context = {{.key = "param", .value = "paths"}}});
         }
-        auto files = Json::array();
+        std::vector<std::string> raw_paths;
+        raw_paths.reserve(paths->size());
         for (const auto& encoded : *paths) {
             if (!encoded.is_string()) {
                 return std::unexpected(
@@ -279,29 +282,52 @@ void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesyste
                                 .message = "a path is not an encoded path",
                                 .context = {{.key = "param", .value = "paths"}}});
             }
-            const auto raw_path = protocol::decode_raw_path(encoded.get<std::string>());
+            auto raw_path = protocol::decode_raw_path(encoded.get<std::string>());
             if (!raw_path) {
                 return std::unexpected(
                     core::Error{.code = core::ErrorCode::invalid_argument,
                                 .message = "a path is not an encoded path",
                                 .context = {{.key = "param", .value = "paths"}}});
             }
-            auto read = metadata::read_local_metadata(*raw_path);
-            if (read) {
-                Json file = Json::object();
-                file["read"] = wire::encode(*read);
-                files.push_back(std::move(file));
-                continue;
-            }
-            Json failed = Json::object();
-            failed["error"] = wire::encode(read.error());
-            failed["revision"] = nullptr;
-            if (read.error().code == core::ErrorCode::unsupported) {
-                if (auto revision = core::observe_local_source_revision(*raw_path)) {
-                    failed["revision"] = wire::encode(*revision);
+            raw_paths.push_back(std::move(*raw_path));
+        }
+        // A batch is read by a few threads at once: a file's tags are a seek
+        // and a small read, and one after another a disk spends most of a
+        // batch waiting. Bounded, as every pool here is.
+        std::vector<Json> read(raw_paths.size());
+        std::atomic<std::size_t> next{0};
+        const auto work = [&] {
+            for (auto index = next++; index < raw_paths.size(); index = next++) {
+                const auto& raw_path = raw_paths[index];
+                auto result = metadata::read_local_metadata(raw_path);
+                if (result) {
+                    read[index] = Json{{"read", wire::encode(*result)}};
+                    continue;
                 }
+                Json failed = Json::object();
+                failed["error"] = wire::encode(result.error());
+                failed["revision"] = nullptr;
+                if (result.error().code == core::ErrorCode::unsupported) {
+                    if (auto revision = core::observe_local_source_revision(raw_path)) {
+                        failed["revision"] = wire::encode(*revision);
+                    }
+                }
+                read[index] = std::move(failed);
             }
-            files.push_back(std::move(failed));
+        };
+        const auto threads = std::min<std::size_t>(
+            {metadata_read_threads, raw_paths.size(),
+             std::max(1U, std::thread::hardware_concurrency())});
+        {
+            std::vector<std::jthread> pool;
+            for (std::size_t thread = 1; thread < threads; ++thread) {
+                pool.emplace_back(work);
+            }
+            work();
+        }
+        auto files = Json::array();
+        for (auto& file : read) {
+            files.push_back(std::move(file));
         }
         return Json{{"files", std::move(files)}};
     });

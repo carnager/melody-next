@@ -1236,6 +1236,13 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(revision && *revision == here->source_revision, "and so is its revision");
     require(!access.read((directory / "absent.flac").string(), {}),
             "a file that is not there fails through the engine too");
+    // A batch in one request, read at once on the engine: answered in order,
+    // each file for itself, the missing one failing alone.
+    const auto absent = (directory / "absent.flac").string();
+    const auto many = access.read_many({flac, absent, flac}, {});
+    require(many && many->size() == 3U && (*many)[0] && *(*many)[0] == *here &&
+                !(*many)[1] && (*many)[2] && *(*many)[2] == *here,
+            "a batch read through the engine is each file read here, in order");
     const auto probed_there = remote.probe(flac, {});
     const auto probed_here = engine::probe_local_technicals(flac, {});
     require(probed_there && probed_here && *probed_there == *probed_here &&
@@ -1257,6 +1264,41 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(measured && local, "a scan runs through the engine and here");
     require_same(*local, *measured, "and measures the same");
     require(reported >= 1U, "reporting its progress");
+
+    // A scan bigger than one job: several, each album whole in one, the
+    // result back in the order given and the same as one scan here.
+    {
+        std::vector<loudness::LoudnessScanItem> several;
+        for (std::size_t index = 0; index < 7U; ++index) {
+            several.push_back({.item_index = 100U + index,
+                               .raw_path = flac,
+                               .selection = {},
+                               .range = std::nullopt,
+                               .album_key = index == 6U ? std::nullopt
+                                                        : std::optional<std::string>{
+                                                              index < 3U ? "album:a" : "album:b"}});
+        }
+        remote.limitJobs(900U);
+        std::size_t last_completed = 0;
+        const auto split = remote.scan(
+            several, {.measure_true_peak = false, .maximum_parallelism = 1},
+            [&last_completed](const loudness::LoudnessScanProgress& step) {
+                last_completed = std::max(last_completed, step.completed_items);
+            },
+            {});
+        const auto whole = loudness::scan_loudness(
+            several, {.measure_true_peak = false, .maximum_parallelism = 1});
+        require(split && whole, "a scan in several jobs runs");
+        require_same(*whole, *split, "and measures what one scan does, albums included");
+        require(last_completed == several.size(), "counting its progress across the jobs");
+        remote.limitJobs(100U);
+        const auto too_big = remote.scan(several, {.measure_true_peak = false,
+                                                   .maximum_parallelism = 1},
+                                         {}, {});
+        require(!too_big && too_big.error().code == core::ErrorCode::limit_exceeded,
+                "an album too large for one job is refused, not cut in two");
+        remote.limitJobs(engine::remote_job_bytes);
+    }
 
     // A plan built from what the engine read, written by the engine.
     const std::array<std::string_view, 1> preferred{"title"};
@@ -1283,6 +1325,63 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(after && after->document.first_effective_value("title") ==
                          std::optional<std::string>{"Through the engine"},
             "the file has it");
+
+    // A plan bigger than one job goes in parts, each file written once and
+    // the results in the plan's order.
+    {
+        std::vector<std::string> copies;
+        std::vector<metadata::StagedMetadataSource> sources;
+        for (int index = 0; index < 3; ++index) {
+            const auto copy = (directory / ("part-" + std::to_string(index) + ".flac")).string();
+            std::filesystem::copy_file(flac, copy, std::filesystem::copy_options::overwrite_existing);
+            const auto read = access.read(copy, {});
+            require(read.has_value(), "a copy is read through the engine");
+            copies.push_back(copy);
+            sources.push_back({.raw_path = copy,
+                               .source_revision = read->source_revision,
+                               .baseline = read->document});
+        }
+        auto parts_selection = metadata::StagedMetadataSelection::create(sources, preferred);
+        require(parts_selection.has_value(), "a selection of three files");
+        std::size_t part_title = 0;
+        for (std::size_t index = 0; index < parts_selection->field_count(); ++index) {
+            if (parts_selection->field(index).canonical_name == "title") {
+                part_title = index;
+            }
+        }
+        metadata::StagedMetadataPatchSet part_patches;
+        for (std::size_t item = 0; item < 3U; ++item) {
+            require(part_patches
+                        .replace_values(*parts_selection, item, part_title,
+                                        {"Part " + std::to_string(item)})
+                        .has_value(),
+                    "a title for each");
+        }
+        const auto parts_plan =
+            metadata::build_metadata_write_plan(*parts_selection, part_patches, access);
+        require(parts_plan && parts_plan->ready() && parts_plan->sources.size() == 3U,
+                "the plan reads all three through the engine in one batch");
+        remote.limitJobs(1U);
+        std::size_t last_completed = 0;
+        const auto written = remote.apply(
+            *parts_plan,
+            [&last_completed](const trackknife::operations::MetadataApplyProgress& step) {
+                last_completed = std::max(last_completed, step.completed_sources);
+            },
+            {});
+        remote.limitJobs(engine::remote_job_bytes);
+        require(written && written->committed_source_count() == 3U &&
+                    written->sources.size() == 3U && written->sources[2].source_index == 2U &&
+                    written->sources[2].raw_path == copies[2],
+                "written in parts, the results in the plan's order");
+        require(last_completed == 3U, "progress counted across the parts");
+        for (std::size_t item = 0; item < 3U; ++item) {
+            const auto now = metadata::read_local_metadata(copies[item]);
+            require(now && now->document.first_effective_value("title") ==
+                               std::optional<std::string>{"Part " + std::to_string(item)},
+                    "each file has its own title");
+        }
+    }
 
     // The tagger's lookups through the engine: a cached answer comes back as
     // it was, a URL elsewhere is refused, the key is handed over.

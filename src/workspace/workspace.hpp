@@ -866,6 +866,9 @@ class Workspace final : public QObject {
     void startLastFm();
     void sampleLastFm(const EnginePlayback::State& state);
     // What plays, as MPRIS and the track-change notification show it.
+    // What the desktop -- media keys, the notification -- is told of what an
+    // engine reports.
+    [[nodiscard]] MprisPlaybackState desktopStateOf(const EnginePlayback::State& engine);
     void publishDesktopState();
     // The play order as MPRIS names it: repeat and single together loop the
     // track ("Track"), repeat alone the list ("Playlist"), else "None"; and

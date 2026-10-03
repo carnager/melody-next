@@ -239,6 +239,7 @@ class BenchMainWindowTest final : public QObject {
     void init();
     void cleanup();
     void transportIsOneRowWithCoverAndPills();
+    void theDesktopNamesWhatPlaysAfterARestart();
     void headerShowsThePlayingAlbumsCover();
     void libraryDragsIntoUpNextWithCovers();
     void quickAlbumFindsByWordsAndPutsItAway();
@@ -1374,6 +1375,36 @@ void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
     QCOMPARE(window.header_cover_key_, group);
     QCOMPARE(window.now_playing_cover_->pixmap().deviceIndependentSize().toSize(),
              QSize(44, 44));
+}
+
+// The desktop -- notifications, media keys -- names what plays as the header
+// does, by finding its entry in any open list: after a restart the list
+// played from is not known until something plays, and it said only the file
+// name.
+void BenchMainWindowTest::theDesktopNamesWhatPlaysAfterARestart() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    LocalTrackRow row;
+    row.raw_path = "/music/Someone/Album/01 file name.flac";
+    row.title = "The Title";
+    row.artist = "Someone";
+    row.album = "Album";
+    tab->model->appendRows({row});
+    const auto entry = QString::fromStdString(tab->model->rows().front().entry_id.to_string());
+    // Restarted: playing, but from no list this window knows of.
+    window.workspace_.playback_.anchors = {};
+    EnginePlayback::State engine;
+    engine.status = QStringLiteral("playing");
+    engine.entry = entry;
+    engine.path = QStringLiteral("/music/Someone/Album/01 file name.flac");
+    const auto state = window.workspace_.desktopStateOf(engine);
+    QCOMPARE(state.title, QStringLiteral("The Title"));
+    QCOMPARE(state.artist, QStringLiteral("Someone"));
+    QCOMPARE(state.album, QStringLiteral("Album"));
+    QCOMPARE(state.track_key, entry);
 }
 
 void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {

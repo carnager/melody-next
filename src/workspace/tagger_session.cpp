@@ -2,6 +2,8 @@
 
 #include "workspace/tagger_session.hpp"
 
+#include "workspace/preparation_planning.hpp"
+
 #include "bench/artwork_fitting.hpp"
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_grid_model.hpp"
@@ -491,7 +493,7 @@ void TaggerSession::startSelection() {
     });
     const QPointer<TaggerSession> self{this};
     selection_watcher_.setFuture(QtConcurrent::run(
-        [sources = std::move(sources_), preferred = std::move(preferred_fields_),
+        [sources = std::move(sources_), preferred = preferred_fields_,
          access = services_.tools.access, token = technical_cancellation_.token(),
          reading = reading_, unread, self]() mutable {
             std::vector<std::string_view> cached_views;
@@ -596,18 +598,40 @@ void TaggerSession::finishSelection() {
                                             "them read -- open the editor again to read them")
                                  .arg(why);
             setStatus(sticky_status_);
+            rewritten_items_.clear();
+            const auto after_write = std::exchange(writing_elsewhere_, false);
             emit changed();
+            if (after_write) {
+                emit writtenElsewhere();
+            }
             return;
         }
-        auto adopted = grid_model_->adoptReadSelection(std::move(**result));
+        const auto rewritten = std::exchange(rewritten_items_, {});
+        const auto after_write = std::exchange(writing_elsewhere_, false);
+        auto adopted = grid_model_->adoptReadSelection(std::move(**result), rewritten);
         if (!adopted) {
             sticky_status_ = QStringLiteral("The tags read could not replace the cached ones · %1")
                                  .arg(display_utf8(adopted.error().message));
             setStatus(sticky_status_);
             emit changed();
+            if (after_write) {
+                emit writtenElsewhere();
+            }
             return;
         }
         provisional_ = false;
+        if (after_write) {
+            // The files' scripts already ran when they were opened.
+            describeSelection(grid_model_->selection());
+            selectAllRows();
+            sticky_status_.clear();
+            setStatus(QStringLiteral("Written files read again"));
+            reportUnreadable();
+            updateTechnicalSummary();
+            emit changed();
+            emit writtenElsewhere();
+            return;
+        }
         describeSelection(grid_model_->selection());
         selectAllRows();
         const auto [kept, unchanged] = *adopted;
@@ -955,7 +979,7 @@ void TaggerSession::updateApplySummary() {
 // Enablement.
 
 bool TaggerSession::selectionReady() const {
-    return aggregate_model_ != nullptr && aggregate_model_->summaryReady() &&
+    return !writing_elsewhere_ && aggregate_model_ != nullptr && aggregate_model_->summaryReady() &&
            aggregate_model_->selectedItemCount() > 0U;
 }
 
@@ -968,7 +992,8 @@ bool TaggerSession::canEditValues() const {
 }
 
 bool TaggerSession::canTransform() const {
-    return !provisional_ && !transformation_dialog_open_ && grid_model_ != nullptr &&
+    return !provisional_ && !writing_elsewhere_ && !transformation_dialog_open_ &&
+           grid_model_ != nullptr &&
            selectionReady() &&
            !exact_values_dialog_open_ && !field_name_dialog_open_ && !write_plan_running_ &&
            !apply_running_ && !artwork_operation_running_;
@@ -987,11 +1012,11 @@ bool TaggerSession::canApply() const {
            (has_metadata_effect || has_path_effect ||
             (artwork_ != nullptr && artwork_->hasPendingChanges())) &&
            !transformation_catalog_loading_ && !write_plan_running_ && !apply_running_ &&
-           !artwork_operation_running_;
+           !artwork_operation_running_ && !writing_elsewhere_;
 }
 
 bool TaggerSession::fileListEnabled() const {
-    return !artwork_operation_running_ && (artwork_ == nullptr || !artwork_->hasPendingChanges());
+    return !writing_elsewhere_ && !artwork_operation_running_ && (artwork_ == nullptr || !artwork_->hasPendingChanges());
 }
 
 void TaggerSession::setFieldSelection(const bool has_selected_fields,
@@ -1543,7 +1568,72 @@ std::optional<std::int64_t> TaggerSession::durationOf(const std::size_t item) co
 }
 
 bool TaggerSession::canStageProposals() const {
-    return grid_model_ != nullptr && !proposal_running_ && !provisional_;
+    return grid_model_ != nullptr && !proposal_running_ && !provisional_ && !writing_elsewhere_;
+}
+
+bool TaggerSession::canWriteElsewhere() const {
+    return grid_model_ != nullptr && !provisional_ && !writing_elsewhere_ && !proposal_running_ &&
+           !write_plan_running_ && !apply_running_ && !artwork_operation_running_ &&
+           !transformation_catalog_loading_;
+}
+
+std::shared_ptr<const metadata::StagedMetadataSelection> TaggerSession::sharedSelection() const {
+    return grid_model_ != nullptr ? grid_model_->sharedSelection() : nullptr;
+}
+
+const metadata::StagedMetadataPatchSet* TaggerSession::draft() const {
+    return grid_model_ != nullptr ? &grid_model_->patches() : nullptr;
+}
+
+std::optional<operations::OutputLayoutProfile> TaggerSession::layoutProfile(const int index) const {
+    if (index < 0 || static_cast<std::size_t>(index) >= output_layout_catalog_.size()) {
+        return std::nullopt;
+    }
+    return output_layout_catalog_[static_cast<std::size_t>(index)].profile;
+}
+
+bool TaggerSession::beginWriteElsewhere() {
+    if (!canWriteElsewhere()) {
+        return false;
+    }
+    writing_elsewhere_ = true;
+    invalidateWritePlan();
+    return true;
+}
+
+void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written) {
+    if (!writing_elsewhere_) {
+        return;
+    }
+    if (written.empty() || grid_model_ == nullptr) {
+        writing_elsewhere_ = false;
+        emit changed();
+        emit writtenElsewhere();
+        return;
+    }
+    // Read again as when opened over cached tags (ADR-0257): nothing saved
+    // until read, and the draft carried onto what the files now hold.
+    const auto& selection = grid_model_->selection();
+    sources_.clear();
+    sources_.reserve(selection.item_count());
+    for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+        sources_.push_back(selection.source(item));
+    }
+    rewritten_items_.clear();
+    for (auto& rewritten : written) {
+        if (rewritten.item >= sources_.size()) {
+            continue;
+        }
+        auto& source = sources_[rewritten.item];
+        source.raw_path = std::move(rewritten.raw_path);
+        source.source_revision.reset();
+        source.needs_metadata_capture = true;
+        rewritten_items_.push_back(rewritten.item);
+    }
+    provisional_ = true;
+    setStatus(QStringLiteral("Reading the files written…"));
+    emit changed();
+    startSelection();
 }
 
 std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
@@ -2143,14 +2233,19 @@ void TaggerSession::startWritePlan() {
     write_plan_job_generation_ = write_plan_generation_;
     write_plan_cancellation_.request_cancellation();
     write_plan_cancellation_ = core::CancellationSource{};
-    const auto selection = grid_model_->sharedSelection();
+    PreparationRequest request{
+        .selection = grid_model_->sharedSelection(),
+        .draft = std::move(draft),
+        .items = std::move(items),
+        .operations = operation_selection,
+        .layout = std::move(output_layout),
+        .destination = std::move(destination),
+        .options = writePlanOptions(),
+        .artwork = artwork_intents,
+        .cover_policy = cover_policy,
+        .tools = services_.tools,
+    };
     const auto cancellation = write_plan_cancellation_.token();
-    const QSettings stored;
-    const metadata::MetadataWritePlanOptions plan_options{
-        .sidecar_loudness =
-            stored.value(QLatin1String(SettingsKeys::replaygain_sidecar_only_key), false).toBool(),
-        .true_peak_loudness =
-            stored.value(QLatin1String(SettingsKeys::replaygain_true_peak_key), false).toBool()};
     write_plan_running_ = true;
     if (artwork_ != nullptr) {
         artwork_->setWorking(true);
@@ -2158,105 +2253,10 @@ void TaggerSession::startWritePlan() {
     setStatus(QStringLiteral("Checking files…"));
     emit changed();
     write_plan_watcher_.setFuture(
-        QtConcurrent::run([selection, draft = std::move(draft), items = std::move(items),
-                           operation_selection, output_layout = std::move(output_layout),
-                           destination = std::move(destination), cancellation, plan_options,
-                           artwork_intents, cover_policy, tools = services_.tools]() mutable {
+        QtConcurrent::run([request = std::move(request), cancellation]() mutable {
             // WYSIWYG apply: the plan writes exactly the staged draft.
-            // Automatic scripts already staged their edits into the grid.
-            const auto metadata_context_change_count =
-                (operation_selection.save_tags ? draft.patch_count() : 0U) + artwork_intents.size();
-            std::optional<metadata::MetadataWritePlan> metadata_plan;
-            if (operation_selection.save_tags && !draft.empty()) {
-                auto revalidated = metadata::build_metadata_write_plan(
-                    *selection, draft, tools.access, cancellation, plan_options);
-                if (!revalidated) {
-                    return std::make_shared<WritePlanResult>(
-                        std::unexpected(std::move(revalidated.error())));
-                }
-                metadata_plan = std::move(*revalidated);
-            }
-
-            if (!artwork_intents.empty()) {
-                // ADR-0237: images of this computer handed over first when the
-                // engine writes; planned against the files where they are.
-                auto staged =
-                    stageReplacements(artwork_intents, tools, cancellation, cover_policy);
-                if (!staged) {
-                    return std::make_shared<WritePlanResult>(std::unexpected(staged.error()));
-                }
-                auto art = operations::plan_artwork_storage(*staged, cover_policy, cancellation,
-                                                            artworkFitterFor(tools), tools.artwork);
-                if (!art) {
-                    return std::make_shared<WritePlanResult>(std::unexpected(art.error()));
-                }
-                auto merged = metadata::merge_artwork_write_plan(
-                    metadata_plan.value_or(metadata::MetadataWritePlan{}), std::move(*art));
-                if (!merged) {
-                    return std::make_shared<WritePlanResult>(std::unexpected(merged.error()));
-                }
-                metadata_plan = std::move(*merged);
-            }
-            std::optional<operations::OutputPathPlan> path_plan;
-            std::optional<operations::OutputPathPreflight> path_preflight;
-            if (operation_selection.rename_files || operation_selection.move_files) {
-                const metadata::StagedMetadataPatchSet actual_source_tags;
-                const auto& naming_selection = *selection;
-                const auto& naming_context =
-                    operation_selection.save_tags ? draft : actual_source_tags;
-                auto documents = metadata::materialize_metadata_draft(
-                    naming_selection, naming_context, items, cancellation);
-                if (!documents) {
-                    return std::make_shared<WritePlanResult>(
-                        std::unexpected(std::move(documents.error())));
-                }
-                std::vector<operations::OutputPathPlanningItem> planning_items;
-                planning_items.reserve(items.size());
-                for (std::size_t position = 0U; position < items.size(); ++position) {
-                    const auto item_index = items[position];
-                    const auto& source = naming_selection.source(item_index);
-                    if (!source.source_revision) {
-                        return std::make_shared<WritePlanResult>(std::unexpected(core::Error{
-                            .code = core::ErrorCode::conflict,
-                            .message = "File path planning requires a fresh source revision "
-                                       "for every selected track",
-                            .context = {{.key = "item", .value = std::to_string(item_index)}},
-                        }));
-                    }
-                    planning_items.push_back(operations::OutputPathPlanningItem{
-                        .item_index = item_index,
-                        .source_raw_path = source.raw_path,
-                        .source_revision = *source.source_revision,
-                        .final_metadata = std::move((*documents)[position]),
-                    });
-                }
-                auto planned = operations::plan_output_paths(
-                    planning_items,
-                    operations::OutputPathOperationSelection{
-                        .rename_files = operation_selection.rename_files,
-                        .move_files = operation_selection.move_files,
-                    },
-                    std::move(*output_layout), std::move(destination), {}, cancellation);
-                if (!planned) {
-                    return std::make_shared<WritePlanResult>(
-                        std::unexpected(std::move(planned.error())));
-                }
-                path_plan = std::move(*planned);
-                if (path_plan->ready()) {
-                    auto checked =
-                        tools.preflight
-                            ? tools.preflight(*path_plan, cancellation)
-                            : operations::preflight_output_paths(*path_plan, cancellation);
-                    if (!checked) {
-                        return std::make_shared<WritePlanResult>(
-                            std::unexpected(std::move(checked.error())));
-                    }
-                    path_preflight = std::move(*checked);
-                }
-            }
-            return std::make_shared<WritePlanResult>(operations::assemble_preparation_plan(
-                operation_selection, metadata_context_change_count, std::move(metadata_plan),
-                std::move(path_plan), std::move(path_preflight)));
+            return std::make_shared<WritePlanResult>(
+                planPreparation(std::move(request), cancellation));
         }));
 }
 

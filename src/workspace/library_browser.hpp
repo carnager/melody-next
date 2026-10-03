@@ -104,6 +104,8 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] QString viewId() const { return view_id_; }
     [[nodiscard]] QString search() const { return search_; }
     [[nodiscard]] QVariantList roots() const;
+    // The library folders, as raw paths.
+    [[nodiscard]] std::vector<std::string> rootPaths() const;
     [[nodiscard]] const std::vector<Root>& rootList() const { return roots_; }
     [[nodiscard]] QString rootsError() const { return roots_error_; }
     // Whether it is this computer's library, or that of an engine elsewhere,

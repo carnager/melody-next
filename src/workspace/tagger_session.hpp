@@ -117,6 +117,8 @@ struct TaggerServices {
     MetadataDialogLayoutStore layout_store;
     MusicBrainzLookupService musicbrainz;
     FileWorkTools tools;
+    // The library folders of the engine holding the files, as raw paths.
+    std::function<std::vector<std::string>()> library_roots;
 };
 
 // The tagger's artwork, as the session needs it: its pending covers, whether
@@ -351,6 +353,23 @@ class TaggerSession final : public QObject {
     // nothing else is being staged. proposalsSettled says when one was.
     [[nodiscard]] bool canStageProposals() const;
 
+    // ADR-0261: Identify albums… writes some of the files itself. While it
+    // does, nothing here is edited or applied; then the files it wrote are
+    // read again -- at their new paths, when moved -- and the draft of the
+    // rest kept, the files' own drafts having been written.
+    struct Rewritten {
+        std::size_t item{0U};
+        std::string raw_path;
+    };
+    [[nodiscard]] bool canWriteElsewhere() const;
+    [[nodiscard]] bool writingElsewhere() const { return writing_elsewhere_; }
+    // What such a write starts from.
+    [[nodiscard]] std::shared_ptr<const metadata::StagedMetadataSelection> sharedSelection() const;
+    [[nodiscard]] const metadata::StagedMetadataPatchSet* draft() const;
+    [[nodiscard]] std::optional<operations::OutputLayoutProfile> layoutProfile(int index) const;
+    bool beginWriteElsewhere();
+    void finishWriteElsewhere(std::vector<Rewritten> written);
+
     // Apply.
     void startWritePlan();
     // The folder images a plan writes were seen (accepted) or not.
@@ -403,6 +422,8 @@ class TaggerSession final : public QObject {
     // ADR-0261: a proposal set has been staged -- or not, saying why in the
     // status.
     void proposalsSettled(bool staged);
+    // A write made elsewhere is over, and the files it wrote read again.
+    void writtenElsewhere();
 
   private:
     using SelectionResult = core::Result<metadata::StagedMetadataSelection>;
@@ -575,6 +596,9 @@ class TaggerSession final : public QObject {
     // ADR-0257: the grid shows cached tags while the files are read; scripts,
     // suggestions and Save wait for the files' own.
     bool provisional_{false};
+    bool writing_elsewhere_{false};
+    // Read again after a write elsewhere: their drafts were written.
+    std::vector<std::size_t> rewritten_items_;
     // The files that could not be read, one a line, for a tooltip.
     QString unreadable_details_;
     QTimer reading_progress_timer_;

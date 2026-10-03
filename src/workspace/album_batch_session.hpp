@@ -2,6 +2,7 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
+#include "workspace/album_batch_write.hpp"
 #include "trackknife/musicbrainz/album_groups.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/album_lookup.hpp"
@@ -38,6 +39,8 @@ class AlbumBatchSession final : public QObject {
         left_out,
         // Passed over in review: stays for later.
         skipped,
+        // Its staged tags are in its files.
+        written,
     };
     struct Album {
         musicbrainz::AlbumGroupBasis basis{musicbrainz::AlbumGroupBasis::folder};
@@ -51,6 +54,9 @@ class AlbumBatchSession final : public QObject {
         // Why it failed, or could not be staged.
         QString note;
         std::optional<musicbrainz::AlbumLookupResult> result;
+        // The version of result's candidates staged: the best, unless the
+        // person chose another.
+        std::size_t version{0U};
     };
 
     AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupService service,
@@ -88,13 +94,24 @@ class AlbumBatchSession final : public QObject {
     };
     [[nodiscard]] Files filesOf(std::size_t album) const;
     // The pairing the person confirmed, staged as a clear match would be.
-    void choose(std::size_t album, metadata::MetadataProposalSet proposals);
+    void choose(std::size_t album, std::size_t version, metadata::MetadataProposalSet proposals);
     void skip(std::size_t album);
+
+    // Step 4, Apply: the albums chosen of those staged written, the rest
+    // staying staged; one write at a time, once nothing is being staged.
+    [[nodiscard]] bool canWrite() const;
+    // The fields each album's staged draft changes, over all its files.
+    [[nodiscard]] std::vector<std::size_t> changes() const;
+    void write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options);
+    [[nodiscard]] const AlbumBatchWrite* writing() const { return writer_; }
+    void stopWriting();
 
     static QString stateText(const Album& album);
 
   signals:
     void changed();
+    // The write is over, its outcome in each album's state and note.
+    void writeFinished();
 
   private:
     void group();
@@ -117,6 +134,7 @@ class AlbumBatchSession final : public QObject {
     };
     std::deque<ToStage> to_stage_;
     std::optional<std::size_t> staging_;
+    QPointer<AlbumBatchWrite> writer_;
 };
 
 } // namespace trackknife::bench

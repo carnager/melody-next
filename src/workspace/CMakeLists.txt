@@ -36,6 +36,7 @@ qt_add_library(
     convert_job.hpp
     field_filter.cpp
     album_batch_session.cpp
+    album_batch_write.cpp
     album_lookup_queue.cpp
     identify_session.cpp
     identify_session.hpp
@@ -86,6 +87,8 @@ qt_add_library(
     sources.hpp
     startup.cpp
     startup.hpp
+    preparation_planning.cpp
+    preparation_planning.hpp
     tagger_session.cpp
     tagger_session.hpp
     ../bench/artwork_fitting.cpp

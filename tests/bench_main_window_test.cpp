@@ -313,6 +313,7 @@ class BenchMainWindowTest final : public QObject {
     void musicBrainzIdentifyStagesChosenVersion();
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
+    void identifyAlbumsWritesWhatIsChosen();
     void musicBrainzFingerprintScanRanksAndStages();
     void replayGainScanStagesMeasuredGainsAsDrafts();
     void replayGainScanUsesTruePeakWhenOptedIn();
@@ -5990,6 +5991,316 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
 
 // ADR-0261: albums that fit more than one release wait for the person, who
 // goes through them from the keyboard.
+// ADR-0261: the albums chosen of those staged written in one go -- tags
+// only, or renamed and moved by two presets into the library folder they are
+// in -- an album with a file changed since it was read left out, and the
+// rest of the draft kept.
+void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto library = media.filePath(QStringLiteral("library"));
+    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(engine_.socket()).toStdString(),
+        .host = {},
+        .port = 0,
+        .token = {}});
+    const auto raw = [](const QString& path) {
+        const auto encoded = QFile::encodeName(path);
+        return std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    };
+    // A tag written as the engine writes it.
+    const auto retag = [&work](const std::string& raw_path,
+                               const std::vector<std::pair<std::string, std::string>>& fields) {
+        const auto read = metadata::read_local_metadata(raw_path);
+        if (!read) {
+            return false;
+        }
+        auto selection = metadata::StagedMetadataSelection::create({metadata::StagedMetadataSource{
+            .raw_path = raw_path,
+            .source_revision = read->source_revision,
+            .baseline = read->document,
+        }});
+        if (!selection) {
+            return false;
+        }
+        metadata::StagedMetadataPatchSet patches;
+        for (const auto& [name, value] : fields) {
+            const auto canonical = metadata::canonicalize_field_name(name);
+            auto field = selection->field_index(canonical);
+            if (!field) {
+                auto added = selection->ensure_missing_field(canonical, name);
+                if (!added) {
+                    return false;
+                }
+                field = *added;
+            }
+            if (!patches.replace_values(*selection, 0U, *field, {value})) {
+                return false;
+            }
+        }
+        auto plan = metadata::build_metadata_write_plan(*selection, patches,
+                                                        metadata::local_metadata_file_access());
+        if (!plan || !plan->ready()) {
+            return false;
+        }
+        const auto applied = work->apply(*plan, {}, {});
+        return applied && applied->committed_source_count() == 1U;
+    };
+    std::vector<MetadataPropertiesSource> sources;
+    for (const auto* artist : {"Band", "Cover", "Third"}) {
+        const auto folder = QStringLiteral("%1/incoming/%2 - Alpha").arg(library, QLatin1String(artist));
+        QVERIFY(QDir{}.mkpath(folder));
+        for (const auto& [number, title, length] :
+             {std::tuple{"1", "One", 61'000}, std::tuple{"2", "Two", 59'000}}) {
+            const auto path = raw(QStringLiteral("%1/0%2.flac").arg(folder, QLatin1String(number)));
+            QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"),
+                                              QString::fromStdString(path)));
+            QVERIFY(retag(path, {{"ALBUM", "Alpha"},
+                                 {"ARTIST", artist},
+                                 {"TITLE", title},
+                                 {"TRACKNUMBER", number}}));
+            const auto read = metadata::read_local_metadata(path);
+            QVERIFY(read.has_value());
+            sources.push_back(MetadataPropertiesSource{
+                .source =
+                    metadata::StagedMetadataSource{
+                        .raw_path = path,
+                        .source_revision = read->source_revision,
+                        .baseline = read->document,
+                    },
+                .track_label = {},
+                .duration_ms = length,
+            });
+        }
+    }
+    const std::map<QString, QString> ids{
+        {QStringLiteral("Band"), QStringLiteral("11111111-0000-0000-0000-000000000001")},
+        {QStringLiteral("Cover"), QStringLiteral("22222222-0000-0000-0000-000000000002")},
+        {QStringLiteral("Third"), QStringLiteral("33333333-0000-0000-0000-000000000003")}};
+    const auto release = [&ids](const QString& artist) {
+        return QStringLiteral(R"json({"id": "%1", "score": 100, "title": "Alpha",
+          "status": "Official", "date": "1999-09-09", "country": "DE", "track-count": 2,
+          "artist-credit": [{"name": "%2",
+            "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "%2"}}],
+          "release-group": {"id": "99999999-8888-7777-6666-555555555555"},
+          "media": [{"position": 1, "format": "CD", "track-count": 2, "tracks": [
+            {"id": "aaaa1111-0000-0000-0000-000000000001", "position": 1, "number": "1",
+             "title": "One", "length": 61000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000001", "title": "One"}},
+            {"id": "aaaa1111-0000-0000-0000-000000000002", "position": 2, "number": "2",
+             "title": "Two", "length": 59000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000002", "title": "Two"}}
+          ]}]})json")
+            .arg(ids.at(artist), artist);
+    };
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
+                const auto asked = QUrl::fromPercentEncoding(url.toUtf8());
+                QString artist = QStringLiteral("Band");
+                for (const auto& [name, id] : ids) {
+                    if (asked.contains(name) || asked.contains(id)) {
+                        artist = name;
+                    }
+                }
+                const auto body = url.contains(QStringLiteral("?query="))
+                                      ? QStringLiteral(R"({"count": 1, "releases": [%1]})")
+                                            .arg(release(artist))
+                                            .toUtf8()
+                                      : release(artist).toUtf8();
+                QTimer::singleShot(1, [body, completion = std::move(completion)] {
+                    completion(body);
+                });
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+    const auto layout = [](std::string name, std::string folder, std::string file) {
+        return persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                       .name = std::move(name),
+                                                       .dialect = {},
+                                                       .relative_directory_expression =
+                                                           std::move(folder),
+                                                       .basename_expression = std::move(file),
+                                                       .sanitization_policy = {"linux", 1U}}};
+    };
+    // The file name of one, the folders of the other.
+    const std::vector layouts{layout("By title", "", "%title%"),
+                              layout("Artist folders", "%artist%/%album%", "unused %title%")};
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {},
+        TaggerServices{
+            .plan_applier_factory =
+                [work] {
+                    return MetadataWritePlanApplier{
+                        [work](const metadata::MetadataWritePlan& plan,
+                               const operations::MetadataApplyProgressCallback& progress,
+                               const core::CancellationToken& cancellation) {
+                            return work->apply(plan, progress, cancellation);
+                        }};
+                },
+            .apply_observer = {},
+            .transformation_store =
+                MetadataTransformationStore{
+                    .load =
+                        [](MetadataTransformationStore::LoadCompletion completion) {
+                            completion({}, {});
+                        },
+                    .save = {},
+                    .remove = {}},
+            .output_profile_store =
+                OutputProfileStore{
+                    .load =
+                        [layouts](OutputProfileStore::LoadCompletion completion) {
+                            completion(layouts, {}, {});
+                        },
+                    .save_layout = {},
+                    .remove_layout = {},
+                    .save_destination = {},
+                    .remove_destination = {},
+                    .destinations_on = {},
+                    .destinations_key = {},
+                    .places = {}},
+            .file_plan_applier_factory =
+                [work] {
+                    return FilePublicationPlanApplier{
+                        [work](const operations::PreparationPlan& plan,
+                               const operations::FilePublicationApplyProgressCallback& progress,
+                               const core::CancellationToken& cancellation) {
+                            return work->publish(plan, progress, cancellation);
+                        }};
+                },
+            .file_apply_observer = {},
+            .layout_store = {},
+            .musicbrainz = service,
+            .tools = engineFileWorkTools(work),
+            .library_roots = [root = raw(library)] { return std::vector{root}; },
+        });
+    properties->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = properties->fileListView()) != nullptr);
+    auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
+    auto* open =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    QTRY_VERIFY(open->isEnabled());
+    open->click();
+    auto* dialog =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* session = dialog->session();
+    QCOMPARE(session->albums().size(), 3U);
+    const auto album_of = [session](const QString& artist) {
+        const auto& albums = session->albums();
+        return static_cast<std::size_t>(std::distance(
+            albums.begin(), std::ranges::find(albums, artist, &AlbumBatchSession::Album::artist)));
+    };
+    const auto band = album_of(QStringLiteral("Band"));
+    const auto cover = album_of(QStringLiteral("Cover"));
+    const auto third = album_of(QStringLiteral("Third"));
+    dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-look-up"))->click();
+    QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::staged), std::size_t{3U},
+                              10'000);
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-apply"));
+    QTRY_VERIFY(apply->isEnabled());
+    QCOMPARE(apply->text(), QStringLiteral("Apply 3 staged…"));
+    apply->click();
+
+    auto* list = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-apply-list"));
+    auto* write = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
+    QVERIFY(list->isVisible());
+    QCOMPARE(list->topLevelItemCount(), 3);
+    const auto row_of = [list](const std::size_t album) {
+        for (int row = 0; row < list->topLevelItemCount(); ++row) {
+            if (list->topLevelItem(row)->data(0, Qt::UserRole).toInt() == static_cast<int>(album)) {
+                return list->topLevelItem(row);
+            }
+        }
+        return static_cast<QTreeWidgetItem*>(nullptr);
+    };
+    QVERIFY(row_of(band)->text(1).contains(QStringLiteral("1999-09-09 · DE")));
+    QVERIFY(row_of(band)->text(2).startsWith(QStringLiteral("2 files · ")));
+    QCOMPARE(write->text(), QStringLiteral("Write 3 albums"));
+
+    // Tags only, and only Band's.
+    row_of(cover)->setCheckState(0, Qt::Unchecked);
+    row_of(third)->setCheckState(0, Qt::Unchecked);
+    QCOMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QTRY_VERIFY(write->isEnabled());
+    write->click();
+    QTRY_COMPARE_WITH_TIMEOUT(session->albums()[band].state, AlbumBatchSession::State::written,
+                              10'000);
+    QTRY_COMPARE(write->text(), QStringLiteral("Back to the list"));
+    const auto band_file = sources[0].source.raw_path;
+    const auto band_tags = metadata::read_local_metadata(band_file);
+    QVERIFY(band_tags.has_value());
+    const auto value_of = [](const metadata::MetadataDocument& document, std::string_view name) {
+        const auto found = std::ranges::find(document.fields, metadata::canonicalize_field_name(name),
+                                             &metadata::MetadataField::canonical_name);
+        return found == document.fields.end() || found->values.empty() ? std::string{}
+                                                                        : found->values.front();
+    };
+    QCOMPARE(value_of(band_tags->document, "MUSICBRAINZ_ALBUMID"),
+             ids.at(QStringLiteral("Band")).toStdString());
+    // Read again; Band's draft written, the others' kept.
+    auto* tagger = properties->findChild<TaggerSession*>();
+    QVERIFY(tagger != nullptr);
+    QTRY_VERIFY(!tagger->writingElsewhere());
+    const auto has_patches = [&grid_model](std::size_t first, std::size_t last) {
+        return std::ranges::any_of(grid_model->patches().patches(), [&](const auto& patch) {
+            return patch.item_index >= first && patch.item_index <= last;
+        });
+    };
+    QVERIFY(!has_patches(0U, 1U));
+    QVERIFY(has_patches(2U, 5U));
+    QCOMPARE(session->albums()[cover].state, AlbumBatchSession::State::staged);
+
+    // Cover renamed by one preset and moved by the other; Third's file
+    // changed since it was read, so Third is left out.
+    write->click();
+    QTRY_VERIFY(apply->isEnabled());
+    apply->click();
+    QCOMPARE(list->topLevelItemCount(), 2);
+    auto* rename = dialog->findChild<QCheckBox*>(QStringLiteral("bench-identify-albums-apply-rename"));
+    auto* move = dialog->findChild<QCheckBox*>(QStringLiteral("bench-identify-albums-apply-move"));
+    auto* rename_preset =
+        dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-rename-preset"));
+    auto* move_preset =
+        dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-move-preset"));
+    QTRY_COMPARE(rename_preset->count(), 2);
+    rename->setChecked(true);
+    rename_preset->setCurrentIndex(0);
+    move->setChecked(true);
+    move_preset->setCurrentIndex(1);
+    QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-move-pattern"))
+                 ->text(),
+             QStringLiteral("%artist%/%album%"));
+    QVERIFY(retag(sources[4].source.raw_path, {{"COMMENT", "changed elsewhere"}}));
+    QTRY_VERIFY(write->isEnabled());
+    write->click();
+    QTRY_VERIFY_WITH_TIMEOUT(session->writing() == nullptr, 10'000);
+    QVERIFY2(session->albums()[cover].state == AlbumBatchSession::State::written,
+             qPrintable(AlbumBatchSession::stateText(session->albums()[cover]) + QStringLiteral(" | ") +
+                        AlbumBatchSession::stateText(session->albums()[third])));
+    QTRY_VERIFY(!tagger->writingElsewhere());
+    const auto moved = library + QStringLiteral("/Cover/Alpha/One.flac");
+    QVERIFY2(QFile::exists(moved), qPrintable(moved));
+    QVERIFY(QFile::exists(library + QStringLiteral("/Cover/Alpha/Two.flac")));
+    QVERIFY(!QFile::exists(QString::fromStdString(sources[2].source.raw_path)));
+    QCOMPARE(tagger->sharedSelection()->source(2U).raw_path, raw(moved));
+    QCOMPARE(session->albums()[third].state, AlbumBatchSession::State::staged);
+    QVERIFY2(session->albums()[third].note.contains(QStringLiteral("changed since it was read")),
+             qPrintable(session->albums()[third].note));
+    QVERIFY(QFile::exists(QString::fromStdString(sources[4].source.raw_path)));
+    QVERIFY(row_of(third)->text(3).contains(QStringLiteral("not written")));
+    QVERIFY(has_patches(4U, 5U));
+    delete properties;
+}
+
 void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{

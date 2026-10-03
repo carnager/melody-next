@@ -223,6 +223,19 @@ class Workspace final : public QObject {
     MprisService* mpris_{nullptr};
     // The cover file given to the desktop, and which album it is.
     QString desktop_cover_key_;
+    // A new track's cover still being fetched, by group key, and the track
+    // whose notification waits for it -- briefly: a notification without its
+    // cover, for an album no open list had shown yet (queued from
+    // melody-cli, say), looked broken.
+    QString desktop_cover_waiting_;
+    // The engine plays an entry no list here holds yet: its queue is on its
+    // way (another client -- melody-cli -- queued it).
+    bool desktop_track_unknown_{false};
+    QString notification_waiting_track_;
+    // Waited for long enough: this track's notification goes as it is.
+    QString notification_cover_given_up_;
+    QTimer* notification_wait_{nullptr};
+    QElapsedTimer notification_waited_;
     QString desktop_cover_path_;
     DesktopNotifier* notifier_{nullptr};
     ui::ListPersistenceService* persistence_{nullptr};
@@ -866,6 +879,9 @@ class Workspace final : public QObject {
     void startLastFm();
     void sampleLastFm(const EnginePlayback::State& state);
     // What plays, as MPRIS and the track-change notification show it.
+    // What the desktop -- media keys, the notification -- is told of what an
+    // engine reports.
+    [[nodiscard]] MprisPlaybackState desktopStateOf(const EnginePlayback::State& engine);
     void publishDesktopState();
     // The play order as MPRIS names it: repeat and single together loop the
     // track ("Track"), repeat alone the list ("Playlist"), else "None"; and

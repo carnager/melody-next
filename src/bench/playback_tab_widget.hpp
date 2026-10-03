@@ -99,7 +99,11 @@ class TabCloseButton final : public QAbstractButton {
 // under the style it was designed with.
 class PlaybackTabBar final : public QTabBar {
   public:
-    explicit PlaybackTabBar(QWidget* parent = nullptr) : QTabBar(parent) {
+    // `closable`: each tab has a close button -- the lists'; the library
+    // sources beside them have none, and their data names an engine, not
+    // whether the tab is playing.
+    explicit PlaybackTabBar(QWidget* parent = nullptr, const bool closable = true)
+        : QTabBar(parent), closable_(closable) {
         // On the style the application uses: a proxy made without one would
         // wrap the desktop's default instead.
         auto* placement =
@@ -153,9 +157,13 @@ class PlaybackTabBar final : public QTabBar {
         }
     };
 
+    // A list tab marked as the one playing (its data true).
+    [[nodiscard]] bool playing(int index) const {
+        return closable_ && tabData(index).typeId() == QMetaType::Bool && tabData(index).toBool();
+    }
     [[nodiscard]] int contentWidth(int index) const {
         int width = fontMetrics().horizontalAdvance(tabText(index));
-        if (tabData(index).toBool()) {
+        if (playing(index)) {
             width += dot_width;
         }
         if (const auto icon = tabIcon(index); !icon.isNull()) {
@@ -164,11 +172,14 @@ class PlaybackTabBar final : public QTabBar {
         return width;
     }
     [[nodiscard]] QSize tabSizeHint(int index) const override {
-        return {lead + contentWidth(index) + slack + close_room + trail,
+        return {lead + contentWidth(index) + slack + (closable_ ? close_room : 0) + trail,
                 fontMetrics().height() + height_padding};
     }
     void tabInserted(int index) override {
         QTabBar::tabInserted(index);
+        if (!closable_) {
+            return;
+        }
         auto* close = new TabCloseButton(this);
         connect(close, &QAbstractButton::clicked, this, [this, close] {
             for (int each = 0; each < count(); ++each) {
@@ -201,9 +212,10 @@ class PlaybackTabBar final : public QTabBar {
                 painter.fillPath(shape, fill);
                 painter.restore();
             }
-            const auto rect = option.rect.adjusted(lead, 3, -(trail + close_room), 0);
-            const bool playing = tabData(index).toBool();
-            const auto dot = playing ? dot_width : 0;
+            const auto rect =
+                option.rect.adjusted(lead, 3, -(trail + (closable_ ? close_room : 0)), 0);
+            const bool marked = playing(index);
+            const auto dot = marked ? dot_width : 0;
             const auto icon_size =
                 option.icon.isNull() ? QSize{} : option.icon.actualSize(QSize{14, 14});
             const auto icon_width = icon_size.isEmpty() ? 0 : icon_size.width() + icon_gap;
@@ -216,7 +228,7 @@ class PlaybackTabBar final : public QTabBar {
                                   : fontMetrics().elidedText(tabText(index), Qt::ElideRight, room);
             const auto width = fontMetrics().horizontalAdvance(text) + icon_width + dot;
             auto x = rect.left() + qMax(0, (rect.width() - width) / 2);
-            if (playing) {
+            if (marked) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(palette().color(QPalette::Highlight));
@@ -255,6 +267,9 @@ class PlaybackTabBar final : public QTabBar {
         QTabBar::mouseMoveEvent(event);
         update();
     }
+
+  private:
+    bool closable_{true};
 };
 
 class PlaybackTabWidget final : public QTabWidget {

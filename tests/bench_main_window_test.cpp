@@ -239,6 +239,7 @@ class BenchMainWindowTest final : public QObject {
     void init();
     void cleanup();
     void transportIsOneRowWithCoverAndPills();
+    void theDesktopNamesWhatPlaysAfterARestart();
     void headerShowsThePlayingAlbumsCover();
     void libraryDragsIntoUpNextWithCovers();
     void quickAlbumFindsByWordsAndPutsItAway();
@@ -325,6 +326,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
+    void aNotificationWaitsForItsCover();
     void theRemoteTabTakesTheNameItsEngineAnnounces();
     void anUnreachableRemoteDoesNotHoldTheWindow();
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();
@@ -1374,6 +1376,36 @@ void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
     QCOMPARE(window.header_cover_key_, group);
     QCOMPARE(window.now_playing_cover_->pixmap().deviceIndependentSize().toSize(),
              QSize(44, 44));
+}
+
+// The desktop -- notifications, media keys -- names what plays as the header
+// does, by finding its entry in any open list: after a restart the list
+// played from is not known until something plays, and it said only the file
+// name.
+void BenchMainWindowTest::theDesktopNamesWhatPlaysAfterARestart() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    LocalTrackRow row;
+    row.raw_path = "/music/Someone/Album/01 file name.flac";
+    row.title = "The Title";
+    row.artist = "Someone";
+    row.album = "Album";
+    tab->model->appendRows({row});
+    const auto entry = QString::fromStdString(tab->model->rows().front().entry_id.to_string());
+    // Restarted: playing, but from no list this window knows of.
+    window.workspace_.playback_.anchors = {};
+    EnginePlayback::State engine;
+    engine.status = QStringLiteral("playing");
+    engine.entry = entry;
+    engine.path = QStringLiteral("/music/Someone/Album/01 file name.flac");
+    const auto state = window.workspace_.desktopStateOf(engine);
+    QCOMPARE(state.title, QStringLiteral("The Title"));
+    QCOMPARE(state.artist, QStringLiteral("Someone"));
+    QCOMPARE(state.album, QStringLiteral("Album"));
+    QCOMPARE(state.track_key, entry);
 }
 
 void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
@@ -7119,6 +7151,59 @@ void BenchMainWindowTest::anUnreachableRemoteDoesNotHoldTheWindow() {
     settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
 }
 
+// An album queued and played by another client -- melody-cli -- is in no
+// list this window has shown, so its cover is not at hand when it starts.
+// The notification waits for the cover rather than going out without it.
+void BenchMainWindowTest::aNotificationWaitsForItsCover() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    // A minute long, so it is still playing when the window looks, with its
+    // cover beside it as an album folder has.
+    const auto path = media.filePath(QStringLiteral("track.wav"));
+    write_wave(path, wave_sample_rate * 60U);
+    QImage cover{64, 64, QImage::Format_RGB32};
+    cover.fill(Qt::darkCyan);
+    QVERIFY(cover.save(media.filePath(QStringLiteral("cover.jpg")), "JPEG"));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QVERIFY(window.notifier_ != nullptr);
+    window.notifier_->setEnabled(true);
+    window.notifier_->setBackgroundOnly(false);
+    QStringList sent;
+    window.notifier_->setSendOverride(
+        [&sent](const QString& summary, const QString&) { sent << summary; });
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto entry = core::StableId::random().to_string();
+    auto entries = protocol::Json::array();
+    entries.push_back(protocol::Json{
+        {"entry", entry},
+        {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
+        {"title", "With a cover"},
+        {"group", protocol::Json{{"album_artist", "Band"},
+                                 {"artist", "Band"},
+                                 {"album", "Covered"},
+                                 {"date", "1992"}}}});
+    QVERIFY((*other)
+                ->call("playback.replace_queue", protocol::Json{{"entries", std::move(entries)}})
+                .has_value());
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", entry}}).has_value());
+
+    QTRY_VERIFY_WITH_TIMEOUT(!sent.isEmpty(), 10'000);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.front(), QStringLiteral("With a cover"));
+    QVERIFY2(!window.notifier_->lastImage().isEmpty(), "the notification shows the cover");
+    QVERIFY(QFileInfo::exists(window.notifier_->lastImage()));
+}
+
 void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QTemporaryDir remote_state;
     QTemporaryDir media;
@@ -7304,15 +7389,10 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         QVERIFY(!sources->isTabVisible(library_tab));
         QCOMPARE(sources->tabData(sources->currentIndex()).toString(),
                  window.remoteEngine()->key.text());
-        // Gone from the bar too: two segments, not three with one blank, and
-        // the remote's lifted over the right half where a click finds it.
-        QTest::qWait(250);
-        const auto drawn = sources->grab().toImage();
-        const QPoint left_of_middle{drawn.width() * 55 / 100, drawn.height() / 2};
-        QCOMPARE(drawn.pixelColor(left_of_middle * drawn.devicePixelRatio()).rgb(),
-                 TrackknifeStyle::raised(sources->palette()).rgb());
-        QCOMPARE(sources->tabAt(QPoint{sources->width() * 55 / 100, sources->height() / 2}),
-                 sources->currentIndex());
+        // Gone from the bar too: the remote's tab is where a click finds it.
+        const auto remote_rect = sources->tabRect(sources->currentIndex());
+        QVERIFY(remote_rect.isValid());
+        QCOMPARE(sources->tabAt(remote_rect.center()), sources->currentIndex());
         QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));

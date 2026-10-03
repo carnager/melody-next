@@ -30,6 +30,12 @@ class DesktopNotifier final : public QObject {
     // even while disabled or suppressed so state changes never
     // retro-notify an old transition.
     bool publish(const MprisPlaybackState& state, bool window_active);
+    // Whether `state` is a track this notifier has not seen play yet: what
+    // publish would announce, if enabled.
+    [[nodiscard]] bool isNewTrack(const MprisPlaybackState& state) const {
+        return state.status == QStringLiteral("Playing") && !state.track_key.isEmpty() &&
+               state.track_key != last_track_key_;
+    }
 
     [[nodiscard]] quint64 sentCount() const noexcept { return sent_count_; }
     [[nodiscard]] QString lastSummary() const { return last_summary_; }

@@ -8,6 +8,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "workspace/workspace_view.hpp"
 
+#include <QTimer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -159,59 +160,104 @@ QString Workspace::desktopCoverPath(const LocalTrackRow& track, const EngineKey&
     return path;
 }
 
+MprisPlaybackState Workspace::desktopStateOf(const EnginePlayback::State& engine) {
+    // What the desktop sees is what the engine is doing. Reading the local
+    // player here would publish an idle player while music plays, so media
+    // keys and the notification would describe nothing.
+    MprisPlaybackState state;
+    state.status = engine.status == QStringLiteral("playing")  ? QStringLiteral("Playing")
+                   : engine.status == QStringLiteral("paused") ? QStringLiteral("Paused")
+                                                               : QStringLiteral("Stopped");
+    if (!engine.entry.isEmpty()) {
+        // The entry, not the path: the same file queued twice is two tracks
+        // to the desktop, and a notification per occurrence.
+        state.track_key = engine.entry;
+        state.title = QFileInfo{engine.path}.fileName();
+        // Named as the header names it: the entry looked for in the list
+        // played from, Up Next and every other open list. The list played
+        // from alone is unknown after a restart until something plays, and
+        // the desktop then saw only a file name.
+        const auto* track = playingRow(engine.entry);
+        desktop_track_unknown_ = track == nullptr;
+        if (track != nullptr) {
+            if (!track->title.empty()) {
+                state.title = displayText(track->title);
+            }
+            state.artist = displayText(track->artist);
+            state.album = displayText(track->album);
+            const auto* playing = transport_ != nullptr ? linkOf(transport_) : nullptr;
+            state.art_path =
+                desktopCoverPath(*track, playing != nullptr ? playing->key : EngineKey::local());
+            // Asked for just now, or on its way: worth a moment's wait.
+            const auto key = LocalListModel::groupKeyOf(*track);
+            desktop_cover_waiting_ =
+                state.art_path.isEmpty() && artwork_pending_.contains(key) ? key : QString{};
+        } else {
+            desktop_cover_waiting_.clear();
+        }
+    } else {
+        desktop_track_unknown_ = false;
+        desktop_cover_waiting_.clear();
+    }
+    state.position_us = engine.position_ms * 1'000;
+    state.length_us = engine.duration_ms > 0 ? engine.duration_ms * 1'000 : -1;
+    state.volume_percent = engine.volume_percent;
+    const bool has_queue = engine.queue_size > 0U;
+    state.can_next = engine.queue_size > 1U || engine.requests > 0U;
+    state.can_previous = engine.queue_size > 1U;
+    state.can_play = has_queue;
+    state.can_pause = has_queue;
+    state.can_seek = !engine.entry.isEmpty() && engine.duration_ms > 0;
+    return state;
+}
+
 void Workspace::publishDesktopState() {
     if (mpris_ == nullptr && notifier_ == nullptr) {
         return;
     }
     MprisPlaybackState state;
     if (playingOnEngine()) {
-        // What the desktop sees is what the engine is doing. Reading the
-        // local player here would publish an idle player while music plays,
-        // so media keys and the notification would describe nothing.
-        const auto engine = transport_->state();
-        state.status = engine.status == QStringLiteral("playing")  ? QStringLiteral("Playing")
-                       : engine.status == QStringLiteral("paused") ? QStringLiteral("Paused")
-                                                                   : QStringLiteral("Stopped");
-        if (!engine.entry.isEmpty()) {
-            // The entry, not the path: the same file queued twice is two
-            // tracks to the desktop, and a notification per occurrence.
-            state.track_key = engine.entry;
-            state.title = QFileInfo{engine.path}.fileName();
-            if (const auto entry = core::StableId::parse(engine.entry.toStdString())) {
-                if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-                    if (const auto row = tab->model->rowOfEntry(*entry, playback_.row); row >= 0) {
-                        const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
-                        if (!track.title.empty()) {
-                            state.title = displayText(track.title);
-                        }
-                        state.artist = displayText(track.artist);
-                        state.album = displayText(track.album);
-                    }
-                }
-            }
-        }
-        if (const auto* track = playingRow(engine.entry); track != nullptr) {
-            const auto* playing = linkOf(transport_);
-            state.art_path =
-                desktopCoverPath(*track, playing != nullptr ? playing->key : EngineKey::local());
-        }
-        state.position_us = engine.position_ms * 1'000;
-        state.length_us = engine.duration_ms > 0 ? engine.duration_ms * 1'000 : -1;
-        state.volume_percent = engine.volume_percent;
-        const bool has_queue = engine.queue_size > 0U;
-        state.can_next = engine.queue_size > 1U || engine.requests > 0U;
-        state.can_previous = engine.queue_size > 1U;
-        state.can_play = has_queue;
-        state.can_pause = has_queue;
-        state.can_seek = !engine.entry.isEmpty() && engine.duration_ms > 0;
+        state = desktopStateOf(transport_->state());
     }
     state.loop_status = loopStatus();
     state.shuffle = shuffled();
     if (mpris_ != nullptr) {
         mpris_->publish(state);
     }
-    if (notifier_ != nullptr &&
-        notifier_->publish(state, QGuiApplication::focusWindow() != nullptr)) {
+    if (notifier_ == nullptr) {
+        return;
+    }
+    // A new track this window cannot name yet -- the engine's queue on its
+    // way -- or whose cover is being fetched: its notification waits, at most
+    // a moment, rather than going out as a file name with no cover. Looked at
+    // again every little while, and at once when the cover comes.
+    constexpr qint64 wait_ms = 1'500;
+    const bool waiting = notifier_->isNewTrack(state) &&
+                         (desktop_track_unknown_ || !desktop_cover_waiting_.isEmpty()) &&
+                         notification_cover_given_up_ != state.track_key;
+    if (waiting) {
+        if (notification_waiting_track_ != state.track_key) {
+            notification_waiting_track_ = state.track_key;
+            notification_waited_.start();
+        }
+        if (notification_wait_ == nullptr) {
+            notification_wait_ = new QTimer(this);
+            notification_wait_->setInterval(150);
+            connect(notification_wait_, &QTimer::timeout, this, [this] {
+                if (notification_waited_.elapsed() >= wait_ms) {
+                    notification_cover_given_up_ = notification_waiting_track_;
+                }
+                publishDesktopState();
+            });
+        }
+        notification_wait_->start();
+        return;
+    }
+    if (notification_wait_ != nullptr) {
+        notification_wait_->stop();
+    }
+    notification_waiting_track_.clear();
+    if (notifier_->publish(state, QGuiApplication::focusWindow() != nullptr)) {
         setProperty("trackknife-notifications-sent",
                     static_cast<qulonglong>(notifier_->sentCount()));
         setProperty("trackknife-notification-summary", notifier_->lastSummary());

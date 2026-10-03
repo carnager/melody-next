@@ -135,9 +135,13 @@ void BenchMainWindow::buildWorkspace() {
     // replaces the dropdown and static heading.
     const auto make_source_tabs = [this](const QString& object_name,
                                          const QString& accessible_name) {
-        // One box split into its sources, the chosen one lifted out of it
-        // (ADR-0250).
-        auto* bar = new SegmentedTabBar(folders_panel_);
+        // The same tabs as the lists', without close buttons: a source is
+        // chosen, not closed.
+        auto* bar = new PlaybackTabBar(folders_panel_, false);
+        bar->setDrawBase(false);
+        bar->setExpanding(false);
+        bar->setUsesScrollButtons(true);
+        bar->setElideMode(Qt::ElideRight);
         bar->setObjectName(object_name);
         bar->setAccessibleName(accessible_name);
         return bar;

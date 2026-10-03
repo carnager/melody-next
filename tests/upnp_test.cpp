@@ -107,6 +107,27 @@ int main() {
         discovery::parse_upnp_renderer(description, "http://192.0.2.2/device.xml", "192.0.2.1");
     require(parsed && parsed->udn == "uuid:speaker" && parsed->name == "Kitchen & dining",
             "description preserves UDN and decodes XML");
+    {
+        // A container bridge listed before the LAN, as on a NAS running
+        // Docker: discovery takes the interface the default route leaves by.
+        const std::vector<discovery::NetworkInterface> interfaces{
+            {.name = "lo", .address = 0x7f000001U, .usable = false},
+            {.name = "br-449dc1b8745a", .address = 0xac120001U, .usable = true},
+            {.name = "docker0", .address = 0xac110001U, .usable = false},
+            {.name = "enp0s13f0u1", .address = 0xc0a800c8U, .usable = true},
+        };
+        require(discovery::choose_upnp_interface(interfaces, 0xc0a800c8U) == "enp0s13f0u1",
+                "the default route's interface is chosen over a bridge listed first");
+        require(discovery::choose_upnp_interface(interfaces, std::nullopt) == "br-449dc1b8745a",
+                "without a route, the first usable interface");
+        require(discovery::choose_upnp_interface(
+                    {{.name = "en0", .address = 0xa9fe0102U, .usable = true},
+                     {.name = "en1", .address = 0xc0a80105U, .usable = true}},
+                    std::nullopt) == "en1",
+                "a link-local address is not a network");
+        require(discovery::choose_upnp_interface({}, 0xc0a800c8U).empty(),
+                "no interface, none chosen");
+    }
     require(discovery::upnp_xml_escape("A\x01" "B\tC<") == "AB\tC&lt;",
             "control characters XML cannot carry are left out");
     require(parsed->manufacturer == "Sonos, Inc." && parsed->model == "Era 100",

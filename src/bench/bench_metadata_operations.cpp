@@ -5,6 +5,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/convert_dialog.hpp"
+#include "bench/identify_albums_dialog.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/post_back.hpp"
@@ -232,6 +233,57 @@ void BenchMainWindow::showMetadataForView(QTableView* view) {
     const auto selected_row_count = selected_rows.size();
     openMetadataProperties(selected_row_count,
                            selectionSourceReader(model, std::move(selected_rows)), std::move(work));
+}
+
+void BenchMainWindow::showIdentifyAlbums() {
+    auto* tab = currentListTab();
+    auto* view = tab != nullptr ? tab->view : nullptr;
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (model == nullptr || view->selectionModel() == nullptr || model->rowCount() == 0) {
+        return;
+    }
+    auto work = requireFileWork(view, tr("Identifying albums"));
+    if (!work) {
+        return;
+    }
+    // The tracks selected, else the whole list.
+    auto selected = view->selectionModel()->selectedRows();
+    if (selected.isEmpty()) {
+        for (int row = 0; row < model->rowCount(); ++row) {
+            selected.push_back(model->index(row, 0));
+        }
+    }
+    std::ranges::sort(selected, {}, &QModelIndex::row);
+    std::vector<QPersistentModelIndex> rows;
+    rows.reserve(static_cast<std::size_t>(selected.size()));
+    for (const auto& index : selected) {
+        rows.emplace_back(index);
+    }
+    const auto count = rows.size();
+    auto opening = workspace_.taggerServices(std::move(work));
+    const auto work_engine = opening.engine;
+    auto* dialog = new IdentifyAlbumsDialog(count, selectionSourceReader(model, std::move(rows)),
+                                            Workspace::taggerFields(),
+                                            std::move(opening.services), tabs_);
+    dialog->setWindowFlags(Qt::Window);
+    auto* tagger = dialog->tagger();
+    connect(tagger, &TaggerSession::statusMessage, this,
+            [this](const QString& message) { statusBar()->showMessage(message, 12'000); });
+    connect(tagger, &TaggerSession::openSettingsRequested, this,
+            [this](const TaggerSession::SettingsPage page) {
+                auto* settings = showSettingsDialog(settingsPage(page));
+                if (settings != nullptr && page == TaggerSession::SettingsPage::naming) {
+                    settings->showNamingLayouts();
+                }
+            });
+    connect(tagger, &TaggerSession::openDestinationsRequested, this, [this, work_engine] {
+        if (auto* settings = showSettingsDialog(SettingsDialog::Page::naming)) {
+            settings->showDestinationsOf(work_engine.text());
+        }
+    });
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_count,

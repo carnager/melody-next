@@ -436,6 +436,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);
     void showMetadataForView(QTableView* view);
+    // ADR-0262: Identify albums… by itself, over the selected tracks or, none
+    // selected, the whole tab.
+    void showIdentifyAlbums();
     void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     // Naming layouts, and the move destinations of `destinations_of`; with
@@ -670,6 +673,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* play_selected_action_{nullptr};
     QAction* properties_action_{nullptr};
     QAction* convert_action_{nullptr};
+    QAction* identify_albums_action_{nullptr};
     QAction* remove_selected_action_{nullptr};
     QAction* undo_list_action_{nullptr};
     QAction* redo_list_action_{nullptr};

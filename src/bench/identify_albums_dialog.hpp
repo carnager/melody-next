@@ -2,12 +2,15 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
+#include "workspace/tagger_session.hpp"
 
 #include <QDialog>
 #include <QPointer>
 
 #include <cstddef>
 #include <optional>
+#include <span>
+#include <string_view>
 
 class QButtonGroup;
 class QLabel;
@@ -20,7 +23,6 @@ class QTreeWidget;
 namespace trackknife::bench {
 
 class AlbumBatchSession;
-class TaggerSession;
 class TrackMatchSession;
 
 // ADR-0261/0262: Identify albums… -- the albums of the files open in a
@@ -30,10 +32,18 @@ class TrackMatchSession;
 class IdentifyAlbumsDialog final : public QDialog {
     Q_OBJECT
   public:
+    // Over the files open in a tag editor, and its draft.
     IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLookupService service,
                          QWidget* parent = nullptr);
+    // By itself (Tools): a tagger of its own over the tracks, without the
+    // editor's window.
+    IdentifyAlbumsDialog(std::size_t track_count, MetadataPropertiesSourceReader reader,
+                         std::span<const std::string_view> fields, TaggerServices services,
+                         QWidget* parent = nullptr);
 
+    // None until the files are read, opened by itself.
     [[nodiscard]] AlbumBatchSession* session() const { return session_; }
+    [[nodiscard]] TaggerSession* tagger() const { return tagger_; }
 
     // Review an album needing a person, or the next that does.
     void review(std::size_t album);
@@ -46,6 +56,11 @@ class IdentifyAlbumsDialog final : public QDialog {
     void reject() override;
 
   private:
+    explicit IdentifyAlbumsDialog(QWidget* parent);
+    void begin(MusicBrainzLookupService service);
+    // Whether closing may go on: not while writing, nor, when nothing else
+    // holds them, over staged albums the person keeps.
+    [[nodiscard]] bool mayClose();
     void sync();
     void showVersion(int version);
     void accept();
@@ -57,7 +72,8 @@ class IdentifyAlbumsDialog final : public QDialog {
     [[nodiscard]] bool shown(int album) const;
 
     QPointer<TaggerSession> tagger_;
-    AlbumBatchSession* session_;
+    AlbumBatchSession* session_{nullptr};
+    bool owns_tagger_{false};
     QLabel* heading_;
     QProgressBar* progress_;
     QLabel* progress_text_;

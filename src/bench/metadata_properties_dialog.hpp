@@ -42,6 +42,9 @@ class QVBoxLayout;
 
 namespace trackknife::bench {
 
+// The Settings page a tagger asks for.
+[[nodiscard]] SettingsDialog::Page settingsPage(TaggerSession::SettingsPage page);
+
 class ApplyActionsPopover;
 
 class MetadataFieldReviewBar;

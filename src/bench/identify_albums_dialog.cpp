@@ -3,6 +3,7 @@
 
 #include "bench/apply_actions_popover.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
+#include "bench/preparation_feedback_dialog.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 #include "workspace/album_batch_session.hpp"
 #include "workspace/identify_session.hpp"
@@ -14,6 +15,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QShortcut>
@@ -113,8 +115,47 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
 
 IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLookupService service,
                                            QWidget* parent)
-    : QDialog(parent), tagger_(&tagger),
-      session_(new AlbumBatchSession(tagger, std::move(service), this)) {
+    : IdentifyAlbumsDialog(parent) {
+    tagger_ = &tagger;
+    begin(std::move(service));
+}
+
+IdentifyAlbumsDialog::IdentifyAlbumsDialog(const std::size_t track_count,
+                                           MetadataPropertiesSourceReader reader,
+                                           std::span<const std::string_view> fields,
+                                           TaggerServices services, QWidget* parent)
+    : IdentifyAlbumsDialog(parent) {
+    // Its own tagger, without the editor's window: the files read, and
+    // grouped once they are.
+    auto service = services.musicbrainz;
+    owns_tagger_ = true;
+    tagger_ = new TaggerSession(track_count, std::move(reader), fields, std::move(services), this);
+    heading_->setText(QStringLiteral("Reading %1 files…").arg(track_count));
+    pages_->setEnabled(false);
+    bottom_bar_->setEnabled(false);
+    connect(tagger_, &TaggerSession::changed, this, [this] {
+        if (session_ == nullptr && tagger_ != nullptr) {
+            const auto loading = tagger_->loadingText();
+            heading_->setText(loading.isEmpty() ? tagger_->status() : loading);
+        }
+    });
+    connect(tagger_, &TaggerSession::gridReady, this,
+            [this, service] {
+                pages_->setEnabled(true);
+                bottom_bar_->setEnabled(true);
+                begin(service);
+            },
+            Qt::SingleShotConnection);
+    // What the editor would show: the files a scan could not measure, say.
+    connect(tagger_, &TaggerSession::feedbackRequested, this,
+            [this](const QString& title, const QString& summary,
+                   std::vector<PreparationFeedbackRow> rows, bool) {
+                createPreparationFeedbackDialog(title, summary, rows, this)->show();
+            });
+    tagger_->start();
+}
+
+IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     setObjectName(QStringLiteral("bench-identify-albums"));
     setWindowTitle(QStringLiteral("Identify albums"));
     setAttribute(Qt::WA_DeleteOnClose);
@@ -290,7 +331,11 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
         auto* popover = new ApplyActionsPopover(*tagger_, {}, this);
         popover->showAt(actions_);
     });
-    connect(write_, &QPushButton::clicked, session_, &AlbumBatchSession::write);
+    connect(write_, &QPushButton::clicked, this, [this] {
+        if (session_ != nullptr) {
+            session_->write();
+        }
+    });
     connect(list_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
         const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
         if (session_->albums()[album].state == State::needs_choice) {
@@ -298,14 +343,6 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
         }
     });
 
-    connect(session_, &AlbumBatchSession::changed, this, &IdentifyAlbumsDialog::sync);
-    // Done, as the tag editor's Apply is: everything written and nothing
-    // left here to do, the window closes.
-    connect(session_, &AlbumBatchSession::writeFinished, this, [this] {
-        if (session_->wroteAll() && session_->nothingLeftToDo()) {
-            QTimer::singleShot(0, this, &QDialog::close);
-        }
-    });
     connect(filter_group_, &QButtonGroup::idClicked, this, &IdentifyAlbumsDialog::sync);
     connect(list_, &QTreeWidget::currentItemChanged, this, &IdentifyAlbumsDialog::showDetail);
     connect(list_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, const int column) {
@@ -342,7 +379,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
         }
         menu.exec(merge_->mapToGlobal(QPoint{0, merge_->height()}));
     });
-    connect(look_up_, &QPushButton::clicked, session_, &AlbumBatchSession::lookUp);
+    connect(look_up_, &QPushButton::clicked, this, [this] { session_->lookUp(); });
     connect(stop_, &QPushButton::clicked, this, [this] {
         if (session_->writing() != nullptr || session_->measuring()) {
             session_->stopWriting();
@@ -351,12 +388,28 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
         }
     });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
+}
+
+void IdentifyAlbumsDialog::begin(MusicBrainzLookupService service) {
+    session_ = new AlbumBatchSession(*tagger_, std::move(service), this);
+    connect(session_, &AlbumBatchSession::changed, this, &IdentifyAlbumsDialog::sync);
+    // Done, as the tag editor's Apply is: everything written and nothing
+    // left here to do, the window closes.
+    connect(session_, &AlbumBatchSession::writeFinished, this, [this] {
+        if (session_->wroteAll() && session_->nothingLeftToDo()) {
+            QTimer::singleShot(0, this, &QDialog::close);
+        }
+    });
     sync();
     if (list_->topLevelItemCount() > 0) {
         list_->setCurrentItem(list_->topLevelItem(0));
     }
     // Looked up from the start: a wrong group is put right meanwhile, and
-    // looked up again.
+    // looked up again. Test seam: held while the window it opened over says.
+    if (parentWidget() != nullptr &&
+        parentWidget()->window()->property("trackknife-identify-hold-lookup").toBool()) {
+        return;
+    }
     QTimer::singleShot(0, session_, &AlbumBatchSession::lookUp);
 }
 
@@ -664,10 +717,31 @@ void IdentifyAlbumsDialog::backToList() {
     sync();
 }
 
-void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
+bool IdentifyAlbumsDialog::mayClose() {
+    if (session_ == nullptr) {
+        return true;
+    }
     // The files under way are finished first.
     if (session_->writing() != nullptr || session_->measuring()) {
         session_->stopWriting();
+        return false;
+    }
+    // Opened by itself, nothing else holds what is staged.
+    const auto staged = session_->count(State::staged) + session_->count(State::staging);
+    if (!owns_tagger_ || staged == 0U) {
+        return true;
+    }
+    return QMessageBox::question(
+               this, QStringLiteral("Close Identify albums"),
+               QStringLiteral("%1 %2 staged but not written. Close and drop them?")
+                   .arg(staged)
+                   .arg(staged == 1U ? QStringLiteral("album is") : QStringLiteral("albums are")),
+               QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel) ==
+           QMessageBox::Close;
+}
+
+void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
+    if (!mayClose()) {
         event->ignore();
         return;
     }
@@ -675,11 +749,9 @@ void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
 }
 
 void IdentifyAlbumsDialog::reject() {
-    if (session_->writing() != nullptr || session_->measuring()) {
-        session_->stopWriting();
-        return;
+    if (mayClose()) {
+        QDialog::reject();
     }
-    QDialog::reject();
 }
 
 void IdentifyAlbumsDialog::showDetail() {

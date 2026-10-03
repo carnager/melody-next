@@ -94,3 +94,10 @@ each album is in, and ReplayGain scanned after the write. In use:
   so the next Write takes it. When a Write writes everything and nothing is
   left to do (nothing looked up, needing a person or staged), the window
   closes, as Apply closes the tag editor.
+- From Tools (2026-10-04): **Identify albums…** stands beside Edit tags…
+  in the Edit menu and a track's Tools, over the tracks selected or, none
+  selected, the whole list. It opens no tag editor: the window keeps a
+  tagger session of its own -- the files read, the draft, the Actions --
+  groups once the files are read, and asks before closing over albums
+  staged and not written, which nothing else then holds. The tag editor
+  keeps its own Identify albums… over its files and draft.

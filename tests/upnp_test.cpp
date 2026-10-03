@@ -253,8 +253,8 @@ int main() {
     audition.poll();
     require(audition.snapshot().state == audio::LocalAuditionState::ended,
             "renderer end drives normal progression");
-    require(!audition.set_replay_gain_mode(audio::ReplayGainMode::track),
-            "ReplayGain explicitly unsupported");
+    require(audition.set_replay_gain_mode(audio::ReplayGainMode::track).has_value(),
+            "the engine's ReplayGain setting is taken, not refused");
     require(renderer->volume == 100 && audition.snapshot().effective_replay_gain_multiplier == 1.0F,
             "ReplayGain never changes device volume");
     require(audition.set_volume_percent(38).has_value() && renderer->volume == 38,

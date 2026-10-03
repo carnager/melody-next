@@ -769,11 +769,51 @@ build_metadata_write_plan(const StagedMetadataSelection& selection,
         }
     }
 
+    // Every source read again, as it is now, to check nothing changed since
+    // the draft: through read_many where the access has it, a batch a
+    // request, rather than one request a file.
+    std::unordered_map<std::string, core::Result<LocalMetadataRead>> prefetched;
+    if (access.read_many) {
+        std::vector<std::string> paths;
+        paths.reserve(plan.sources.size());
+        for (const auto& source : plan.sources) {
+            paths.push_back(source.raw_path);
+        }
+        for (std::size_t first = 0; first < paths.size(); first += metadata_capture_batch) {
+            if (cancellation.is_cancellation_requested()) {
+                return cancelled();
+            }
+            const auto last = std::min(paths.size(), first + metadata_capture_batch);
+            const std::vector<std::string> batch{paths.begin() + static_cast<std::ptrdiff_t>(first),
+                                                 paths.begin() + static_cast<std::ptrdiff_t>(last)};
+            auto results = access.read_many(batch, cancellation);
+            if (!results) {
+                if (results.error().code == core::ErrorCode::cancelled ||
+                    cancellation.is_cancellation_requested()) {
+                    return cancelled();
+                }
+                return std::unexpected(std::move(results.error()));
+            }
+            if (results->size() != batch.size()) {
+                return std::unexpected(planner_error(core::ErrorCode::backend,
+                                                     "a batch of files was answered in part",
+                                                     batch.front()));
+            }
+            for (std::size_t index = 0; index < batch.size(); ++index) {
+                prefetched.insert_or_assign(batch[index], std::move((*results)[index]));
+            }
+        }
+    }
     for (auto& source : plan.sources) {
         if (cancellation.is_cancellation_requested()) {
             return cancelled();
         }
-        auto read = reader(source.raw_path, cancellation);
+        auto read = [&]() -> core::Result<LocalMetadataRead> {
+            if (const auto found = prefetched.find(source.raw_path); found != prefetched.end()) {
+                return std::move(found->second);
+            }
+            return reader(source.raw_path, cancellation);
+        }();
         if (!read) {
             if (read.error().code == core::ErrorCode::cancelled ||
                 cancellation.is_cancellation_requested()) {

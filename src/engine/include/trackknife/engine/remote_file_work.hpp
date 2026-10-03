@@ -51,6 +51,11 @@ probe_local_technicals(const std::string& raw_path, const core::CancellationToke
 // Its own connection, made on first use and again after it drops, so a scan
 // never waits behind playback. Safe to use from several worker threads; every
 // call blocks, so none may run on a UI thread.
+// The most one loudness.scan or metadata.apply job carries, in bytes of JSON:
+// half the engine's line limit. A larger one goes as several jobs -- a scan
+// with each album whole in one.
+inline constexpr std::size_t remote_job_bytes = 512U * 1024U;
+
 class RemoteFileWork final {
   public:
     explicit RemoteFileWork(protocol::Endpoint endpoint);
@@ -150,6 +155,9 @@ class RemoteFileWork final {
     // ADR-0237, which the tools then do themselves, as before. Asked once.
     [[nodiscard]] bool supported();
 
+    // The most one scan or apply job carries (remote_job_bytes unless told).
+    void limitJobs(std::size_t bytes) noexcept { job_bytes_ = bytes; }
+
   private:
     [[nodiscard]] core::Result<std::shared_ptr<protocol::Client>> client();
     // ADR-0237: files read a batch to a request, in order, one result each.
@@ -160,6 +168,7 @@ class RemoteFileWork final {
     read_one(const std::string& raw_path, const core::CancellationToken& cancellation);
 
     protocol::Endpoint endpoint_;
+    std::size_t job_bytes_{remote_job_bytes};
     std::mutex mutex_;
     std::shared_ptr<protocol::Client> client_;
     std::optional<bool> supported_;

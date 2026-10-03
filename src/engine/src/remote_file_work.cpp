@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <memory>
 
+#include <iterator>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -223,37 +225,126 @@ RemoteFileWork::scan(const std::span<const loudness::LoudnessScanItem> items,
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto encoded = Json::array();
+    // Several jobs, each under the engine's line limit: an album's tracks
+    // stay in one, for its album gain is measured across them; a track with
+    // no album goes wherever there is room. In order of first appearance.
+    std::vector<std::vector<std::size_t>> groups;
+    {
+        std::unordered_map<std::string, std::size_t> album_group;
+        for (std::size_t position = 0; position < items.size(); ++position) {
+            const auto& key = items[position].album_key;
+            if (!key) {
+                groups.push_back({position});
+                continue;
+            }
+            const auto [found, added] = album_group.emplace(*key, groups.size());
+            if (added) {
+                groups.emplace_back();
+            }
+            groups[found->second].push_back(position);
+        }
+    }
+    std::vector<Json> encoded(items.size());
+    for (std::size_t position = 0; position < items.size(); ++position) {
+        encoded[position] = wire::encode(items[position]);
+    }
+    std::vector<std::vector<std::size_t>> jobs;
+    {
+        std::vector<std::size_t> job;
+        std::size_t bytes = 0;
+        for (const auto& group : groups) {
+            std::size_t size = 0;
+            for (const auto position : group) {
+                size += encoded[position].dump().size() + 1U;
+            }
+            if (size > job_bytes_) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::limit_exceeded,
+                    .message = "an album of " + std::to_string(group.size()) +
+                               " tracks is too large to measure in one piece; group by "
+                               "release instead of the whole selection",
+                    .context = {}});
+            }
+            if (!job.empty() && bytes + size > job_bytes_) {
+                jobs.push_back(std::move(job));
+                job.clear();
+                bytes = 0;
+            }
+            job.insert(job.end(), group.begin(), group.end());
+            bytes += size;
+        }
+        if (!job.empty()) {
+            jobs.push_back(std::move(job));
+        }
+    }
+    std::unordered_map<std::size_t, const std::string*> paths;
     for (const auto& item : items) {
-        encoded.push_back(wire::encode(item));
+        paths.emplace(item.item_index, &item.raw_path);
     }
-    auto outcome = (*connection)
-                       ->run_job(
-                           "loudness.scan",
-                           Json{{"items", std::move(encoded)}, {"options", wire::encode(options)}},
-                           [&items, &progress](const Json& reported) {
-                               if (!progress) {
-                                   return;
-                               }
-                               loudness::LoudnessScanProgress step;
-                               step.item_index = reported.value("item_index", std::size_t{0});
-                               step.completed_items =
-                                   reported.value("completed_items", std::size_t{0});
-                               step.total_items = reported.value("total_items", items.size());
-                               step.state = loudness::LoudnessScanState::analyzed;
-                               for (const auto& item : items) {
-                                   if (item.item_index == step.item_index) {
-                                       step.raw_path = item.raw_path;
-                                   }
-                               }
-                               progress(step);
-                           },
-                           cancellation);
-    if (!outcome) {
-        return std::unexpected(std::move(outcome.error()));
+    loudness::LoudnessScanResult merged;
+    merged.tracks.resize(items.size());
+    std::size_t done_before = 0;
+    for (const auto& job : jobs) {
+        if (cancellation.is_cancellation_requested()) {
+            merged.cancellation_requested = true;
+            break;
+        }
+        auto batch = Json::array();
+        for (const auto position : job) {
+            batch.push_back(encoded[position]);
+        }
+        auto outcome =
+            (*connection)
+                ->run_job("loudness.scan",
+                          Json{{"items", std::move(batch)}, {"options", wire::encode(options)}},
+                          [&paths, &progress, done_before, total = items.size()](
+                              const Json& reported) {
+                              if (!progress) {
+                                  return;
+                              }
+                              loudness::LoudnessScanProgress step;
+                              step.item_index = reported.value("item_index", std::size_t{0});
+                              step.completed_items =
+                                  done_before + reported.value("completed_items", std::size_t{0});
+                              step.total_items = total;
+                              step.state = loudness::LoudnessScanState::analyzed;
+                              if (const auto found = paths.find(step.item_index);
+                                  found != paths.end()) {
+                                  step.raw_path = *found->second;
+                              }
+                              progress(step);
+                          },
+                          cancellation);
+        if (!outcome) {
+            return std::unexpected(std::move(outcome.error()));
+        }
+        auto result = outcome_of<loudness::LoudnessScanResult>(
+            *outcome, [](const Json& value) { return wire::decode_scan_result(value); });
+        if (!result) {
+            return std::unexpected(std::move(result.error()));
+        }
+        if (result->tracks.size() != job.size()) {
+            return std::unexpected(unexpected_answer("loudness.scan"));
+        }
+        // Back where each item was given, as one scan answers.
+        for (std::size_t index = 0; index < job.size(); ++index) {
+            merged.tracks[job[index]] = std::move(result->tracks[index]);
+        }
+        std::ranges::move(result->albums, std::back_inserter(merged.albums));
+        merged.cancellation_requested =
+            merged.cancellation_requested || result->cancellation_requested;
+        done_before += job.size();
     }
-    return outcome_of<loudness::LoudnessScanResult>(
-        *outcome, [](const Json& value) { return wire::decode_scan_result(value); });
+    // Stopped part way: what no job reached is reported as cancelled.
+    for (std::size_t position = 0; position < items.size(); ++position) {
+        auto& track = merged.tracks[position];
+        if (track.state == loudness::LoudnessScanState::pending) {
+            track.item_index = items[position].item_index;
+            track.raw_path = items[position].raw_path;
+            track.state = loudness::LoudnessScanState::cancelled;
+        }
+    }
+    return merged;
 }
 
 core::Result<FileTechnicals> RemoteFileWork::probe(const std::string& raw_path,
@@ -301,23 +392,99 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto outcome = (*connection)
-                       ->run_job(
-                           "metadata.apply", Json{{"plan", wire::encode(plan)}},
-                           [&progress](const Json& reported) {
-                               if (!progress) {
-                                   return;
-                               }
-                               if (auto step = wire::decode_apply_progress(reported)) {
-                                   progress(*step);
-                               }
-                           },
-                           cancellation);
-    if (!outcome) {
-        return std::unexpected(std::move(outcome.error()));
+    // Sent in parts each under the engine's line limit: every source, CUE
+    // sheet and sidecar is committed and journaled on its own, so a plan is
+    // as good as the parts it is made of. Each part keeps the plan's order.
+    std::vector<metadata::MetadataWritePlan> parts;
+    {
+        metadata::MetadataWritePlan part;
+        std::size_t bytes = 0;
+        const auto size_of = [](metadata::MetadataWritePlan one) {
+            return wire::encode(one).dump().size();
+        };
+        const auto close = [&] {
+            if (!part.sources.empty() || !part.cue_sheets.empty() || !part.sidecars.empty()) {
+                part.patch_count = plan.patch_count;
+                parts.push_back(std::move(part));
+                part = {};
+                bytes = 0;
+            }
+        };
+        const auto add = [&](const std::size_t size) {
+            if (bytes > 0U && bytes + size > job_bytes_) {
+                close();
+            }
+            bytes += size;
+        };
+        for (const auto& source : plan.sources) {
+            add(size_of({.sources = {source}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {}}));
+            part.sources.push_back(source);
+        }
+        for (const auto& sheet : plan.cue_sheets) {
+            add(size_of({.sources = {}, .patch_count = 0U, .cue_sheets = {sheet}, .sidecars = {}}));
+            part.cue_sheets.push_back(sheet);
+        }
+        for (const auto& sidecar : plan.sidecars) {
+            add(size_of({.sources = {}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {sidecar}}));
+            part.sidecars.push_back(sidecar);
+        }
+        close();
     }
-    return outcome_of<operations::MetadataApplyResult>(
-        *outcome, [](const Json& value) { return wire::decode_apply_result(value); });
+    operations::MetadataApplyResult merged;
+    std::size_t sources_before = 0;
+    for (const auto& part : parts) {
+        if (cancellation.is_cancellation_requested()) {
+            merged.cancellation_requested = true;
+            break;
+        }
+        auto outcome = (*connection)
+                           ->run_job(
+                               "metadata.apply", Json{{"plan", wire::encode(part)}},
+                               [&progress, sources_before, total = plan.sources.size()](
+                                   const Json& reported) {
+                                   if (!progress) {
+                                       return;
+                                   }
+                                   if (auto step = wire::decode_apply_progress(reported)) {
+                                       step->source_index += sources_before;
+                                       step->completed_sources += sources_before;
+                                       step->total_sources = total;
+                                       progress(*step);
+                                   }
+                               },
+                               cancellation);
+        if (!outcome) {
+            return std::unexpected(std::move(outcome.error()));
+        }
+        auto result = outcome_of<operations::MetadataApplyResult>(
+            *outcome, [](const Json& value) { return wire::decode_apply_result(value); });
+        if (!result) {
+            return std::unexpected(std::move(result.error()));
+        }
+        for (auto& source : result->sources) {
+            source.source_index += sources_before;
+            merged.sources.push_back(std::move(source));
+        }
+        std::ranges::move(result->cue_sheets, std::back_inserter(merged.cue_sheets));
+        std::ranges::move(result->sidecars, std::back_inserter(merged.sidecars));
+        merged.cancellation_requested =
+            merged.cancellation_requested || result->cancellation_requested;
+        sources_before += part.sources.size();
+    }
+    // Stopped between parts: the sources no part reached were not written.
+    for (auto index = merged.sources.size(); index < plan.sources.size(); ++index) {
+        merged.sources.push_back(operations::MetadataApplySourceResult{
+            .source_index = index,
+            .raw_path = plan.sources[index].raw_path,
+            .state = operations::MetadataApplySourceState::cancelled,
+            .commit = std::nullopt,
+            .issue = core::Error{.code = core::ErrorCode::cancelled,
+                                 .message = "metadata Apply was cancelled before this source "
+                                            "started",
+                                 .context = {}},
+        });
+    }
+    return merged;
 }
 
 namespace {

@@ -414,6 +414,12 @@ class ListRepository final {
     // False when there was no such list. A saved list's draft goes with it.
     [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
                                                      std::optional<std::uint64_t> expected_revision);
+    // ADR-0259: the list's revision and the path of each of `entries`, in
+    // that order; nothing for an entry it does not hold. Not found without
+    // the list.
+    [[nodiscard]] core::Result<std::pair<std::uint64_t, std::vector<std::optional<std::string>>>>
+    engine_list_entry_paths(const core::StableId& id,
+                            const std::vector<core::StableId>& entries) const;
     // ADR-0259: the draft of the saved list `of` -- the one there is, or a
     // new working list `id` with its name and entries, entry identities
     // kept, begun at its revision. Refused as not_found without the list and

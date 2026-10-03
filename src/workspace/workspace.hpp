@@ -286,6 +286,9 @@ class Workspace final : public QObject {
     bool discovery_running_{false};
     QFutureWatcher<std::vector<ProbeOutcome>> probe_watcher_;
     std::deque<ProbeJob> probe_queue_;
+    // Tabs being described, and those taken up again meanwhile.
+    QSet<QString> describing_;
+    QSet<QString> describe_again_;
     bool probe_running_{false};
     core::CancellationSource probe_cancellation_;
     QFutureWatcher<void> artwork_watcher_;
@@ -903,6 +906,11 @@ class Workspace final : public QObject {
     void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
                         int insertion_row, bool replace_and_play = false);
     void enqueueUnprobedRows(ListTab& tab);
+    // ADR-0259: rows of an engine's list the engine's library can describe,
+    // filled in from it a part at a time, top first.
+    void describeEngineRows(ListTab& tab);
+    void describeEngineRowsFrom(const QString& document_id, std::vector<core::StableId> entries,
+                                std::size_t from);
     void enrichRemoteRows(ListTab& tab);
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.

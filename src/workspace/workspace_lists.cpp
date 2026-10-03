@@ -3,6 +3,7 @@
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "trackknife/engine/track_description.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
@@ -176,8 +177,94 @@ void Workspace::adoptEngineList(const persistence::ListDocument& document) {
     tab->document.dirty = false;
     view_->refreshTabChrome(*tab);
     enqueueUnprobedRows(*tab);
+    describeEngineRows(*tab);
     syncArtwork(*tab);
     schedulePersist();
+}
+
+void Workspace::describeEngineRows(ListTab& tab) {
+    const auto id = QString::fromStdString(tab.document.id.to_string());
+    if (describing_.contains(id)) {
+        describe_again_.insert(id);
+        return;
+    }
+    // A row with a revision was read or described already; a CUE track's
+    // title is its own.
+    std::vector<core::StableId> entries;
+    for (const auto& row : tab.model->rows()) {
+        if (!row.source_revision && !row.segment) {
+            entries.push_back(row.entry_id);
+        }
+    }
+    if (entries.empty() || playbackOf(EngineKey::of(tab.document)) == nullptr) {
+        return;
+    }
+    describing_.insert(id);
+    describeEngineRowsFrom(id, std::move(entries), 0U);
+}
+
+void Workspace::describeEngineRowsFrom(const QString& document_id,
+                                       std::vector<core::StableId> entries,
+                                       const std::size_t from) {
+    constexpr std::size_t part = 2'000U;
+    auto* tab = tabForDocument(document_id);
+    auto* engine = tab != nullptr ? playbackOf(EngineKey::of(tab->document)) : nullptr;
+    const auto done = [this, document_id] {
+        describing_.remove(document_id);
+        if (describe_again_.remove(document_id)) {
+            if (auto* again = tabForDocument(document_id)) {
+                describeEngineRows(*again);
+            }
+        }
+    };
+    if (engine == nullptr || from >= entries.size()) {
+        done();
+        return;
+    }
+    auto asked = protocol::Json::array();
+    for (auto index = from; index < std::min(entries.size(), from + part); ++index) {
+        asked.push_back(entries[index].to_string());
+    }
+    engine->request(
+        QStringLiteral("list.describe"),
+        protocol::Json{{"id", document_id.toStdString()}, {"entries", std::move(asked)}},
+        [this, document_id, entries = std::move(entries), from,
+         done](const core::Result<protocol::Json>& answer) mutable {
+            auto* target = tabForDocument(document_id);
+            // An engine from before ADR-0259 does not describe: the rows keep
+            // the names they were saved with.
+            if (target == nullptr || !answer) {
+                done();
+                return;
+            }
+            std::unordered_map<std::string, int> row_of;
+            const auto& rows = target->model->rows();
+            for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
+                row_of.emplace(rows[static_cast<std::size_t>(row)].entry_id.to_string(), row);
+            }
+            bool described = false;
+            for (const auto& item : answer->value("items", protocol::Json::array())) {
+                const auto library = item.find("library");
+                const auto at = row_of.find(item.value("entry", std::string{}));
+                if (library == item.end() || library->is_null() || at == row_of.end()) {
+                    continue;
+                }
+                const auto& current = rows[static_cast<std::size_t>(at->second)];
+                auto track = engine::described_track(*library, current.raw_path);
+                if (!track) {
+                    continue;
+                }
+                auto row = cached_library_row(*track);
+                row.source_revision = track->revision;
+                described = target->model->describeRow(at->second, current.entry_id,
+                                                       std::move(row)) ||
+                            described;
+            }
+            if (described) {
+                syncArtwork(*target);
+            }
+            describeEngineRowsFrom(document_id, std::move(entries), from + part);
+        });
 }
 
 
@@ -209,7 +296,7 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
         return;
     }
     engine->request(
-        QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}, {"describe", true}},
+        QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}},
         [this, key, then = std::move(then)](const core::Result<protocol::Json>& answer) {
             if (!answer) {
                 view_->showMessage(QStringLiteral("Could not open the list: %1")
@@ -225,7 +312,9 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
                 view_->showList(*open);
             } else {
                 list_sync_->opened(*answer, key);
-                static_cast<void>(addList(std::move(*document), true));
+                if (auto* added = addList(std::move(*document), true)) {
+                    describeEngineRows(*added);
+                }
                 schedulePersist();
             }
             if (then) {

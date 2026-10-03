@@ -307,17 +307,26 @@ described = a.call("list.save", {"name": "Described", "items": [
     {"path": encode(f"{music}/one.wav"), "title": "Snapshot"},
     {"path": encode(f"{work}/two.wav"), "title": "Outside"}]})["result"]
 plain = a.call("list.get", {"id": described["id"]})["result"]["items"]
-check(all("library" not in i for i in plain), "unasked, nothing is described")
-items = a.call("list.get", {"id": described["id"], "describe": True})["result"]["items"]
-indexed, outside = items
-library = indexed.get("library")
+check(all("library" not in i for i in plain), "a list's items are what it was saved with")
+entries = [i["entry"] for i in plain]
+items = a.call("list.describe", {"id": described["id"],
+                                 "entries": [entries[1], entries[0], str(uuid.uuid4())]})["result"]
+check(items["revision"] == described["revision"], "described at the list's revision")
+outside, indexed, unknown = items["items"]
+check([outside["entry"], indexed["entry"]] == [entries[1], entries[0]], "in the order asked")
+library = indexed["library"]
 check(library is not None and library["duration_ms"] == 30000 and library["codec"] != "",
       "an indexed file is described from the library")
 check(library["revision"] is not None and library["revision"]["size"] == os.path.getsize(f"{music}/one.wav"),
       "with the revision it was indexed at")
 check(isinstance(library["fields"], dict), "and its tags")
-check("library" not in outside and outside["title"] == "Outside",
-      "a file the library does not index keeps what it was saved with")
+check(outside["library"] is None and "missing" not in outside,
+      "a file the library does not index has no description")
+check(unknown["library"] is None and unknown["missing"] is True, "nor an entry the list lacks")
+check(a.call("list.describe", {"id": described["id"], "entries": [entries[0]] * 2001})["error"]["code"]
+      == "invalid_argument", "at most 2000 at a time")
+check(a.call("list.describe", {"id": str(uuid.uuid4()), "entries": []})["error"]["code"] == "not_found",
+      "of a list that is there")
 
 # ADR-0259: a kept search made on the engine, from its library.
 everything = a.call("list.from_query", {"query": "ALL", "name": "Everything"})["result"]

@@ -579,6 +579,30 @@ bool LocalListModel::applyMetadata(const std::string& raw_path, const int hint_r
     return true;
 }
 
+bool LocalListModel::describeRow(const int row, const core::StableId& entry,
+                                 LocalTrackRow described) {
+    if (row < 0 || row >= static_cast<int>(rows_.size())) {
+        return false;
+    }
+    auto& current = rows_[static_cast<std::size_t>(row)];
+    if (current.entry_id != entry) {
+        return false;
+    }
+    touched();
+    described.entry_id = current.entry_id;
+    described.raw_path = current.raw_path;
+    described.logical_reference = current.logical_reference;
+    described.selection = current.selection;
+    described.segment = current.segment;
+    if (!described.duration_ms) {
+        described.duration_ms = current.duration_ms;
+    }
+    described.probed = true;
+    current = std::move(described);
+    emitRowChanged(row);
+    return true;
+}
+
 bool LocalListModel::applyProbeRows(const std::string& raw_path, const int hint_row,
                                     std::vector<LocalTrackRow> rows) {
     touched();

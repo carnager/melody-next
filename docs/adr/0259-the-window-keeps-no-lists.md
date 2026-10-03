@@ -33,14 +33,16 @@ ADR-0220 exists to end.
 
 **A tab is an engine's list and the window's view of it, nothing more.**
 
-1. **The engine describes its items.** `list.get` answers each item with what
-   the engine's library knows of its file -- every tag, the technical facts
-   and the revision -- and the stored snapshot only for a file the library
-   does not index. A row made from it is as complete as one the window read
-   itself, with field names as the library folds them, as a search's rows
-   have. The snapshot an item is saved with stays what it is for: files
-   outside the library. (`list.get {id, describe: true}`; an engine that
-   does not know `describe` answers as before.)
+1. **The engine describes its items.** `list.describe {id, entries}`
+   answers, for at most 2,000 of a list's entries, what the engine's library
+   knows of each file -- every tag, the technical facts and the revision --
+   and nothing for a file the library does not index, whose item keeps the
+   snapshot it was saved with. A tab opens on its items' snapshots at once
+   and asks for the rows that have no revision yet, top first, a part at a
+   time, each row filled in where it is. A row so filled is as complete as
+   one the window read itself, with field names as the library folds them,
+   as a search's rows have. An engine that does not know `list.describe`
+   leaves the rows as saved.
 2. **The window keeps what is its own in its settings:** which lists are open
    as tabs and on which engine, their order, the active tab, which are pinned,
    and the column layouts. Not in a database.
@@ -78,7 +80,10 @@ unreadable -- and a tab whose engine is away shows its cached rows.
 
 ## Progress
 
-- Step 1, the engine describes its items: done (2026-10-03).
+- Step 1, the engine describes its items: done (2026-10-03), first as
+  `list.get {describe}`, replaced the same day, before any other client used
+  it, by `list.describe` in parts once a whole description proved heavy
+  (below).
 - Step 2, drafts on the engine: done (2026-10-03). `list.draft {of}` answers
   the saved list's draft, made if there is none; `list.commit {id, force?}`
   writes it into the saved list and deletes it, and a queue played from the
@@ -86,20 +91,17 @@ unreadable -- and a tab whose engine is away shows its cached rows.
   `draft_base`. Schema 51. The window does not use them yet.
 - Step 3, `list.from_query {query, name, words?}`: done (2026-10-03). The
   window does not use it yet.
-- The window asks for descriptions only when it takes a list up from its
-  engine, not when comparing: measured on a copy of gemenon's library (66,841
-  tracks, debug build, 2026-10-03), `list.from_query ALL` takes 2.4 s,
-  `list.get` of it 1.6 s for 24 MB, and with `describe` 9.3 s for 99 MB.
+- Measured on a copy of gemenon's library (66,841 tracks, debug build,
+  2026-10-03): `list.from_query ALL` 2.4 s; `list.get` of it 1.6 s for
+  24 MB; described whole 9.3 s for 99 MB; described in parts of 2,000, the
+  first in 0.25 s and all in 8.1 s, behind a tab already shown.
 
 ## Not decided here
 
-- **Paging a long list.** A tab holds every row of its list, as now: Qt's
-  models need the count. Described whole, a 66,000-row list is 99 MB and
-  about nine seconds (above); with the cache a tab shows its rows at once and
-  the description is needed only when the list changed elsewhere, but a
-  kept search of the whole library is still that much once. Describing in
-  pages, the first screenful first, is the likely answer and its own
-  decision.
+- **Paging a long list's entries.** A tab holds every entry of its list, as
+  now -- Qt's models need the count, and `list.get` of 66,000 entries is
+  1.6 s -- and only the descriptions come in parts. Holding only what is on
+  screen would be its own decision.
 - **The window's other data in `lists.sqlite`** -- naming layouts, encoder
   presets, transformation chains, the workspace backup -- is not lists, and
   moves on its own.
@@ -116,8 +118,9 @@ unreadable -- and a tab whose engine is away shows its cached rows.
 
 ## Verification
 
-- An engine test: `list.get` describes an indexed file from the library,
-  revision included, and a file outside it from its snapshot.
+- An engine test: `list.describe` describes an indexed file from the
+  library, revision included, and none outside it, in the order asked, at
+  most 2,000 at a time.
 - Drafts: a draft of a saved list is a working list; saving writes it with the
   revision it started from, refuses a moved-on list as `conflict`, and deletes
   the draft; discarding deletes it.

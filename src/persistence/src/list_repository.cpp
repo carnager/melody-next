@@ -6125,6 +6125,41 @@ namespace {
 
 } // namespace
 
+core::Result<std::pair<std::uint64_t, std::vector<std::optional<std::string>>>>
+ListRepository::engine_list_entry_paths(const core::StableId& id,
+                                        const std::vector<core::StableId>& entries) const {
+    auto* database = implementation_->database;
+    auto revision = engine_list_revision(database, id);
+    if (!revision) {
+        return std::unexpected(std::move(revision.error()));
+    }
+    if (!*revision) {
+        return std::unexpected(list_refused(core::ErrorCode::not_found, "There is no such list"));
+    }
+    auto statement = prepare(database, "SELECT raw_path FROM engine_list_items "
+                                       "WHERE list_id=?1 AND entry_id=?2");
+    if (!statement || !bind_text(statement->get(), 1, id.to_string())) {
+        return std::unexpected(database_error(database, "Could not read a list"));
+    }
+    std::vector<std::optional<std::string>> paths;
+    paths.reserve(entries.size());
+    for (const auto& entry : entries) {
+        sqlite3_reset(statement->get());
+        if (!bind_text(statement->get(), 2, entry.to_string())) {
+            return std::unexpected(database_error(database, "Could not read a list"));
+        }
+        const auto step = sqlite3_step(statement->get());
+        if (step == SQLITE_ROW) {
+            paths.emplace_back(column_blob(statement->get(), 0));
+        } else if (step == SQLITE_DONE) {
+            paths.emplace_back();
+        } else {
+            return std::unexpected(database_error(database, "Could not read a list"));
+        }
+    }
+    return std::pair{**revision, std::move(paths)};
+}
+
 core::Result<EngineListSummary> ListRepository::draft_engine_list(const core::StableId& of,
                                                                   const core::StableId& id,
                                                                   const std::int64_t now_ms) {

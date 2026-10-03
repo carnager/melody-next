@@ -22,6 +22,7 @@ class Workspace;
 //   list.delete {id, revision?}                -> {"deleted": bool}
 //   list.draft {of}                            -> summary (ADR-0259)
 //   list.commit {id, force?}                   -> summary of the saved list
+//   list.from_query {query, name, words?}      -> summary of a new working list
 //   list.play {id, entry?}                     -> {"playing": entry}
 //   list.relocate {moves: [{from, to}]}        -> {"changed": [id]}
 //   event list.changed {id, revision?, deleted}

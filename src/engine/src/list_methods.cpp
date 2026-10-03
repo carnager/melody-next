@@ -7,6 +7,7 @@
 #include "trackknife/engine/track_description.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
+#include "trackknife/query/tkq.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -71,6 +72,45 @@ using protocol::Json;
                 {"modified_ms", summary.modified_ms},
                 {"draft_of", summary.draft_of ? Json(summary.draft_of->to_string()) : Json(nullptr)},
                 {"draft_base", summary.draft_base}};
+}
+
+// Text a list item may hold, cut at a character's start; the library keeps
+// the whole of it.
+[[nodiscard]] std::string item_text(std::string text) {
+    constexpr std::size_t most = 4'096U;
+    if (text.size() > most) {
+        auto end = most;
+        while (end > 0U && (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) {
+            --end;
+        }
+        text.resize(end);
+    }
+    return text;
+}
+
+// ADR-0259: a list item for an indexed track, named from the library.
+[[nodiscard]] persistence::EngineListItem
+item_of_track(persistence::LibraryTrackSnapshot track) {
+    const auto first = [&track](const char* field) {
+        const auto found = track.facts.fields.find(field);
+        return found == track.facts.fields.end() || found->second.empty()
+                   ? std::string{}
+                   : found->second.front().first;
+    };
+    return persistence::EngineListItem{
+        .entry_id = core::StableId::random(),
+        .raw_path = std::move(track.raw_path),
+        .logical_reference = std::nullopt,
+        .segment = std::nullopt,
+        .source_selection = std::nullopt,
+        .duration_ms = track.facts.duration_ms >= 0 ? std::optional{track.facts.duration_ms}
+                                                    : std::nullopt,
+        .title = item_text(std::move(track.facts.title)),
+        .artist = item_text(std::move(track.facts.artist)),
+        .album = item_text(std::move(track.facts.album)),
+        .album_artist = item_text(first("albumartist")),
+        .date = item_text(std::move(track.facts.date)),
+        .replay_gain = std::nullopt};
 }
 
 [[nodiscard]] Json item_json(const persistence::EngineListItem& item) {
@@ -550,6 +590,55 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
             }
         }
         return Json{{"deleted", *deleted}};
+    });
+
+    // ADR-0259: a kept search, made here: a working list of a query's
+    // matches -- a tkq-1 query, or with `words` a plain word search -- in
+    // its order, so they do not travel to a client and back.
+    dispatcher.on("list.from_query",
+                  [&workspace, catalogue, changed](const Json& params) -> core::Result<Json> {
+        if (catalogue == nullptr) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                               .message = "this engine has no library",
+                                               .context = {}});
+        }
+        const auto source = params.find("query");
+        if (source == params.end() || !source->is_string()) {
+            return std::unexpected(bad_params("a query is required", "query"));
+        }
+        auto name = required_name(params);
+        if (!name) {
+            return std::unexpected(std::move(name.error()));
+        }
+        auto compiled = params.value("words", false)
+                            ? query::compile_tkq_word_search(source->get<std::string>())
+                            : query::compile_tkq(source->get<std::string>());
+        if (!compiled) {
+            return std::unexpected(std::move(compiled.error()));
+        }
+        auto paths = catalogue->filter_paths(*compiled);
+        if (!paths) {
+            return std::unexpected(std::move(paths.error()));
+        }
+        auto tracks = catalogue->described_tracks(*paths);
+        if (!tracks) {
+            return std::unexpected(std::move(tracks.error()));
+        }
+        std::vector<persistence::EngineListItem> items;
+        items.reserve(tracks->size());
+        for (auto& track : *tracks) {
+            if (track) {
+                items.push_back(item_of_track(std::move(*track)));
+            }
+        }
+        auto made = workspace.save_engine_list(core::StableId::random(), *name,
+                                               persistence::EngineListKind::working, items, 0U,
+                                               now_ms());
+        if (!made) {
+            return std::unexpected(std::move(made.error()));
+        }
+        changed(&*made, made->id);
+        return summary_json(*made);
     });
 
     // ADR-0259: the draft of a saved list -- the one there is, or a new one.

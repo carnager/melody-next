@@ -904,7 +904,7 @@ void EngineListSync::fetch(const std::string& id, const EngineKey& key, const Fe
         ++stateFor(key).outstanding;
     }
     const QPointer self{this};
-    engine->request(QStringLiteral("list.get"), Json{{"id", id}, {"describe", true}},
+    engine->request(QStringLiteral("list.get"), Json{{"id", id}},
                     [self, id, key, why](core::Result<Json> answer) {
                         if (!self) {
                             return;
@@ -953,15 +953,55 @@ void EngineListSync::fetch(const std::string& id, const EngineKey& key, const Fe
                         } else if (!known.working && known.dirty) {
                             // Changed there while edited here: settled when saved.
                             known.conflict = true;
-                        } else if (auto document = documentFromAnswer(*answer, key)) {
-                            known.local = known.acked->entries;
-                            known.name = known.acked->name;
-                            known.working = known.acked->working;
-                            known.conflict = false;
-                            known.asked = false;
-                            emit self->adopted(*document);
+                        } else {
+                            self->adoptDescribed(id, key);
                         }
                         finish();
+                    });
+}
+
+void EngineListSync::adoptDescribed(const std::string& id, const EngineKey& key) {
+    auto* engine = engineFor(key);
+    const auto found = known_.find(id);
+    if (engine == nullptr || found == known_.end()) {
+        return;
+    }
+    found->second.fetching = true;
+    ++in_flight_;
+    const QPointer self{this};
+    engine->request(QStringLiteral("list.get"), Json{{"id", id}, {"describe", true}},
+                    [self, id, key](core::Result<Json> answer) {
+                        if (!self) {
+                            return;
+                        }
+                        --self->in_flight_;
+                        const auto held = self->known_.find(id);
+                        if (held == self->known_.end()) {
+                            return;
+                        }
+                        auto& known = held->second;
+                        known.fetching = false;
+                        if (!answer) {
+                            self->settle(known, false);
+                            return;
+                        }
+                        auto document = documentFromAnswer(*answer, key);
+                        if (!document) {
+                            return;
+                        }
+                        // What was read now, which may be newer than what
+                        // the compare saw.
+                        known.acked = Acked{.revision = answer->value("revision", std::uint64_t{0}),
+                                            .name = answer->value("name", std::string{}),
+                                            .working = answer->value("kind", std::string{}) != "saved",
+                                            .entries = prints_of(items_of_answer(*answer))};
+                        known.missing = false;
+                        known.local = known.acked->entries;
+                        known.name = known.acked->name;
+                        known.working = known.acked->working;
+                        known.conflict = false;
+                        known.asked = false;
+                        emit self->adopted(*document);
                     });
 }
 

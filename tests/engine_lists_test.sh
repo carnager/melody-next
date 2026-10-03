@@ -318,6 +318,20 @@ check(library["revision"] is not None and library["revision"]["size"] == os.path
 check(isinstance(library["fields"], dict), "and its tags")
 check("library" not in outside and outside["title"] == "Outside",
       "a file the library does not index keeps what it was saved with")
+
+# ADR-0259: a kept search made on the engine, from its library.
+everything = a.call("list.from_query", {"query": "ALL", "name": "Everything"})["result"]
+check(everything["kind"] == "working" and everything["tracks"] == 1 and
+      everything["name"] == "Everything", "a query's matches become a working list")
+made = a.call("list.get", {"id": everything["id"]})["result"]["items"]
+check([i["path"] for i in made] == [encode(f"{music}/one.wav")] and made[0]["duration_ms"] == 30000,
+      "of the files the library indexes, named from it")
+nothing = a.call("list.from_query", {"query": "title IS nothing-here", "name": "None"})["result"]
+check(nothing["tracks"] == 0, "a query matching nothing makes an empty list")
+check(a.call("list.from_query", {"query": "codec (((", "name": "Bad"})["error"]["code"] ==
+      "invalid_argument", "a query that does not compile is refused")
+check("result" in a.call("list.from_query", {"query": "codec (((", "name": "Words", "words": True}),
+      "unless it is a word search, which any text is")
 PY
 
 echo "engine lists: ok"

@@ -84,13 +84,22 @@ unreadable -- and a tab whose engine is away shows its cached rows.
   writes it into the saved list and deletes it, and a queue played from the
   draft is played from the list from then on. Summaries carry `draft_of` and
   `draft_base`. Schema 51. The window does not use them yet.
+- Step 3, `list.from_query {query, name, words?}`: done (2026-10-03). The
+  window does not use it yet.
+- The window asks for descriptions only when it takes a list up from its
+  engine, not when comparing: measured on a copy of gemenon's library (66,841
+  tracks, debug build, 2026-10-03), `list.from_query ALL` takes 2.4 s,
+  `list.get` of it 1.6 s for 24 MB, and with `describe` 9.3 s for 99 MB.
 
 ## Not decided here
 
 - **Paging a long list.** A tab holds every row of its list, as now: Qt's
-  models need the count, and measuring comes first. `list.get` of a kept
-  search of 66,000 rows is to be measured on the NAS with this change; paging
-  is its own decision if that is too slow.
+  models need the count. Described whole, a 66,000-row list is 99 MB and
+  about nine seconds (above); with the cache a tab shows its rows at once and
+  the description is needed only when the list changed elsewhere, but a
+  kept search of the whole library is still that much once. Describing in
+  pages, the first screenful first, is the likely answer and its own
+  decision.
 - **The window's other data in `lists.sqlite`** -- naming layouts, encoder
   presets, transformation chains, the workspace backup -- is not lists, and
   moves on its own.

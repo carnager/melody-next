@@ -47,6 +47,21 @@ class MetadataServices final {
     // Whether a URL is one fetch() will reach.
     [[nodiscard]] static bool fetchable(std::string_view url);
 
+    // ADR-0261: what fetch() does with MusicBrainz's answer `status` to
+    // attempt `attempt` (0 the first), which asked to wait
+    // `retry_after_seconds` (0: it did not say): take it, wait that many
+    // seconds and ask again, or give up -- twice asked again at most, and
+    // never after more than 30 s.
+    struct Throttle {
+        enum class Kind : std::uint8_t { answer, wait, give_up };
+        Kind kind{Kind::answer};
+        std::int64_t seconds{0};
+
+        friend bool operator==(const Throttle&, const Throttle&) = default;
+    };
+    [[nodiscard]] static Throttle throttle(long status, std::int64_t retry_after_seconds,
+                                           int attempt);
+
   private:
     // Waits until `interval` has passed since the last dispatch of its kind.
     void pace(std::chrono::steady_clock::time_point& last, std::chrono::milliseconds interval);

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/musicbrainz/album_groups.hpp"
+#include "trackknife/musicbrainz/album_lookup.hpp"
 #include "trackknife/musicbrainz/matching.hpp"
 #include "trackknife/musicbrainz/proposal_bridge.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -487,6 +489,73 @@ void selectionsGroupIntoAlbums() {
           !is_disc_folder("2"));
 }
 
+// ADR-0261: which releases of a search are looked up, and what the lookups
+// make of an album.
+void albumsAreLookedUpAndJudged() {
+    const auto file = [](std::string title, std::size_t number, std::int64_t length) {
+        return LocalTrackDescriptor{.title = std::move(title),
+                                    .artist = {},
+                                    .album = {},
+                                    .track_number = number,
+                                    .disc_number = {},
+                                    .duration_ms = length};
+    };
+    const AlbumQuery query{.release_id = {},
+                           .artist = "Band",
+                           .album = "Alpha",
+                           .tracks = {file("One", 1U, 61'000), file("Two", 2U, 59'000),
+                                      file("Three", 3U, 63'000)}};
+    ReleaseSearchResult found;
+    const auto listed = [](std::string id, int score, std::size_t tracks) {
+        auto release = two_disc_release();
+        release.id = std::move(id);
+        release.search_score = score;
+        release.track_count = tracks;
+        return release;
+    };
+    found.releases = {listed("a", 100, 12U), listed("b", 90, 3U), listed("c", 95, 3U),
+                      listed("d", 80, 4U), listed("e", 70, 3U), listed("c", 60, 3U)};
+    CHECK(releases_to_examine(query, found) == (std::vector<std::string>{"c", "b", "e"}));
+    CHECK(releases_to_examine(query, found, 5U) ==
+          (std::vector<std::string>{"c", "b", "e", "a", "d"}));
+
+    // The release's tracks are on two discs, numbered 1, 2 and 1: the files
+    // say disc nothing, so they pair in order.
+    auto fits = two_disc_release();
+    fits.id = "fits";
+    auto shorter = two_disc_release();
+    shorter.id = "shorter";
+    shorter.media.pop_back();
+    auto stranger = two_disc_release();
+    stranger.id = "stranger";
+    for (auto& medium : stranger.media) {
+        for (auto& each : medium.tracks) {
+            each.title = "Unrelated " + each.title;
+            each.length_ms = 400'000;
+            each.position = 90U;
+        }
+    }
+    const auto one = judge_album(query, {shorter, fits, stranger});
+    CHECK(one.outcome == AlbumLookupOutcome::matched);
+    CHECK(one.candidates.front().release.id == "fits" && one.candidates.front().clear);
+    CHECK(std::ranges::none_of(one.candidates, [](const AlbumCandidate& candidate) {
+        return candidate.release.id == "stranger";
+    }));
+
+    auto twin = fits;
+    twin.id = "twin";
+    const auto two = judge_album(query, {fits, twin});
+    CHECK(two.outcome == AlbumLookupOutcome::needs_choice);
+    CHECK(two.candidates.size() == 2U);
+
+    const auto unsure = judge_album(query, {shorter});
+    CHECK(unsure.outcome == AlbumLookupOutcome::needs_choice);
+    CHECK(!unsure.candidates.front().clear);
+
+    CHECK(judge_album(query, {stranger}).outcome == AlbumLookupOutcome::no_match);
+    CHECK(judge_album(query, {}).outcome == AlbumLookupOutcome::no_match);
+}
+
 } // namespace
 
 int main() {
@@ -498,6 +567,7 @@ int main() {
     lowConfidenceTracksReceiveNothing();
     clearMatchesNeedNoOne();
     selectionsGroupIntoAlbums();
+    albumsAreLookedUpAndJudged();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";
         return 1;

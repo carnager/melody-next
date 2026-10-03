@@ -1526,6 +1526,23 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
     const auto database = directory / "services.sqlite3";
     engine::MetadataServices services{database, directory};
 
+    // ADR-0261: a throttled answer is asked again, twice at most, never
+    // after more than 30 s.
+    {
+        using Throttle = engine::MetadataServices::Throttle;
+        const auto decide = engine::MetadataServices::throttle;
+        require(decide(200, 0, 0) == Throttle{} && decide(404, 5, 0) == Throttle{},
+                "an answer is taken, whatever it says");
+        require(decide(429, 0, 0) == Throttle{.kind = Throttle::Kind::wait, .seconds = 2} &&
+                    decide(503, 0, 1) == Throttle{.kind = Throttle::Kind::wait, .seconds = 4},
+                "throttled without a word: 2 s, then 4");
+        require(decide(429, 7, 0) == Throttle{.kind = Throttle::Kind::wait, .seconds = 7},
+                "or as long as it asks");
+        require(decide(429, 7, 2).kind == Throttle::Kind::give_up,
+                "and not a third time");
+        require(decide(503, 120, 0) == Throttle{.kind = Throttle::Kind::give_up, .seconds = 120},
+                "nor after a wait too long to sit through");
+    }
     require(
         engine::MetadataServices::fetchable("https://musicbrainz.org/ws/2/release/x?fmt=json") &&
             engine::MetadataServices::fetchable("https://coverartarchive.org/release/x"),

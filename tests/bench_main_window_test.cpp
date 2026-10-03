@@ -6173,8 +6173,14 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                                                        .sanitization_policy = {"linux", 1U}}};
     };
     // The file name of one, the folders of the other.
-    const std::vector layouts{layout("By title", "", "%title%"),
-                              layout("Artist folders", "%artist%/%album%", "unused %title%")};
+    const std::vector layouts{
+        layout("By title", "", "%title%"),
+        layout("Artist folders", "%artist%/%album%", "unused %title%"),
+        // As long as one in use: it may not widen the window.
+        layout("Albumartist/Date Album/{CD}/Track-Title",
+               "$if2(%albumartist%,%artist%)/$if(%date%,$left(%date%,4) ,)%album%$if($or($gt("
+               "%totaldiscs%,1),$gt(%discnumber%,1)),/CD $num(%discnumber%,1),)",
+               "$num(%tracknumber%,2)-%title%")};
     auto* properties = new MetadataPropertiesDialog(
         sources.size(),
         [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
@@ -6336,10 +6342,13 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-rename-preset"));
     auto* move_preset =
         dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-move-preset"));
-    QTRY_COMPARE(rename_preset->count(), 2);
+    QTRY_COMPARE(rename_preset->count(), 3);
+    move->setChecked(true);
+    move_preset->setCurrentIndex(2);
+    QVERIFY2(dialog->minimumSizeHint().width() < 700,
+             qPrintable(QString::number(dialog->minimumSizeHint().width())));
     rename->setChecked(true);
     rename_preset->setCurrentIndex(0);
-    move->setChecked(true);
     move_preset->setCurrentIndex(1);
     QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-move-pattern"))
                  ->text(),

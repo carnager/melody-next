@@ -3,6 +3,7 @@
 
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
+#include "uicommon/eliding_label.hpp"
 #include "workspace/album_batch_session.hpp"
 #include "workspace/identify_session.hpp"
 #include "workspace/tagger_session.hpp"
@@ -195,6 +196,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     review_layout->setContentsMargins(0, 0, 0, 0);
     review_heading_ = new QLabel(review_page);
     review_heading_->setObjectName(QStringLiteral("bench-identify-albums-review-heading"));
+    review_heading_->setWordWrap(true);
     review_layout->addWidget(review_heading_);
     versions_ = new QListWidget(review_page);
     versions_->setObjectName(QStringLiteral("bench-identify-albums-versions"));
@@ -274,15 +276,21 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     rename_preset_ = new QComboBox(apply_page);
     rename_preset_->setObjectName(QStringLiteral("bench-identify-albums-apply-rename-preset"));
     rename_preset_->setAccessibleName(QStringLiteral("Naming preset for renaming"));
-    rename_pattern_ = new QLabel(apply_page);
+    // A pattern can be long: it ends in "…", whole in its tooltip, and asks
+    // the window for no width.
+    rename_pattern_ = new ui::ElidingLabel(apply_page);
     rename_pattern_->setObjectName(QStringLiteral("bench-identify-albums-apply-rename-pattern"));
     move_ = new QCheckBox(QStringLiteral("Move into folders"), apply_page);
     move_->setObjectName(QStringLiteral("bench-identify-albums-apply-move"));
     move_preset_ = new QComboBox(apply_page);
     move_preset_->setObjectName(QStringLiteral("bench-identify-albums-apply-move-preset"));
     move_preset_->setAccessibleName(QStringLiteral("Naming preset for moving"));
-    move_pattern_ = new QLabel(apply_page);
+    move_pattern_ = new ui::ElidingLabel(apply_page);
     move_pattern_->setObjectName(QStringLiteral("bench-identify-albums-apply-move-pattern"));
+    for (auto* combo : {rename_preset_, move_preset_}) {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(18);
+    }
     for (auto* pattern : {rename_pattern_, move_pattern_}) {
         pattern->setTextInteractionFlags(Qt::TextSelectableByMouse);
         QFont mono = pattern->font();
@@ -751,6 +759,8 @@ void IdentifyAlbumsDialog::syncApply() {
     move_pattern_->setText(move_layout
                                ? QString::fromStdString(move_layout->relative_directory_expression)
                                : QString{});
+    rename_pattern_->setToolTip(rename_pattern_->text());
+    move_pattern_->setToolTip(move_pattern_->text());
     const auto editable = !running && !done;
     apply_list_->setEnabled(editable);
     rename_->setEnabled(editable && rename_preset_->count() > 0);

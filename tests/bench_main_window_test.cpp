@@ -335,6 +335,7 @@ class BenchMainWindowTest final : public QObject {
     void remoteUpNextKeepsItsIdentityAcrossARestart();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
+    void aKeptSearchOpensAtOnce();
     void narrowWindowKeepsListAndUpNextCompact();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
@@ -7586,6 +7587,44 @@ void BenchMainWindowTest::narrowWindowKeepsListAndUpNextCompact() {
     // The list's columns fit, so no scroll bar is left standing under it.
     QTRY_COMPARE(tab->view->horizontalHeader()->length(), tab->view->viewport()->width());
     QTRY_VERIFY(!tab->view->horizontalScrollBar()->isVisible());
+}
+
+// ADR-0140: Enter opens the kept search's tab at once, saying the tracks are
+// being collected, and fills that tab when they come; nothing found, it says
+// so there.
+void BenchMainWindowTest::aKeptSearchOpensAtOnce() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* browser = window.findChild<LibraryBrowser*>();
+    QVERIFY(browser != nullptr);
+    const auto tabs_before = window.tabs_->count();
+
+    emit browser->searchStarted(QStringLiteral("ALL"));
+    QCOMPARE(window.tabs_->count(), tabs_before + 1);
+    auto* view = qobject_cast<QTableView*>(window.tabs_->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* tab = window.tabForDocument(view->property("bench-document-id").toString());
+    QVERIFY(tab != nullptr && tab->model->rowCount() == 0);
+    QCOMPARE(window.tabs_->tabText(window.tabs_->currentIndex()), QStringLiteral("Search: ALL"));
+    QVERIFY(static_cast<ui::QueueTableView*>(view)->emptyTitle().contains(QStringLiteral("ALL")));
+
+    LocalTrackRow row;
+    row.raw_path = "/music/found.flac";
+    row.title = "Found";
+    emit browser->searchCommitted(QStringLiteral("ALL"), {row});
+    QCOMPARE(window.tabs_->count(), tabs_before + 1);
+    QCOMPARE(tab->model->rowCount(), 1);
+    QCOMPARE(static_cast<ui::QueueTableView*>(view)->emptyTitle(),
+             window.emptyListTitle(EngineKey::of(tab->document)));
+
+    emit browser->searchStarted(QStringLiteral("nothing like it"));
+    auto* empty = window.tabForDocument(
+        qobject_cast<QTableView*>(window.tabs_->currentWidget())->property("bench-document-id").toString());
+    QVERIFY(empty != nullptr && empty != tab);
+    emit browser->searchFailed(QStringLiteral("nothing like it"), QStringLiteral("Nothing matches"));
+    QCOMPARE(static_cast<ui::QueueTableView*>(empty->view)->emptyTitle(), QStringLiteral("Nothing matches"));
+    QCOMPARE(empty->model->rowCount(), 0);
 }
 
 void BenchMainWindowTest::emptyListsSayHowToFillThem() {

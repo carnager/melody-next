@@ -1097,6 +1097,7 @@ void LibraryBrowser::commitSearch() {
             return;
         }
         setQueryError({});
+        emit searchStarted(query_text);
         enqueue({[shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
                   cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
                      Outcome outcome;
@@ -1118,10 +1119,12 @@ void LibraryBrowser::commitSearch() {
                  [this, query_text](Outcome outcome) {
                      if (!outcome.error.isEmpty()) {
                          setStatus(outcome.error);
+                         emit searchFailed(query_text, outcome.error);
                          return;
                      }
                      if (outcome.rows.empty()) {
                          setStatus(tr("No search results to keep."));
+                         emit searchFailed(query_text, tr("Nothing matches “%1”").arg(query_text));
                          return;
                      }
                      setStatus(tr("Search kept as a new tab."));
@@ -1129,6 +1132,7 @@ void LibraryBrowser::commitSearch() {
                  }});
         return;
     }
+    emit searchStarted(query_text);
     enqueue({[query = bytes(query_text),
               cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
                  Outcome outcome;
@@ -1164,10 +1168,12 @@ void LibraryBrowser::commitSearch() {
              [this, query_text](Outcome outcome) {
                  if (!outcome.error.isEmpty()) {
                      setStatus(outcome.error);
+                     emit searchFailed(query_text, outcome.error);
                      return;
                  }
                  if (outcome.rows.empty()) {
                      setStatus(tr("No search results to keep."));
+                     emit searchFailed(query_text, tr("Nothing matches “%1”").arg(query_text));
                      return;
                  }
                  setStatus(tr("Search kept as a new tab."));

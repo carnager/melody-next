@@ -378,6 +378,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         return workspace_.canReplayCrossTabMove(undo);
     }
     bool replayCrossTabMove(bool undo) { return workspace_.replayCrossTabMove(undo); }
+    void refreshEmptyMessage(ListTab& tab) override;
     void refreshTabChrome(ListTab& tab) override;
     void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
     void refreshPlaybackCursor(bool jump = false) override;

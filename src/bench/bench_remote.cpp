@@ -104,9 +104,7 @@ void BenchMainWindow::engineAttached(EngineLink& engine) {
     }
     for (auto& tab : list_tabs_) {
         if (EngineKey::of(tab->document) == engine.key) {
-            static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(
-                emptyListTitle(EngineKey::of(tab->document)),
-                emptyListHint(EngineKey::of(tab->document)));
+            refreshEmptyMessage(*tab);
         }
     }
 }

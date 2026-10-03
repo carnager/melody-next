@@ -43,6 +43,8 @@ class WorkspaceView {
     [[nodiscard]] virtual QObject* modelParent() = 0;
     // A list's name, kind or state changed.
     virtual void refreshTabChrome(Workspace::ListTab& tab) = 0;
+    // What an empty list says changed (ListTab::notice).
+    virtual void refreshEmptyMessage(Workspace::ListTab& tab) = 0;
     // The list edits that can be undone or redone changed.
     virtual void refreshListHistoryActions() = 0;
     // What is selected changed, or what it is.

@@ -1291,7 +1291,8 @@ void LocalLibraryTest::cachedSearchTabsLoadCovers() {
         auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(view);
         auto* model = qobject_cast<LocalListModel*>(view->model());
-        QVERIFY(model && model->rowCount() == 2);
+        // Open at once, filled as the results come (ADR-0140).
+        QTRY_VERIFY(model && model->rowCount() == 2);
         QVERIFY(model->rows()[0].probed && model->rows()[0].technicals);
         QVERIFY(!model->rows()[0].source_revision);
         QCOMPARE(model->rows()[0].metadata.fields.front().provenance,

@@ -39,6 +39,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -114,6 +115,10 @@ class Workspace final : public QObject {
             friend bool operator==(const Saved&, const Saved&) = default;
         };
         std::optional<Saved> saved;
+        // Said in the middle of the list while it is empty, in place of how
+        // to fill it: a kept search still being collected, or what it found
+        // nothing for. Empty, the usual words.
+        QString notice;
     };
     struct CrossTabMoveEdit {
         QString source_id;
@@ -210,6 +215,9 @@ class Workspace final : public QObject {
         bool move{false};
     };
 
+    // Kept searches on their way, by library, in the order asked: each
+    // library answers its searches in turn.
+    std::map<const LibraryBrowser*, std::deque<core::StableId>> pending_searches_;
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QHash<QString, QByteArray> restored_track_view_layouts_;
     MprisService* mpris_{nullptr};
@@ -845,6 +853,10 @@ class Workspace final : public QObject {
                        LocalLibraryAction action, const QString& name = {});
     void libraryAddToList(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
                           const QString& id);
+    // ADR-0140: Enter keeps a search as a tab, opened at once and filled
+    // when the results come -- or saying there were none.
+    void librarySearchStarted(LibraryBrowser& browser, const QString& query);
+    void librarySearchFailed(LibraryBrowser& browser, const QString& why);
     void librarySearchCommitted(LibraryBrowser& browser, const QString& query,
                                 std::vector<LocalTrackRow> rows);
     [[nodiscard]] int insertionForNext(const ListTab& target);

@@ -292,6 +292,9 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
     markViewEngine(view, EngineKey::of(document));
     view->setEmptyMessage(emptyListTitle(EngineKey::of(document)),
                           emptyListHint(EngineKey::of(document)));
+    if (!added.notice.isEmpty()) {
+        view->setEmptyMessage(added.notice, {});
+    }
     view->setProperty("bench-document-id", id);
     view->setModel(model);
     connect(
@@ -715,6 +718,19 @@ void BenchMainWindow::quitAndStopEngine() {
     // still open elsewhere -- a tag editor, say -- kept the process, and
     // with it anything that might start an engine.
     QCoreApplication::quit();
+}
+
+void BenchMainWindow::refreshEmptyMessage(ListTab& tab) {
+    auto* view = dynamic_cast<ui::QueueTableView*>(tab.view);
+    if (view == nullptr) {
+        return;
+    }
+    if (!tab.notice.isEmpty()) {
+        view->setEmptyMessage(tab.notice, {});
+    } else {
+        view->setEmptyMessage(emptyListTitle(EngineKey::of(tab.document)),
+                              emptyListHint(EngineKey::of(tab.document)));
+    }
 }
 
 void BenchMainWindow::refreshTabChrome(ListTab& tab) {

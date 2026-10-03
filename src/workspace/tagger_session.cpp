@@ -1636,11 +1636,12 @@ bool TaggerSession::beginWriteElsewhere() {
     return true;
 }
 
-void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written) {
+void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written,
+                                         std::vector<std::size_t> stale) {
     if (!writing_elsewhere_) {
         return;
     }
-    if (written.empty() || grid_model_ == nullptr) {
+    if ((written.empty() && stale.empty()) || grid_model_ == nullptr) {
         writing_elsewhere_ = false;
         emit changed();
         emit writtenElsewhere();
@@ -1664,6 +1665,12 @@ void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written) {
         source.source_revision.reset();
         source.needs_metadata_capture = true;
         rewritten_items_.push_back(rewritten.item);
+    }
+    for (const auto item : stale) {
+        if (item < sources_.size()) {
+            sources_[item].source_revision.reset();
+            sources_[item].needs_metadata_capture = true;
+        }
     }
     provisional_ = true;
     setStatus(QStringLiteral("Reading the files written…"));

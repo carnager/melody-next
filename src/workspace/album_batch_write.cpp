@@ -270,6 +270,8 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
                     !source.observed_revision ||
                     *source.expected_revision != *source.observed_revision ||
                     path->source_revision != *source.observed_revision) {
+                    changed_.insert(changed_.end(), source.occurrence_indexes.begin(),
+                                    source.occurrence_indexes.end());
                     per_item(source.occurrence_indexes,
                              QStringLiteral("A file changed since it was read"));
                 }
@@ -280,6 +282,10 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
                 for (const auto& issue : source.issues) {
                     if (!issue.blocking) {
                         continue;
+                    }
+                    if (issue.kind == metadata::MetadataWritePlanIssueKind::source_changed) {
+                        changed_.insert(changed_.end(), source.occurrence_indexes.begin(),
+                                        source.occurrence_indexes.end());
                     }
                     per_item(source.occurrence_indexes,
                              issue.kind == metadata::MetadataWritePlanIssueKind::source_changed
@@ -315,8 +321,12 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
         if (plan->path_preflight) {
             for (const auto& issue : plan->path_preflight->issues) {
                 if (issue.blocking) {
-                    per_item(issue.item_indexes.empty() ? itemsAt(issue.source_raw_path)
-                                                        : issue.item_indexes,
+                    const auto items = issue.item_indexes.empty() ? itemsAt(issue.source_raw_path)
+                                                                  : issue.item_indexes;
+                    if (issue.kind == operations::OutputPathPreflightIssueKind::source_changed) {
+                        changed_.insert(changed_.end(), items.begin(), items.end());
+                    }
+                    per_item(items,
                              issue.kind == operations::OutputPathPreflightIssueKind::source_changed
                                  ? QStringLiteral("A file changed since it was read")
                                  : issueText(issue.message));
@@ -501,7 +511,7 @@ void AlbumBatchWrite::finish() {
                 emit finished();
             },
             Qt::SingleShotConnection);
-    tagger_->finishWriteElsewhere(std::move(rewritten_));
+    tagger_->finishWriteElsewhere(std::move(rewritten_), std::move(changed_));
 }
 
 } // namespace trackknife::bench

@@ -11,7 +11,6 @@
 
 class QButtonGroup;
 class QLabel;
-class QListWidget;
 class QStackedWidget;
 class QProgressBar;
 class QPushButton;
@@ -80,7 +79,7 @@ class IdentifyAlbumsDialog final : public QDialog {
     QLabel* review_place_;
     QLabel* review_status_;
     QPushButton* accept_;
-    QListWidget* versions_;
+    QTreeWidget* versions_;
     QWidget* match_holder_;
     TrackMatchSession* match_{nullptr};
     QWidget* match_view_{nullptr};

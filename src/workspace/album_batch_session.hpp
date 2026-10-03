@@ -120,6 +120,12 @@ class AlbumBatchSession final : public QObject {
     [[nodiscard]] bool measuring() const { return measuring_; }
     // How the last Write went, said once it is over.
     [[nodiscard]] QString writeSummary() const { return write_summary_; }
+    // The last Write wrote every album it was given.
+    [[nodiscard]] bool wroteAll() const { return wrote_all_; }
+    // Nothing left that the batch can still do: nothing being looked up,
+    // needing a person, or staged for a Write. Albums found nothing for,
+    // skipped or left out are left as they are.
+    [[nodiscard]] bool nothingLeftToDo() const;
     void stopWriting();
 
     static QString stateText(const Album& album);
@@ -157,6 +163,7 @@ class AlbumBatchSession final : public QObject {
     QPointer<AlbumBatchWrite> writer_;
     bool measuring_{false};
     QString write_summary_;
+    bool wrote_all_{false};
 };
 
 } // namespace trackknife::bench

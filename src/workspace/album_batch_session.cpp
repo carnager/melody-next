@@ -450,6 +450,22 @@ bool AlbumBatchSession::canWrite() const {
            !tagger_.isNull() && tagger_->canWriteElsewhere() && !toWrite().empty();
 }
 
+bool AlbumBatchSession::nothingLeftToDo() const {
+    return std::ranges::none_of(order_, [this](const std::size_t album) {
+        switch (albums_[album].state) {
+        case State::waiting:
+        case State::searching:
+        case State::staging:
+        case State::staged:
+        case State::needs_choice:
+        case State::failed:
+            return true;
+        default:
+            return false;
+        }
+    });
+}
+
 std::vector<std::size_t> AlbumBatchSession::toWrite() const {
     std::vector<std::size_t> albums;
     for (const auto album : order_) {
@@ -466,6 +482,7 @@ void AlbumBatchSession::write() {
     }
     auto albums = toWrite();
     write_summary_.clear();
+    wrote_all_ = false;
     if (tagger_->replayGainOnApply()) {
         std::vector<std::size_t> items;
         for (const auto album : albums) {
@@ -552,6 +569,7 @@ void AlbumBatchSession::startWriter(std::vector<std::size_t> albums) {
             }
         }
         const auto total = writer_->outcomes().size();
+        wrote_all_ = written == total;
         write_summary_ = written == total
                              ? QStringLiteral("Wrote %1 %2")
                                    .arg(written)

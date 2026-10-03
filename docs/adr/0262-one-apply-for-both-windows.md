@@ -83,3 +83,14 @@ each album is in, and ReplayGain scanned after the write. In use:
   the naming layout into the destination, a chosen folder, or the library
   folder each album is in; ReplayGain measured first. The Apply page is
   gone.
+- The window, tidied (2026-10-04): Actions… leads its bottom bar as in the
+  tag editor; only what can be done now is shown (Stop while something
+  runs, Look up again, Review next, Split and Merge when they apply). The
+  review shows the versions as a table -- released, country, label,
+  catalogue number, format, tracks, fit; the title only where versions
+  differ in it -- and the matcher's panes without their own heading and
+  Stage, the file buttons there once a file is chosen. A file found changed
+  since it was read is read again after the write, its album's draft kept,
+  so the next Write takes it. When a Write writes everything and nothing is
+  left to do (nothing looked up, needing a person or staged), the window
+  closes, as Apply closes the tag editor.

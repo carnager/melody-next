@@ -207,8 +207,16 @@ class TrackMatchWidget final : public QWidget {
         order_->setToolTip(
             tr("Pair files in their original selection order with the album tracks."));
         if (embedded) {
-            // Buttons as wide as their words, not a row of equal slabs.
+            // Buttons as wide as their words, not a row of equal slabs; what
+            // works on a file at the right, there once a file is chosen.
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                actions->removeWidget(file_button);
+            }
             actions->addStretch(1);
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                actions->addWidget(file_button);
+            }
+            embedded_ = true;
         }
         layout->addLayout(actions);
         status_ = new QLabel(this);
@@ -269,6 +277,11 @@ class TrackMatchWidget final : public QWidget {
         up_->setEnabled(session_->canMoveUp(row));
         down_->setEnabled(session_->canMoveDown(row));
         unmatch_->setEnabled(session_->canUnmatch(row));
+        if (embedded_) {
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                file_button->setVisible(row >= 0);
+            }
+        }
         sort_->setEnabled(session_->ready());
         order_->setEnabled(session_->ready());
         stage_->setEnabled(session_->canStage());
@@ -330,6 +343,7 @@ class TrackMatchWidget final : public QWidget {
     QPushButton* order_;
     QPushButton* stage_;
     QLabel* status_;
+    bool embedded_{false};
 };
 
 } // namespace

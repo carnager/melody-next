@@ -13,7 +13,6 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QListWidget>
 #include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
@@ -84,20 +83,25 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
 
 [[nodiscard]] QString escaped(const QString& text) { return text.toHtmlEscaped(); }
 
-// A release as one line: what tells its versions apart.
-[[nodiscard]] QStringList release_parts(const musicbrainz::Release& release) {
-    QStringList parts;
-    for (const auto& part : {release.date, release.country, release.label}) {
-        if (!part.empty()) {
-            parts << QString::fromStdString(part);
+// Its media, counted by kind: "1×CD", "2×CD + DVD".
+[[nodiscard]] QString format_of(const musicbrainz::Release& release) {
+    std::vector<std::pair<QString, int>> kinds;
+    for (const auto& medium : release.media) {
+        const auto kind = medium.format.empty() ? QStringLiteral("Medium")
+                                                : QString::fromStdString(medium.format);
+        const auto found = std::ranges::find(kinds, kind, &std::pair<QString, int>::first);
+        if (found == kinds.end()) {
+            kinds.emplace_back(kind, 1);
+        } else {
+            ++found->second;
         }
     }
-    if (!release.media.empty() && !release.media.front().format.empty()) {
-        parts << QStringLiteral("%1×%2")
-                     .arg(release.media.size())
-                     .arg(QString::fromStdString(release.media.front().format));
+    QStringList parts;
+    for (const auto& [kind, count] : kinds) {
+        parts << (count == 1 && kinds.size() > 1U ? kind
+                                                  : QStringLiteral("%1×%2").arg(count).arg(kind));
     }
-    return parts;
+    return parts.join(QStringLiteral(" + "));
 }
 
 [[nodiscard]] QString check(const bool ok, const QString& text) {
@@ -199,9 +203,23 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     review_top->addWidget(review_heading_, 1);
     review_top->addWidget(review_place_);
     review_layout->addLayout(review_top);
-    versions_ = new QListWidget(review_page);
+    // The versions that fit, side by side in what tells them apart.
+    versions_ = new QTreeWidget(review_page);
     versions_->setObjectName(QStringLiteral("bench-identify-albums-versions"));
     versions_->setToolTip(QStringLiteral("The versions that fit: ↑/↓ choose one"));
+    versions_->setRootIsDecorated(false);
+    versions_->setUniformRowHeights(true);
+    versions_->setAllColumnsShowFocus(true);
+    versions_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    versions_->setHeaderLabels({QStringLiteral("Version"), QStringLiteral("Released"),
+                                QStringLiteral("Country"), QStringLiteral("Label"),
+                                QStringLiteral("Cat. no."), QStringLiteral("Format"),
+                                QStringLiteral("Tracks"), QStringLiteral("Fit")});
+    versions_->header()->setStretchLastSection(false);
+    for (int column = 0; column < versions_->columnCount(); ++column) {
+        versions_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    }
+    versions_->header()->setSectionResizeMode(3, QHeaderView::Stretch);
     review_layout->addWidget(versions_);
     match_holder_ = new QWidget(review_page);
     auto* holder_layout = new QVBoxLayout(match_holder_);
@@ -235,7 +253,9 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     connect(accept_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::accept);
     connect(skip_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::skip);
     connect(back, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
-    connect(versions_, &QListWidget::currentRowChanged, this, &IdentifyAlbumsDialog::showVersion);
+    connect(versions_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
+        showVersion(versions_->indexOfTopLevelItem(item));
+    });
     layout->addWidget(pages_, 1);
 
     // Write as the tagger's Actions say (ADR-0262).
@@ -279,6 +299,13 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     });
 
     connect(session_, &AlbumBatchSession::changed, this, &IdentifyAlbumsDialog::sync);
+    // Done, as the tag editor's Apply is: everything written and nothing
+    // left here to do, the window closes.
+    connect(session_, &AlbumBatchSession::writeFinished, this, [this] {
+        if (session_->wroteAll() && session_->nothingLeftToDo()) {
+            QTimer::singleShot(0, this, &QDialog::close);
+        }
+    });
     connect(filter_group_, &QButtonGroup::idClicked, this, &IdentifyAlbumsDialog::sync);
     connect(list_, &QTreeWidget::currentItemChanged, this, &IdentifyAlbumsDialog::showDetail);
     connect(list_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, const int column) {
@@ -497,24 +524,52 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
     {
         const QSignalBlocker blocker{versions_};
         versions_->clear();
+        // A version's name only where it is not the album's own.
+        bool named = false;
+        const auto row_height = fontMetrics().height() + 12;
         for (const auto& candidate : entry.result->candidates) {
             const auto& release = candidate.release;
-            QStringList parts{QString::fromStdString(release.title)};
-            parts << release_parts(release);
-            parts << QStringLiteral("%1 tracks").arg(candidate.alignment.release_tracks.size());
-            parts << QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0));
-            versions_->addItem(parts.join(QStringLiteral(" · ")));
+            auto name = QString::fromStdString(release.title);
+            if (!release.disambiguation.empty()) {
+                name += QStringLiteral(" (%1)").arg(QString::fromStdString(release.disambiguation));
+            }
+            const auto own = name == entry.title;
+            named = named || !own;
+            auto* item = new QTreeWidgetItem(versions_);
+            item->setText(0, own ? QStringLiteral("—") : name);
+            item->setText(1, QString::fromStdString(release.date));
+            item->setText(2, QString::fromStdString(release.country));
+            item->setText(3, QString::fromStdString(release.label));
+            item->setText(4, QString::fromStdString(release.catalog_number));
+            item->setText(5, format_of(release));
+            item->setText(6, QString::number(candidate.alignment.release_tracks.size()));
+            item->setText(7, QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0)));
+            item->setTextAlignment(6, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(7, Qt::AlignRight | Qt::AlignVCenter);
+            item->setToolTip(0, QStringLiteral("MusicBrainz release %1")
+                                    .arg(QString::fromStdString(release.id)));
+            // Roomy rows, each cell as wide as its text.
+            for (int column = 0; column < versions_->columnCount(); ++column) {
+                item->setSizeHint(
+                    column,
+                    QSize{fontMetrics().horizontalAdvance(item->text(column)) + 16, row_height});
+            }
         }
+        versions_->setColumnHidden(0, !named);
     }
     // As tall as its versions, up to five.
-    const auto shown_rows = std::min(versions_->count(), 5);
-    versions_->setFixedHeight(shown_rows * versions_->sizeHintForRow(0) +
+    const auto shown_rows = std::min(versions_->topLevelItemCount(), 5);
+    versions_->setFixedHeight(versions_->header()->sizeHint().height() +
+                              shown_rows * (fontMetrics().height() + 12) +
                               2 * versions_->frameWidth());
     pages_->setCurrentIndex(1);
     filters_->hide();
     bottom_bar_->hide();
     sync();
-    versions_->setCurrentRow(0);
+    {
+        const QSignalBlocker blocker{versions_};
+        versions_->setCurrentItem(versions_->topLevelItem(0));
+    }
     showVersion(0);
     versions_->setFocus();
 }
@@ -554,7 +609,8 @@ void IdentifyAlbumsDialog::showVersion(const int version) {
             [this](metadata::MetadataProposalSet proposals) {
                 if (reviewing_) {
                     session_->choose(*reviewing_,
-                                     static_cast<std::size_t>(std::max(0, versions_->currentRow())),
+                                     static_cast<std::size_t>(std::max(
+                                         0, versions_->indexOfTopLevelItem(versions_->currentItem()))),
                                      std::move(proposals));
                     reviewNext();
                 }

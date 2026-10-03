@@ -104,6 +104,8 @@ class AlbumBatchWrite final : public QObject {
     std::unordered_map<std::size_t, std::size_t> album_of_;
     std::unordered_map<std::string, std::vector<std::size_t>> items_at_;
     std::vector<TaggerSession::Rewritten> rewritten_;
+    // Found changed since they were read: read again after, drafts kept.
+    std::vector<std::size_t> changed_;
     std::size_t files_total_{0U};
     std::size_t files_before_{0U};
     std::shared_ptr<Progress> progress_;

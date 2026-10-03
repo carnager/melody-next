@@ -6612,6 +6612,21 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(QFile::exists(QString::fromStdString(sources[4].source.raw_path)));
     QVERIFY(row_of(third)->text(2).contains(QStringLiteral("not written")));
     QVERIFY(has_patches(4U, 5U));
+    QVERIFY(dialog->isVisible());
+
+    // Third's changed file was read again, its draft kept: written now, and
+    // with nothing left to do the window closes, as Apply closes the editor.
+    const QPointer<IdentifyAlbumsDialog> guard{dialog};
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QTRY_VERIFY(write->isEnabled());
+    write->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    const auto third_moved = library + QStringLiteral("/Third/Alpha/One.flac");
+    QVERIFY2(QFile::exists(third_moved), qPrintable(third_moved));
+    const auto third_tags = metadata::read_local_metadata(raw(third_moved));
+    QVERIFY(third_tags.has_value());
+    QCOMPARE(value_of(third_tags->document, "MUSICBRAINZ_ALBUMID"),
+             ids.at(QStringLiteral("Third")).toStdString());
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }
@@ -6709,15 +6724,22 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
         dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-next"));
     // Looked up at once; the first album needing a person opens by itself.
     auto* heading = dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
-    auto* versions = dialog->findChild<QListWidget*>(QStringLiteral("bench-identify-albums-versions"));
+    auto* versions = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-versions"));
     QTRY_VERIFY_WITH_TIMEOUT(heading->isVisible(), 5'000);
     QVERIFY(heading->text().contains(QStringLiteral("Band — Alpha")));
-    QCOMPARE(versions->count(), 2);
+    QCOMPARE(versions->topLevelItemCount(), 2);
+    // Told apart by what differs; the title column only when titles do.
+    QCOMPARE(versions->topLevelItem(0)->text(1), QStringLiteral("1999-09-09"));
+    QCOMPARE(versions->topLevelItem(0)->text(5), QStringLiteral("1×CD"));
+    QVERIFY(versions->isColumnHidden(0));
+    // The file buttons once a file is chosen.
+    QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-up"))
+                 ->isVisibleTo(dialog));
     QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::needs_choice),
                               std::size_t{2U}, 5'000);
     // ↓ chooses the other version; the matcher follows.
     QTest::keyClick(versions, Qt::Key_Down);
-    QCOMPARE(versions->currentRow(), 1);
+    QCOMPARE(versions->indexOfTopLevelItem(versions->currentItem()), 1);
     auto* accept =
         dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-accept"));
     QTRY_VERIFY(accept->isEnabled());

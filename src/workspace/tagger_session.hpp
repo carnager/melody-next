@@ -391,7 +391,10 @@ class TaggerSession final : public QObject {
     [[nodiscard]] const metadata::StagedMetadataPatchSet* draft() const;
     [[nodiscard]] std::optional<operations::OutputLayoutProfile> layoutProfile(int index) const;
     bool beginWriteElsewhere();
-    void finishWriteElsewhere(std::vector<Rewritten> written);
+    // `stale`: files found changed since they were read, read again too,
+    // their drafts kept, so the next write can take them.
+    void finishWriteElsewhere(std::vector<Rewritten> written,
+                              std::vector<std::size_t> stale = {});
 
     // Apply.
     void startWritePlan();

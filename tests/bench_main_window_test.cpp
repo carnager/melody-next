@@ -11218,7 +11218,7 @@ void BenchMainWindowTest::metadataRetrySkipsSavedFiles() {
                                                 .message = "injected temporary failure",
                                                 .context = {}});
                             }
-                            return operations::commit_flac_metadata_source(
+                            return operations::commit_metadata_source(
                                 source, *journal,
                                 [](const operations::MetadataCommitResult&) -> core::Result<void> {
                                     return {};
@@ -11883,7 +11883,7 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
                         plan,
                         [&journal](const metadata::MetadataWritePlanSource& item,
                                    const core::CancellationToken& token) {
-                            return operations::commit_flac_metadata_source(
+                            return operations::commit_metadata_source(
                                 item, *journal,
                                 [](const operations::MetadataCommitResult&) -> core::Result<void> {
                                     return {};
@@ -12034,7 +12034,7 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
                         plan,
                         [&journal](const metadata::MetadataWritePlanSource& item,
                                    const core::CancellationToken& token) {
-                            return operations::commit_flac_metadata_source(
+                            return operations::commit_metadata_source(
                                 item, *journal,
                                 [](const operations::MetadataCommitResult&) -> core::Result<void> {
                                     return {};
@@ -12222,7 +12222,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
                                plan,
                                [&journal](const metadata::MetadataWritePlanSource& source_plan,
                                           const core::CancellationToken& source_cancellation) {
-                                   return operations::commit_flac_metadata_source(
+                                   return operations::commit_metadata_source(
                                        source_plan, journal,
                                        [](const operations::MetadataCommitResult&)
                                            -> core::Result<void> { return {}; },

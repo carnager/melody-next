@@ -418,7 +418,7 @@ void commits_atomically_and_retains_verified_backup(
         return;
     }
     std::size_t callback_count = 0U;
-    const auto committed = operations::commit_flac_metadata_source(
+    const auto committed = operations::commit_metadata_source(
         *plan, *journal,
         [&callback_count](const operations::MetadataCommitResult& result) -> core::Result<void> {
             ++callback_count;
@@ -480,7 +480,7 @@ void rolls_back_dependent_and_journal_failures(const std::filesystem::path& fixt
         return;
     }
     CapturingJournal capturing{*dependent_journal};
-    const auto failed = operations::commit_flac_metadata_source(
+    const auto failed = operations::commit_metadata_source(
         *dependent_plan, capturing,
         [](const operations::MetadataCommitResult&) -> core::Result<void> {
             return std::unexpected(core::Error{
@@ -509,7 +509,7 @@ void rolls_back_dependent_and_journal_failures(const std::filesystem::path& fixt
         return;
     }
     FailingPublishedTransitionJournal injected{*journal_store};
-    const auto journal_failed = operations::commit_flac_metadata_source(
+    const auto journal_failed = operations::commit_metadata_source(
         *journal_plan, injected, successful_dependent_commit);
     CHECK(!journal_failed && journal_failed.error().code == core::ErrorCode::database);
     CHECK(read_bytes(journal_source) == journal_original);
@@ -531,7 +531,7 @@ void preserves_ambiguous_external_changes_for_reconciliation(
         return;
     }
     CapturingJournal capturing{*journal};
-    const auto raced = operations::commit_flac_metadata_source(
+    const auto raced = operations::commit_metadata_source(
         *plan, capturing, [](const operations::MetadataCommitResult& result) -> core::Result<void> {
             std::ofstream changed{result.source_raw_path, std::ios::binary | std::ios::app};
             changed.put('\0');
@@ -568,7 +568,7 @@ void serializes_sources_and_honors_cancellation(const std::filesystem::path& fix
     auto callback_release = callback_release_promise.get_future().share();
     std::optional<core::Result<operations::MetadataCommitResult>> first_result;
     std::thread first{[&] {
-        first_result = operations::commit_flac_metadata_source(
+        first_result = operations::commit_metadata_source(
             *plan, *journal, [&](const operations::MetadataCommitResult&) -> core::Result<void> {
                 callback_entered_promise.set_value();
                 callback_release.wait();
@@ -583,7 +583,7 @@ void serializes_sources_and_honors_cancellation(const std::filesystem::path& fix
     std::optional<core::Result<operations::MetadataCommitResult>> second_result;
     std::thread second{[&] {
         second_started_promise.set_value();
-        second_result = operations::commit_flac_metadata_source(
+        second_result = operations::commit_metadata_source(
             *plan, *journal, successful_dependent_commit, cancellation.token());
     }};
     second_started.wait();
@@ -609,7 +609,7 @@ void rejects_hard_linked_sources_before_journaling(const std::filesystem::path& 
         return;
     }
     const auto committed =
-        operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
     CHECK(!committed && committed.error().code == core::ErrorCode::unsupported);
     const auto incomplete = journal->load_incomplete();
     CHECK(incomplete.has_value() && incomplete->empty());
@@ -734,7 +734,7 @@ void commits_with_copied_backup_where_links_are_refused(
 
     // A dependent-state failure rolls back from the copy: the original
     // bytes return under the copy's identity, and nothing is left behind.
-    const auto refused = operations::commit_flac_metadata_source(
+    const auto refused = operations::commit_metadata_source(
         *plan, *journal, [](const operations::MetadataCommitResult&) -> core::Result<void> {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database, .message = "injected", .context = {}});
@@ -755,7 +755,7 @@ void commits_with_copied_backup_where_links_are_refused(
         return;
     }
     const auto committed =
-        operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
     if (!committed) {
         std::cerr << committed.error().message << '\n';
     }
@@ -783,7 +783,7 @@ void commits_with_copied_backup_where_links_are_refused(
     CHECK(::stat(committed->backup_raw_path.c_str(), &status) == 0 &&
           (status.st_mode & 07777) == 0640);
 
-    const auto undone = operations::undo_flac_metadata_operation(
+    const auto undone = operations::undo_metadata_operation(
         committed->journal_id, *journal,
         [&](const operations::MetadataCommitResult& result) -> core::Result<void> {
             CHECK(result.published_revision == *backup);
@@ -805,7 +805,7 @@ void commits_with_copied_backup_where_links_are_refused(
     CHECK(plan.has_value());
     if (plan) {
         const auto again =
-            operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+            operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
         CHECK(again.has_value());
         const auto maintained = operations::maintain_metadata_backups(
             *journal,
@@ -1104,7 +1104,7 @@ void script_written_rating_verifies_over_an_existing_one(
         if (!plan || !plan->ready() || plan->sources.size() != 1U) {
             return;
         }
-        const auto committed = operations::commit_flac_metadata_source(
+        const auto committed = operations::commit_metadata_source(
             plan->sources.front(), *journal, successful_dependent_commit);
         if (!committed) {
             std::cerr << name << ": " << committed.error().message << '\n';
@@ -1194,7 +1194,7 @@ void commits_and_undoes_mp4_covr_artwork(const std::filesystem::path& fixture_di
           committed_inventory->items.front().role == metadata::ArtworkRole::front &&
           committed_inventory->items.front().native_type.empty() &&
           committed_inventory->items.front().description.empty());
-    const auto undone = operations::undo_flac_metadata_operation(
+    const auto undone = operations::undo_metadata_operation(
         added->journal_id, *journal,
         [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
     CHECK(undone.has_value() && read_bytes(source) == original_bytes);
@@ -1258,7 +1258,7 @@ void commits_and_recovers_artwork_at_unchanged_paths(
           std::filesystem::exists((**durable_record).backup_raw_path) &&
           read_bytes((**durable_record).backup_raw_path) == original_bytes);
     const auto undone =
-        committed ? operations::undo_flac_metadata_operation(
+        committed ? operations::undo_metadata_operation(
                         committed->journal_id, *journal,
                         [](const operations::MetadataCommitResult& result) -> core::Result<void> {
                             return result.occurrence_indexes == std::vector<std::size_t>{2U, 7U}
@@ -1298,7 +1298,7 @@ void commits_and_recovers_artwork_at_unchanged_paths(
           (**removed_record).artwork->planned_item_count == 1U);
     const auto remove_undone =
         removed
-            ? operations::undo_flac_metadata_operation(
+            ? operations::undo_metadata_operation(
                   removed->journal_id, *journal,
                   [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; })
             : core::Result<operations::MetadataCommitResult>{std::unexpected(core::Error{
@@ -1353,7 +1353,7 @@ void commits_and_recovers_artwork_at_unchanged_paths(
           (**added_record).artwork->planned_item_count == 1U);
     const auto add_undone =
         added
-            ? operations::undo_flac_metadata_operation(
+            ? operations::undo_metadata_operation(
                   added->journal_id, *journal,
                   [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; })
             : core::Result<operations::MetadataCommitResult>{std::unexpected(core::Error{
@@ -1518,6 +1518,62 @@ void recovers_safe_prepublication_debris_but_retains_ambiguous_paths(
           (**retained_record).state == State::needs_reconciliation);
 }
 
+// Undo restores the retained file whole, so it is the same for every
+// container the commit writes: proved on a real file of each.
+void undoes_text_edits_in_every_writable_container(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    auto journal = open_journal(directory, "every-container.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    for (const auto& [fixture, name] :
+         {std::pair{"tagged-tone-flac.b64", "tone.flac"}, std::pair{"tagged-tone-mp3.b64", "tone.mp3"},
+          std::pair{"tagged-tone-m4a.b64", "tone.m4a"}, std::pair{"tagged-tone-vorbis.b64", "tone.ogg"},
+          std::pair{"tagged-tone-opus.b64", "tone.opus"},
+          std::pair{"tagged-tone-wavpack.b64", "tone.wv"}}) {
+        const auto source = materialize(fixture_directory, fixture, directory.path() / name);
+        const auto original_bytes = read_bytes(source);
+        const auto original = metadata::read_local_metadata(source.native());
+        CHECK(original.has_value());
+        auto plan = title_plan(source, "Undo me");
+        if (!original || !plan) {
+            std::cerr << name << ": no plan\n";
+            continue;
+        }
+        auto committed =
+            operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+        CHECK(committed.has_value());
+        if (!committed) {
+            std::cerr << name << ": " << committed.error().message << '\n';
+            continue;
+        }
+        const auto written = metadata::read_local_metadata(source.native());
+        CHECK(written && written->document.effective_values("title") ==
+                             std::vector<std::string>{"Undo me"});
+        const auto undone = operations::undo_metadata_operation(
+            committed->journal_id, *journal,
+            [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+        // Undo needs RENAME_EXCHANGE; NFS says so instead (ADR-0111).
+        if (!undone && undone.error().code == trackknife::core::ErrorCode::unsupported) {
+            std::cerr << "undo unavailable on this filesystem: " << undone.error().message << '\n';
+            return;
+        }
+        CHECK(undone.has_value());
+        if (!undone) {
+            std::cerr << name << ": " << undone.error().message << '\n';
+            continue;
+        }
+        if (read_bytes(source) != original_bytes) {
+            std::cerr << name << ": not restored byte for byte\n";
+            CHECK(false);
+        }
+        const auto restored = metadata::read_local_metadata(source.native());
+        CHECK(restored && restored->document.effective_values("title") ==
+                              original->document.effective_values("title"));
+    }
+}
+
 void undoes_completed_metadata_and_recovers_interrupted_undo(
     const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
@@ -1530,13 +1586,13 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
         return;
     }
     auto committed =
-        operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
     CHECK(committed.has_value());
     if (!committed) {
         return;
     }
     std::size_t undo_callback_count = 0U;
-    const auto undone = operations::undo_flac_metadata_operation(
+    const auto undone = operations::undo_metadata_operation(
         committed->journal_id, *journal,
         [&](const operations::MetadataCommitResult& result) -> core::Result<void> {
             ++undo_callback_count;
@@ -1576,7 +1632,7 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
     if (!recovery_plan) {
         return;
     }
-    auto recovery_commit = operations::commit_flac_metadata_source(*recovery_plan, *journal,
+    auto recovery_commit = operations::commit_metadata_source(*recovery_plan, *journal,
                                                                    successful_dependent_commit);
     CHECK(recovery_commit.has_value());
     if (!recovery_commit) {
@@ -1636,7 +1692,7 @@ void retention_releases_only_verified_backups(const std::filesystem::path& fixtu
         return;
     }
     auto committed =
-        operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
     CHECK(committed.has_value());
     if (!committed) {
         return;
@@ -1665,7 +1721,7 @@ void undo_conflicts_become_visible_reconciliation_evidence(
         return;
     }
     auto committed =
-        operations::commit_flac_metadata_source(*plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
     CHECK(committed.has_value());
     if (!committed) {
         return;
@@ -1675,7 +1731,7 @@ void undo_conflicts_become_visible_reconciliation_evidence(
         changed.put('\0');
         CHECK(changed.good());
     }
-    const auto undone = operations::undo_flac_metadata_operation(committed->journal_id, *journal,
+    const auto undone = operations::undo_metadata_operation(committed->journal_id, *journal,
                                                                  successful_dependent_commit);
     CHECK(!undone && undone.error().code == core::ErrorCode::conflict);
     CHECK(std::filesystem::exists(committed->backup_raw_path));
@@ -1696,7 +1752,7 @@ void retention_releases_older_verified_backup_for_the_same_source(
         return;
     }
     auto first =
-        operations::commit_flac_metadata_source(*first_plan, *journal, successful_dependent_commit);
+        operations::commit_metadata_source(*first_plan, *journal, successful_dependent_commit);
     CHECK(first.has_value());
     if (!first) {
         return;
@@ -1706,7 +1762,7 @@ void retention_releases_older_verified_backup_for_the_same_source(
     if (!second_plan) {
         return;
     }
-    auto second = operations::commit_flac_metadata_source(*second_plan, *journal,
+    auto second = operations::commit_metadata_source(*second_plan, *journal,
                                                           successful_dependent_commit);
     CHECK(second.has_value());
     if (!second) {
@@ -1751,7 +1807,7 @@ void batch_apply_commits_real_sources_and_reports_partial_results(
         [&](const metadata::MetadataWritePlanSource& source_plan,
             const core::CancellationToken& cancellation)
             -> core::Result<operations::MetadataCommitResult> {
-            return operations::commit_flac_metadata_source(
+            return operations::commit_metadata_source(
                 source_plan, *journal,
                 [&callbacks](const operations::MetadataCommitResult&) -> core::Result<void> {
                     callbacks.fetch_add(1U, std::memory_order_relaxed);
@@ -2009,11 +2065,11 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
         auto broken_art = std::make_shared<metadata::ArtworkWritePlanSource>(*broken.artwork);
         broken_art->additional_changes.back().replacement->raw_path += ".missing";
         broken.artwork = broken_art;
-        const auto failed = operations::commit_flac_metadata_source(
+        const auto failed = operations::commit_metadata_source(
             broken, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
         CHECK(!failed && read_bytes(path) == original_bytes);
-        const auto atomic = operations::commit_flac_metadata_source(
+        const auto atomic = operations::commit_metadata_source(
             combined->sources.front(), *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
         if (!atomic) {
@@ -2031,7 +2087,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
         const auto record = journal->load(atomic->journal_id);
         CHECK(record && *record && (**record).artwork && !(**record).changes.empty() &&
               (**record).artwork->kind == metadata::ArtworkWritePlanIntentKind::batch);
-        const auto undone = operations::undo_flac_metadata_operation(
+        const auto undone = operations::undo_metadata_operation(
             atomic->journal_id, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
         CHECK(undone && read_bytes(path) == original_bytes);
@@ -2048,7 +2104,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
             recovery.published_revision.reset();
             recovery.failure.reset();
             CHECK(journal->create(recovery).has_value());
-            const auto blocked_retry = operations::commit_flac_metadata_source(
+            const auto blocked_retry = operations::commit_metadata_source(
                 combined->sources.front(), *journal,
                 [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
             CHECK(!blocked_retry && blocked_retry.error().code == core::ErrorCode::conflict &&
@@ -2075,7 +2131,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
                 CHECK(recovered && std::ranges::any_of(*recovered, [](const auto& item) {
                           return item.outcome == operations::MetadataRecoveryOutcome::completed;
                       }));
-                CHECK(operations::undo_flac_metadata_operation(
+                CHECK(operations::undo_metadata_operation(
                           recovery.id, *journal,
                           [](const operations::MetadataCommitResult&) -> core::Result<void> {
                               return {};
@@ -2733,7 +2789,7 @@ void commits_cue_replay_gain_sheets_atomically() {
 
         // Undo restores the byte-identical pre-image (skipped on
         // filesystems without RENAME_EXCHANGE).
-        auto undone = operations::undo_flac_metadata_operation(
+        auto undone = operations::undo_metadata_operation(
             backup.operation.id, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
         if (!undone && undone.error().code == core::ErrorCode::unsupported) {
@@ -3183,7 +3239,7 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
     CHECK(journal && old_plan);
     if (!journal || !old_plan)
         return;
-    CHECK(operations::commit_flac_metadata_source(*old_plan, *journal, successful_dependent_commit)
+    CHECK(operations::commit_metadata_source(*old_plan, *journal, successful_dependent_commit)
               .has_value());
     sqlite3* database = nullptr;
     CHECK(sqlite3_open((directory.path() / "existing.sqlite3").c_str(), &database) == SQLITE_OK);
@@ -3205,7 +3261,7 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
     const auto for_source = journal->load_incomplete_for_source(old.native());
     CHECK(for_source && for_source->size() == 1U);
     auto blocked = title_plan(old, "Must not save");
-    CHECK(blocked && !operations::commit_flac_metadata_source(*blocked, *journal,
+    CHECK(blocked && !operations::commit_metadata_source(*blocked, *journal,
                                                               successful_dependent_commit));
     const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / "new.flac");
     const auto donor =
@@ -3376,7 +3432,7 @@ void folder_cover_policy_publication_and_recovery(const std::filesystem::path& f
     if (interrupted.created_id) {
         auto record = journal->load(*interrupted.created_id);
         CHECK(record && *record && read_bytes((**record).backup_raw_path) == read_bytes(donor));
-        CHECK(operations::undo_flac_metadata_operation(*interrupted.created_id, *journal,
+        CHECK(operations::undo_metadata_operation(*interrupted.created_id, *journal,
                                                        successful_dependent_commit)
                   .has_value());
         CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
@@ -3508,7 +3564,7 @@ void folder_cover_without_hard_links(const std::filesystem::path& fixtures) {
         CHECK(record && *record && copy && (**record).backup_revision == *copy);
         CHECK(blue_revision && copy && copy->inode != blue_revision->inode);
         CHECK(read_bytes(replaced->backup_raw_path) == read_bytes(donor));
-        const auto undone = operations::undo_flac_metadata_operation(replaced->journal_id, *journal,
+        const auto undone = operations::undo_metadata_operation(replaced->journal_id, *journal,
                                                                      successful_dependent_commit);
         if (undone || undone.error().code != core::ErrorCode::unsupported) {
             CHECK(undone.has_value());
@@ -3714,6 +3770,7 @@ int main(const int argc, char** argv) {
         commits_and_undoes_mp4_covr_artwork(fixture_directory);
         recovers_safe_prepublication_debris_but_retains_ambiguous_paths(fixture_directory);
         undoes_completed_metadata_and_recovers_interrupted_undo(fixture_directory);
+        undoes_text_edits_in_every_writable_container(fixture_directory);
         retention_releases_only_verified_backups(fixture_directory);
         undo_conflicts_become_visible_reconciliation_evidence(fixture_directory);
         retention_releases_older_verified_backup_for_the_same_source(fixture_directory);

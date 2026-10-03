@@ -80,7 +80,9 @@ and compatibility policy are ADR-0260 (`docs/protocol-levels.md`). The quiet
 period starts from the last level bump. Optimised builds pass the suite: the
 release preset with makepkg's flags (`-O3`, LTO, `_FORTIFY_SOURCE=3`,
 `_GLIBCXX_ASSERTIONS`), GCC 16.2.1, 101 of 101, with no warnings once a test
-reading past a string literal and an unbounded encoder result were fixed.
+reading past a string literal and an unbounded encoder result were fixed. The
+66,841-track library on gemenon is measured end to end, engine and window,
+with no step stalling the window: `docs/release-measurements.md`.
 
 Flathub and other distribution beyond the AUR come after 1.0.
 

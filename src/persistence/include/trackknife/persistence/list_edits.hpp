@@ -118,15 +118,19 @@ template <typename Element, typename Identity, typename Make>
         }
         case ListEdit::Kind::move: {
             std::unordered_set<core::StableId, detail::IdHash> named;
+            std::vector<typename Working::iterator> moving;
+            moving.reserve(edit.entries.size());
             for (const auto& entry : edit.entries) {
                 if (!named.insert(entry).second) {
                     return std::unexpected(detail::edit_refused(core::ErrorCode::invalid_argument,
                                                                 "an edit names an entry twice"));
                 }
-                if (!where.contains(entry)) {
+                const auto found = where.find(entry);
+                if (found == where.end()) {
                     return std::unexpected(detail::edit_refused(
                         core::ErrorCode::not_found, "an edit moves an entry the list does not hold"));
                 }
+                moving.push_back(found->second);
             }
             if (edit.after && named.contains(*edit.after)) {
                 return std::unexpected(detail::edit_refused(
@@ -135,8 +139,8 @@ template <typename Element, typename Identity, typename Make>
             // Taken out first, so the anchor is found where it is once they
             // have gone.
             Working taken;
-            for (const auto& entry : edit.entries) {
-                taken.splice(taken.end(), working, where.find(entry)->second);
+            for (const auto at : moving) {
+                taken.splice(taken.end(), working, at);
             }
             auto at = position_after(edit.after);
             if (!at) {

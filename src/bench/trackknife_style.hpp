@@ -2,12 +2,9 @@
 #pragma once
 
 #include <QProxyStyle>
-#include <QTabBar>
-#include <QVariantAnimation>
 #include <QWidget>
 
 #include <cstdint>
-#include <vector>
 
 namespace trackknife::bench {
 
@@ -83,34 +80,6 @@ class Band final : public QWidget {
 
   private:
     Edge edge_;
-};
-
-// A choice of a few sources: one rounded box
-// split into equal segments, the chosen one lifted out of it, the lift
-// sliding to a segment chosen. A QTabBar still, for everything that asks it
-// which tab is current.
-class SegmentedTabBar final : public QTabBar {
-  public:
-    explicit SegmentedTabBar(QWidget* parent = nullptr);
-
-  protected:
-    [[nodiscard]] QSize tabSizeHint(int index) const override;
-    [[nodiscard]] QSize minimumTabSizeHint(int index) const override;
-    [[nodiscard]] QSize sizeHint() const override;
-    [[nodiscard]] QSize minimumSizeHint() const override;
-    void paintEvent(QPaintEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void leaveEvent(QEvent* event) override;
-
-  private:
-    // A hidden tab takes no segment: the tabs shown, in order, and where
-    // one of them sits among them (-1 when it is hidden).
-    [[nodiscard]] std::vector<int> shown() const;
-    [[nodiscard]] int slotOf(int index) const;
-    [[nodiscard]] qreal segment() const;
-    // Animates between slots, not tab indexes.
-    QVariantAnimation lift_;
-    int hovered_{-1};
 };
 
 } // namespace trackknife::bench

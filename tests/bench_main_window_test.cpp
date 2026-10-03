@@ -7389,15 +7389,10 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         QVERIFY(!sources->isTabVisible(library_tab));
         QCOMPARE(sources->tabData(sources->currentIndex()).toString(),
                  window.remoteEngine()->key.text());
-        // Gone from the bar too: two segments, not three with one blank, and
-        // the remote's lifted over the right half where a click finds it.
-        QTest::qWait(250);
-        const auto drawn = sources->grab().toImage();
-        const QPoint left_of_middle{drawn.width() * 55 / 100, drawn.height() / 2};
-        QCOMPARE(drawn.pixelColor(left_of_middle * drawn.devicePixelRatio()).rgb(),
-                 TrackknifeStyle::raised(sources->palette()).rgb());
-        QCOMPARE(sources->tabAt(QPoint{sources->width() * 55 / 100, sources->height() / 2}),
-                 sources->currentIndex());
+        // Gone from the bar too: the remote's tab is where a click finds it.
+        const auto remote_rect = sources->tabRect(sources->currentIndex());
+        QVERIFY(remote_rect.isValid());
+        QCOMPARE(sources->tabAt(remote_rect.center()), sources->currentIndex());
         QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));

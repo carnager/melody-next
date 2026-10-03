@@ -2161,7 +2161,7 @@ write_prepared_carrier_bytes(const MetadataOperationJournalRecord& record, const
 } // namespace
 
 core::Result<MetadataCommitResult>
-commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
+commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
                             MetadataOperationJournal& journal,
                             const MetadataDependentStateCommitter& dependent_state_committer,
                             const core::CancellationToken& cancellation) {
@@ -2203,7 +2203,7 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
                                         .content_kind = MetadataOperationContentKind::text_fields};
         }
         auto committed =
-            commit_flac_metadata_source(media, journal, dependent_state_committer, cancellation);
+            commit_metadata_source(media, journal, dependent_state_committer, cancellation);
         if (!committed)
             committed.error().message =
                 "Folder image saved; media save failed: " + committed.error().message;
@@ -2335,7 +2335,7 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
                                                source_plan.occurrence_indexes.size()});
         if (!combined)
             return std::unexpected(combined.error());
-        return commit_flac_metadata_source(combined->sources.front(), journal,
+        return commit_metadata_source(combined->sources.front(), journal,
                                            dependent_state_committer, cancellation);
     }
     if (cancellation.is_cancellation_requested()) {
@@ -3149,7 +3149,7 @@ void use_copied_metadata_backups_for_testing(const bool enabled) noexcept {
 }
 
 core::Result<MetadataCommitResult>
-undo_flac_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
+undo_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
                              const MetadataDependentStateCommitter& dependent_state_committer,
                              const core::CancellationToken& cancellation) {
     if (journal_id.is_nil() || !dependent_state_committer) {

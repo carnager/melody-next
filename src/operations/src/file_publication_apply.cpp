@@ -574,7 +574,7 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
 
             if (outcome && metadata_source != nullptr && !refreshed) {
                 auto committed =
-                    commit_flac_metadata_source(*metadata_source, synchronized_metadata_journal,
+                    commit_metadata_source(*metadata_source, synchronized_metadata_journal,
                                                 metadata_dependent_state_committer, cancellation);
                 if (committed) {
                     source_result.published_metadata = committed->document;

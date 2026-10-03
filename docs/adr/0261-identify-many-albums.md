@@ -170,3 +170,11 @@ presets…** opens them.
   left out and reported, the rest written; rename, move and ReplayGain each
   only when chosen, with the preset chosen; skip-existing leaves albums with
   gain alone; one undo restores the batch.
+- Undo this batch, groundwork (2026-10-04): every container the commit
+  writes -- FLAC, MP3, MP4, Ogg Vorbis, Opus, WavPack -- keeps the file it
+  replaced, and undo puts that file back whole, so undo needs nothing per
+  format; a test now proves it on a real file of each, byte for byte. The
+  commit and undo lost "flac" from their names (`commit_metadata_source`,
+  `undo_metadata_operation`). Still to come, after 1.0 as it changes the
+  protocol: the engine keeping backups past its next start, an engine
+  method to undo, undoing moves and renames, and the button.

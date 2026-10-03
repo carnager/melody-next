@@ -63,7 +63,7 @@ apply_metadata_plan(const metadata::MetadataWritePlan& plan, const std::filesyst
         plan,
         [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
                                const core::CancellationToken& source_token) {
-            return operations::commit_flac_metadata_source(source, journal, dependent,
+            return operations::commit_metadata_source(source, journal, dependent,
                                                            source_token);
         },
         [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,

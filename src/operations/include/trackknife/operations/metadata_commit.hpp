@@ -36,12 +36,14 @@ struct MetadataCommitResult {
 using MetadataDependentStateCommitter =
     std::function<core::Result<void>(const MetadataCommitResult&)>;
 
-// Executes one ready native-FLAC source plan. The caller runs this synchronous
+// Executes one ready source plan, of any container a qualified text adapter
+// writes (FLAC, MP3, MP4, Ogg Vorbis, Opus, WavPack): the source is published
+// whole and the file it replaced retained for undo. The caller runs this synchronous
 // operation on a bounded mutation worker. The dependent-state callback must be
 // idempotent and all-or-nothing: recovery may replay it after a crash. Its
 // success is part of commit; failure rolls the source back before returning.
 [[nodiscard]] core::Result<MetadataCommitResult>
-commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
+commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
                             MetadataOperationJournal& journal,
                             const MetadataDependentStateCommitter& dependent_state_committer,
                             const core::CancellationToken& cancellation = {});
@@ -92,11 +94,12 @@ recover_metadata_operations(MetadataOperationJournal& journal,
                             const MetadataDependentStateCommitter& dependent_state_committer,
                             const core::CancellationToken& cancellation = {});
 
-// Restores the exact retained inode for one completed operation. Undo is a
+// Restores the exact retained inode for one completed operation -- the whole
+// file, whatever its container. Undo is a
 // second journaled mutation with its own idempotency identity; a crash either
 // resumes the restore or leaves explicit reconciliation evidence.
 [[nodiscard]] core::Result<MetadataCommitResult>
-undo_flac_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
+undo_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
                              const MetadataDependentStateCommitter& dependent_state_committer,
                              const core::CancellationToken& cancellation = {});
 

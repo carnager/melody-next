@@ -45,6 +45,36 @@ below retain implementation history. Older references to two executables,
 missing local indexing, or pending features may be superseded by later ADRs;
 they must not be read as current workspace status.
 
+## Toward 1.0
+
+**Trackknife decision (2026-10-03):** there are no pre-1.0 release tags.
+`main` is kept working at all times -- it is what the packages build -- and
+features and fixes are made on branches and merged once the full test suite
+passes. 1.0 is the first tagged release, and it is cut when all of these
+hold:
+
+- **M11 is complete,** including step 3d: Trackknife no longer keeps its own
+  copy of the lists (ADR-0233), so a tab holds an engine's list rather than a
+  second copy of it.
+- **Window and engine check each other's version.** The protocol handshake
+  names a protocol version; a client and an engine that cannot work together
+  say so plainly instead of failing in odd ways.
+- **A written compatibility policy:** which protocol and database changes a
+  1.x release may make, how long a newer client keeps working with an older
+  engine and the other way round, and that every migration stays reversible.
+- **A quiet period:** a few weeks of everyday use with no protocol or schema
+  change.
+- **Large libraries proven on the real setup:** a library of about 66,000
+  tracks on a NAS engine, measured for opening, searching, keeping a search,
+  playing, tagging, ReplayGain and conversion, with no step stalling the
+  window. The numbers are recorded with the release.
+- **The documentation is current:** `docs/roadmap.md`, `docs/feature-matrix.md`
+  and this file describe what 1.0 actually is.
+- **Optimised builds pass** the suite the way debug builds do, on the compilers
+  the packages are built with.
+
+Flathub and other distribution beyond the AUR come after 1.0.
+
 ### Requested workspace addition — optional local library (ADR-0115)
 
 M5 is complete. At the user's request, local context now offers an optional
@@ -81,6 +111,8 @@ remain future work.
 - Every mutation uses plan, preview, revalidation, journal, verification, and a
   truthful recovery story.
 - Update this file and `docs/feature-matrix.md` when a gate changes state.
+- Keep `main` working: work happens on branches, and a branch is merged only
+  once the full test suite passes on it.
 - Do not stabilize a plugin ABI before built-in boundaries have real use.
 
 ## M0 — Decisions, skeleton, and test infrastructure

@@ -145,6 +145,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -315,6 +316,7 @@ class BenchMainWindowTest final : public QObject {
     void searchDialogProbesMissingTechnicalsOnDemand();
     void searchPresetsAreGroupedAndPrompt();
     void musicBrainzStagesFromCachedSearchMetadata();
+    void theTaggerOpensOnCachedTagsAndReadsBehind();
     void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
     void loudnessSidecarProjectsOntoProbedRows();
@@ -9396,6 +9398,92 @@ void BenchMainWindowTest::searchPresetsAreGroupedAndPrompt() {
     QVERIFY(menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums")));
 }
 
+// ADR-0257: the tagger opens on the tags the list cached, at once, and reads
+// the files behind them. A value typed meanwhile is kept when the file's own
+// tags take their place; scripts and Save wait for them.
+void BenchMainWindowTest::theTaggerOpensOnCachedTagsAndReadsBehind() {
+    QTemporaryDir media;
+    const auto path = media.filePath(QStringLiteral("behind.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    const auto raw_path = QFile::encodeName(path).toStdString();
+    auto native = metadata::read_local_metadata(raw_path);
+    QVERIFY(native);
+    auto cached = native->document;
+    for (auto& field : cached.fields) {
+        field.native_name = field.canonical_name;
+        field.provenance = metadata::FieldProvenance::cached_snapshot;
+        if (field.canonical_name == "title") {
+            field.values = {"As cached"};
+        }
+    }
+    const metadata::StagedMetadataSource source{.raw_path = raw_path,
+                                                .source_revision = {},
+                                                .baseline = cached,
+                                                .needs_metadata_capture = true};
+    // The reads wait until let go, as a slow disk far away would.
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    bool let_go = false;
+    const auto go = [&] {
+        if (!let_go) {
+            let_go = true;
+            release.set_value();
+        }
+    };
+    TaggerServices services;
+    const auto local = services.tools.access;
+    services.tools.access.read_many =
+        [local, released](const std::vector<std::string>& paths,
+                          const core::CancellationToken& token)
+        -> core::Result<std::vector<core::Result<metadata::LocalMetadataRead>>> {
+        released.wait();
+        std::vector<core::Result<metadata::LocalMetadataRead>> read;
+        for (const auto& each : paths) {
+            read.push_back(local.read(each, token));
+        }
+        return read;
+    };
+    MetadataPropertiesDialog properties{
+        1,
+        [source](std::size_t) -> std::optional<MetadataPropertiesSource> {
+            return MetadataPropertiesSource{.source = source, .track_label = QStringLiteral("Behind")};
+        },
+        {},
+        std::move(services)};
+    // Let go before the dialog is, whatever fails: it waits for its reads.
+    const auto always = qScopeGuard(go);
+    properties.show();
+    MetadataGridModel* grid = nullptr;
+    QTRY_VERIFY((grid = properties.findChild<MetadataGridModel*>()) != nullptr);
+    auto* session = properties.findChild<TaggerSession*>();
+    QVERIFY(session != nullptr);
+    // Open before anything is read: the cached tags, provisional.
+    QVERIFY(!grid->selection().source(0).source_revision);
+    const auto cached_title = grid->selection().field_index("title");
+    QVERIFY(cached_title);
+    QCOMPARE(grid->selection().cell(0, *cached_title)->values,
+             std::vector<std::string>{"As cached"});
+    QVERIFY(!session->canTransform());
+    QVERIFY(!session->canApply());
+    QTRY_VERIFY(session->status().contains(QStringLiteral("Reading tags")));
+    // A value edit is open at once.
+    const std::vector<std::size_t> first{0U};
+    QVERIFY(grid->replaceFieldValues(first, *cached_title, {"Typed meanwhile"}));
+
+    go();
+    QTRY_VERIFY(grid->selection().source(0).source_revision);
+    const auto title = grid->selection().field_index("title");
+    QVERIFY(title);
+    // The file's own title now, not the cached one.
+    QCOMPARE(grid->selection().cell(0, *title)->values.front(),
+             native->document.first_effective_value("title").value_or(std::string{}));
+    const auto* kept = grid->patches().patch(0, *title);
+    QVERIFY(kept != nullptr);
+    QCOMPARE(kept->values, std::vector<std::string>{"Typed meanwhile"});
+    QVERIFY(session->status().contains(QStringLiteral("Tags read")));
+    QTRY_VERIFY(session->canTransform());
+}
+
 void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
     QTemporaryDir media;
     const auto path = media.filePath(QStringLiteral("cached-release.flac"));
@@ -9446,7 +9534,8 @@ void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
     properties.show();
     MetadataGridModel* grid = nullptr;
     QTRY_VERIFY((grid = properties.findChild<MetadataGridModel*>()) != nullptr);
-    QVERIFY(grid->selection().source(0).source_revision);
+    // ADR-0257: shown on the cached tags first, then on the file's own.
+    QTRY_VERIFY(grid->selection().source(0).source_revision);
     const auto preview =
         metadata::metadata_proposal_preview(grid->selection(), grid->patches(), proposals, 0.5);
     QVERIFY(preview);

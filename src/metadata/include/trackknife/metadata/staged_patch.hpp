@@ -104,4 +104,20 @@ class StagedMetadataPatchSet final {
     std::shared_ptr<State> state_;
 };
 
+// ADR-0257: drafts staged on a provisional selection -- built from a list's
+// cached tags while the files are read -- carried onto the selection built
+// from the files' own. Rows are matched by position and must name the same
+// file; fields by name, `onto` gaining any a draft names that it lacks. A
+// value edit is the same edit whatever the old value was. A draft that is no
+// change against the real tags, or removes a field the file does not have,
+// is dropped and counted.
+struct CarriedMetadataPatches {
+    StagedMetadataPatchSet patches;
+    std::size_t carried{0U};
+    std::size_t dropped{0U};
+};
+[[nodiscard]] core::Result<CarriedMetadataPatches>
+carry_staged_patches(const StagedMetadataSelection& from, const StagedMetadataPatchSet& patches,
+                     StagedMetadataSelection& onto);
+
 } // namespace trackknife::metadata

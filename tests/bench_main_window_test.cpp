@@ -6718,10 +6718,19 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     // ↓ chooses the other version; the matcher follows.
     QTest::keyClick(versions, Qt::Key_Down);
     QCOMPARE(versions->currentRow(), 1);
-    QPushButton* stage = nullptr;
-    QTRY_VERIFY((stage = dialog->findChild<QPushButton*>(
-                     QStringLiteral("bench-musicbrainz-match-stage"))) != nullptr &&
-                stage->isVisible() && stage->isEnabled());
+    auto* accept =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-accept"));
+    QTRY_VERIFY(accept->isEnabled());
+    QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-status"))
+                 ->text(),
+             QStringLiteral("2 of 2 files paired"));
+    // The matcher's own heading and Stage are the window's here.
+    QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"))
+                 ->isVisible());
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/identify-albums-review.png")));
+    }
     // Enter accepts, and the next album needing a person opens.
     QTest::keyClick(versions, Qt::Key_Return);
     QTRY_VERIFY(heading->text().contains(QStringLiteral("Cover — Alpha")));

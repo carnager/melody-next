@@ -26,6 +26,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace trackknife::bench {
 namespace {
 
@@ -183,40 +185,43 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     pages_->addWidget(splitter);
 
     // The review: one album needing a person -- its versions above, the
-    // matcher below. ↑/↓ in the versions choose one; Tab reaches the files.
+    // files and tracks below, and one line to go on. ↑/↓ in the versions
+    // choose one; Tab reaches the files.
     auto* review_page = new QWidget(pages_);
     auto* review_layout = new QVBoxLayout(review_page);
     review_layout->setContentsMargins(0, 0, 0, 0);
+    auto* review_top = new QHBoxLayout;
     review_heading_ = new QLabel(review_page);
     review_heading_->setObjectName(QStringLiteral("bench-identify-albums-review-heading"));
     review_heading_->setWordWrap(true);
-    review_layout->addWidget(review_heading_);
+    review_place_ = new QLabel(review_page);
+    review_place_->setObjectName(QStringLiteral("bench-identify-albums-review-place"));
+    review_top->addWidget(review_heading_, 1);
+    review_top->addWidget(review_place_);
+    review_layout->addLayout(review_top);
     versions_ = new QListWidget(review_page);
     versions_->setObjectName(QStringLiteral("bench-identify-albums-versions"));
-    versions_->setMaximumHeight(120);
+    versions_->setToolTip(QStringLiteral("The versions that fit: ↑/↓ choose one"));
     review_layout->addWidget(versions_);
     match_holder_ = new QWidget(review_page);
     auto* holder_layout = new QVBoxLayout(match_holder_);
     holder_layout->setContentsMargins(0, 0, 0, 0);
     review_layout->addWidget(match_holder_, 1);
-    auto* keys = new QLabel(
-        QStringLiteral("Enter accept and next · S skip · ↑/↓ another version · Tab to the "
-                       "files · Alt+↑/↓ move a file · U leave a file unmatched"),
-        review_page);
-    keys->setObjectName(QStringLiteral("bench-identify-albums-review-keys"));
-    keys->setWordWrap(true);
-    review_layout->addWidget(keys);
     auto* review_buttons = new QHBoxLayout;
+    review_status_ = new QLabel(review_page);
+    review_status_->setObjectName(QStringLiteral("bench-identify-albums-review-status"));
     auto* back = new QPushButton(QStringLiteral("Back to the list"), review_page);
     back->setObjectName(QStringLiteral("bench-identify-albums-review-back"));
-    auto* skip_button = new QPushButton(QStringLiteral("Skip"), review_page);
+    auto* skip_button = new QPushButton(QStringLiteral("Skip (S)"), review_page);
     skip_button->setObjectName(QStringLiteral("bench-identify-albums-review-skip"));
-    auto* accept_button = new QPushButton(QStringLiteral("Accept and next"), review_page);
-    accept_button->setObjectName(QStringLiteral("bench-identify-albums-review-accept"));
-    review_buttons->addStretch(1);
+    skip_button->setToolTip(QStringLiteral("Leave this album for later and go to the next"));
+    accept_ = new QPushButton(QStringLiteral("Accept and next (Enter)"), review_page);
+    accept_->setObjectName(QStringLiteral("bench-identify-albums-review-accept"));
+    accept_->setToolTip(QStringLiteral("Stage this pairing and go to the next album needing you"));
+    review_buttons->addWidget(review_status_, 1);
     review_buttons->addWidget(back);
     review_buttons->addWidget(skip_button);
-    review_buttons->addWidget(accept_button);
+    review_buttons->addWidget(accept_);
     review_layout->addLayout(review_buttons);
     pages_->addWidget(review_page);
     for (const auto& key : {QKeySequence{Qt::Key_Return}, QKeySequence{Qt::Key_Enter}}) {
@@ -227,7 +232,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     auto* skip_key = new QShortcut(QKeySequence{Qt::Key_S}, review_page);
     skip_key->setContext(Qt::WidgetWithChildrenShortcut);
     connect(skip_key, &QShortcut::activated, this, &IdentifyAlbumsDialog::skip);
-    connect(accept_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::accept);
+    connect(accept_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::accept);
     connect(skip_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::skip);
     connect(back, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
     connect(versions_, &QListWidget::currentRowChanged, this, &IdentifyAlbumsDialog::showVersion);
@@ -352,9 +357,13 @@ void IdentifyAlbumsDialog::sync() {
     const auto* writing = session_->writing();
     const auto measuring = session_->measuring();
     const auto busy = writing != nullptr || measuring;
-    progress_->setVisible(started);
-    progress_text_->setVisible(started);
-    stop_->setVisible(started);
+    // Reviewing, only what still runs is shown above the album.
+    const auto reviewing = pages_->currentIndex() == 1;
+    heading_->setVisible(!reviewing);
+    const auto progress_shown = started && (!reviewing || session_->lookingUp() || busy);
+    progress_->setVisible(progress_shown);
+    progress_text_->setVisible(progress_shown);
+    stop_->setVisible(progress_shown);
     stop_->setEnabled(session_->lookingUp() || busy);
     if (writing != nullptr) {
         progress_->setMaximum(static_cast<int>(std::max<std::size_t>(writing->filesTotal(), 1U)));
@@ -471,10 +480,11 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
     for (std::size_t index = 0; index < album; ++index) {
         place += albums[index].state == State::needs_choice ? 1U : 0U;
     }
-    review_heading_->setText(QStringLiteral("<b>%1</b> · %2 · %3 of %4 needing you")
-                                 .arg(escaped(name_of(entry)), escaped(detail_of(entry)))
-                                 .arg(place)
-                                 .arg(session_->count(State::needs_choice)));
+    review_heading_->setText(QStringLiteral("<b>%1</b> · %2")
+                                 .arg(escaped(name_of(entry)), escaped(detail_of(entry))));
+    review_place_->setText(QStringLiteral("%1 of %2 needing you")
+                               .arg(place)
+                               .arg(session_->count(State::needs_choice)));
     {
         const QSignalBlocker blocker{versions_};
         versions_->clear();
@@ -487,9 +497,14 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
             versions_->addItem(parts.join(QStringLiteral(" · ")));
         }
     }
+    // As tall as its versions, up to five.
+    const auto shown_rows = std::min(versions_->count(), 5);
+    versions_->setFixedHeight(shown_rows * versions_->sizeHintForRow(0) +
+                              2 * versions_->frameWidth());
     pages_->setCurrentIndex(1);
     filters_->hide();
     bottom_bar_->hide();
+    sync();
     versions_->setCurrentRow(0);
     showVersion(0);
     versions_->setFocus();
@@ -535,8 +550,32 @@ void IdentifyAlbumsDialog::showVersion(const int version) {
                     reviewNext();
                 }
             });
-    match_view_ = createMusicBrainzTrackMatchView(match_, [this] { backToList(); }, match_holder_);
+    connect(match_, &TrackMatchSession::changed, this, &IdentifyAlbumsDialog::syncReviewStatus);
+    match_view_ = createMusicBrainzTrackMatchPanes(match_, match_holder_);
     match_holder_->layout()->addWidget(match_view_);
+    syncReviewStatus();
+}
+
+void IdentifyAlbumsDialog::syncReviewStatus() {
+    if (match_ == nullptr) {
+        review_status_->clear();
+        accept_->setEnabled(false);
+        return;
+    }
+    const auto paired = match_->pairedCount();
+    const auto files = match_->fileCount();
+    const auto gaps = match_->trackCount() - std::min(match_->trackCount(), paired);
+    QStringList parts{QStringLiteral("%1 of %2 files paired").arg(paired).arg(files)};
+    if (files > paired) {
+        parts << QStringLiteral("%1 left unmatched").arg(files - paired);
+    }
+    if (gaps > 0U) {
+        parts << QStringLiteral("%1 %2 without a file")
+                     .arg(gaps)
+                     .arg(gaps == 1U ? QStringLiteral("track") : QStringLiteral("tracks"));
+    }
+    review_status_->setText(parts.join(QStringLiteral(" · ")));
+    accept_->setEnabled(match_->canStage());
 }
 
 void IdentifyAlbumsDialog::accept() {

@@ -53,6 +53,7 @@ class IdentifyAlbumsDialog final : public QDialog {
     void skip();
     void backToList();
     void showDetail();
+    void syncReviewStatus();
     [[nodiscard]] int selectedAlbum() const;
     [[nodiscard]] bool shown(int album) const;
 
@@ -76,6 +77,9 @@ class IdentifyAlbumsDialog final : public QDialog {
     QWidget* bottom_bar_;
     QStackedWidget* pages_;
     QLabel* review_heading_;
+    QLabel* review_place_;
+    QLabel* review_status_;
+    QPushButton* accept_;
     QListWidget* versions_;
     QWidget* match_holder_;
     TrackMatchSession* match_{nullptr};

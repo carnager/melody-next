@@ -1238,6 +1238,14 @@ void clearing_the_queue_ends_what_plays() {
     require(!player->resume().has_value() || player->state().status != "playing",
             "a toggle brings nothing back");
 
+    // Stopped with a queue, play starts it again from its first entry.
+    player->replace_queue(entries);
+    require(player->play_entry(entries[1].entry_id).has_value(), "the second plays");
+    require(player->stop().has_value() && player->state().status == "stopped", "and stops");
+    require(player->resume().has_value(), "play after stop is taken");
+    require(player->state().status == "playing" && player->state().entry == entries[0].entry_id,
+            "and starts the queue from its first entry");
+
     // Removing the playing row from a list that goes on stops it too.
     player->replace_queue(entries);
     require(player->play_entry(entries[0].entry_id).has_value(), "it plays again");

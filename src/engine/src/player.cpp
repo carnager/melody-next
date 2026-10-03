@@ -719,9 +719,14 @@ core::Result<void> Player::resume() {
     // have a track loaded after its entry left the queue, and that is not
     // something to bring back.
     if (anchors_.current.is_nil()) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
-                                           .message = "nothing to resume",
-                                           .context = {}});
+        // Stopped: play starts the queue again, from its first entry, as a
+        // player's Play does.
+        if (queue_.empty()) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
+                                               .message = "nothing to play",
+                                               .context = {}});
+        }
+        return start_locked(0U);
     }
     return audition_->play();
 }

@@ -59,6 +59,10 @@ using persistence::ListEntryPrint;
 
 [[nodiscard]] std::string id_text(const Json& answer) { return answer.value("id", std::string{}); }
 
+// What an engine from before ADR-0256 takes in one line, less room for the
+// rest of the request.
+constexpr std::size_t old_engine_line_bytes = (1U << 20U) - 4096U;
+
 } // namespace
 
 Json EngineListSync::itemJson(const EngineListItem& item) {
@@ -679,8 +683,20 @@ void EngineListSync::sendWhole(const std::string& id, Known& known,
     // An engine from before ADR-0256: the whole list, as then. What does not
     // fit in its line is refused, and said so, rather than looping.
     auto rendered = Json::array();
+    std::size_t bytes = 0;
     for (const auto& item : items) {
         rendered.push_back(itemJson(item));
+        bytes += rendered.back().dump().size() + 1U;
+    }
+    // Such an engine drops a line past its limit without a word, and the
+    // window would reconnect and send it again for good: a list that long
+    // stays in the window until the engine is updated.
+    if (bytes > old_engine_line_bytes) {
+        qWarning("A list of %zu entries is too long for an engine from before ADR-0256; "
+                 "it is kept in this window until that engine is updated",
+                 items.size());
+        settle(known, false);
+        return;
     }
     Json params{{"id", id},
                 {"name", protocol::displayable_text(known.name)},

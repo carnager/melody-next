@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/identify_albums_dialog.hpp"
 
+#include "bench/musicbrainz_track_match_widget.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 #include "workspace/album_batch_session.hpp"
+#include "workspace/identify_session.hpp"
 
 #include <QButtonGroup>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -125,7 +130,8 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     filter_row->addStretch(1);
     layout->addWidget(filters_);
 
-    auto* splitter = new QSplitter(this);
+    pages_ = new QStackedWidget(this);
+    auto* splitter = new QSplitter(pages_);
     list_ = new QTreeWidget(splitter);
     list_->setObjectName(QStringLiteral("bench-identify-albums-list"));
     list_->setColumnCount(3);
@@ -151,19 +157,79 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     side_layout->addLayout(group_row);
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 2);
-    layout->addWidget(splitter, 1);
+    pages_->addWidget(splitter);
 
-    auto* bottom = new QHBoxLayout;
+    // Step 3: one album needing a person -- its versions above, the matcher
+    // below. ↑/↓ in the versions choose one; Tab reaches the files.
+    auto* review_page = new QWidget(pages_);
+    auto* review_layout = new QVBoxLayout(review_page);
+    review_layout->setContentsMargins(0, 0, 0, 0);
+    review_heading_ = new QLabel(review_page);
+    review_heading_->setObjectName(QStringLiteral("bench-identify-albums-review-heading"));
+    review_layout->addWidget(review_heading_);
+    versions_ = new QListWidget(review_page);
+    versions_->setObjectName(QStringLiteral("bench-identify-albums-versions"));
+    versions_->setMaximumHeight(120);
+    review_layout->addWidget(versions_);
+    match_holder_ = new QWidget(review_page);
+    auto* holder_layout = new QVBoxLayout(match_holder_);
+    holder_layout->setContentsMargins(0, 0, 0, 0);
+    review_layout->addWidget(match_holder_, 1);
+    auto* review_keys = new QHBoxLayout;
+    auto* keys = new QLabel(
+        QStringLiteral("Enter accept and next · S skip · ↑/↓ another version · Tab to the "
+                       "files · Alt+↑/↓ move a file · U leave a file unmatched"),
+        review_page);
+    keys->setObjectName(QStringLiteral("bench-identify-albums-review-keys"));
+    auto* back = new QPushButton(QStringLiteral("Back to the list"), review_page);
+    back->setObjectName(QStringLiteral("bench-identify-albums-review-back"));
+    auto* skip_button = new QPushButton(QStringLiteral("Skip"), review_page);
+    skip_button->setObjectName(QStringLiteral("bench-identify-albums-review-skip"));
+    auto* accept_button = new QPushButton(QStringLiteral("Accept and next"), review_page);
+    accept_button->setObjectName(QStringLiteral("bench-identify-albums-review-accept"));
+    review_keys->addWidget(keys, 1);
+    review_keys->addWidget(back);
+    review_keys->addWidget(skip_button);
+    review_keys->addWidget(accept_button);
+    review_layout->addLayout(review_keys);
+    pages_->addWidget(review_page);
+    for (const auto& key : {QKeySequence{Qt::Key_Return}, QKeySequence{Qt::Key_Enter}}) {
+        auto* accept_key = new QShortcut(key, review_page);
+        accept_key->setContext(Qt::WidgetWithChildrenShortcut);
+        connect(accept_key, &QShortcut::activated, this, &IdentifyAlbumsDialog::accept);
+    }
+    auto* skip_key = new QShortcut(QKeySequence{Qt::Key_S}, review_page);
+    skip_key->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(skip_key, &QShortcut::activated, this, &IdentifyAlbumsDialog::skip);
+    connect(accept_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::accept);
+    connect(skip_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::skip);
+    connect(back, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
+    connect(versions_, &QListWidget::currentRowChanged, this, &IdentifyAlbumsDialog::showVersion);
+    layout->addWidget(pages_, 1);
+
+    bottom_bar_ = new QWidget(this);
+    auto* bottom = new QHBoxLayout(bottom_bar_);
+    bottom->setContentsMargins(0, 0, 0, 0);
     summary_ = new QLabel(this);
     summary_->setObjectName(QStringLiteral("bench-identify-albums-summary"));
     auto* close = new QPushButton(QStringLiteral("Close"), this);
     look_up_ = new QPushButton(this);
     look_up_->setObjectName(QStringLiteral("bench-identify-albums-look-up"));
     look_up_->setDefault(true);
+    review_next_ = new QPushButton(this);
+    review_next_->setObjectName(QStringLiteral("bench-identify-albums-review-next"));
     bottom->addWidget(summary_, 1);
     bottom->addWidget(close);
     bottom->addWidget(look_up_);
-    layout->addLayout(bottom);
+    bottom->addWidget(review_next_);
+    layout->addWidget(bottom_bar_);
+    connect(review_next_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::reviewNext);
+    connect(list_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
+        const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
+        if (session_->albums()[album].state == State::needs_choice) {
+            review(album);
+        }
+    });
 
     connect(session_, &AlbumBatchSession::changed, this, &IdentifyAlbumsDialog::sync);
     connect(filter_group_, &QButtonGroup::idClicked, this, &IdentifyAlbumsDialog::sync);
@@ -292,6 +358,11 @@ void IdentifyAlbumsDialog::sync() {
                             started ? QStringLiteral("State") : QStringLiteral("Grouped by")});
     split_->setVisible(!started);
     merge_->setVisible(!started);
+    const auto needing = session_->count(State::needs_choice);
+    review_next_->setVisible(started);
+    review_next_->setEnabled(session_->nextNeedingYou(std::nullopt).has_value());
+    review_next_->setText(QStringLiteral("Review next needing you (%1)").arg(needing));
+    review_next_->setDefault(started && needing > 0U);
     look_up_->setVisible(!started || !session_->lookingUp());
     look_up_->setText(started ? QStringLiteral("Look up again")
                               : QStringLiteral("Look up %1 albums").arg(included));
@@ -308,6 +379,114 @@ void IdentifyAlbumsDialog::sync() {
                       .arg(included)
                       .arg(session_->fileCount()));
     showDetail();
+}
+
+void IdentifyAlbumsDialog::review(const std::size_t album) {
+    const auto& albums = session_->albums();
+    if (album >= albums.size() || !albums[album].result ||
+        albums[album].result->candidates.empty()) {
+        return;
+    }
+    reviewing_ = album;
+    const auto& entry = albums[album];
+    std::size_t place = 1U;
+    for (std::size_t index = 0; index < album; ++index) {
+        place += albums[index].state == State::needs_choice ? 1U : 0U;
+    }
+    review_heading_->setText(QStringLiteral("<b>%1</b> · %2 · %3 of %4 needing you")
+                                 .arg(escaped(name_of(entry)), escaped(detail_of(entry)))
+                                 .arg(place)
+                                 .arg(session_->count(State::needs_choice)));
+    {
+        const QSignalBlocker blocker{versions_};
+        versions_->clear();
+        for (const auto& candidate : entry.result->candidates) {
+            const auto& release = candidate.release;
+            QStringList parts{QString::fromStdString(release.title)};
+            for (const auto& part : {release.date, release.country, release.label}) {
+                if (!part.empty()) {
+                    parts << QString::fromStdString(part);
+                }
+            }
+            if (!release.media.empty() && !release.media.front().format.empty()) {
+                parts << QStringLiteral("%1×%2")
+                             .arg(release.media.size())
+                             .arg(QString::fromStdString(release.media.front().format));
+            }
+            parts << QStringLiteral("%1 tracks").arg(candidate.alignment.release_tracks.size());
+            parts << QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0));
+            versions_->addItem(parts.join(QStringLiteral(" · ")));
+        }
+    }
+    pages_->setCurrentIndex(1);
+    filters_->hide();
+    bottom_bar_->hide();
+    versions_->setCurrentRow(0);
+    showVersion(0);
+    versions_->setFocus();
+}
+
+void IdentifyAlbumsDialog::reviewNext() {
+    if (const auto next = session_->nextNeedingYou(reviewing_)) {
+        review(*next);
+    } else {
+        backToList();
+    }
+}
+
+void IdentifyAlbumsDialog::showVersion(const int version) {
+    if (!reviewing_ || version < 0) {
+        return;
+    }
+    const auto& album = session_->albums()[*reviewing_];
+    if (static_cast<std::size_t>(version) >= album.result->candidates.size()) {
+        return;
+    }
+    // Later, not now: this may run inside the old matcher's own signal.
+    if (match_view_ != nullptr) {
+        match_view_->hide();
+        match_view_->deleteLater();
+        match_view_ = nullptr;
+    }
+    if (match_ != nullptr) {
+        match_->disconnect(this);
+        match_->deleteLater();
+        match_ = nullptr;
+    }
+    auto files = session_->filesOf(*reviewing_);
+    match_ = new TrackMatchSession(
+        album.result->candidates[static_cast<std::size_t>(version)].release,
+        std::move(files.descriptors), std::move(files.paths), std::move(files.items), this);
+    connect(match_, &TrackMatchSession::accepted, this,
+            [this](metadata::MetadataProposalSet proposals) {
+                if (reviewing_) {
+                    session_->choose(*reviewing_, std::move(proposals));
+                    reviewNext();
+                }
+            });
+    match_view_ = createMusicBrainzTrackMatchView(match_, [this] { backToList(); }, match_holder_);
+    match_holder_->layout()->addWidget(match_view_);
+}
+
+void IdentifyAlbumsDialog::accept() {
+    if (match_ != nullptr && match_->canStage()) {
+        match_->stage();
+    }
+}
+
+void IdentifyAlbumsDialog::skip() {
+    if (reviewing_) {
+        session_->skip(*reviewing_);
+        reviewNext();
+    }
+}
+
+void IdentifyAlbumsDialog::backToList() {
+    reviewing_.reset();
+    pages_->setCurrentIndex(0);
+    filters_->setVisible(session_->started());
+    bottom_bar_->show();
+    sync();
 }
 
 void IdentifyAlbumsDialog::showDetail() {

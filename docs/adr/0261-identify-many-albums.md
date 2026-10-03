@@ -124,6 +124,13 @@ presets…** opens them.
   tagger has read the files (`AlbumBatchSession`, `proposalsSettled`). The
   tagger now carries each file's length from its list, so lengths count
   in single Identify too. Untagged albums are still not looked up.
+- The review, step 3 (2026-10-03): **Review next needing you** opens the
+  albums that fit more than one release, one at a time: the versions that
+  fit with date, country, label, format, tracks and score above the
+  matcher of ADR-0162. ↑/↓ choose a version, Enter accepts the pairing
+  shown and stages it as a clear match would be, S skips (the album stays,
+  Skipped, for later), U leaves a file unmatched; with none left the list
+  is back. Double-clicking an album needing a choice opens it too.
 
 ## Verification
 

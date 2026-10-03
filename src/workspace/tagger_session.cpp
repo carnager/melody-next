@@ -1538,6 +1538,12 @@ std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
             .disc_number = {},
             .duration_ms = {},
         };
+        // ADR-0261: a length, where the technical probe has one, so the
+        // match can tell how close it is.
+        if (const auto known = technical_cache_.find(source.raw_path);
+            known != technical_cache_.end() && known->second && known->second->duration_ms >= 0) {
+            descriptor.duration_ms = known->second->duration_ms;
+        }
         if (const auto number = baseline.first_effective_value("tracknumber")) {
             descriptor.track_number = parse_position_number(*number);
         }

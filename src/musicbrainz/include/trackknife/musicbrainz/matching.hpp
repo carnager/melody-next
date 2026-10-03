@@ -66,6 +66,17 @@ struct TrackAlignment {
     friend bool operator==(const TrackAlignment&, const TrackAlignment&) = default;
 };
 
+// How an alignment paired its files.
+enum class AlignmentMethod : std::uint8_t {
+    none,
+    // Every file named a distinct (disc, track number) of the release.
+    numbers,
+    // As many files as tracks, paired in order.
+    order,
+    // Paired by title and length where they agreed well enough.
+    titles,
+};
+
 struct ReleaseAlignment {
     std::vector<FlattenedReleaseTrack> release_tracks;
     std::vector<TrackAlignment> tracks;
@@ -73,9 +84,32 @@ struct ReleaseAlignment {
     // Mean per-track confidence over the local files, zero-counting the
     // unmatched ones, with a penalty when counts disagree.
     double confidence{0.0};
+    // ADR-0261: the evidence, for deciding whether a match needs a person.
+    AlignmentMethod method{AlignmentMethod::none};
+    // Over the paired files: how many had a length on both sides, the
+    // largest difference among those, and the weakest title similarity
+    // ([0, 1]; 1 when nothing is paired).
+    std::size_t durations_compared{0U};
+    std::int64_t worst_duration_delta_ms{0};
+    double weakest_title{1.0};
 
     friend bool operator==(const ReleaseAlignment&, const ReleaseAlignment&) = default;
 };
+
+// ADR-0261: when a match needs no one to look at it. Defaults to be measured
+// on real albums and tuned.
+struct ClearMatchRule {
+    std::int64_t maximum_duration_delta_ms{3'000};
+    double minimum_title_similarity{0.8};
+
+    friend bool operator==(const ClearMatchRule&, const ClearMatchRule&) = default;
+};
+
+// As many files as release tracks, every one paired -- by track numbers or
+// in order, not guessed from titles -- every length known on both sides and
+// within the rule's difference, and every title at least that alike.
+[[nodiscard]] bool is_clear_match(const ReleaseAlignment& alignment, std::size_t local_count,
+                                  const ClearMatchRule& rule = {});
 
 // Assigns local files to a looked-up release's tracks. Preference order:
 // exact (disc, track-number) permutation, then plain order when counts

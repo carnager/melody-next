@@ -22,11 +22,13 @@ endif()
 
 qt_add_library(
     trackknife_musicbrainz STATIC
+    src/album_groups.cpp
     src/client.cpp
     src/matching.cpp
     src/proposal_bridge.cpp
     src/acoustid.cpp
     src/web_service.cpp
+    include/trackknife/musicbrainz/album_groups.hpp
     include/trackknife/musicbrainz/client.hpp
     include/trackknife/musicbrainz/matching.hpp
     include/trackknife/musicbrainz/proposal_bridge.hpp
@@ -44,6 +46,6 @@ target_link_libraries(
     trackknife_musicbrainz
     PUBLIC Trackknife::Core Trackknife::Metadata Trackknife::MusicBrainzCore Qt6::Core
            trackknife_project_options
-    PRIVATE Qt6::Network trackknife_project_warnings
+    PRIVATE Qt6::Network Trackknife::Loudness trackknife_project_warnings
 )
 target_compile_features(trackknife_musicbrainz PUBLIC cxx_std_23)

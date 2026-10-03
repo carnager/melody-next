@@ -184,6 +184,10 @@ core::Result<void> Player::take_up_locked(const std::int64_t position_ms, const 
             revision = *observed;
         }
     }
+    // Taken up afresh: whatever was armed to follow went with the output's
+    // old session, and its count of handovers is where it now stands.
+    gapless_entry_.reset();
+    advanced_from_.reset();
     auto restored = audition_->restore_paused(
         entry->source.raw_path, revision.value_or(core::LocalSourceRevision{}),
         entry->source.selection, entry->source.segment, position_ms, entry->replay_gain);

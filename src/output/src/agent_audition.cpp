@@ -134,12 +134,14 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
         files_ = files;
         reached_ = std::move(reached);
         wishes_ = std::move(wishes);
-        // A new process knows nothing of what the old one played.
+        // A new process knows nothing of what the old one played, and counts
+        // its handovers from nothing; the engine's count stays where it was.
         reported_ = audio::LocalAuditionSnapshot{};
+        reported_.chain_transitions = seen_transitions_;
         next_armed_ = false;
         current_raw_.clear();
         next_raw_.clear();
-        seen_transitions_ = 0U;
+        agent_transitions_ = 0U;
     }
     if (previous) {
         previous->close();
@@ -212,12 +214,14 @@ void AgentAudition::on_offline(std::function<void()> callback) {
 void AgentAudition::adopt(const Json& report) {
     auto parsed = snapshot_from_json(report);
     // A gapless handover: what was armed is what plays now.
-    if (parsed.chain_transitions > seen_transitions_) {
+    if (parsed.chain_transitions > agent_transitions_) {
         if (!next_raw_.empty()) {
             current_raw_ = std::exchange(next_raw_, {});
         }
-        seen_transitions_ = parsed.chain_transitions;
+        seen_transitions_ += parsed.chain_transitions - agent_transitions_;
     }
+    agent_transitions_ = parsed.chain_transitions;
+    parsed.chain_transitions = seen_transitions_;
     next_armed_ = report.value("next_armed", false);
     // A change of mind -- off Wi-Fi, say -- for what is sent from now on.
     if (const auto stream = report.find("stream"); stream != report.end()) {
@@ -386,7 +390,6 @@ core::Result<void> AgentAudition::load(std::string raw_path, Source source, cons
     current_raw_ = std::move(raw_path);
     next_raw_.clear();
     next_armed_ = false;
-    seen_transitions_ = reported_.chain_transitions;
     return {};
 }
 

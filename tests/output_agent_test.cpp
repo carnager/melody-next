@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -359,6 +360,63 @@ int main(int argc, char** argv) {
                        (agent_root / "two.wav").string();
             }),
             "which the agent plays from its own copy");
+
+    // An agent that drops after a gapless handover, with the next track
+    // armed, and comes back: a new agent process counts its handovers from
+    // nothing, which once read to the engine as one more handover, so the
+    // track after the one playing was taken up, at the place reached in
+    // the one playing.
+    {
+        const std::vector<engine::QueueEntry> chained{entry(engine_root / "two.wav"),
+                                                      entry(engine_root / "one.wav"),
+                                                      entry(engine_root / "two.wav")};
+        player->replace_queue(chained);
+        require(player->play_entry(chained[0].entry_id).has_value(), "a short track plays");
+        require(eventually(
+                    [&] {
+                        static_cast<void>(player->advance_if_ended());
+                        const auto state = player->state();
+                        return state.entry == chained[1].entry_id &&
+                               state.gapless_entry == chained[2].entry_id;
+                    },
+                    std::chrono::seconds{20}),
+                "the next one follows it, and the one after is armed");
+        require(player->pause().has_value(), "and is paused");
+        require(eventually([&] { return player->state().status == "paused"; }),
+                "the engine hears it paused");
+        const auto reached = player->state().position_ms;
+        returned->stop();
+        returned.reset();
+        require(eventually([&] { return !outputs.list().front().online; }),
+                "the agent goes away");
+        // The engine's watcher samples the player all along, the agent's
+        // return included.
+        std::atomic<bool> watching{true};
+        std::thread watcher{[&] {
+            while (watching.load()) {
+                static_cast<void>(player->advance_if_ended());
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
+        }};
+        returned = start_agent(port, agent_root);
+        const bool back = returned != nullptr && eventually([&] { return returned->registered(); });
+        const bool taken_up = back && eventually([&] {
+                                  const auto snapshot = returned->audition().snapshot();
+                                  return snapshot.state == audio::LocalAuditionState::paused &&
+                                         !snapshot.raw_path.empty();
+                              });
+        std::this_thread::sleep_for(std::chrono::milliseconds{200});
+        watching.store(false);
+        watcher.join();
+        require(back, "and comes back");
+        require(taken_up, "taking the music up, paused");
+        require(returned->audition().snapshot().raw_path == (agent_root / "one.wav").string(),
+                "the track that was playing, not the one after");
+        require(player->state().entry == chained[1].entry_id,
+                "the engine still names that track, not the one after");
+        require(player->state().position_ms >= reached - 50, "at the place it was");
+        static_cast<void>(player->stop());
+    }
 
     // A file the agent has no copy of is streamed to it instead.
     require(write_silence(engine_root / "three.wav", 5), "the test audio must be written");

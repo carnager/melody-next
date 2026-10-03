@@ -1348,7 +1348,9 @@ void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
     choose(QStringLiteral("rule-everything"));
     QTRY_VERIFY_WITH_TIMEOUT(continuation.all().at(list).rule_id == "rule-everything", 5'000);
     QTRY_VERIFY_WITH_TIMEOUT(tabs->tabText(0).endsWith(QStringLiteral(" ∞")), 5'000);
-    QVERIFY(tabs->tabToolTip(0).contains(QStringLiteral("Continues with Everything")));
+    // Waited for, as the rule chosen last replaced another the tab named.
+    QTRY_VERIFY_WITH_TIMEOUT(
+        tabs->tabToolTip(0).contains(QStringLiteral("Continues with Everything")), 5'000);
 
     // Deleting the rule ends what continued with it.
     auto* dynamic = window.findChild<QAction*>(QStringLiteral("action-dynamic-playlists"));

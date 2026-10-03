@@ -120,17 +120,12 @@ void ReplayGainJob::setStatusText(const QString& text) {
 }
 
 void ReplayGainJob::setRunning(const bool running) {
-    const auto ended = running_ && !running;
     running_ = running;
     stopping_ = false;
     if (!running) {
         progress_timer_.stop();
     }
     emit changed();
-    if (ended) {
-        // Once the status says how it ended.
-        QMetaObject::invokeMethod(this, &ReplayGainJob::finished, Qt::QueuedConnection);
-    }
 }
 
 void ReplayGainJob::preview() {
@@ -189,13 +184,11 @@ void ReplayGainJob::startCapture() {
     }
     settings_.sidecar_only = sidecar_only_;
     settings_.true_peak = true_peak_;
-    if (remember_choices_) {
-        QSettings settings;
-        settings.setValue(QStringLiteral("replaygain/grouping"), grouping_);
-        settings.setValue(QStringLiteral("replaygain/grouping-expression"), expression_);
-        settings.setValue(QStringLiteral("replaygain/sidecar-only"), settings_.sidecar_only);
-        settings.setValue(QStringLiteral("replaygain/true-peak"), settings_.true_peak);
-    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("replaygain/grouping"), grouping_);
+    settings.setValue(QStringLiteral("replaygain/grouping-expression"), expression_);
+    settings.setValue(QStringLiteral("replaygain/sidecar-only"), settings_.sidecar_only);
+    settings.setValue(QStringLiteral("replaygain/true-peak"), settings_.true_peak);
 
     problems_.clear();
     scan_problems_.clear();

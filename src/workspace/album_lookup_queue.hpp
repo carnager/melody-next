@@ -30,6 +30,8 @@ class AlbumLookupQueue final : public QObject {
     // Nothing more is asked; an answer on its way is dropped. Albums added
     // afterwards are looked up again.
     void stop();
+    // `id` is not looked up, or no longer: its answer, if asked, is dropped.
+    void forget(std::size_t id);
     [[nodiscard]] bool running() const { return current_.has_value(); }
     [[nodiscard]] std::size_t waiting() const { return waiting_.size(); }
     // Requests a batch still has to make, at most: for the time left.

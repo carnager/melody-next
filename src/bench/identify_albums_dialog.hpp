@@ -8,11 +8,8 @@
 
 #include <cstddef>
 #include <optional>
-#include <vector>
 
 class QButtonGroup;
-class QCheckBox;
-class QComboBox;
 class QLabel;
 class QListWidget;
 class QStackedWidget;
@@ -27,8 +24,10 @@ class AlbumBatchSession;
 class TaggerSession;
 class TrackMatchSession;
 
-// ADR-0261: Identify albums… -- the albums of the files open in a tagger,
-// grouped, looked up in the background, and the clear matches staged.
+// ADR-0261/0262: Identify albums… -- the albums of the files open in a
+// tagger, grouped and looked up at once, the clear matches staged, those
+// needing a person reviewed, and the albums chosen written as the tagger's
+// Actions say.
 class IdentifyAlbumsDialog final : public QDialog {
     Q_OBJECT
   public:
@@ -37,11 +36,9 @@ class IdentifyAlbumsDialog final : public QDialog {
 
     [[nodiscard]] AlbumBatchSession* session() const { return session_; }
 
-    // Step 3: review an album needing a person, or the next that does.
+    // Review an album needing a person, or the next that does.
     void review(std::size_t album);
     void reviewNext();
-    // Step 4: the staged albums, to be written.
-    void showApply();
 
   protected:
     void closeEvent(QCloseEvent* event) override;
@@ -55,9 +52,6 @@ class IdentifyAlbumsDialog final : public QDialog {
     void accept();
     void skip();
     void backToList();
-    void syncApply();
-    void write();
-    [[nodiscard]] std::vector<std::size_t> albumsToWrite() const;
     void showDetail();
     [[nodiscard]] int selectedAlbum() const;
     [[nodiscard]] bool shown(int album) const;
@@ -77,6 +71,8 @@ class IdentifyAlbumsDialog final : public QDialog {
     QLabel* summary_;
     QPushButton* look_up_;
     QPushButton* review_next_;
+    QPushButton* actions_;
+    QPushButton* write_;
     QWidget* bottom_bar_;
     QStackedWidget* pages_;
     QLabel* review_heading_;
@@ -85,26 +81,8 @@ class IdentifyAlbumsDialog final : public QDialog {
     TrackMatchSession* match_{nullptr};
     QWidget* match_view_{nullptr};
     std::optional<std::size_t> reviewing_;
-    QPushButton* apply_;
-    QLabel* apply_heading_;
-    QTreeWidget* apply_list_;
-    QCheckBox* rename_;
-    QComboBox* rename_preset_;
-    QLabel* rename_pattern_;
-    QCheckBox* move_;
-    QComboBox* move_preset_;
-    QLabel* move_pattern_;
-    QCheckBox* replaygain_;
-    QComboBox* replaygain_mode_;
-    QCheckBox* replaygain_skip_;
-    QLabel* replaygain_hint_;
-    QLabel* apply_note_;
-    QProgressBar* write_progress_;
-    QPushButton* write_stop_;
-    QPushButton* apply_back_;
-    QPushButton* write_;
-    // The albums the last write was given, shown with how each went.
-    std::vector<std::size_t> written_;
+    // The review has opened by itself once.
+    bool reviewed_{false};
     bool syncing_{false};
 };
 

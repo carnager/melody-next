@@ -96,7 +96,9 @@ void AlbumBatchWrite::start() {
             continue;
         }
         std::optional<std::string> root;
-        if (operations_.move_files) {
+        if (operations_.move_files && options_.destination) {
+            root = options_.destination->root_raw_path;
+        } else if (operations_.move_files) {
             root = album.items.empty() ? std::nullopt
                                        : libraryFolderOf(selection->source(album.items.front()).raw_path,
                                                         roots);
@@ -115,7 +117,9 @@ void AlbumBatchWrite::start() {
         });
         if (group == groups_.end()) {
             groups_.push_back(Group{
-                .destination = root ? std::optional{folderDestination(*root)} : std::nullopt,
+                .destination = options_.destination ? options_.destination
+                               : root               ? std::optional{folderDestination(*root)}
+                                                    : std::nullopt,
                 .albums = {}});
             group = std::prev(groups_.end());
         }

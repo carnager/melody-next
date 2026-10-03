@@ -68,3 +68,18 @@ each album is in, and ReplayGain scanned after the write. In use:
   library folder each is in** is a choice where the library folders are
   known; the tagger, writing one plan, moves there when all its files are
   in one library folder and says so otherwise.
+- One popover (2026-10-04): `ApplyActionsPopover` is the Actions panel,
+  bound to the tagger session itself rather than mirroring the editor's
+  hidden controls; the tag editor opens it from Actions, Identify albums…
+  from Actions… -- the same choices.
+- Identify albums… streamlined (2026-10-04): looked up as it opens; an
+  album keeps its place in the session for good -- one split is replaced by
+  its folders' albums, one merged is merged away, both hidden -- so
+  splitting, merging and leaving out work while looking up, on any album not
+  yet staged, which is then looked up again. The review opens by itself
+  once, when the first album needs a person. Each album's checkbox leaves
+  it out of the lookup, or, once staged, out of the next Write. **Write N
+  albums** writes as the tagger's Actions say -- tags; renamed and moved by
+  the naming layout into the destination, a chosen folder, or the library
+  folder each album is in; ReplayGain measured first. The Apply page is
+  gone.

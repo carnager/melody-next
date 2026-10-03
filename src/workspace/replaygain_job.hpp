@@ -51,8 +51,6 @@ class ReplayGainJob final : public QObject {
     void setExpression(const QString& expression);
     void setSidecarOnly(bool on);
     void setTruePeak(bool on);
-    // Off: the choices made here are not kept as the ReplayGain dialog's.
-    void setRememberChoices(bool on) { remember_choices_ = on; }
     // The album groups the selection falls into, without measuring.
     void preview();
     // Measured and written.
@@ -61,8 +59,6 @@ class ReplayGainJob final : public QObject {
 
   signals:
     void changed();
-    // A preview or a scan is over, however it ended.
-    void finished();
 
   private:
     struct Capture {
@@ -110,7 +106,6 @@ class ReplayGainJob final : public QObject {
     QString status_;
     QStringList problems_;
     bool preview_only_{false};
-    bool remember_choices_{true};
     bool running_{false};
     bool stopping_{false};
     int progress_value_{0};

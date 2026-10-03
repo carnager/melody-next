@@ -1,6 +1,7 @@
 # ADR-0261: Identifying many albums at once
 
-Status: Accepted (2026-10-03)
+Status: Accepted (2026-10-03). Its Apply page, presets and ReplayGain as a
+second step are replaced by ADR-0262: one Apply, the tagger's.
 
 Extends the MusicBrainz identification of ADR-0089, ADR-0090, ADR-0158 and
 ADR-0162, which identify one album: the files selected are matched to one

@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <cstdint>
+#include <vector>
 
 namespace trackknife::bench {
 
@@ -102,7 +103,12 @@ class SegmentedTabBar final : public QTabBar {
     void leaveEvent(QEvent* event) override;
 
   private:
+    // A hidden tab takes no segment: the tabs shown, in order, and where
+    // one of them sits among them (-1 when it is hidden).
+    [[nodiscard]] std::vector<int> shown() const;
+    [[nodiscard]] int slotOf(int index) const;
     [[nodiscard]] qreal segment() const;
+    // Animates between slots, not tab indexes.
     QVariantAnimation lift_;
     int hovered_{-1};
 };

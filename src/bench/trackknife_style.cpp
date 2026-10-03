@@ -926,23 +926,44 @@ SegmentedTabBar::SegmentedTabBar(QWidget* parent) : QTabBar{parent} {
     lift_.setEasingCurve(QEasingCurve::OutCubic);
     connect(&lift_, &QVariantAnimation::valueChanged, this, [this] { update(); });
     connect(this, &QTabBar::currentChanged, this, [this](const int index) {
+        const auto to = static_cast<qreal>(std::max(0, slotOf(index)));
         const auto from = lift_.state() == QAbstractAnimation::Running
                               ? lift_.currentValue().toReal()
                           : lift_.endValue().isValid() ? lift_.endValue().toReal()
-                                                       : static_cast<qreal>(index);
+                                                       : to;
         lift_.stop();
         lift_.setStartValue(from);
-        lift_.setEndValue(static_cast<qreal>(index));
+        lift_.setEndValue(to);
         lift_.start();
     });
 }
 
+std::vector<int> SegmentedTabBar::shown() const {
+    std::vector<int> indexes;
+    for (int index = 0; index < count(); ++index) {
+        if (isTabVisible(index)) {
+            indexes.push_back(index);
+        }
+    }
+    return indexes;
+}
+
+int SegmentedTabBar::slotOf(const int index) const {
+    const auto indexes = shown();
+    const auto found = std::ranges::find(indexes, index);
+    return found != indexes.end() ? static_cast<int>(found - indexes.begin()) : -1;
+}
+
 qreal SegmentedTabBar::segment() const {
-    return count() > 0 ? (width() - 4) / static_cast<qreal>(count()) : 0.0;
+    const auto places = shown().size();
+    return places > 0U ? (width() - 4) / static_cast<qreal>(places) : 0.0;
 }
 
 QSize SegmentedTabBar::tabSizeHint(const int /*index*/) const {
-    return {count() > 0 ? std::max(1, (width() - 4) / count()) : 0, 26};
+    // The same width for every tab shown, so where QTabBar takes a click to
+    // be is where the segment is drawn.
+    const auto places = static_cast<int>(shown().size());
+    return {places > 0 ? std::max(1, (width() - 4) / places) : 0, 26};
 }
 
 QSize SegmentedTabBar::minimumTabSizeHint(const int index) const {
@@ -951,7 +972,7 @@ QSize SegmentedTabBar::minimumTabSizeHint(const int index) const {
 
 QSize SegmentedTabBar::sizeHint() const {
     int width = 4;
-    for (int index = 0; index < count(); ++index) {
+    for (const auto index : shown()) {
         width += minimumTabSizeHint(index).width();
     }
     return {width, 26};
@@ -967,14 +988,18 @@ void SegmentedTabBar::paintEvent(QPaintEvent* /*event*/) {
     painter.setPen(QPen{TrackknifeStyle::hairline(colours), 1.0});
     painter.setBrush(colours.color(QPalette::Base));
     painter.drawRoundedRect(box, TrackknifeStyle::radius + 1, TrackknifeStyle::radius + 1);
-    if (count() == 0) {
+    const auto indexes = shown();
+    if (indexes.empty()) {
         return;
     }
     const auto step = segment();
+    const auto current = slotOf(currentIndex());
+    // Settled, it is where the current tab is now: a tab hidden or shown
+    // since moves it without an animation.
     const auto at = lift_.state() == QAbstractAnimation::Running
                         ? lift_.currentValue().toReal()
-                        : static_cast<qreal>(currentIndex());
-    if (currentIndex() >= 0) {
+                        : static_cast<qreal>(current);
+    if (current >= 0) {
         const QRectF lift{2 + at * step + 0.5, 2.5, step - 1, height() - 5.0};
         painter.setPen(QPen{TrackknifeStyle::hairline(colours), 1.0});
         painter.setBrush(TrackknifeStyle::raised(colours));
@@ -983,8 +1008,9 @@ void SegmentedTabBar::paintEvent(QPaintEvent* /*event*/) {
     auto small = font();
     small.setPointSizeF(small.pointSizeF() * 0.9);
     painter.setFont(small);
-    for (int index = 0; index < count(); ++index) {
-        const QRectF segment_rect{2 + index * step, 2, step, height() - 4.0};
+    for (std::size_t slot = 0; slot < indexes.size(); ++slot) {
+        const auto index = indexes[slot];
+        const QRectF segment_rect{2 + static_cast<qreal>(slot) * step, 2, step, height() - 4.0};
         const bool lit = index == currentIndex() || index == hovered_;
         painter.setPen(lit ? colours.color(QPalette::WindowText) : TrackknifeStyle::dim(colours));
         painter.drawText(segment_rect, Qt::AlignCenter,
@@ -995,8 +1021,11 @@ void SegmentedTabBar::paintEvent(QPaintEvent* /*event*/) {
 
 void SegmentedTabBar::mouseMoveEvent(QMouseEvent* event) {
     const auto step = segment();
-    const auto index = step > 0 ? static_cast<int>((event->position().x() - 2) / step) : -1;
-    const auto hovered = index >= 0 && index < count() ? index : -1;
+    const auto indexes = shown();
+    const auto slot = step > 0 ? static_cast<int>((event->position().x() - 2) / step) : -1;
+    const auto hovered =
+        slot >= 0 && slot < static_cast<int>(indexes.size()) ? indexes[static_cast<std::size_t>(slot)]
+                                                             : -1;
     if (hovered != hovered_) {
         hovered_ = hovered;
         update();

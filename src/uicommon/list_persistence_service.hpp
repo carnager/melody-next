@@ -49,7 +49,9 @@ class ListPersistenceService final : public QObject {
     ListPersistenceService(const ListPersistenceService&) = delete;
     ListPersistenceService& operator=(const ListPersistenceService&) = delete;
 
-    void initialize(WorkspaceCallback callback);
+    // ADR-0259: `lists` false once the window keeps its tabs elsewhere; the
+    // lists stored here are then not read at all.
+    void initialize(WorkspaceCallback callback, bool lists = true);
     void saveWorkspace(std::vector<persistence::ListDocumentWrite> lists,
                        std::vector<persistence::TrackViewPreset> presets,
                        CompletionCallback callback = {});

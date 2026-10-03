@@ -5,6 +5,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/remote_engines.hpp"
+#include "workspace/tab_store.hpp"
 #include "workspace/workspace_view.hpp"
 
 #include <QDir>
@@ -59,29 +60,85 @@ void Workspace::start() {
         persistNow(false);
         refreshRatings();
     });
-    persistence_->initialize([this](ui::PersistedWorkspace workspace, QString error) {
-        if (!error.isEmpty()) {
-            view_->showMessage(QStringLiteral("List restore failed: %1").arg(error), 5'000);
-        }
-        restored_track_view_layouts_.clear();
-        for (const auto& preset : workspace.view_presets) {
+    tab_store_ = std::make_unique<TabStore>();
+    // ADR-0259: once this window keeps its tabs itself, the lists it stored
+    // before are not read again.
+    const bool kept = TabStore::hasState();
+    persistence_->initialize(
+        [this, kept](ui::PersistedWorkspace workspace, QString error) {
+            if (!error.isEmpty()) {
+                view_->showMessage(QStringLiteral("List restore failed: %1").arg(error), 5'000);
+            }
+            if (kept) {
+                restoreFromTabStore();
+                return;
+            }
+            // The migration: this window's lists as it stored them, one last
+            // time; the first save keeps them as tabs.
+            migrating_ = true;
+            restored_track_view_layouts_.clear();
+            for (const auto& preset : workspace.view_presets) {
+                restored_track_view_layouts_.insert(
+                    displayText(preset.binding),
+                    QByteArray{preset.header_state.data(),
+                               static_cast<qsizetype>(preset.header_state.size())});
+            }
+            // The lists' rows are made off this thread: on a big list that
+            // was seconds of a window that took no clicks. The rest of the
+            // start follows once they are in.
+            auto* preparing = new QFutureWatcher<std::vector<PreparedList>>(this);
+            connect(preparing, &QFutureWatcherBase::finished, this, [this, preparing, error] {
+                preparing->deleteLater();
+                restoreLists(preparing->future().takeResult());
+                restoredWorkspace(error);
+            });
+            preparing->setFuture(QtConcurrent::run([lists = std::move(workspace.lists)]() mutable {
+                return prepareLists(std::move(lists));
+            }));
+        },
+        !kept);
+}
+
+void Workspace::restoreFromTabStore() {
+    auto state = TabStore::loadState();
+    restored_track_view_layouts_.clear();
+    for (const auto& tab : state.tabs) {
+        if (!tab.layout.isEmpty()) {
             restored_track_view_layouts_.insert(
-                displayText(preset.binding),
-                QByteArray{preset.header_state.data(),
-                           static_cast<qsizetype>(preset.header_state.size())});
+                QStringLiteral("local:%1").arg(QString::fromStdString(tab.id.to_string())),
+                tab.layout);
         }
-        // The lists' rows are made off this thread: on a big list that was
-        // seconds of a window that took no clicks. The rest of the start
-        // follows once they are in.
-        auto* preparing = new QFutureWatcher<std::vector<PreparedList>>(this);
-        connect(preparing, &QFutureWatcherBase::finished, this, [this, preparing, error] {
-            preparing->deleteLater();
-            restoreLists(preparing->future().takeResult());
-            restoredWorkspace(error);
-        });
-        preparing->setFuture(QtConcurrent::run(
-            [lists = std::move(workspace.lists)]() mutable { return prepareLists(std::move(lists)); }));
+    }
+    restored_active_ = state.active;
+    auto* preparing = new QFutureWatcher<std::vector<PreparedList>>(this);
+    connect(preparing, &QFutureWatcherBase::finished, this, [this, preparing] {
+        preparing->deleteLater();
+        restoreLists(preparing->future().takeResult());
+        restoredWorkspace({});
     });
+    preparing->setFuture(QtConcurrent::run([store = tab_store_.get(), tabs = std::move(state.tabs)] {
+        std::vector<persistence::ListDocument> documents;
+        documents.reserve(tabs.size());
+        for (const auto& tab : tabs) {
+            auto cached = store->readRows(tab.id);
+            // Its cache gone, a tab is empty until its engine answers -- and
+            // not edited: what was not saved went with the cache, and an
+            // empty list kept over the engine's would lose it all.
+            auto document = cached.value_or(persistence::ListDocument{.id = tab.id,
+                                                                      .kind = tab.kind,
+                                                                      .name = tab.name,
+                                                                      .pinned = false,
+                                                                      .dirty = false,
+                                                                      .items = {},
+                                                                      .engine = {}});
+            // The window's own say: which engine, and how it is shown.
+            document.engine = tab.engine;
+            document.pinned = tab.pinned;
+            document.dirty = cached.has_value() && tab.dirty;
+            documents.push_back(std::move(document));
+        }
+        return prepareLists(std::move(documents));
+    }));
 }
 
 void Workspace::restoredWorkspace(const QString& error) {

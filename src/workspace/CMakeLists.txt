@@ -22,6 +22,7 @@ qt_add_library(
     workspace_ingest.cpp
     workspace_library.cpp
     workspace_lists.cpp
+    tab_store.cpp
     workspace_playback.cpp
     workspace_ratings.cpp
     workspace_texts.cpp

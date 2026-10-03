@@ -91,6 +91,21 @@ unreadable -- and a tab whose engine is away shows its cached rows.
   `draft_base`. Schema 51. The window does not use them yet.
 - Step 3, `list.from_query {query, name, words?}`: done (2026-10-03). The
   window does not use it yet.
+- Steps 2 and 3 of the window, its tabs in settings and a cache: done
+  (2026-10-03). The window keeps which lists are open -- engine, name, kind,
+  pinned, unsaved, layout -- their order and the shown one under `tabs/v1`,
+  and each tab's rows in `<cache>/tabs/<id>.tabcache`, written off its
+  thread when they changed. The first start reads `list_documents` once and
+  keeps its lists so; after that neither it nor the file work's
+  bookkeeping of it is touched. A tab whose cache is gone opens empty and
+  not edited, and is its engine's list once that answers. Measured on a
+  copy of the window's database from before the 2026-10-02 cleanup (debug
+  build): a kept search of 66,841 rows is a 103 MB cache, written in 0.7 s
+  and read in 1.0 s, against 3.6 s for all of `load_all`. Its size is the
+  full tags of every row; compressing it is left for when it matters.
+- Not yet: a tab whose engine is away is still editable, its edits sent
+  when the engine is back, as before; drafts (step 2) and
+  `list.from_query` (step 3) are not used by the window yet.
 - Measured on a copy of gemenon's library (66,841 tracks, debug build,
   2026-10-03): `list.from_query ALL` 2.4 s; `list.get` of it 1.6 s for
   24 MB; described whole 9.3 s for 99 MB; described in parts of 2,000, the

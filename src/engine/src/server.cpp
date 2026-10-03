@@ -21,7 +21,10 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <mutex>
+#include <optional>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -35,9 +38,42 @@ namespace {
 }
 
 // A line longer than this is refused rather than buffered without bound: the
-// control path carries no binary, so a megabyte-long line is a confused or
-// hostile sender, not a large request.
+// control path carries no binary, and nothing a client asks needs a megabyte
+// -- a list travels as its edits, never whole. An admitted client is answered
+// and stays connected; one that has not authenticated is let go.
 constexpr std::size_t maximum_line_bytes = 1U << 20U;
+
+// The id and method of a request, read from the start of a line too long to
+// parse. Clients write "id" first and "method" second -- the keys sorted, as
+// the protocol's encoder does -- so the refusal can answer the call that is
+// waiting for it. Nothing when the line does not start that way.
+[[nodiscard]] std::optional<std::pair<std::int64_t, std::string>>
+refused_call(const std::string_view head) {
+    constexpr std::string_view id_key = "{\"id\":";
+    if (!head.starts_with(id_key)) {
+        return std::nullopt;
+    }
+    std::size_t at = id_key.size();
+    std::int64_t id = 0;
+    const auto digits = at;
+    while (at < head.size() && head[at] >= '0' && head[at] <= '9' && at - digits < 18U) {
+        id = id * 10 + (head[at] - '0');
+        ++at;
+    }
+    if (at == digits) {
+        return std::nullopt;
+    }
+    std::string method;
+    constexpr std::string_view method_key = ",\"method\":\"";
+    if (head.substr(at).starts_with(method_key)) {
+        at += method_key.size();
+        while (at < head.size() && head[at] != '"' && method.size() < 64U) {
+            method.push_back(head[at]);
+            ++at;
+        }
+    }
+    return std::pair{id, std::move(method)};
+}
 
 // How many clients may be connected at once. A person's players, agents and
 // scripts are a handful; this is a bound, not a budget.
@@ -588,6 +624,34 @@ void Server::serve(Connection& connection_ref) {
 
     std::string pending;
     std::array<char, 4096> buffer{};
+    // A line past the limit from an admitted client: skipped to its end, then
+    // answered -- with an error to the call it was, when that can be read
+    // from its start -- and the connection carries on. Dropping it instead
+    // made a client reconnect and send the same line again, for good.
+    bool refusing = false;
+    std::string refused_head;
+    std::size_t refused_bytes = 0;
+    const auto refuse = [&] {
+        const auto call = refused_call(refused_head);
+        const auto method = call && !call->second.empty() ? call->second : std::string{"?"};
+        std::cerr << "melodyd: refused a " << refused_bytes << "-byte message (" << method
+                  << "); the limit is " << maximum_line_bytes << " bytes\n";
+        const auto message = "the message is " + std::to_string(refused_bytes) +
+                             " bytes; the engine takes at most " +
+                             std::to_string(maximum_line_bytes);
+        if (!call) {
+            protocol::Event rejected{.name = "protocol.rejected", .data = protocol::Json::object()};
+            rejected.data["reason"] = message;
+            connection->write_line(protocol::encode_message(rejected));
+            return;
+        }
+        protocol::Response answer{.id = call->first, .result = std::nullopt, .error = std::nullopt};
+        answer.error = protocol::to_protocol_error(core::Error{
+            .code = core::ErrorCode::limit_exceeded,
+            .message = message,
+            .context = {{.key = "method", .value = method}}});
+        connection->write_line(encode_answer(std::move(answer)));
+    };
     while (connection->open.load()) {
         const auto received = ::recv(connection->descriptor, buffer.data(), buffer.size(), 0);
         if (received < 0) {
@@ -642,6 +706,20 @@ void Server::serve(Connection& connection_ref) {
             return;
         }
         pending.append(buffer.data(), static_cast<std::size_t>(received));
+        if (refusing) {
+            // Skipping the rest of a refused line; what follows its end is
+            // read as usual.
+            const auto end = pending.find('\n');
+            if (end == std::string::npos) {
+                refused_bytes += pending.size();
+                pending.clear();
+                continue;
+            }
+            refused_bytes += end;
+            pending.erase(0, end + 1U);
+            refusing = false;
+            refuse();
+        }
 
         std::size_t start = 0;
         while (true) {
@@ -725,10 +803,17 @@ void Server::serve(Connection& connection_ref) {
         }
         pending.erase(0, start);
         if (pending.size() > maximum_line_bytes) {
-            protocol::Event rejected{.name = "protocol.rejected", .data = protocol::Json::object()};
-            rejected.data["reason"] = "line exceeds the maximum length";
-            connection->write_line(protocol::encode_message(rejected));
-            break;
+            if (!connection->authenticated.load()) {
+                protocol::Event rejected{.name = "protocol.rejected",
+                                         .data = protocol::Json::object()};
+                rejected.data["reason"] = "line exceeds the maximum length";
+                connection->write_line(protocol::encode_message(rejected));
+                break;
+            }
+            refused_head = pending.substr(0, 128U);
+            refused_bytes = pending.size();
+            pending.clear();
+            refusing = true;
         }
     }
     finish_reading();

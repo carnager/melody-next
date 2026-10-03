@@ -254,11 +254,12 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     actions_->setObjectName(QStringLiteral("bench-identify-albums-actions"));
     write_ = new QPushButton(this);
     write_->setObjectName(QStringLiteral("bench-identify-albums-write"));
+    // Actions on the left, as in the tag editor.
+    bottom->addWidget(actions_);
     bottom->addWidget(summary_, 1);
     bottom->addWidget(close);
     bottom->addWidget(look_up_);
     bottom->addWidget(review_next_);
-    bottom->addWidget(actions_);
     bottom->addWidget(write_);
     layout->addWidget(bottom_bar_);
     connect(review_next_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::reviewNext);
@@ -360,11 +361,12 @@ void IdentifyAlbumsDialog::sync() {
     // Reviewing, only what still runs is shown above the album.
     const auto reviewing = pages_->currentIndex() == 1;
     heading_->setVisible(!reviewing);
-    const auto progress_shown = started && (!reviewing || session_->lookingUp() || busy);
-    progress_->setVisible(progress_shown);
-    progress_text_->setVisible(progress_shown);
-    stop_->setVisible(progress_shown);
-    stop_->setEnabled(session_->lookingUp() || busy);
+    // The bar and Stop while something runs; the line saying how it went
+    // after.
+    const auto running = session_->lookingUp() || busy;
+    progress_->setVisible(running);
+    stop_->setVisible(running);
+    progress_text_->setVisible(started && (!reviewing || running));
     if (writing != nullptr) {
         progress_->setMaximum(static_cast<int>(std::max<std::size_t>(writing->filesTotal(), 1U)));
         progress_->setValue(static_cast<int>(writing->filesDone()));
@@ -436,14 +438,21 @@ void IdentifyAlbumsDialog::sync() {
             }
         }
     }
+    // Something is always looked at, its details beside it.
+    if (list_->currentItem() == nullptr && list_->topLevelItemCount() > 0) {
+        const QSignalBlocker blocker{list_};
+        list_->setCurrentItem(list_->topLevelItem(0));
+    }
     syncing_ = false;
     const auto needing = session_->count(State::needs_choice);
-    review_next_->setEnabled(session_->nextNeedingYou(std::nullopt).has_value());
+    // Only what can be done now is offered.
+    const auto can_review = session_->nextNeedingYou(std::nullopt).has_value();
+    review_next_->setVisible(can_review);
+    review_next_->setEnabled(can_review);
     review_next_->setText(QStringLiteral("Review next needing you (%1)").arg(needing));
-    look_up_->setVisible(started && !session_->lookingUp());
-    look_up_->setEnabled(!busy && session_->count(State::failed) + session_->count(State::waiting) +
-                                          session_->count(State::no_match) >
-                                      0U);
+    const auto again = session_->count(State::failed) + session_->count(State::waiting) +
+                       session_->count(State::no_match);
+    look_up_->setVisible(started && !session_->lookingUp() && !busy && again > 0U);
     const auto to_write = session_->toWrite().size();
     write_->setText(QStringLiteral("Write %1 %2")
                         .arg(to_write)
@@ -621,14 +630,15 @@ void IdentifyAlbumsDialog::showDetail() {
     const auto index = selectedAlbum();
     if (index < 0) {
         detail_->clear();
-        split_->setEnabled(false);
-        merge_->setEnabled(false);
+        split_->hide();
+        merge_->hide();
         return;
     }
     const auto& album = session_->albums()[static_cast<std::size_t>(index)];
     const auto editable = session_->editable(static_cast<std::size_t>(index));
-    split_->setEnabled(editable && album.folders.size() > 1U);
-    merge_->setEnabled(editable && session_->order().size() > 1U);
+    // Grouping changes while it can.
+    split_->setVisible(editable && album.folders.size() > 1U);
+    merge_->setVisible(editable && session_->order().size() > 1U);
     QString html = QStringLiteral("<h3>%1</h3>").arg(escaped(name_of(album)));
     html += QStringLiteral("<p>%1 · grouped by %2</p>")
                 .arg(escaped(detail_of(album)), basis_text(album));

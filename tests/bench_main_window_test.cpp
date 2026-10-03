@@ -6013,7 +6013,7 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     QCOMPARE(albums->topLevelItemCount(), 1);
     QVERIFY(albums->topLevelItem(0)->text(1).contains(QStringLiteral("2 folders")));
     albums->setCurrentItem(albums->topLevelItem(0));
-    QVERIFY(split->isEnabled());
+    QVERIFY(split->isVisibleTo(albums_dialog));
     split->click();
     QCOMPARE(albums->topLevelItemCount(), 2);
     const auto order = albums_dialog->session()->order();
@@ -6741,9 +6741,8 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     QTest::keyClick(versions, Qt::Key_S);
     QCOMPARE(session->count(AlbumBatchSession::State::skipped), std::size_t{1U});
     QTRY_VERIFY(!heading->isVisible());
-    QVERIFY(!review_next->isEnabled());
-    // Back in the list, it does not open again by itself.
-    QCOMPARE(review_next->text(), QStringLiteral("Review next needing you (0)"));
+    // Back in the list, nothing left to review: not offered.
+    QVERIFY(!review_next->isVisibleTo(dialog));
     delete properties;
 }
 

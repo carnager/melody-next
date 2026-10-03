@@ -54,10 +54,16 @@ struct FileWorkTools {
 
 // Images of this computer that intents name -- a cover picked on its disk or
 // downloaded -- handed to the engine, so the plan names the engine's copy.
-// This process's tools change nothing.
+// With a size limit for every destination the policy writes, an image is
+// resized here to the largest of them first: what the engine would shrink
+// anyway does not travel at full size. This process's tools change nothing.
 [[nodiscard]] core::Result<std::vector<metadata::ArtworkWritePlanIntent>>
 stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const FileWorkTools& tools,
-                  const core::CancellationToken& cancellation);
+                  const core::CancellationToken& cancellation,
+                  const metadata::ArtworkStoragePolicy& policy = {});
+// The longest edge every destination `policy` writes keeps a cover within;
+// 0 when one of them keeps covers as they are.
+[[nodiscard]] std::uint32_t largestCoverEdge(const metadata::ArtworkStoragePolicy& policy);
 
 // The engine's, through its file-work connection.
 [[nodiscard]] FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work);

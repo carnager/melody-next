@@ -2,6 +2,7 @@
 
 #include "bench/file_work_tools.hpp"
 
+#include "bench/artwork_fitting.hpp"
 #include "bench/post_back.hpp"
 
 #include "bench/artwork_fitting.hpp"
@@ -43,12 +44,29 @@ operations::ArtworkImageFitter artworkFitterFor(const FileWorkTools& tools) {
     return tools.stage ? engineArtworkFitter(tools.artwork, tools.stage) : artworkFitter();
 }
 
+std::uint32_t largestCoverEdge(const metadata::ArtworkStoragePolicy& policy) {
+    std::uint32_t largest = 0U;
+    for (const auto& [writes, edge] : {std::pair{policy.embed, policy.max_embedded_edge},
+                                       std::pair{policy.write_folder_image, policy.max_folder_edge}}) {
+        if (!writes) {
+            continue;
+        }
+        if (edge == 0U) {
+            return 0U;
+        }
+        largest = std::max(largest, edge);
+    }
+    return largest;
+}
+
 core::Result<std::vector<metadata::ArtworkWritePlanIntent>>
 stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const FileWorkTools& tools,
-                  const core::CancellationToken& cancellation) {
+                  const core::CancellationToken& cancellation,
+                  const metadata::ArtworkStoragePolicy& policy) {
     if (!tools.stage) {
         return intents;
     }
+    const auto edge = largestCoverEdge(policy);
     // One handover per distinct image, however many files it goes into.
     std::map<std::string, std::string> staged;
     for (auto& intent : intents) {
@@ -68,7 +86,21 @@ stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const F
             if (!bytes) {
                 return std::unexpected(std::move(bytes.error()));
             }
-            auto there = tools.stage(*bytes);
+            // Resized here first when every destination would shrink it: the
+            // engine then makes each copy from this one.
+            std::optional<FittedArtwork> fitted;
+            if (edge > 0U) {
+                auto fit = fitArtworkBytes(*bytes, edge, cancellation);
+                if (!fit) {
+                    return std::unexpected(std::move(fit.error()));
+                }
+                fitted = std::move(*fit);
+            }
+            auto there =
+                fitted ? tools.stage(std::span{reinterpret_cast<const unsigned char*>(
+                                                   fitted->bytes.constData()),
+                                               static_cast<std::size_t>(fitted->bytes.size())})
+                       : tools.stage(*bytes);
             if (!there) {
                 return std::unexpected(std::move(there.error()));
             }

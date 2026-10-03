@@ -318,6 +318,7 @@ class BenchMainWindowTest final : public QObject {
     void searchPresetsAreGroupedAndPrompt();
     void musicBrainzStagesFromCachedSearchMetadata();
     void theTaggerOpensOnCachedTagsAndReadsBehind();
+    void coversAreResizedBeforeTheyTravel();
     void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
     void loudnessSidecarProjectsOntoProbedRows();
@@ -9481,6 +9482,59 @@ void BenchMainWindowTest::searchPresetsAreGroupedAndPrompt() {
 // ADR-0257: the tagger opens on the tags the list cached, at once, and reads
 // the files behind them. A value typed meanwhile is kept when the file's own
 // tags take their place; scripts and Save wait for them.
+// A cover picked on this computer for an engine's files is resized here, to
+// the largest size any destination keeps, before it travels: what the engine
+// would shrink anyway is not sent at full size -- an original past the
+// engine's line limit could not be sent at all.
+void BenchMainWindowTest::coversAreResizedBeforeTheyTravel() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("scan.jpg"));
+    QImage scan{2000, 1600, QImage::Format_RGB32};
+    for (int y = 0; y < scan.height(); ++y) {
+        for (int x = 0; x < scan.width(); ++x) {
+            scan.setPixel(x, y, qRgb((x * 7) % 256, (y * 13) % 256, ((x + y) * 3) % 256));
+        }
+    }
+    QVERIFY(scan.save(path, "JPEG", 95));
+    std::vector<QSize> sent;
+    FileWorkTools tools;
+    tools.stage = [&sent](const std::span<const unsigned char> bytes)
+        -> core::Result<metadata::ArtworkImageFile> {
+        QImage arrived;
+        arrived.loadFromData(reinterpret_cast<const uchar*>(bytes.data()),
+                             static_cast<int>(bytes.size()));
+        sent.push_back(arrived.size());
+        metadata::ArtworkImageFile there;
+        there.raw_path = "/engine/staged.jpg";
+        return there;
+    };
+    const auto send = [&](const metadata::ArtworkStoragePolicy& policy) {
+        metadata::ArtworkWritePlanIntent intent;
+        intent.kind = metadata::ArtworkWritePlanIntentKind::replace;
+        intent.replacement_raw_path = QFile::encodeName(path).toStdString();
+        auto staged = stageReplacements({intent}, tools, {}, policy);
+        return staged && staged->front().replacement_raw_path == std::string{"/engine/staged.jpg"};
+    };
+    metadata::ArtworkStoragePolicy policy;
+    policy.embed = true;
+    policy.write_folder_image = true;
+    policy.max_embedded_edge = 500U;
+    policy.max_folder_edge = 1000U;
+    QCOMPARE(largestCoverEdge(policy), 1000U);
+    QVERIFY(send(policy));
+    QCOMPARE(sent.back(), QSize(1000, 800));
+    // A folder image kept as it is: the original has to travel.
+    policy.max_folder_edge = 0U;
+    QCOMPARE(largestCoverEdge(policy), 0U);
+    QVERIFY(send(policy));
+    QCOMPARE(sent.back(), QSize(2000, 1600));
+    // Embedded only: the embedded limit.
+    policy.write_folder_image = false;
+    QVERIFY(send(policy));
+    QCOMPARE(sent.back(), QSize(500, 400));
+}
+
 void BenchMainWindowTest::theTaggerOpensOnCachedTagsAndReadsBehind() {
     QTemporaryDir media;
     const auto path = media.filePath(QStringLiteral("behind.flac"));

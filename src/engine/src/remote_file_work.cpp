@@ -674,11 +674,43 @@ operations::ArtworkFileAccess RemoteFileWork::artwork_access() {
 
 core::Result<metadata::ArtworkImageFile>
 RemoteFileWork::stage(const std::span<const unsigned char> bytes) {
-    return image_of(
-        answer_of(client(), "artwork.stage",
-                  Json{{"bytes", protocol::encode_raw_path(std::string{
-                                     reinterpret_cast<const char*>(bytes.data()), bytes.size()})}}),
-        "artwork.stage");
+    const auto encoded = [&bytes](const std::size_t from, const std::size_t length) {
+        return protocol::encode_raw_path(
+            std::string{reinterpret_cast<const char*>(bytes.data()) + from, length});
+    };
+    // Whole when it fits well within the engine's line; a larger image --
+    // an original cover, a scan -- goes in parts.
+    constexpr std::size_t part_bytes = 384U * 1024U;
+    if (bytes.size() <= part_bytes) {
+        return image_of(answer_of(client(), "artwork.stage",
+                                  Json{{"bytes", encoded(0U, bytes.size())}}),
+                        "artwork.stage");
+    }
+    auto upload = core::StableId::random().to_string();
+    std::erase(upload, '-');
+    for (std::size_t from = 0; from < bytes.size(); from += part_bytes) {
+        const auto length = std::min(part_bytes, bytes.size() - from);
+        const bool last = from + length == bytes.size();
+        auto answer = answer_of(client(), "artwork.stage_part",
+                                Json{{"upload", upload},
+                                     {"offset", from},
+                                     {"bytes", encoded(from, length)},
+                                     {"last", last}});
+        if (!answer) {
+            if (answer.error().code == core::ErrorCode::unsupported && from == 0U) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::unsupported,
+                    .message = "this engine takes images of at most 384 KiB; update melodyd, "
+                               "or set a largest cover size in Settings",
+                    .context = {}});
+            }
+            return std::unexpected(std::move(answer.error()));
+        }
+        if (last) {
+            return image_of(std::move(answer), "artwork.stage_part");
+        }
+    }
+    return std::unexpected(unexpected_answer("artwork.stage_part"));
 }
 
 core::Result<operations::ArtworkApplyResult>

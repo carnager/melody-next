@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <ctime>
+#include <fstream>
 
 #include <string>
 #include <thread>
@@ -372,6 +373,65 @@ namespace {
 
 } // namespace
 
+namespace {
+
+// An image a client handed over, kept in `staging` under its content's name
+// and inspected there. Kept before, it is left as it is: a plan made from the
+// first staging names its revision, and touching it would make that stale.
+[[nodiscard]] core::Result<Json> keep_staged(const std::filesystem::path& staging,
+                                             const std::string& image_bytes) {
+    if (image_bytes.size() > operations::maximum_fittable_artwork_bytes) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
+                                           .message = "the image is too large",
+                                           .context = {}});
+    }
+    const auto* data = reinterpret_cast<const unsigned char*>(image_bytes.data());
+    const auto inspected =
+        metadata::inspect_encoded_image_bytes(std::span{data, image_bytes.size()});
+    if (!inspected) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "only PNG and JPEG images are taken",
+                                           .context = {}});
+    }
+    std::error_code ignored;
+    std::filesystem::create_directories(staging, ignored);
+    const auto target = staging / (sha256_hex(image_bytes) +
+                                   (inspected->mime_type == "image/png" ? ".png" : ".jpg"));
+    if (!std::filesystem::exists(target, ignored)) {
+        const auto partial = target.string() + ".partial";
+        const auto descriptor =
+            ::open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        const auto written = descriptor < 0
+                                 ? ssize_t{-1}
+                                 : ::write(descriptor, image_bytes.data(), image_bytes.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        std::error_code renamed;
+        std::filesystem::rename(partial, target, renamed);
+        if (written != static_cast<ssize_t>(image_bytes.size()) || renamed) {
+            std::filesystem::remove(partial, ignored);
+            return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                               .message = "could not keep the image",
+                                               .context = {}});
+        }
+    }
+    // Staged before, it is left as it is: a plan made from the first
+    // staging names its revision, and touching it would make that stale.
+    auto image = metadata::read_artwork_image_file(
+        target.string(), operations::maximum_fittable_artwork_bytes);
+    if (!image) {
+        return std::unexpected(std::move(image.error()));
+    }
+    return Json{{"image", wire::encode(*image)}};
+}
+
+// A large image arrives in parts: each appended to its upload's file, in
+// order; the last makes it a staged image like any other.
+constexpr std::string_view upload_prefix = "upload-";
+
+} // namespace
+
 void register_artwork_methods(protocol::Dispatcher& dispatcher, std::filesystem::path staging) {
     dispatcher.on("artwork.inventory", [](const Json& params) -> core::Result<Json> {
         const auto paths = params.find("paths");
@@ -449,56 +509,79 @@ void register_artwork_methods(protocol::Dispatcher& dispatcher, std::filesystem:
     });
 
     dispatcher.on(
-        "artwork.stage", [staging = std::move(staging)](const Json& params) -> core::Result<Json> {
+        "artwork.stage", [staging](const Json& params) -> core::Result<Json> {
             const auto encoded = params.value("bytes", std::string{});
             auto bytes = protocol::decode_raw_path(encoded);
             if (encoded.empty() || !bytes || bytes->empty()) {
                 return std::unexpected(bad_param("encoded image bytes are required", "bytes"));
             }
-            if (bytes->size() > operations::maximum_fittable_artwork_bytes) {
+            return keep_staged(staging, *bytes);
+        });
+
+    dispatcher.on(
+        "artwork.stage_part", [staging](const Json& params) -> core::Result<Json> {
+            const auto upload = params.value("upload", std::string{});
+            if (upload.size() < 16U || upload.size() > 64U ||
+                !std::ranges::all_of(upload, [](const char c) {
+                    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+                })) {
+                return std::unexpected(bad_param("an upload is named by hex digits", "upload"));
+            }
+            const auto offset = params.value("offset", std::uint64_t{0});
+            auto bytes = protocol::decode_raw_path(params.value("bytes", std::string{}));
+            if (!bytes) {
+                return std::unexpected(bad_param("encoded image bytes are required", "bytes"));
+            }
+            std::error_code ignored;
+            std::filesystem::create_directories(staging, ignored);
+            const auto part = staging / (std::string{upload_prefix} + upload + ".part");
+            const auto held = std::filesystem::exists(part, ignored)
+                                  ? std::filesystem::file_size(part, ignored)
+                                  : std::uintmax_t{0};
+            // In order, and never past what any image may be: a part out of
+            // place starts nothing over, it is refused.
+            if (offset != held) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::conflict,
+                    .message = "the upload holds " + std::to_string(held) + " bytes",
+                    .context = {}});
+            }
+            if (held + bytes->size() > operations::maximum_fittable_artwork_bytes) {
+                std::filesystem::remove(part, ignored);
                 return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
                                                    .message = "the image is too large",
                                                    .context = {}});
             }
-            const auto* data = reinterpret_cast<const unsigned char*>(bytes->data());
-            const auto inspected =
-                metadata::inspect_encoded_image_bytes(std::span{data, bytes->size()});
-            if (!inspected) {
-                return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
-                                                   .message = "only PNG and JPEG images are taken",
-                                                   .context = {}});
-            }
-            std::error_code ignored;
-            std::filesystem::create_directories(staging, ignored);
-            const auto target = staging / (sha256_hex(*bytes) +
-                                           (inspected->mime_type == "image/png" ? ".png" : ".jpg"));
-            if (!std::filesystem::exists(target, ignored)) {
-                const auto partial = target.string() + ".partial";
-                const auto descriptor =
-                    ::open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+            {
+                const auto descriptor = ::open(part.c_str(),
+                                               O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
                 const auto written = descriptor < 0
                                          ? ssize_t{-1}
                                          : ::write(descriptor, bytes->data(), bytes->size());
                 if (descriptor >= 0) {
                     ::close(descriptor);
                 }
-                std::error_code renamed;
-                std::filesystem::rename(partial, target, renamed);
-                if (written != static_cast<ssize_t>(bytes->size()) || renamed) {
-                    std::filesystem::remove(partial, ignored);
+                if (written != static_cast<ssize_t>(bytes->size())) {
+                    std::filesystem::remove(part, ignored);
                     return std::unexpected(core::Error{.code = core::ErrorCode::io,
                                                        .message = "could not keep the image",
                                                        .context = {}});
                 }
             }
-            // Staged before, it is left as it is: a plan made from the first
-            // staging names its revision, and touching it would make that stale.
-            auto image = metadata::read_artwork_image_file(
-                target.string(), operations::maximum_fittable_artwork_bytes);
-            if (!image) {
-                return std::unexpected(std::move(image.error()));
+            if (!params.value("last", false)) {
+                return Json{{"received", held + bytes->size()}};
             }
-            return Json{{"image", wire::encode(*image)}};
+            std::string whole;
+            {
+                std::ifstream input{part, std::ios::binary};
+                whole.assign(std::istreambuf_iterator<char>{input},
+                             std::istreambuf_iterator<char>{});
+            }
+            std::filesystem::remove(part, ignored);
+            if (whole.empty()) {
+                return std::unexpected(bad_param("encoded image bytes are required", "bytes"));
+            }
+            return keep_staged(staging, whole);
         });
 }
 

@@ -86,6 +86,10 @@ void register_file_work_methods(protocol::Dispatcher& dispatcher,
 //     own disk, downloaded, or resized -- kept where the engine can write it
 //     from, in `staging`, and inspected there. Named by content, so staging
 //     the same image twice keeps one copy.
+//   artwork.stage_part {upload, offset, bytes, last?} -> {received} | {image}:
+//     a large image in parts, each under the engine's line limit, appended in
+//     order to the upload a client named (hex); the last stages it as
+//     artwork.stage would. A part out of place is refused as a conflict.
 void register_artwork_methods(protocol::Dispatcher& dispatcher, std::filesystem::path staging);
 
 // Staged images outlive the plan that used them by a week, then go; run at

@@ -1412,6 +1412,23 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         const auto art_here = local_access.inventory(art, policy, {});
         require(art_there && art_here && *art_there == *art_here,
                 "a file's pictures through the engine are its pictures");
+        // An image over one part -- an original cover -- goes in parts and
+        // arrives whole. Bytes after a JPEG's end are no part of the picture,
+        // so a small one padded out stands for a large one.
+        {
+            std::ifstream input{cover_path, std::ios::binary};
+            std::string large{std::istreambuf_iterator<char>{input},
+                              std::istreambuf_iterator<char>{}};
+            large.append(1'200'000U, '\0');
+            const auto staged = remote.stage(std::span{
+                reinterpret_cast<const unsigned char*>(large.data()), large.size()});
+            require(staged && staged->byte_size == large.size() && staged->mime_type == "image/jpeg",
+                    "a large image is staged in parts, whole");
+            std::ifstream kept{staged->raw_path, std::ios::binary};
+            const std::string back{std::istreambuf_iterator<char>{kept},
+                                   std::istreambuf_iterator<char>{}};
+            require(back == large, "byte for byte");
+        }
         require(!art_here->items.empty(), "and it has one to replace");
 
         std::ifstream input{cover_path, std::ios::binary};

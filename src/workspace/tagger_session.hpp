@@ -306,11 +306,22 @@ class TaggerSession final : public QObject {
     void setRenameFiles(bool on);
     void setMoveFiles(bool on);
     [[nodiscard]] std::vector<Choice> layouts() const;
+    // Where Move goes: the engine's saved destinations, then the library
+    // folder each file is in, then the folder chosen last (ADR-0262).
     [[nodiscard]] std::vector<Choice> destinations() const;
     [[nodiscard]] int layoutIndex() const;
     [[nodiscard]] int destinationIndex() const;
     void selectLayout(int index);
     void selectDestination(int index);
+    // A folder of the engine's, moved into without being saved.
+    void chooseMoveFolder(std::string raw_path);
+    // Where a folder is chosen from: the engine's lister, or (empty) this
+    // computer's file dialog; and where to start.
+    [[nodiscard]] EngineFolderLister moveFolderLister() const;
+    [[nodiscard]] std::string moveFolderStart() const;
+    // The destination Move goes to; none for the library folder each is in.
+    [[nodiscard]] std::optional<operations::DestinationProfile> moveDestination() const;
+    [[nodiscard]] bool movesIntoLibraryFolders() const { return move_target_ == MoveTarget::library; }
     [[nodiscard]] QString outputProfileStatus() const { return output_profile_status_; }
     [[nodiscard]] QString destinationsOn() const {
         return services_.output_profile_store.destinations_on;
@@ -635,6 +646,9 @@ class TaggerSession final : public QObject {
     bool output_profiles_loading_{false};
     std::optional<core::StableId> editing_output_layout_id_;
     std::optional<core::StableId> editing_destination_id_;
+    enum class MoveTarget : std::uint8_t { saved, library, folder };
+    MoveTarget move_target_{MoveTarget::saved};
+    std::optional<std::string> move_folder_;
     bool write_plan_running_{false};
     bool apply_running_{false};
     bool applying_file_paths_{false};

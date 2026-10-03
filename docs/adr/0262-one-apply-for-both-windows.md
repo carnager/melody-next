@@ -61,3 +61,10 @@ each album is in, and ReplayGain scanned after the write. In use:
   ReplayGain checkbox, grouping and Skip existing; Apply measures the
   files lacking gain, stages the gains and writes once
   (`measureBeforeWrite`, `itemsNeedingGain`).
+- Choose folder… (2026-10-04): the destination lists end in **Choose
+  folder…**, which opens the engine's folder browser (this computer's file
+  dialog for its own files); the folder is moved into, listed as the
+  choice, and remembered for that engine with the choice of target. **The
+  library folder each is in** is a choice where the library folders are
+  known; the tagger, writing one plan, moves there when all its files are
+  in one library folder and says so otherwise.

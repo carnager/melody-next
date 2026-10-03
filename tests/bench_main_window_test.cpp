@@ -315,6 +315,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsWritesWhatIsChosen();
     void applyMeasuresReplayGainAndWritesOnce();
+    void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
     void replayGainScanStagesMeasuredGainsAsDrafts();
     void replayGainScanUsesTruePeakWhenOptedIn();
@@ -4228,7 +4229,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QVERIFY(destination_combo != nullptr);
     QCOMPARE(layout_combo->count(), 1);
     QCOMPARE(layout_combo->currentText(), QStringLiteral("Albums"));
-    QCOMPARE(destination_combo->count(), 1);
+    // The saved one, then Choose folder… (ADR-0262).
+    QCOMPARE(destination_combo->count(), 2);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Library"));
 
     // ADR-0185: the Edit buttons ask for the Settings screen instead of
@@ -4770,7 +4772,7 @@ void BenchMainWindowTest::actionChoicesAreRemembered() {
     auto* elsewhere = open(QStringLiteral("other-engine"));
     destination_combo =
         elsewhere->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
-    QTRY_COMPARE(destination_combo->count(), 2);
+    QTRY_COMPARE(destination_combo->count(), 3);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Incoming"));
     QTRY_VERIFY(hidden(elsewhere, "bench-preparation-rename-files")->isChecked());
     QVERIFY(!hidden(elsewhere, "bench-preparation-move-files")->isChecked());
@@ -6027,6 +6029,106 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
 // rest of the draft kept.
 // ReplayGain as an Apply action: measured first, staged, and written with
 // the tag edits in the same write; an album with gain already left alone.
+// ADR-0262: Move into a folder that is no saved destination, the layout's
+// folders made inside it; offered again after.
+void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(engine_.socket()).toStdString(),
+        .host = {},
+        .port = 0,
+        .token = {}});
+    const auto path = media.filePath(QStringLiteral("in/one.flac"));
+    QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("in"))));
+    QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("chosen"))));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), path));
+    const auto raw_path = QFile::encodeName(path).toStdString();
+    const auto read = metadata::read_local_metadata(raw_path);
+    QVERIFY(read.has_value());
+    const MetadataPropertiesSource source{
+        .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                 .source_revision = read->source_revision,
+                                                 .baseline = read->document},
+        .track_label = {},
+    };
+    const std::vector layouts{persistence::SavedOutputLayoutProfile{
+        .id = core::StableId::random(),
+        .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                   .name = "Artist folders",
+                                                   .dialect = {},
+                                                   .relative_directory_expression = "%artist%",
+                                                   .basename_expression = "%title%",
+                                                   .sanitization_policy = {"linux", 1U}}}};
+    auto* properties = new MetadataPropertiesDialog(
+        1U,
+        [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index == 0U ? std::optional{source} : std::nullopt;
+        },
+        {},
+        TaggerServices{
+            .plan_applier_factory = {},
+            .apply_observer = {},
+            .transformation_store =
+                MetadataTransformationStore{
+                    .load =
+                        [](MetadataTransformationStore::LoadCompletion completion) {
+                            completion({}, {});
+                        },
+                    .save = {},
+                    .remove = {}},
+            .output_profile_store =
+                OutputProfileStore{
+                    .load =
+                        [layouts](OutputProfileStore::LoadCompletion completion) {
+                            completion(layouts, {}, {});
+                        },
+                    .save_layout = {},
+                    .remove_layout = {},
+                    .save_destination = {},
+                    .remove_destination = {},
+                    .destinations_on = {},
+                    .destinations_key = QStringLiteral("chosen-folder-test"),
+                    .places = {}},
+            .file_plan_applier_factory =
+                [work] {
+                    return FilePublicationPlanApplier{
+                        [work](const operations::PreparationPlan& plan,
+                               const operations::FilePublicationApplyProgressCallback& progress,
+                               const core::CancellationToken& cancellation) {
+                            return work->publish(plan, progress, cancellation);
+                        }};
+                },
+            .file_apply_observer = {},
+            .layout_store = {},
+            .musicbrainz = {},
+            .tools = engineFileWorkTools(work),
+            .library_roots = {},
+        });
+    const QPointer<MetadataPropertiesDialog> guard{properties};
+    properties->setProperty("trackknife-move-folder",
+                            QFile::encodeName(media.filePath(QStringLiteral("chosen"))));
+    properties->show();
+    auto* tagger = properties->findChild<TaggerSession*>();
+    auto* destinations =
+        properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QTRY_COMPARE(destinations->count(), 1);
+    QCOMPARE(destinations->itemText(0), QStringLiteral("Choose folder…"));
+    destinations->setCurrentIndex(0);
+    QTRY_COMPARE(destinations->count(), 2);
+    QCOMPARE(destinations->itemText(0), media.filePath(QStringLiteral("chosen")));
+    QCOMPARE(tagger->destinationIndex(), 0);
+    tagger->chooseRename(true);
+    tagger->chooseMove(true);
+    QTRY_VERIFY(tagger->moveFiles() && tagger->canApply());
+    properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"))->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 10'000);
+    const auto moved = media.filePath(QStringLiteral("chosen/Trackknife Project/Fixture Tone.flac"));
+    QVERIFY2(QFile::exists(moved), qPrintable(moved));
+    QVERIFY(!QFile::exists(path));
+    QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
 void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
     QTemporaryDir media;
     QVERIFY(media.isValid());

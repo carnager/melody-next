@@ -45,6 +45,8 @@ constexpr auto remembered_rename_key = "properties/actions/rename-files";
 constexpr auto remembered_move_key = "properties/actions/move-files";
 constexpr auto remembered_layout_key = "properties/actions/naming-layout";
 constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
+constexpr auto remembered_move_target_prefix = "properties/actions/move-target/";
+constexpr auto remembered_move_folder_prefix = "properties/actions/move-folder/";
 constexpr auto remembered_replaygain_key = "properties/actions/replaygain";
 constexpr auto remembered_skip_existing_gain_key = "properties/actions/replaygain-skip-existing";
 
@@ -103,6 +105,18 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         editing_output_layout_id_ = id_of(QLatin1String(remembered_layout_key));
         editing_destination_id_ = id_of(QLatin1String(remembered_destination_prefix) +
                                         services_.output_profile_store.destinations_key);
+        const auto& engine = services_.output_profile_store.destinations_key;
+        const auto folder =
+            remembered.value(QLatin1String(remembered_move_folder_prefix) + engine).toByteArray();
+        if (!folder.isEmpty()) {
+            move_folder_ = std::string{folder.constData(), static_cast<std::size_t>(folder.size())};
+        }
+        const auto target =
+            remembered.value(QLatin1String(remembered_move_target_prefix) + engine).toString();
+        move_target_ = target == QLatin1String("library") && services_.library_roots
+                           ? MoveTarget::library
+                       : target == QLatin1String("folder") && move_folder_ ? MoveTarget::folder
+                                                                           : MoveTarget::saved;
     }
     preferred_fields_.reserve(preferred_fields.size());
     for (const auto field : preferred_fields) {
@@ -2021,7 +2035,8 @@ bool TaggerSession::layoutsAvailable() const {
 }
 
 bool TaggerSession::destinationsAvailable() const {
-    return !output_profiles_loading_ && !destination_catalog_.empty();
+    // A folder can always be chosen.
+    return !output_profiles_loading_;
 }
 
 bool TaggerSession::layoutReady() const {
@@ -2032,6 +2047,12 @@ bool TaggerSession::layoutReady() const {
 }
 
 bool TaggerSession::destinationReady() const {
+    if (move_target_ == MoveTarget::library) {
+        return static_cast<bool>(services_.library_roots);
+    }
+    if (move_target_ == MoveTarget::folder) {
+        return move_folder_.has_value();
+    }
     return editing_destination_id_.has_value() &&
            std::ranges::any_of(destination_catalog_, [this](const auto& entry) {
                return entry.id == *editing_destination_id_;
@@ -2111,10 +2132,18 @@ std::vector<TaggerSession::Choice> TaggerSession::layouts() const {
 
 std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
     std::vector<Choice> choices;
-    choices.reserve(destination_catalog_.size());
+    choices.reserve(destination_catalog_.size() + 2U);
     for (const auto& saved : destination_catalog_) {
         choices.push_back(Choice{.id = QString::fromStdString(saved.id.to_string()),
                                  .name = display_utf8(saved.profile.name)});
+    }
+    if (services_.library_roots) {
+        choices.push_back(Choice{.id = QStringLiteral("library"),
+                                 .name = QStringLiteral("The library folder each is in")});
+    }
+    if (move_folder_) {
+        choices.push_back(Choice{.id = QStringLiteral("folder"),
+                                 .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
     }
     return choices;
 }
@@ -2131,6 +2160,13 @@ int TaggerSession::layoutIndex() const {
 }
 
 int TaggerSession::destinationIndex() const {
+    const auto saved = static_cast<int>(destination_catalog_.size());
+    if (move_target_ == MoveTarget::library) {
+        return saved;
+    }
+    if (move_target_ == MoveTarget::folder) {
+        return saved + (services_.library_roots ? 1 : 0);
+    }
     if (!editing_destination_id_) {
         return -1;
     }
@@ -2152,13 +2188,64 @@ void TaggerSession::selectLayout(const int index) {
 }
 
 void TaggerSession::selectDestination(const int index) {
-    if (index < 0 || static_cast<std::size_t>(index) >= destination_catalog_.size()) {
+    const auto saved = static_cast<int>(destination_catalog_.size());
+    const auto library = services_.library_roots ? saved : -1;
+    const auto folder = move_folder_ ? saved + (services_.library_roots ? 1 : 0) : -1;
+    if (index >= 0 && index == library) {
+        move_target_ = MoveTarget::library;
+    } else if (index >= 0 && index == folder) {
+        move_target_ = MoveTarget::folder;
+    } else if (index < 0 || index >= saved) {
+        move_target_ = MoveTarget::saved;
         editing_destination_id_.reset();
     } else {
+        move_target_ = MoveTarget::saved;
         editing_destination_id_ = destination_catalog_[static_cast<std::size_t>(index)].id;
     }
     reconcileOutputProfileChoices();
     invalidateWritePlan();
+}
+
+void TaggerSession::chooseMoveFolder(std::string raw_path) {
+    if (raw_path.empty()) {
+        return;
+    }
+    move_folder_ = std::move(raw_path);
+    move_target_ = MoveTarget::folder;
+    rememberActionChoices();
+    reconcileOutputProfileChoices();
+    invalidateWritePlan();
+    emit outputProfilesChanged();
+}
+
+EngineFolderLister TaggerSession::moveFolderLister() const {
+    const auto& store = services_.output_profile_store;
+    const auto place = std::ranges::find(store.places, store.destinations_key, &DestinationPlace::key);
+    return place == store.places.end() ? EngineFolderLister{} : place->folders;
+}
+
+std::string TaggerSession::moveFolderStart() const {
+    if (move_folder_) {
+        return *move_folder_;
+    }
+    const auto index = destinationIndex();
+    return index >= 0 && static_cast<std::size_t>(index) < destination_catalog_.size()
+               ? destination_catalog_[static_cast<std::size_t>(index)].profile.root_raw_path
+               : std::string{};
+}
+
+std::optional<operations::DestinationProfile> TaggerSession::moveDestination() const {
+    if (move_target_ == MoveTarget::folder && move_folder_) {
+        return folderDestination(*move_folder_);
+    }
+    if (move_target_ == MoveTarget::saved && editing_destination_id_) {
+        const auto found = std::ranges::find(destination_catalog_, *editing_destination_id_,
+                                             &persistence::SavedDestinationProfile::id);
+        if (found != destination_catalog_.end()) {
+            return found->profile;
+        }
+    }
+    return std::nullopt;
 }
 
 void TaggerSession::reloadOutputProfiles() { loadOutputProfiles(); }
@@ -2250,6 +2337,15 @@ void TaggerSession::rememberActionChoices() const {
                           QString::fromStdString(editing_output_layout_id_->to_string()));
     }
     // Destinations are the engine's: one remembered for each.
+    const auto& engine = services_.output_profile_store.destinations_key;
+    settings.setValue(QLatin1String(remembered_move_target_prefix) + engine,
+                      move_target_ == MoveTarget::library  ? QStringLiteral("library")
+                      : move_target_ == MoveTarget::folder ? QStringLiteral("folder")
+                                                           : QStringLiteral("saved"));
+    if (move_folder_) {
+        settings.setValue(QLatin1String(remembered_move_folder_prefix) + engine,
+                          QByteArray{move_folder_->data(), static_cast<qsizetype>(move_folder_->size())});
+    }
     if (editing_destination_id_) {
         settings.setValue(QLatin1String(remembered_destination_prefix) +
                               services_.output_profile_store.destinations_key,
@@ -2323,19 +2419,33 @@ void TaggerSession::startWritePlan() {
             return;
         }
         output_layout = layout->profile;
-        if (operation_selection.move_files) {
-            if (!editing_destination_id_) {
-                refuse(QStringLiteral("Select a saved move destination before applying"));
+        if (operation_selection.move_files && move_target_ == MoveTarget::library) {
+            // One plan has one destination: the files' one library folder.
+            const auto roots = services_.library_roots ? services_.library_roots()
+                                                       : std::vector<std::string>{};
+            std::optional<std::string> root;
+            const auto& selection = grid_model_->selection();
+            for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+                const auto here = libraryFolderOf(selection.source(item).raw_path, roots);
+                if (!here) {
+                    refuse(QStringLiteral("A file is in no library folder; choose where to move "
+                                          "to"));
+                    return;
+                }
+                if (root && *root != *here) {
+                    refuse(QStringLiteral("These files are in more than one library folder; "
+                                          "choose where to move to"));
+                    return;
+                }
+                root = here;
+            }
+            destination = root ? std::optional{folderDestination(*root)} : std::nullopt;
+        } else if (operation_selection.move_files) {
+            destination = moveDestination();
+            if (!destination) {
+                refuse(QStringLiteral("Choose where to move to before applying"));
                 return;
             }
-            const auto selected_destination =
-                std::ranges::find(destination_catalog_, *editing_destination_id_,
-                                  &persistence::SavedDestinationProfile::id);
-            if (selected_destination == destination_catalog_.end()) {
-                refuse(QStringLiteral("The selected move destination is unavailable"));
-                return;
-            }
-            destination = selected_destination->profile;
         }
     }
     auto draft = save_tags_ ? grid_model_->patches() : metadata::StagedMetadataPatchSet{};

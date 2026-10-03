@@ -3,6 +3,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 
 #include "bench/cover_review.hpp"
+#include "bench/engine_folder_dialog.hpp"
 #include "bench/file_scope_view.hpp"
 #include "bench/identify_albums_dialog.hpp"
 #include "bench/metadata_artwork_section.hpp"
@@ -98,6 +99,9 @@ class EmptyStateListWidget final : public QListWidget {
     }
     return SettingsDialog::Page::naming;
 }
+
+// The destination list's last entry: not a destination, a folder to choose.
+const QString choose_folder_item = QStringLiteral("choose-folder");
 
 } // namespace
 
@@ -549,8 +553,8 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     });
     connect(output_layout_combo_, &QComboBox::currentIndexChanged, session_,
             &TaggerSession::selectLayout);
-    connect(destination_combo_, &QComboBox::currentIndexChanged, session_,
-            &TaggerSession::selectDestination);
+    connect(destination_combo_, &QComboBox::currentIndexChanged, this,
+            [this](const int index) { destinationActivated(destination_combo_, index); });
     connect(save_tags_check_, &QCheckBox::toggled, session_, &TaggerSession::setSaveTags);
     connect(rename_files_check_, &QCheckBox::toggled, session_, &TaggerSession::setRenameFiles);
     connect(move_files_check_, &QCheckBox::toggled, session_, &TaggerSession::setMoveFiles);
@@ -764,6 +768,8 @@ void MetadataPropertiesDialog::rebuildOutputProfiles() {
         for (const auto& destination : session_->destinations()) {
             destination_combo_->addItem(destination.name, destination.id);
         }
+        // ADR-0262: a folder that is not a saved destination.
+        destination_combo_->addItem(QStringLiteral("Choose folder…"), choose_folder_item);
     }
     sync();
 }
@@ -1089,8 +1095,7 @@ void MetadataPropertiesDialog::showActionsPopover() {
     actions_destination_->setAccessibleName(QStringLiteral("Move destination"));
     copy_items(destination_combo_, actions_destination_);
     connect(actions_destination_, &QComboBox::activated, this, [this](const int index) {
-        session_->selectDestination(index);
-        session_->rememberActionChoices();
+        destinationActivated(actions_destination_, index);
     });
     grid->addWidget(actions_move_, row, 0);
     grid->addWidget(actions_destination_, row++, 1);
@@ -1214,6 +1219,50 @@ void MetadataPropertiesDialog::syncActionsPopover() {
     }
     actions_grouping_->setEnabled(session_->replayGainOnApply());
     actions_skip_gain_->setEnabled(session_->replayGainOnApply());
+}
+
+void MetadataPropertiesDialog::destinationActivated(QComboBox* combo, const int index) {
+    if (combo->itemData(index).toString() != choose_folder_item) {
+        session_->selectDestination(index);
+        session_->rememberActionChoices();
+        return;
+    }
+    // Shown as it was until a folder is chosen.
+    {
+        const QSignalBlocker blocker{combo};
+        combo->setCurrentIndex(session_->destinationIndex());
+    }
+    chooseMoveFolder();
+}
+
+void MetadataPropertiesDialog::chooseMoveFolder() {
+    const QPointer session{session_};
+    const auto chosen = [session](const QByteArray& raw_path) {
+        if (session && !raw_path.isEmpty()) {
+            session->chooseMoveFolder(
+                std::string{raw_path.constData(), static_cast<std::size_t>(raw_path.size())});
+        }
+    };
+    // Test seam: a folder given skips the chooser.
+    if (const auto given = property("trackknife-move-folder").toByteArray(); !given.isEmpty()) {
+        chosen(given);
+        return;
+    }
+    const auto start = session_->moveFolderStart();
+    if (auto lister = session_->moveFolderLister()) {
+        auto* chooser = new EngineFolderDialog(session_->destinationsOn(), std::move(lister), start,
+                                               this);
+        connect(chooser, &EngineFolderDialog::folderChosen, this, chosen);
+        chooser->show();
+        return;
+    }
+    const auto selected = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Move into folder"),
+        QFile::decodeName(QByteArray{start.data(), static_cast<qsizetype>(start.size())}),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (!selected.isEmpty()) {
+        chosen(QFile::encodeName(selected));
+    }
 }
 
 void MetadataPropertiesDialog::startIdentify() {

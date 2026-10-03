@@ -104,6 +104,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // layout, destination, grouping and scripts -- all in view at once.
     void showActionsPopover();
     void syncActionsPopover();
+    // A destination list's entry taken: a destination, or Choose folder….
+    void destinationActivated(QComboBox* combo, int index);
+    void chooseMoveFolder();
     void startIdentify();
     void exportReplayGainResults();
     void showLoudnessProvenance();

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace trackknife::bench {
@@ -37,6 +38,13 @@ struct PreparationRequest {
 // The plan, every file checked against what it is now. Run on a worker.
 [[nodiscard]] core::Result<operations::PreparationPlan>
 planPreparation(PreparationRequest request, const core::CancellationToken& cancellation);
+
+// The library folder `raw_path` is in: the deepest of `roots` holding it.
+[[nodiscard]] std::optional<std::string> libraryFolderOf(const std::string& raw_path,
+                                                         const std::vector<std::string>& roots);
+
+// A folder moved into, as a destination.
+[[nodiscard]] operations::DestinationProfile folderDestination(std::string root_raw_path);
 
 // How a plan treats loudness, as Settings say.
 [[nodiscard]] metadata::MetadataWritePlanOptions writePlanOptions();

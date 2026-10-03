@@ -15,23 +15,6 @@ namespace trackknife::bench {
 
 namespace {
 
-// The library folder `raw_path` is in: the deepest that holds it.
-std::optional<std::string> rootOf(const std::string& raw_path,
-                                  const std::vector<std::string>& roots) {
-    std::optional<std::string> found;
-    for (auto root : roots) {
-        while (root.size() > 1U && root.ends_with('/')) {
-            root.pop_back();
-        }
-        const auto holds = root == "/" ? raw_path.starts_with('/')
-                                       : raw_path.starts_with(root + '/');
-        if (holds && (!found || root.size() > found->size())) {
-            found = std::move(root);
-        }
-    }
-    return found;
-}
-
 QString issueText(const std::string& message) { return display_utf8(message); }
 
 } // namespace
@@ -115,8 +98,8 @@ void AlbumBatchWrite::start() {
         std::optional<std::string> root;
         if (operations_.move_files) {
             root = album.items.empty() ? std::nullopt
-                                       : rootOf(selection->source(album.items.front()).raw_path,
-                                                roots);
+                                       : libraryFolderOf(selection->source(album.items.front()).raw_path,
+                                                        roots);
             if (!root) {
                 outcome.outcome = Outcome::left_out;
                 outcome.note = QStringLiteral("Not in a library folder, so not moved");
@@ -132,13 +115,7 @@ void AlbumBatchWrite::start() {
         });
         if (group == groups_.end()) {
             groups_.push_back(Group{
-                .destination = root ? std::optional{operations::DestinationProfile{
-                                          .schema_version = 1U,
-                                          .name = "Library folder",
-                                          .root_raw_path = *root,
-                                          .containment_policy = {"lexical-beneath-root", 1U},
-                                      }}
-                                    : std::nullopt,
+                .destination = root ? std::optional{folderDestination(*root)} : std::nullopt,
                 .albums = {}});
             group = std::prev(groups_.end());
         }

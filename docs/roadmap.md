@@ -74,6 +74,9 @@ New options must keep the converter's output checks and collision checks.
 Text editing supports FLAC, WavPack, MP3, Vorbis, Opus and MP4/M4A; artwork
 editing supports FLAC, MP3 and MP4/M4A.
 
+- [ ] Identifying many albums at once: group, look up in the background,
+  review only what needs it, apply once, with renaming, moving and
+  ReplayGain as options (ADR-0261).
 - [ ] Artwork editing in more containers, Ogg first.
 - [ ] An ALAC fixture for MP4 text-writing tests.
 - [ ] Deleting external cover files through a reviewed file operation.

@@ -1538,6 +1538,31 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
     require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{500},
             "at once, without waiting its turn");
 
+    // Only answers are served from the cache: an archive's 404 page an older
+    // engine kept for a release with no covers is not served as its listing
+    // -- it is asked again (here, cancelled before reaching the network). An
+    // image is bytes, and is served as it was kept.
+    {
+        const std::string listing = "https://coverartarchive.org/release/"
+                                    "00000000-0000-0000-0000-000000000000";
+        const std::string image = listing + "/1-250.jpg";
+        auto cache = trackknife::persistence::SqliteMusicBrainzResponseCache::open(database);
+        require(cache.has_value(), "the cache opens again");
+        const auto now = static_cast<std::int64_t>(std::time(nullptr));
+        require(cache->store(listing, "<!doctype html><title>404 Not Found</title>", now,
+                             14LL * 24 * 60 * 60, 100U)
+                        .has_value() &&
+                    cache->store(image, "\xff\xd8\xff", now, 14LL * 24 * 60 * 60, 100U)
+                        .has_value(),
+                "a kept error page and a kept image");
+        core::CancellationSource stop;
+        stop.request_cancellation();
+        const auto page = services.fetch(listing, stop.token());
+        require(!page || !page->starts_with("<!doctype"), "an error page is not an answer");
+        const auto bytes = services.fetch(image, stop.token());
+        require(bytes && *bytes == "\xff\xd8\xff", "an image is served as it was kept");
+    }
+
     // The AcoustID key is the engine's, readable by its owner only.
     require(!services.has_acoustid_key(), "no key to begin with");
     const auto keyless =

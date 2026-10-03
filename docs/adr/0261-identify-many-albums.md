@@ -131,6 +131,22 @@ presets…** opens them.
   shown and stages it as a clear match would be, S skips (the album stays,
   Skipped, for later), U leaves a file unmatched; with none left the list
   is back. Double-clicking an album needing a choice opens it too.
+- Apply, step 4 (2026-10-03): **Apply N staged…** lists the staged albums,
+  each with its release, its changes and its own checkbox, and writes those
+  chosen from the tagger's draft (`AlbumBatchWrite`), with progress and
+  Stop. **Rename the files** and **Move into folders** each take a naming
+  preset: the file name from the one, the folders from the other. Moving
+  plans once per library folder, each album going under the one its files
+  are in (an album in none is left out, not moved): a path plan holds one
+  destination, and the engines check every target against it, so this
+  needed no change to them. **Trackknife decision:** a file that cannot be
+  written as planned -- changed since it was read, say -- leaves its whole
+  album out, saying why, rather than splitting an album between two
+  places; the rest is planned again and written. Albums left out stay
+  staged. Meanwhile the tagger takes no edits; then it reads the files
+  written again, at their new paths, and keeps the drafts of the rest.
+  The plan is built as the tagger's own Apply builds it
+  (`planPreparation`). ReplayGain and Undo this batch are still to come.
 
 ## Verification
 

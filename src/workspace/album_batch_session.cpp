@@ -10,6 +10,7 @@
 #include <charconv>
 #include <map>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 namespace trackknife::bench {
@@ -311,6 +312,7 @@ void AlbumBatchSession::settled(const bool staged) {
     staging_.reset();
     if (staged) {
         album.state = State::staged;
+        album.note.clear();
     } else {
         album.state = State::needs_choice;
         album.note = QStringLiteral("Could not be staged by itself");
@@ -353,10 +355,12 @@ AlbumBatchSession::Files AlbumBatchSession::filesOf(const std::size_t index) con
     return files;
 }
 
-void AlbumBatchSession::choose(const std::size_t index, metadata::MetadataProposalSet proposals) {
+void AlbumBatchSession::choose(const std::size_t index, const std::size_t version,
+                               metadata::MetadataProposalSet proposals) {
     if (index >= albums_.size()) {
         return;
     }
+    albums_[index].version = version;
     albums_[index].state = State::staging;
     albums_[index].note.clear();
     to_stage_.push_back(ToStage{.album = index, .proposals = std::move(proposals)});
@@ -370,6 +374,87 @@ void AlbumBatchSession::skip(const std::size_t index) {
     }
     albums_[index].state = State::skipped;
     emit changed();
+}
+
+bool AlbumBatchSession::canWrite() const {
+    return writer_ == nullptr && !staging_ && to_stage_.empty() && !tagger_.isNull() &&
+           tagger_->canWriteElsewhere() &&
+           std::ranges::any_of(albums_, [](const Album& album) { return album.state == State::staged; });
+}
+
+void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options) {
+    if (!canWrite()) {
+        return;
+    }
+    std::vector<AlbumBatchWrite::Album> chosen;
+    for (const auto album : albums) {
+        if (album < albums_.size() && albums_[album].state == State::staged) {
+            chosen.push_back({.album = album, .items = albums_[album].items});
+        }
+    }
+    if (chosen.empty()) {
+        return;
+    }
+    writer_ = new AlbumBatchWrite(*tagger_, std::move(chosen), std::move(options), this);
+    connect(writer_, &AlbumBatchWrite::progressed, this, &AlbumBatchSession::changed);
+    connect(writer_, &AlbumBatchWrite::finished, this, [this] {
+        using Outcome = AlbumBatchWrite::Outcome;
+        for (const auto& outcome : writer_->outcomes()) {
+            auto& album = albums_[outcome.album];
+            switch (outcome.outcome) {
+            case Outcome::written:
+                album.state = State::written;
+                album.note = outcome.note;
+                break;
+            case Outcome::partly_written:
+                // What was not written is still staged.
+                album.note = QStringLiteral("%1 of %2 files written · %3")
+                                 .arg(outcome.written)
+                                 .arg(outcome.files)
+                                 .arg(outcome.note);
+                break;
+            case Outcome::pending:
+            case Outcome::left_out:
+            case Outcome::failed:
+            case Outcome::stopped:
+                album.note = QStringLiteral("not written: %1").arg(outcome.note);
+                break;
+            }
+        }
+        writer_->deleteLater();
+        writer_ = nullptr;
+        emit changed();
+        emit writeFinished();
+        stageNext();
+    });
+    emit changed();
+    writer_->start();
+}
+
+std::vector<std::size_t> AlbumBatchSession::changes() const {
+    std::vector<std::size_t> counts(albums_.size(), 0U);
+    const auto* draft = tagger_.isNull() ? nullptr : tagger_->draft();
+    if (draft == nullptr) {
+        return counts;
+    }
+    std::unordered_map<std::size_t, std::size_t> album_of;
+    for (std::size_t album = 0U; album < albums_.size(); ++album) {
+        for (const auto item : albums_[album].items) {
+            album_of.emplace(item, album);
+        }
+    }
+    for (const auto& patch : draft->patches()) {
+        if (const auto found = album_of.find(patch.item_index); found != album_of.end()) {
+            ++counts[found->second];
+        }
+    }
+    return counts;
+}
+
+void AlbumBatchSession::stopWriting() {
+    if (writer_ != nullptr) {
+        writer_->stop();
+    }
 }
 
 QString AlbumBatchSession::stateText(const Album& album) {
@@ -387,7 +472,9 @@ QString AlbumBatchSession::stateText(const Album& album) {
     case State::staging:
         return QStringLiteral("Matched%1 · staging").arg(confidence());
     case State::staged:
-        return QStringLiteral("Matched%1 · staged").arg(confidence());
+        return album.note.isEmpty()
+                   ? QStringLiteral("Matched%1 · staged").arg(confidence())
+                   : QStringLiteral("Staged · %1").arg(album.note);
     case State::needs_choice:
         return album.result && !album.result->candidates.empty()
                    ? QStringLiteral("Pick a version · %1").arg(album.result->candidates.size())
@@ -400,6 +487,9 @@ QString AlbumBatchSession::stateText(const Album& album) {
         return QStringLiteral("Left out");
     case State::skipped:
         return QStringLiteral("Skipped");
+    case State::written:
+        return album.note.isEmpty() ? QStringLiteral("Written")
+                                    : QStringLiteral("Written · %1").arg(album.note);
     }
     return {};
 }

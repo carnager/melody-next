@@ -122,6 +122,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
               .layout_store = std::move(layout_store),
               .musicbrainz = std::move(musicbrainz),
               .tools = std::move(tools),
+              .library_roots = {},
           },
           parent) {}
 
@@ -720,6 +721,10 @@ void MetadataPropertiesDialog::sync() {
         file_list_->setEnabled(session.fileListEnabled());
     }
     field_layout_remove_action_->setEnabled(!session.activeFieldLayout().isEmpty());
+    if (metadata_splitter_ != nullptr) {
+        // ADR-0261: Identify albums… is writing some of these files.
+        metadata_splitter_->setEnabled(!session.writingElsewhere());
+    }
     syncActionsPopover();
 }
 

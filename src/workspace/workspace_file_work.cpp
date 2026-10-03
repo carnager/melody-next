@@ -271,6 +271,11 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                 },
                 .musicbrainz = engineLookupService(work, this),
                 .tools = engineFileWorkTools(work),
+                .library_roots =
+                    [browser = work_link != nullptr ? work_link->browser
+                                                    : QPointer<LibraryBrowser>{}] {
+                        return browser ? browser->rootPaths() : std::vector<std::string>{};
+                    },
             },
         .artwork_applier = engineArtworkPlanApplierFactory(work),
         .artwork_observer =

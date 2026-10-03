@@ -4,11 +4,15 @@
 #include "bench/musicbrainz_lookup.hpp"
 
 #include <QDialog>
+#include <QPointer>
 
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 class QButtonGroup;
+class QCheckBox;
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QStackedWidget;
@@ -36,6 +40,14 @@ class IdentifyAlbumsDialog final : public QDialog {
     // Step 3: review an album needing a person, or the next that does.
     void review(std::size_t album);
     void reviewNext();
+    // Step 4: the staged albums, to be written.
+    void showApply();
+
+  protected:
+    void closeEvent(QCloseEvent* event) override;
+
+  public slots:
+    void reject() override;
 
   private:
     void sync();
@@ -43,10 +55,14 @@ class IdentifyAlbumsDialog final : public QDialog {
     void accept();
     void skip();
     void backToList();
+    void syncApply();
+    void write();
+    [[nodiscard]] std::vector<std::size_t> albumsToWrite() const;
     void showDetail();
     [[nodiscard]] int selectedAlbum() const;
     [[nodiscard]] bool shown(int album) const;
 
+    QPointer<TaggerSession> tagger_;
     AlbumBatchSession* session_;
     QLabel* heading_;
     QProgressBar* progress_;
@@ -69,6 +85,22 @@ class IdentifyAlbumsDialog final : public QDialog {
     TrackMatchSession* match_{nullptr};
     QWidget* match_view_{nullptr};
     std::optional<std::size_t> reviewing_;
+    QPushButton* apply_;
+    QLabel* apply_heading_;
+    QTreeWidget* apply_list_;
+    QCheckBox* rename_;
+    QComboBox* rename_preset_;
+    QLabel* rename_pattern_;
+    QCheckBox* move_;
+    QComboBox* move_preset_;
+    QLabel* move_pattern_;
+    QLabel* apply_note_;
+    QProgressBar* write_progress_;
+    QPushButton* write_stop_;
+    QPushButton* apply_back_;
+    QPushButton* write_;
+    // The albums the last write was given, shown with how each went.
+    std::vector<std::size_t> written_;
     bool syncing_{false};
 };
 

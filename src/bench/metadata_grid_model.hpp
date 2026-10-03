@@ -83,7 +83,8 @@ class MetadataGridModel final : public QAbstractTableModel {
     // and field name; the undo history before it is dropped. Answers how many
     // drafts carried and how many were no change against the real tags.
     [[nodiscard]] core::Result<std::pair<std::size_t, std::size_t>>
-    adoptReadSelection(metadata::StagedMetadataSelection read);
+    adoptReadSelection(metadata::StagedMetadataSelection read,
+                       std::span<const std::size_t> written = {});
 
   signals:
     void draftStateChanged(int patch_count, bool can_undo, bool can_redo);

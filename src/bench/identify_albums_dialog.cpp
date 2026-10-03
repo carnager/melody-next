@@ -5,8 +5,13 @@
 #include "trackknife/musicbrainz/web_service.hpp"
 #include "workspace/album_batch_session.hpp"
 #include "workspace/identify_session.hpp"
+#include "workspace/tagger_session.hpp"
 
 #include <QButtonGroup>
+#include <QCheckBox>
+#include <QCloseEvent>
+#include <QComboBox>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -35,7 +40,8 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
     case needs_you:
         return album.state == State::needs_choice || album.state == State::failed;
     case matched:
-        return album.state == State::staging || album.state == State::staged;
+        return album.state == State::staging || album.state == State::staged ||
+               album.state == State::written;
     case no_match:
         return album.state == State::no_match;
     case waiting:
@@ -77,6 +83,27 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
 
 [[nodiscard]] QString escaped(const QString& text) { return text.toHtmlEscaped(); }
 
+// A release as one line: what tells its versions apart.
+[[nodiscard]] QStringList release_parts(const musicbrainz::Release& release) {
+    QStringList parts;
+    for (const auto& part : {release.date, release.country, release.label}) {
+        if (!part.empty()) {
+            parts << QString::fromStdString(part);
+        }
+    }
+    if (!release.media.empty() && !release.media.front().format.empty()) {
+        parts << QStringLiteral("%1×%2")
+                     .arg(release.media.size())
+                     .arg(QString::fromStdString(release.media.front().format));
+    }
+    return parts;
+}
+
+[[nodiscard]] QString files_text(const std::size_t count) {
+    return QStringLiteral("%1 %2").arg(count).arg(count == 1U ? QStringLiteral("file")
+                                                              : QStringLiteral("files"));
+}
+
 [[nodiscard]] QString check(const bool ok, const QString& text) {
     return QStringLiteral("<div>%1 %2</div>")
         .arg(ok ? QStringLiteral("✓") : QStringLiteral("✗"), escaped(text));
@@ -86,7 +113,8 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
 
 IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLookupService service,
                                            QWidget* parent)
-    : QDialog(parent), session_(new AlbumBatchSession(tagger, std::move(service), this)) {
+    : QDialog(parent), tagger_(&tagger),
+      session_(new AlbumBatchSession(tagger, std::move(service), this)) {
     setObjectName(QStringLiteral("bench-identify-albums"));
     setWindowTitle(QStringLiteral("Identify albums"));
     setAttribute(Qt::WA_DeleteOnClose);
@@ -205,6 +233,131 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     connect(skip_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::skip);
     connect(back, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
     connect(versions_, &QListWidget::currentRowChanged, this, &IdentifyAlbumsDialog::showVersion);
+
+    // Step 4: what is staged, written in one go -- with each album's own
+    // checkbox, and renaming and moving each chosen on its own.
+    auto* apply_page = new QWidget(pages_);
+    auto* apply_layout = new QVBoxLayout(apply_page);
+    apply_layout->setContentsMargins(0, 0, 0, 0);
+    apply_heading_ = new QLabel(apply_page);
+    apply_heading_->setObjectName(QStringLiteral("bench-identify-albums-apply-heading"));
+    apply_heading_->setWordWrap(true);
+    apply_layout->addWidget(apply_heading_);
+    apply_list_ = new QTreeWidget(apply_page);
+    apply_list_->setObjectName(QStringLiteral("bench-identify-albums-apply-list"));
+    apply_list_->setColumnCount(4);
+    apply_list_->setHeaderLabels({QStringLiteral("Album"), QStringLiteral("Release"),
+                                  QStringLiteral("Changes"), QStringLiteral("State")});
+    apply_list_->setRootIsDecorated(false);
+    apply_list_->setUniformRowHeights(true);
+    apply_list_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    apply_layout->addWidget(apply_list_, 1);
+    auto* options_row = new QHBoxLayout;
+    auto* options_label =
+        new QLabel(QStringLiteral("Also, in the same write — each chosen on its own"), apply_page);
+    auto* presets = new QPushButton(QStringLiteral("Edit naming presets…"), apply_page);
+    presets->setObjectName(QStringLiteral("bench-identify-albums-apply-presets"));
+    presets->setFlat(true);
+    options_row->addWidget(options_label, 1);
+    options_row->addWidget(presets);
+    apply_layout->addLayout(options_row);
+    auto* options = new QGridLayout;
+    rename_ = new QCheckBox(QStringLiteral("Rename the files"), apply_page);
+    rename_->setObjectName(QStringLiteral("bench-identify-albums-apply-rename"));
+    rename_preset_ = new QComboBox(apply_page);
+    rename_preset_->setObjectName(QStringLiteral("bench-identify-albums-apply-rename-preset"));
+    rename_preset_->setAccessibleName(QStringLiteral("Naming preset for renaming"));
+    rename_pattern_ = new QLabel(apply_page);
+    rename_pattern_->setObjectName(QStringLiteral("bench-identify-albums-apply-rename-pattern"));
+    move_ = new QCheckBox(QStringLiteral("Move into folders"), apply_page);
+    move_->setObjectName(QStringLiteral("bench-identify-albums-apply-move"));
+    move_preset_ = new QComboBox(apply_page);
+    move_preset_->setObjectName(QStringLiteral("bench-identify-albums-apply-move-preset"));
+    move_preset_->setAccessibleName(QStringLiteral("Naming preset for moving"));
+    move_pattern_ = new QLabel(apply_page);
+    move_pattern_->setObjectName(QStringLiteral("bench-identify-albums-apply-move-pattern"));
+    for (auto* pattern : {rename_pattern_, move_pattern_}) {
+        pattern->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        QFont mono = pattern->font();
+        mono.setFamily(QStringLiteral("monospace"));
+        mono.setStyleHint(QFont::Monospace);
+        pattern->setFont(mono);
+    }
+    options->addWidget(rename_, 0, 0);
+    options->addWidget(rename_preset_, 0, 1);
+    options->addWidget(rename_pattern_, 0, 2);
+    options->addWidget(new QLabel(QStringLiteral("in the folder they are in"), apply_page), 0, 3);
+    options->addWidget(move_, 1, 0);
+    options->addWidget(move_preset_, 1, 1);
+    options->addWidget(move_pattern_, 1, 2);
+    options->addWidget(new QLabel(QStringLiteral("under the library folder they are in"), apply_page),
+                       1, 3);
+    options->setColumnStretch(2, 1);
+    apply_layout->addLayout(options);
+    auto* write_row = new QHBoxLayout;
+    apply_note_ = new QLabel(apply_page);
+    apply_note_->setObjectName(QStringLiteral("bench-identify-albums-apply-note"));
+    apply_note_->setWordWrap(true);
+    write_progress_ = new QProgressBar(apply_page);
+    write_progress_->setObjectName(QStringLiteral("bench-identify-albums-write-progress"));
+    write_progress_->setMaximumWidth(220);
+    write_stop_ = new QPushButton(QStringLiteral("Stop"), apply_page);
+    write_stop_->setObjectName(QStringLiteral("bench-identify-albums-write-stop"));
+    apply_back_ = new QPushButton(QStringLiteral("Back to the list"), apply_page);
+    apply_back_->setObjectName(QStringLiteral("bench-identify-albums-apply-back"));
+    write_ = new QPushButton(apply_page);
+    write_->setObjectName(QStringLiteral("bench-identify-albums-write"));
+    write_row->addWidget(apply_note_, 1);
+    write_row->addWidget(write_progress_);
+    write_row->addWidget(write_stop_);
+    write_row->addWidget(apply_back_);
+    write_row->addWidget(write_);
+    apply_layout->addLayout(write_row);
+    pages_->addWidget(apply_page);
+    const auto fill_presets = [this] {
+        if (tagger_ == nullptr) {
+            return;
+        }
+        for (auto* combo : {rename_preset_, move_preset_}) {
+            const QSignalBlocker blocker{combo};
+            const auto kept = combo->currentIndex();
+            combo->clear();
+            for (const auto& choice : tagger_->layouts()) {
+                combo->addItem(choice.name, choice.id);
+            }
+            combo->setCurrentIndex(kept >= 0 && kept < combo->count() ? kept
+                                                                      : tagger_->layoutIndex());
+        }
+        syncApply();
+    };
+    fill_presets();
+    connect(&tagger, &TaggerSession::outputProfilesChanged, this, fill_presets);
+    connect(presets, &QPushButton::clicked, this, [this] {
+        if (tagger_ != nullptr) {
+            emit tagger_->openSettingsRequested(TaggerSession::SettingsPage::naming);
+        }
+    });
+    for (auto* box : {rename_, move_}) {
+        connect(box, &QCheckBox::toggled, this, &IdentifyAlbumsDialog::syncApply);
+    }
+    for (auto* combo : {rename_preset_, move_preset_}) {
+        connect(combo, &QComboBox::currentIndexChanged, this, &IdentifyAlbumsDialog::syncApply);
+    }
+    connect(apply_list_, &QTreeWidget::itemChanged, this, [this] {
+        if (!syncing_) {
+            syncApply();
+        }
+    });
+    connect(apply_back_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
+    connect(write_stop_, &QPushButton::clicked, session_, &AlbumBatchSession::stopWriting);
+    connect(write_, &QPushButton::clicked, this, [this] {
+        if (written_.empty()) {
+            write();
+        } else {
+            backToList();
+        }
+    });
+    connect(session_, &AlbumBatchSession::writeFinished, this, &IdentifyAlbumsDialog::syncApply);
     layout->addWidget(pages_, 1);
 
     bottom_bar_ = new QWidget(this);
@@ -218,10 +371,14 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     look_up_->setDefault(true);
     review_next_ = new QPushButton(this);
     review_next_->setObjectName(QStringLiteral("bench-identify-albums-review-next"));
+    apply_ = new QPushButton(this);
+    apply_->setObjectName(QStringLiteral("bench-identify-albums-apply"));
     bottom->addWidget(summary_, 1);
     bottom->addWidget(close);
     bottom->addWidget(look_up_);
     bottom->addWidget(review_next_);
+    bottom->addWidget(apply_);
+    connect(apply_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::showApply);
     layout->addWidget(bottom_bar_);
     connect(review_next_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::reviewNext);
     connect(list_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
@@ -320,7 +477,8 @@ void IdentifyAlbumsDialog::sync() {
     const std::pair<int, std::size_t> counts[]{
         {all, albums.size()},
         {needs_you, session_->count(State::needs_choice) + session_->count(State::failed)},
-        {matched, session_->count(State::staging) + session_->count(State::staged)},
+        {matched, session_->count(State::staging) + session_->count(State::staged) +
+                      session_->count(State::written)},
         {no_match, session_->count(State::no_match)},
         {waiting, open}};
     for (const auto& [id, count] : counts) {
@@ -363,6 +521,11 @@ void IdentifyAlbumsDialog::sync() {
     review_next_->setEnabled(session_->nextNeedingYou(std::nullopt).has_value());
     review_next_->setText(QStringLiteral("Review next needing you (%1)").arg(needing));
     review_next_->setDefault(started && needing > 0U);
+    const auto staged = session_->count(State::staged);
+    apply_->setVisible(started);
+    apply_->setEnabled(staged > 0U);
+    apply_->setText(QStringLiteral("Apply %1 staged…").arg(staged));
+    apply_->setDefault(started && needing == 0U && staged > 0U);
     look_up_->setVisible(!started || !session_->lookingUp());
     look_up_->setText(started ? QStringLiteral("Look up again")
                               : QStringLiteral("Look up %1 albums").arg(included));
@@ -379,6 +542,9 @@ void IdentifyAlbumsDialog::sync() {
                       .arg(included)
                       .arg(session_->fileCount()));
     showDetail();
+    if (pages_->currentIndex() == 2) {
+        syncApply();
+    }
 }
 
 void IdentifyAlbumsDialog::review(const std::size_t album) {
@@ -403,16 +569,7 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
         for (const auto& candidate : entry.result->candidates) {
             const auto& release = candidate.release;
             QStringList parts{QString::fromStdString(release.title)};
-            for (const auto& part : {release.date, release.country, release.label}) {
-                if (!part.empty()) {
-                    parts << QString::fromStdString(part);
-                }
-            }
-            if (!release.media.empty() && !release.media.front().format.empty()) {
-                parts << QStringLiteral("%1×%2")
-                             .arg(release.media.size())
-                             .arg(QString::fromStdString(release.media.front().format));
-            }
+            parts << release_parts(release);
             parts << QStringLiteral("%1 tracks").arg(candidate.alignment.release_tracks.size());
             parts << QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0));
             versions_->addItem(parts.join(QStringLiteral(" · ")));
@@ -460,7 +617,9 @@ void IdentifyAlbumsDialog::showVersion(const int version) {
     connect(match_, &TrackMatchSession::accepted, this,
             [this](metadata::MetadataProposalSet proposals) {
                 if (reviewing_) {
-                    session_->choose(*reviewing_, std::move(proposals));
+                    session_->choose(*reviewing_,
+                                     static_cast<std::size_t>(std::max(0, versions_->currentRow())),
+                                     std::move(proposals));
                     reviewNext();
                 }
             });
@@ -482,11 +641,200 @@ void IdentifyAlbumsDialog::skip() {
 }
 
 void IdentifyAlbumsDialog::backToList() {
+    if (session_->writing() != nullptr) {
+        return;
+    }
     reviewing_.reset();
+    written_.clear();
     pages_->setCurrentIndex(0);
     filters_->setVisible(session_->started());
     bottom_bar_->show();
     sync();
+}
+
+void IdentifyAlbumsDialog::showApply() {
+    written_.clear();
+    const auto& albums = session_->albums();
+    const auto changes = session_->changes();
+    syncing_ = true;
+    {
+        const QSignalBlocker blocker{apply_list_};
+        apply_list_->clear();
+        for (std::size_t index = 0; index < albums.size(); ++index) {
+            const auto& album = albums[index];
+            if (album.state != State::staged) {
+                continue;
+            }
+            auto* item = new QTreeWidgetItem(apply_list_);
+            item->setText(0, name_of(album));
+            if (album.result && album.version < album.result->candidates.size()) {
+                item->setText(1, release_parts(album.result->candidates[album.version].release)
+                                     .join(QStringLiteral(" · ")));
+            }
+            item->setText(2, QStringLiteral("%1 · %2 %3")
+                                 .arg(files_text(album.items.size()))
+                                 .arg(changes[index])
+                                 .arg(changes[index] == 1U ? QStringLiteral("change")
+                                                           : QStringLiteral("changes")));
+            item->setText(3, QStringLiteral("Ready"));
+            item->setData(0, Qt::UserRole, static_cast<int>(index));
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, Qt::Checked);
+        }
+    }
+    syncing_ = false;
+    reviewing_.reset();
+    pages_->setCurrentIndex(2);
+    filters_->hide();
+    bottom_bar_->hide();
+    syncApply();
+    write_->setFocus();
+}
+
+std::vector<std::size_t> IdentifyAlbumsDialog::albumsToWrite() const {
+    std::vector<std::size_t> albums;
+    for (int row = 0; row < apply_list_->topLevelItemCount(); ++row) {
+        const auto* item = apply_list_->topLevelItem(row);
+        if (item->checkState(0) == Qt::Checked) {
+            albums.push_back(static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt()));
+        }
+    }
+    return albums;
+}
+
+void IdentifyAlbumsDialog::syncApply() {
+    const auto& albums = session_->albums();
+    const auto* writing = session_->writing();
+    const auto running = writing != nullptr;
+    const auto done = !written_.empty() && !running;
+    const auto chosen = albumsToWrite();
+    std::size_t files = 0U;
+    for (const auto album : chosen) {
+        files += albums[album].items.size();
+    }
+    const auto layout_of = [this](const QComboBox* combo) {
+        return tagger_ != nullptr ? tagger_->layoutProfile(combo->currentIndex())
+                                  : std::optional<operations::OutputLayoutProfile>{};
+    };
+    const auto rename_layout = layout_of(rename_preset_);
+    const auto move_layout = layout_of(move_preset_);
+    rename_pattern_->setText(rename_layout ? QString::fromStdString(rename_layout->basename_expression)
+                                           : QString{});
+    move_pattern_->setText(move_layout
+                               ? QString::fromStdString(move_layout->relative_directory_expression)
+                               : QString{});
+    const auto editable = !running && !done;
+    apply_list_->setEnabled(editable);
+    rename_->setEnabled(editable && rename_preset_->count() > 0);
+    move_->setEnabled(editable && move_preset_->count() > 0);
+    rename_preset_->setEnabled(editable && rename_->isChecked());
+    move_preset_->setEnabled(editable && move_->isChecked());
+    write_progress_->setVisible(running);
+    write_stop_->setVisible(running);
+    apply_back_->setEnabled(!running);
+    if (running) {
+        write_progress_->setMaximum(static_cast<int>(std::max<std::size_t>(writing->filesTotal(), 1U)));
+        write_progress_->setValue(static_cast<int>(writing->filesDone()));
+    }
+
+    // After a write, each album as it came out.
+    if (!written_.empty()) {
+        const QSignalBlocker blocker{apply_list_};
+        for (int row = 0; row < apply_list_->topLevelItemCount(); ++row) {
+            auto* item = apply_list_->topLevelItem(row);
+            const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
+            if (std::ranges::find(written_, album) != written_.end()) {
+                item->setText(3, running ? QStringLiteral("Writing…")
+                                         : AlbumBatchSession::stateText(albums[album]));
+            }
+        }
+    }
+    if (done) {
+        const auto wrote = static_cast<std::size_t>(std::ranges::count_if(
+            written_, [&albums](auto album) { return albums[album].state == State::written; }));
+        apply_heading_->setText(
+            QStringLiteral("<b>Wrote %1 of %2 albums</b><br>Those not written stay staged, saying "
+                           "why; apply again once that is seen to.")
+                .arg(wrote)
+                .arg(written_.size()));
+    } else {
+        apply_heading_->setText(
+            QStringLiteral("<b>%1 of %2 staged albums · %3 to write</b><br>One write, each file "
+                           "journaled. Each file is read again first; an album with one that "
+                           "changed since is left out, saying why, and the rest written.")
+                .arg(chosen.size())
+                .arg(apply_list_->topLevelItemCount())
+                .arg(files_text(files)));
+    }
+    const auto later = session_->count(State::needs_choice) + session_->count(State::skipped) +
+                       session_->count(State::no_match) + session_->count(State::failed);
+    apply_note_->setText(later == 0U ? QString{}
+                                     : QStringLiteral("Not in this write: %1 not staged — they "
+                                                      "stay in the list for later")
+                                           .arg(later));
+    if (done) {
+        write_->setText(QStringLiteral("Back to the list"));
+        write_->setEnabled(true);
+    } else if (running) {
+        write_->setText(QStringLiteral("Writing…"));
+        write_->setEnabled(false);
+    } else {
+        write_->setText(QStringLiteral("Write %1 %2")
+                            .arg(chosen.size())
+                            .arg(chosen.size() == 1U ? QStringLiteral("album")
+                                                     : QStringLiteral("albums")));
+        write_->setEnabled(!chosen.empty() && session_->canWrite() &&
+                           (!rename_->isChecked() || rename_layout) &&
+                           (!move_->isChecked() || move_layout));
+    }
+    write_->setDefault(true);
+}
+
+void IdentifyAlbumsDialog::write() {
+    if (tagger_ == nullptr) {
+        return;
+    }
+    AlbumBatchWrite::Options options;
+    if (rename_->isChecked()) {
+        options.rename = tagger_->layoutProfile(rename_preset_->currentIndex());
+        if (!options.rename) {
+            return;
+        }
+    }
+    if (move_->isChecked()) {
+        options.move = tagger_->layoutProfile(move_preset_->currentIndex());
+        if (!options.move) {
+            return;
+        }
+    }
+    auto albums = albumsToWrite();
+    if (albums.empty()) {
+        return;
+    }
+    written_ = albums;
+    session_->write(std::move(albums), std::move(options));
+    if (session_->writing() == nullptr) {
+        written_.clear();
+    }
+    syncApply();
+}
+
+void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
+    // The files under way are finished first.
+    if (session_->writing() != nullptr) {
+        session_->stopWriting();
+        event->ignore();
+        return;
+    }
+    QDialog::closeEvent(event);
+}
+
+void IdentifyAlbumsDialog::reject() {
+    if (session_->writing() != nullptr) {
+        session_->stopWriting();
+        return;
+    }
+    QDialog::reject();
 }
 
 void IdentifyAlbumsDialog::showDetail() {

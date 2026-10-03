@@ -776,8 +776,20 @@ void MetadataGridModel::pushHistory(DraftTransaction transaction) {
 }
 
 core::Result<std::pair<std::size_t, std::size_t>>
-MetadataGridModel::adoptReadSelection(metadata::StagedMetadataSelection read) {
-    auto carried = metadata::carry_staged_patches(*selection_, patches_, read);
+MetadataGridModel::adoptReadSelection(metadata::StagedMetadataSelection read,
+                                      const std::span<const std::size_t> written) {
+    // ADR-0261: the drafts of files written are in them now.
+    auto kept = patches_;
+    for (const auto& patch : patches_.patches()) {
+        if (std::ranges::find(written, patch.item_index) == written.end()) {
+            continue;
+        }
+        auto reverted = kept.revert(*selection_, patch.item_index, patch.field_index);
+        if (!reverted) {
+            return std::unexpected(std::move(reverted.error()));
+        }
+    }
+    auto carried = metadata::carry_staged_patches(*selection_, kept, read);
     if (!carried) {
         return std::unexpected(std::move(carried.error()));
     }

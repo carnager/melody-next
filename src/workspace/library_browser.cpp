@@ -1190,6 +1190,15 @@ QVariantList LibraryBrowser::roots() const {
     return list;
 }
 
+std::vector<std::string> LibraryBrowser::rootPaths() const {
+    std::vector<std::string> paths;
+    paths.reserve(roots_.size());
+    for (const auto& root : roots_) {
+        paths.push_back(root.raw_path);
+    }
+    return paths;
+}
+
 void LibraryBrowser::addRoot(const QString& path) {
     if (!path.trimmed().isEmpty()) {
         addRoot(QFile::encodeName(path.trimmed()).toStdString());

@@ -157,7 +157,11 @@ class AgentAudition final : public audio::Audition {
     // the agent's are its own business.
     std::string current_raw_;
     std::string next_raw_;
+    // Gapless handovers as the engine counts them, which never go back --
+    // a lower count reads as one more handover -- and as this agent process
+    // last reported them, which a new process starts again from nothing.
     std::uint64_t seen_transitions_{0U};
+    std::uint64_t agent_transitions_{0U};
     // What the engine asked of this output, kept here rather than trusted to
     // the agent: a freshly started agent, or one offline when it was asked,
     // knows none of it, and is told again on connecting.

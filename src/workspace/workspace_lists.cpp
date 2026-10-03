@@ -209,7 +209,7 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
         return;
     }
     engine->request(
-        QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}},
+        QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}, {"describe", true}},
         [this, key, then = std::move(then)](const core::Result<protocol::Json>& answer) {
             if (!answer) {
                 view_->showMessage(QStringLiteral("Could not open the list: %1")

@@ -221,6 +221,31 @@ check(renamed["name"] == "Kept" and renamed["kind"] == "saved" and
       renamed["revision"] == edited["revision"] + 3, "a name and a kind are edits too")
 check(a.call("list.edit", {"id": edited["id"], "edits": []})["error"]["code"] == "invalid_argument",
       "an edit names the revision it was worked out from")
+
+# ADR-0259: asked to, the engine describes each item from its library -- a
+# file it indexes with its tags and revision, one it does not as saved.
+music = f"{work}/music"
+import os, shutil
+os.makedirs(music)
+shutil.copy(f"{work}/one.wav", f"{music}/one.wav")
+check("result" in a.call("catalogue.add_root", {"path": encode(music)}), "a folder is added")
+check("result" in a.call("job.submit", {"job": "catalogue.scan"}), "and scanned")
+check(a.wait_event("job.finished", 20) is not None, "the scan finishes")
+described = a.call("list.save", {"name": "Described", "items": [
+    {"path": encode(f"{music}/one.wav"), "title": "Snapshot"},
+    {"path": encode(f"{work}/two.wav"), "title": "Outside"}]})["result"]
+plain = a.call("list.get", {"id": described["id"]})["result"]["items"]
+check(all("library" not in i for i in plain), "unasked, nothing is described")
+items = a.call("list.get", {"id": described["id"], "describe": True})["result"]["items"]
+indexed, outside = items
+library = indexed.get("library")
+check(library is not None and library["duration_ms"] == 30000 and library["codec"] != "",
+      "an indexed file is described from the library")
+check(library["revision"] is not None and library["revision"]["size"] == os.path.getsize(f"{music}/one.wav"),
+      "with the revision it was indexed at")
+check(isinstance(library["fields"], dict), "and its tags")
+check("library" not in outside and outside["title"] == "Outside",
+      "a file the library does not index keeps what it was saved with")
 PY
 
 echo "engine lists: ok"

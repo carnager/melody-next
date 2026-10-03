@@ -2,12 +2,16 @@
 
 #include "trackknife/engine/list_methods.hpp"
 
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/player.hpp"
+#include "trackknife/engine/track_description.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <chrono>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace trackknife::engine {
 namespace {
@@ -314,7 +318,7 @@ void announce_list_change(const EventSink& sink, const persistence::EngineListSu
 }
 
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
-                           Player& player) {
+                           Player& player, const LocalCatalogue* catalogue) {
     // Every client hears of every change, so a list open in two places is
     // refreshed -- or, with unsaved edits, flagged -- in both.
     const auto changed = [sink](const persistence::EngineListSummary* summary,
@@ -334,7 +338,7 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         return Json{{"lists", std::move(rendered)}};
     });
 
-    dispatcher.on("list.get", [&workspace](const Json& params) -> core::Result<Json> {
+    dispatcher.on("list.get", [&workspace, catalogue](const Json& params) -> core::Result<Json> {
         auto id = required_id(params);
         if (!id) {
             return std::unexpected(std::move(id.error()));
@@ -352,6 +356,22 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         auto items = Json::array();
         for (const auto& item : (*list)->items) {
             items.push_back(item_json(item));
+        }
+        if (catalogue != nullptr && params.value("describe", false)) {
+            std::vector<std::string> paths;
+            paths.reserve((*list)->items.size());
+            for (const auto& item : (*list)->items) {
+                paths.push_back(item.raw_path);
+            }
+            auto described = catalogue->described_tracks(paths);
+            if (!described) {
+                return std::unexpected(std::move(described.error()));
+            }
+            for (std::size_t index = 0; index < described->size(); ++index) {
+                if (const auto& track = (*described)[index]) {
+                    items[index]["library"] = describe_track(*track);
+                }
+            }
         }
         rendered["items"] = std::move(items);
         return rendered;

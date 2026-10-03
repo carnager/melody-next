@@ -8,6 +8,7 @@
 
 namespace trackknife::engine {
 
+class LocalCatalogue;
 class Player;
 class Workspace;
 
@@ -34,8 +35,12 @@ class Workspace;
 // "after": entry|null}, {"move": [entry], "after": entry|null},
 // {"update": [item]}. An item also carries album_artist, date and an optional
 // replay_gain {track_gain_db, track_peak, album_gain_db, album_peak}.
+//
+// ADR-0259: `list.get {id, describe: true}` gives each item the library
+// indexes a "library" description (track_description.hpp), from `catalogue`;
+// its own title, artist and album are only for a file it does not.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
-                           Player& player);
+                           Player& player, const LocalCatalogue* catalogue = nullptr);
 
 // list.changed, as every change to a list is announced: `summary` null when
 // it was deleted.

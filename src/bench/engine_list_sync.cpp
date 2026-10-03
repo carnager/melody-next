@@ -3,6 +3,7 @@
 #include "bench/engine_list_sync.hpp"
 
 #include "bench/engine_playback.hpp"
+#include "trackknife/engine/track_description.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <QSettings>
@@ -223,23 +224,46 @@ EngineListSync::documentFromAnswer(const Json& answer, const EngineKey& engine) 
                                        .dirty = false,
                                        .items = {},
                                        .engine = engine.stored()};
-    for (auto& item : items_of_answer(answer)) {
-        persistence::ListItem row{.entry_id = item.entry_id,
+    for (const auto& value : answer.value("items", Json::array())) {
+        auto item = itemFromJson(value);
+        if (!item) {
+            continue;
+        }
+        persistence::ListItem row{.entry_id = item->entry_id,
                                   .source = persistence::ListSource::local,
                                   .profile_id = std::nullopt,
-                                  .source_reference = std::move(item.raw_path),
-                                  .logical_reference = std::move(item.logical_reference),
-                                  .segment = item.segment,
-                                  .source_selection = item.source_selection,
-                                  .duration_ms = item.duration_ms,
+                                  .source_reference = item->raw_path,
+                                  .logical_reference = std::move(item->logical_reference),
+                                  .segment = item->segment,
+                                  .source_selection = item->source_selection,
+                                  .duration_ms = item->duration_ms,
                                   .source_revision = std::nullopt,
                                   .fields = {}};
-        for (auto [name, value] :
-             {std::pair{"title", &item.title}, std::pair{"artist", &item.artist},
-              std::pair{"album", &item.album}, std::pair{"albumartist", &item.album_artist},
-              std::pair{"date", &item.date}}) {
-            if (!value->empty()) {
-                row.fields.push_back({.name = name, .value = std::move(*value)});
+        // ADR-0259: a file the engine's library indexes comes with what the
+        // library knows of it, every tag and the revision; the item's own
+        // few names are for a file it does not.
+        const auto library = value.find("library");
+        if (auto track = library != value.end()
+                             ? engine::described_track(*library, item->raw_path)
+                             : std::nullopt) {
+            for (auto& [name, values] : track->facts.fields) {
+                for (auto& [original, folded] : values) {
+                    row.fields.push_back({.name = name, .value = std::move(original)});
+                }
+            }
+            row.source_revision = track->revision;
+            if (!row.duration_ms && track->facts.duration_ms >= 0) {
+                row.duration_ms = track->facts.duration_ms;
+            }
+            document.items.push_back(std::move(row));
+            continue;
+        }
+        for (auto [name, field] :
+             {std::pair{"title", &item->title}, std::pair{"artist", &item->artist},
+              std::pair{"album", &item->album}, std::pair{"albumartist", &item->album_artist},
+              std::pair{"date", &item->date}}) {
+            if (!field->empty()) {
+                row.fields.push_back({.name = name, .value = std::move(*field)});
             }
         }
         document.items.push_back(std::move(row));
@@ -880,7 +904,7 @@ void EngineListSync::fetch(const std::string& id, const EngineKey& key, const Fe
         ++stateFor(key).outstanding;
     }
     const QPointer self{this};
-    engine->request(QStringLiteral("list.get"), Json{{"id", id}},
+    engine->request(QStringLiteral("list.get"), Json{{"id", id}, {"describe", true}},
                     [self, id, key, why](core::Result<Json> answer) {
                         if (!self) {
                             return;

@@ -126,6 +126,8 @@ struct LibraryPage {
 struct LibraryTrackSnapshot {
     std::string raw_path;
     TkqRowFacts facts;
+    // The file as it was when its tags were indexed (ADR-0259).
+    std::optional<core::LocalSourceRevision> revision;
 };
 
 // ADR-0254: an indexed track as a view groups it -- the entry the tree shows,
@@ -218,6 +220,11 @@ class LocalLibrary final {
     core::Result<std::vector<LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const;
+    // ADR-0259: the same, with nothing for a path the library does not
+    // index -- a list may hold files from anywhere.
+    core::Result<std::vector<std::optional<LibraryTrackSnapshot>>>
+    described_tracks(const std::vector<std::string>& raw_paths,
+                     const core::CancellationToken& cancellation = {}) const;
     core::Result<std::optional<std::string>>
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const;

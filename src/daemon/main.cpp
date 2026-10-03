@@ -612,7 +612,7 @@ int main(int argc, char** argv) {
                                                    std::move(file_work_recovery));
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
-    trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);
+    trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player, &catalogue);
     // ADR-0253: a list that ends continues with its rule, from this engine's
     // library, whether or not a window is open.
     trackknife::engine::ListContinuation continuation{*workspace, catalogue, sink};

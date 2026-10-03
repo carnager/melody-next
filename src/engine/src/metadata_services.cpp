@@ -68,9 +68,11 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
 
 // One HTTPS request: GET, or POST with a form body. Redirects are followed,
 // over HTTPS only -- the Cover Art Archive hands images out from archive.org.
+// `status`, when given, is told the HTTP status of the answer.
 [[nodiscard]] core::Result<std::string> perform(const std::string& url,
                                                 const std::optional<std::string>& form,
-                                                const core::CancellationToken& cancellation) {
+                                                const core::CancellationToken& cancellation,
+                                                long* status_out = nullptr) {
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl{curl_easy_init(), curl_easy_cleanup};
     if (!curl) {
         return std::unexpected(service_error(core::ErrorCode::backend, "curl did not start"));
@@ -106,6 +108,9 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
     }
     long status = 0;
     curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status);
+    if (status_out != nullptr) {
+        *status_out = status;
+    }
     // A client error still carries the service's own message, which the
     // tagger shows; only a server that said nothing is an error here.
     if (status >= 500 && body.empty()) {
@@ -113,6 +118,21 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
             service_error(core::ErrorCode::io, "the service answered " + std::to_string(status)));
     }
     return body;
+}
+
+} // namespace
+
+namespace {
+
+// What answers in JSON: MusicBrainz's web service and the archive's listings.
+// The archive's images are bytes.
+[[nodiscard]] bool is_cover_listing(const std::string_view url) {
+    constexpr std::string_view release = "https://coverartarchive.org/release/";
+    return url.starts_with(release) && url.substr(release.size()).find('/') == std::string::npos;
+}
+
+[[nodiscard]] bool answers_json(const std::string_view url) {
+    return url.starts_with("https://musicbrainz.org/ws/2/") || is_cover_listing(url);
 }
 
 } // namespace
@@ -145,22 +165,43 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
             "an engine fetches only MusicBrainz and the Cover Art Archive, over HTTPS"));
     }
     const auto now = static_cast<std::int64_t>(std::time(nullptr));
+    // A release's listing of covers, as against one of its images.
+    const auto listing = is_cover_listing(url);
     // Cache first: a lookup already made is not made again, and not paced.
+    // Only answers are kept -- a cached page that is no JSON where JSON is
+    // answered is an error page an older engine kept, and is asked again.
     if (auto cache = persistence::SqliteMusicBrainzResponseCache::open(database_)) {
         if (auto loaded = cache->load(url, now, musicbrainz::response_cache_ttl_seconds);
             loaded && *loaded) {
             const auto& bytes = **loaded;
-            return std::string{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+            std::string cached{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+            if (!answers_json(url) || cached.starts_with('{')) {
+                return cached;
+            }
         }
     }
     pace(last_musicbrainz_, std::chrono::milliseconds{musicbrainz::minimum_request_interval_ms});
-    auto body = perform(url, std::nullopt, cancellation);
+    long status = 0;
+    auto body = perform(url, std::nullopt, cancellation, &status);
     if (!body) {
         return body;
     }
-    if (auto cache = persistence::SqliteMusicBrainzResponseCache::open(database_)) {
-        static_cast<void>(cache->store(url, *body, now, musicbrainz::response_cache_ttl_seconds,
-                                       musicbrainz::response_cache_maximum_entries));
+    // The archive says a release has no covers with a 404 page: as a listing,
+    // that is an empty one -- the answer, not an error.
+    if (listing && status == 404) {
+        *body = R"({"images":[]})";
+        status = 200;
+    }
+    if (status >= 200 && status < 300) {
+        if (auto cache = persistence::SqliteMusicBrainzResponseCache::open(database_)) {
+            static_cast<void>(cache->store(url, *body, now, musicbrainz::response_cache_ttl_seconds,
+                                           musicbrainz::response_cache_maximum_entries));
+        }
+    } else if (url.starts_with("https://coverartarchive.org/")) {
+        // The archive's other errors are pages, not answers the tagger can show.
+        return std::unexpected(service_error(
+            status == 404 ? core::ErrorCode::not_found : core::ErrorCode::io,
+            "the Cover Art Archive answered " + std::to_string(status)));
     }
     return body;
 }

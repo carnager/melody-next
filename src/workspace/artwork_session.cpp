@@ -1671,7 +1671,7 @@ void ArtworkSession::save() {
         [intents = std::move(intents), cancellation, policy, tools = tools_]() mutable {
             // ADR-0237: images of this computer handed over first, when the
             // engine writes; then planned against the files where they are.
-            auto staged = stageReplacements(std::move(intents), tools, cancellation);
+            auto staged = stageReplacements(std::move(intents), tools, cancellation, policy);
             if (!staged) {
                 return std::make_shared<core::Result<metadata::ArtworkWritePlan>>(
                     std::unexpected(std::move(staged.error())));

@@ -1412,6 +1412,23 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         const auto art_here = local_access.inventory(art, policy, {});
         require(art_there && art_here && *art_there == *art_here,
                 "a file's pictures through the engine are its pictures");
+        // An image over one part -- an original cover -- goes in parts and
+        // arrives whole. Bytes after a JPEG's end are no part of the picture,
+        // so a small one padded out stands for a large one.
+        {
+            std::ifstream input{cover_path, std::ios::binary};
+            std::string large{std::istreambuf_iterator<char>{input},
+                              std::istreambuf_iterator<char>{}};
+            large.append(1'200'000U, '\0');
+            const auto staged = remote.stage(std::span{
+                reinterpret_cast<const unsigned char*>(large.data()), large.size()});
+            require(staged && staged->byte_size == large.size() && staged->mime_type == "image/jpeg",
+                    "a large image is staged in parts, whole");
+            std::ifstream kept{staged->raw_path, std::ios::binary};
+            const std::string back{std::istreambuf_iterator<char>{kept},
+                                   std::istreambuf_iterator<char>{}};
+            require(back == large, "byte for byte");
+        }
         require(!art_here->items.empty(), "and it has one to replace");
 
         std::ifstream input{cover_path, std::ios::binary};
@@ -1537,6 +1554,31 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
     require(served && *served == cached, "a cached answer is served as it was");
     require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{500},
             "at once, without waiting its turn");
+
+    // Only answers are served from the cache: an archive's 404 page an older
+    // engine kept for a release with no covers is not served as its listing
+    // -- it is asked again (here, cancelled before reaching the network). An
+    // image is bytes, and is served as it was kept.
+    {
+        const std::string listing = "https://coverartarchive.org/release/"
+                                    "00000000-0000-0000-0000-000000000000";
+        const std::string image = listing + "/1-250.jpg";
+        auto cache = trackknife::persistence::SqliteMusicBrainzResponseCache::open(database);
+        require(cache.has_value(), "the cache opens again");
+        const auto now = static_cast<std::int64_t>(std::time(nullptr));
+        require(cache->store(listing, "<!doctype html><title>404 Not Found</title>", now,
+                             14LL * 24 * 60 * 60, 100U)
+                        .has_value() &&
+                    cache->store(image, "\xff\xd8\xff", now, 14LL * 24 * 60 * 60, 100U)
+                        .has_value(),
+                "a kept error page and a kept image");
+        core::CancellationSource stop;
+        stop.request_cancellation();
+        const auto page = services.fetch(listing, stop.token());
+        require(!page || !page->starts_with("<!doctype"), "an error page is not an answer");
+        const auto bytes = services.fetch(image, stop.token());
+        require(bytes && *bytes == "\xff\xd8\xff", "an image is served as it was kept");
+    }
 
     // The AcoustID key is the engine's, readable by its owner only.
     require(!services.has_acoustid_key(), "no key to begin with");

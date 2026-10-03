@@ -2145,7 +2145,8 @@ void TaggerSession::startWritePlan() {
             if (!artwork_intents.empty()) {
                 // ADR-0237: images of this computer handed over first when the
                 // engine writes; planned against the files where they are.
-                auto staged = stageReplacements(artwork_intents, tools, cancellation);
+                auto staged =
+                    stageReplacements(artwork_intents, tools, cancellation, cover_policy);
                 if (!staged) {
                     return std::make_shared<WritePlanResult>(std::unexpected(staged.error()));
                 }

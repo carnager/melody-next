@@ -196,6 +196,10 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         .tracks = {},
         .matched_count = 0U,
         .confidence = 0.0,
+        .method = AlignmentMethod::none,
+        .durations_compared = 0U,
+        .worst_duration_delta_ms = 0,
+        .weakest_title = 1.0,
     };
     alignment.tracks.reserve(local_tracks.size());
     if (local_tracks.empty() || alignment.release_tracks.empty()) {
@@ -247,6 +251,7 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         }
         if (complete) {
             assignment = std::move(by_number);
+            alignment.method = AlignmentMethod::numbers;
         }
     }
 
@@ -257,6 +262,7 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         for (std::size_t index = 0U; index < local_tracks.size(); ++index) {
             assignment[index] = index;
         }
+        alignment.method = AlignmentMethod::order;
     }
 
     // 3) Conservative greedy by title similarity and duration proximity.
@@ -298,6 +304,9 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
             assignment[pair.local_index] = pair.release_index;
             used.insert(pair.release_index);
         }
+        if (!used.empty()) {
+            alignment.method = AlignmentMethod::titles;
+        }
     }
 
     if (cancellation.is_cancellation_requested()) {
@@ -314,6 +323,15 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
                 local_tracks[local_index], release_track,
                 position_matches(local_tracks[local_index], release_track, media_count));
             ++alignment.matched_count;
+            const auto& local = local_tracks[local_index];
+            alignment.weakest_title = std::min(
+                alignment.weakest_title, similarity(local.title, release_track.track.title));
+            if (local.duration_ms && release_track.track.length_ms) {
+                ++alignment.durations_compared;
+                alignment.worst_duration_delta_ms =
+                    std::max<std::int64_t>(alignment.worst_duration_delta_ms,
+                             std::llabs(*local.duration_ms - *release_track.track.length_ms));
+            }
         }
         total += track.confidence;
         alignment.tracks.push_back(track);
@@ -323,6 +341,17 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         alignment.confidence *= 0.85;
     }
     return alignment;
+}
+
+bool is_clear_match(const ReleaseAlignment& alignment, const std::size_t local_count,
+                    const ClearMatchRule& rule) {
+    return local_count > 0U && alignment.release_tracks.size() == local_count &&
+           alignment.matched_count == local_count &&
+           (alignment.method == AlignmentMethod::numbers ||
+            alignment.method == AlignmentMethod::order) &&
+           alignment.durations_compared == local_count &&
+           alignment.worst_duration_delta_ms <= rule.maximum_duration_delta_ms &&
+           alignment.weakest_title >= rule.minimum_title_similarity;
 }
 
 } // namespace trackknife::musicbrainz

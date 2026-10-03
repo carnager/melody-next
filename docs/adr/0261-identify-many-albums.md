@@ -53,20 +53,25 @@ choose another version, Alt+↑/↓ move a file, U leaves a file unmatched.
 
 **4. Apply once.** Every staged album lands in one draft, previewed whole:
 each album with its release, what changes and its state, each with its own
-checkbox. One write, journaled, with one undo; each file is read again
-first, and one that changed since the lookup is left out and said so,
-without stopping the rest. Albums skipped or unmatched stay in the list for
-later. In the same write, each chosen on its own, all off by default:
+checkbox. One write, each file journaled as every write is, and the batch
+undone as one: **Undo this batch** restores every file of it from its
+journal. Each file is read again first, and one that changed since the
+lookup is left out and said so, without stopping the rest -- where a write
+plan otherwise refuses as a whole. Albums skipped or unmatched stay in the
+list for later. Each chosen on its own, all off by default:
 
-- **Rename the files** by a naming preset, in the folders they are in;
-- **Move into folders** by a folder preset, under the library folder they
-  are in;
+- **Rename the files** by a naming preset -- its file-name pattern -- in the
+  folders they are in;
+- **Move into folders** by a naming preset's folder pattern, under the
+  library folder each file is in;
 - **Scan ReplayGain**: track and album gain, or track gain only; **skip
-  albums that already have gain**, on by default. Scanned after the tags are
-  written.
+  albums that already have gain**, on by default. A second step once the
+  tags are written, as the ReplayGain dialog does it: a scan cannot be part
+  of a tag write, so its gains are written after, with their own progress.
 
 The presets are the naming layouts the file tools already use (and copy to
-each engine); **Edit naming presets…** opens them.
+each engine), each a folder pattern and a file-name pattern; **Edit naming
+presets…** opens them.
 
 ## Consequences
 
@@ -75,6 +80,12 @@ each engine); **Edit naming presets…** opens them.
 - Grouping, lookup and staging are new; the matcher, MusicBrainz client,
   cache, pacing, naming layouts, the write plan and its journal, and the
   ReplayGain scan are those there are.
+- New beyond the window: a write plan that sets aside a file that changed
+  and writes the rest, moving into each file's own library folder rather
+  than one destination, and undoing a whole Apply from its files' journals.
+- A batch is staged one album at a time, as a proposal set holds at most
+  1,000 files; one Apply holds what one draft holds (100,000 changed
+  fields, a few thousand files).
 - A long lookup belongs to the open window: closing it stops the lookup, and
   the cache makes starting again cheap. Keeping a batch across a restart is
   **Unknown** until wanted.
@@ -85,6 +96,14 @@ each engine); **Edit naming presets…** opens them.
   albums first.
 - Writing a batch's changes in parts, should one very large batch prove too
   slow to preview whole.
+
+## Progress
+
+- Grouping (`musicbrainz::group_albums`) and the clear-match rule
+  (`is_clear_match` over the evidence an alignment now reports: how it
+  paired, the worst length difference, the weakest title): done
+  (2026-10-03). Identify now uses a file's length where the technical probe
+  has it.
 
 ## Verification
 

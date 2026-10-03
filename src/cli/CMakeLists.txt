@@ -10,3 +10,6 @@ target_link_libraries(
 )
 
 install(TARGETS melody_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT cli)
+# The album page, built on melody-cli.
+install(PROGRAMS ${PROJECT_SOURCE_DIR}/scripts/melody-musiclist
+        DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT cli)

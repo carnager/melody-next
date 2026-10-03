@@ -13,8 +13,13 @@ pkgbase = melody-cli-git
 	depends = gcc-libs
 	depends = glibc
 	depends = libutf8proc
+	optdepends = python: melody-musiclist, the album page
+	optdepends = openssh: melody-musiclist uploading it
 	provides = melody-cli
+	provides = melody-musiclist
 	conflicts = melody-cli
+	conflicts = melody-musiclist
+	conflicts = melody-musiclist-git
 	source = melody-next::git+https://github.com/carnager/melody-next.git
 	sha256sums = SKIP
 

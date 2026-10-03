@@ -473,6 +473,15 @@ add_test(
 )
 set_tests_properties(melody-cli PROPERTIES TIMEOUT 90)
 
+# melody-musiclist, the album page, against a real engine through melody-cli.
+add_test(
+    NAME melody-musiclist
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/musiclist_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_cli>"
+            "${PROJECT_SOURCE_DIR}/scripts/melody-musiclist"
+)
+set_tests_properties(melody-musiclist PROPERTIES TIMEOUT 60)
+
 # ADR-0232: melody-watch, its parts and against a real engine.
 if(TARGET melody_watch)
 add_executable(trackknife_watch_tests watch_test.cpp)

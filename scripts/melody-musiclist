@@ -1,0 +1,623 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""melody-musiclist: every album of an engine's library, with its rating, as
+one HTML page, copied with scp to where a web server serves it.
+
+It asks the engine through melody-cli, so it reaches whatever melody-cli
+reaches: this computer's engine, one named on the network, or one by
+address. Configured in $XDG_CONFIG_HOME/melody/melody-musiclist.toml (or the
+melody-musicpage.toml of earlier releases); a first run writes one to fill
+in. --output FILE writes the page there and copies nothing.
+"""
+
+import argparse
+import collections
+import datetime
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+
+DEFAULT_CONFIG = """# The engine whose library is listed: by name as it announces itself on
+# the network (as `melody-cli engines` shows it), or by address
+# (HOST:PORT or a socket path). Neither: this computer's engine.
+[engine]
+name = ""
+server = ""
+# A TCP connection needs the engine's password.
+password_file = ""
+
+# Required: your SSH destination and the directory for index.html.
+[upload]
+host = ""
+path = ""
+
+[output]
+temp_file = "/tmp/musiclist.html"
+"""
+
+# An album's computed rating is the mean of its tracks' ratings, said only
+# once at least this share of them is rated -- as Melody always had it.
+COMPUTED_THRESHOLD = 0.7
+
+START = time.monotonic()
+
+
+def log(message):
+    now = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[{now} | {time.monotonic() - START:.3f}s] {message}", flush=True)
+
+
+def fail(message):
+    log(f"ERROR: {message}")
+    sys.exit(1)
+
+
+def config_path():
+    root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    folder = os.path.join(root, "melody")
+    path = os.path.join(folder, "melody-musiclist.toml")
+    earlier = os.path.join(folder, "melody-musicpage.toml")
+    if not os.path.exists(path) and os.path.exists(earlier):
+        return earlier
+    return path
+
+
+def load_config(need_upload):
+    path = config_path()
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as out:
+            out.write(DEFAULT_CONFIG)
+    with open(path, "rb") as source:
+        config = tomllib.load(source)
+    upload = config.get("upload", {})
+    if need_upload and (not str(upload.get("host", "")).strip()
+                        or not str(upload.get("path", "")).strip()):
+        fail(f"configure both [upload].host and [upload].path in {path}")
+    return config, path
+
+
+def melody_cli(config, *arguments):
+    """melody-cli's output for `arguments`, against the configured engine."""
+    command = [os.environ.get("MELODY_CLI") or shutil.which("melody-cli") or "melody-cli"]
+    engine = config.get("engine", {})
+    if str(engine.get("server", "")).strip():
+        command += ["--server", engine["server"].strip()]
+    elif str(engine.get("name", "")).strip():
+        command += ["--engine", engine["name"].strip()]
+    if str(engine.get("password_file", "")).strip():
+        command += ["--password-file", os.path.expanduser(engine["password_file"].strip())]
+    try:
+        done = subprocess.run(command + list(arguments), capture_output=True, text=True,
+                              check=False)
+    except FileNotFoundError:
+        fail("melody-cli is not installed")
+    if done.stderr.strip():
+        # An older engine, say: worth seeing, not a failure.
+        for line in done.stderr.strip().splitlines():
+            log(line)
+    if done.returncode != 0:
+        fail(f"melody-cli {' '.join(arguments)} failed")
+    return done.stdout
+
+
+def year_of(date):
+    digits = date[:4]
+    return int(digits) if digits.isdigit() else 0
+
+
+def collect(config):
+    log("Fetching albums...")
+    albums = json.loads(melody_cli(config, "--json", "albums"))
+    log(f"Found {len(albums)} albums, fetching track ratings...")
+    # Every track's album and rating, one line each, to work out the
+    # computed ratings: the albums' own key is not something a format
+    # can name, so they are matched by artist, album and date, as the
+    # album list shows them.
+    lines = melody_cli(
+        config, "find", "ALL", "--format",
+        "$if2(%albumartist%,%artist%)\t%album%\t%date%\t%rating%")
+    ratings = collections.defaultdict(list)
+    for line in lines.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        artist, album, date, rating = parts
+        ratings[(artist, album, date)].append(int(rating) if rating.isdigit() else 0)
+    exported = []
+    for album in albums:
+        artist = album.get("artist", "")
+        title = album.get("album", "")
+        date = album.get("date", "")
+        tracks = ratings.get((artist, title, date), [])
+        rated = [rating for rating in tracks if rating > 0]
+        computed = 0.0
+        if tracks and len(rated) / len(tracks) >= COMPUTED_THRESHOLD:
+            computed = round(sum(rated) / len(rated), 1)
+        exported.append({
+            "artist": artist or "Unknown Artist",
+            "album": title or "Unknown Album",
+            "year": date or "N/A",
+            "year_int": year_of(date),
+            "rating": int(album.get("album_rating", 0) or 0),
+            "computed": computed,
+            # When the library first had it, in seconds; for "Latest first".
+            "added": int(album.get("added", 0) or 0),
+        })
+    return exported
+
+
+def render(albums):
+    # Inside a <script> element: "</" would end it early.
+    data = json.dumps(albums, ensure_ascii=False).replace("</", "<\\/")
+    generated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    return PAGE.replace("@@GENERATED@@", generated).replace("@@ALBUMS@@", data)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="melody-musiclist",
+        description="Every album of an engine's library, with its rating, as one HTML page.")
+    parser.add_argument("--output", metavar="FILE",
+                        help="write the page to FILE and copy nothing")
+    arguments = parser.parse_args()
+    log("Starting...")
+    config, path = load_config(need_upload=arguments.output is None)
+    albums = collect(config)
+    page = render(albums)
+    if arguments.output:
+        with open(arguments.output, "w", encoding="utf-8") as out:
+            out.write(page)
+        log(f"HTML written to {arguments.output} ({len(albums)} albums)")
+        return
+    temp_file = config.get("output", {}).get("temp_file") or "/tmp/musiclist.html"
+    with open(temp_file, "w", encoding="utf-8") as out:
+        out.write(page)
+    log(f"HTML generated ({len(albums)} albums)")
+    upload = config["upload"]
+    target = f"{upload['host'].strip()}:{upload['path'].strip()}/index.html"
+    log(f"Uploading to {target}...")
+    done = subprocess.run(["scp", temp_file, target], capture_output=True, text=True,
+                          check=False)
+    os.remove(temp_file)
+    if done.returncode != 0:
+        fail(f"scp failed: {(done.stdout + done.stderr).strip()}")
+    log("Done.")
+
+
+PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Collection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #fafaf9; --bg-card: #ffffff; --bg-hover: #f5f5f4;
+      --bg-badge: #f5f5f4; --bg-header: #f8f8f7;
+      --border: #e7e5e4; --border-focus: #a8a29e;
+      --text: #1c1917; --text-secondary: #57534e; --text-muted: #a8a29e;
+      --accent: #dc2626; --accent-hover: #b91c1c; --accent-soft: #fef2f2;
+      --star: #d6d3d1; --star-filled: #f59e0b; --star-computed: #fbbf24;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --row-alt: rgba(0,0,0,0.015);
+    }
+    .dark {
+      --bg: #0c0a09; --bg-card: #1c1917; --bg-hover: #292524;
+      --bg-badge: #292524; --bg-header: #1a1816;
+      --border: #292524; --border-focus: #57534e;
+      --text: #fafaf9; --text-secondary: #a8a29e; --text-muted: #57534e;
+      --accent: #ef4444; --accent-hover: #f87171; --accent-soft: #1c1917;
+      --star: #44403c; --star-filled: #f59e0b; --star-computed: #d97706;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+      --row-alt: rgba(255,255,255,0.02);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.6; min-height: 100vh;
+      transition: background 0.3s, color 0.3s;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; }
+    .header-left h1 {
+      font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--accent), #f97316);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .header-left .subtitle {
+      font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;
+      font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+    }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; }
+    .stat-badge {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: var(--text-secondary); background: var(--bg-badge);
+      padding: 0.35rem 0.75rem; border-radius: 2rem; border: 1px solid var(--border);
+    }
+    .theme-toggle {
+      width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--bg-card); cursor: pointer; display: flex; align-items: center;
+      justify-content: center; font-size: 1rem; transition: all 0.2s;
+      color: var(--text-secondary);
+    }
+    .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .latest-toggle {
+      height: 36px; padding: 0 0.9rem; border-radius: 18px; border: 1px solid var(--border);
+      background: var(--bg-card); cursor: pointer; font-size: 0.85rem; transition: all 0.2s;
+      color: var(--text-secondary);
+    }
+    .latest-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .latest-toggle[aria-pressed="true"] {
+      border-color: var(--accent); background: var(--accent); color: var(--bg-card);
+    }
+
+    /* Alphabet filter */
+    .alpha-bar {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .alpha-btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 500;
+      width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+    }
+    .alpha-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .alpha-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* Search */
+    .search-bar { position: relative; margin-bottom: 1.25rem; }
+    .search-bar input {
+      width: 100%; font-size: 0.9rem; padding: 0.75rem 1rem 0.75rem 2.75rem;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card);
+      color: var(--text); outline: none; transition: all 0.2s; box-shadow: var(--shadow);
+      font-family: inherit;
+    }
+    .search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .search-bar input::placeholder { color: var(--text-muted); }
+    .search-bar .search-icon {
+      position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); font-size: 1rem; pointer-events: none;
+    }
+    .search-bar .clear-btn {
+      position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 1.1rem; padding: 0.25rem; border-radius: 4px; display: none; line-height: 1;
+    }
+    .search-bar .clear-btn:hover { color: var(--accent); }
+    .search-bar.has-value .clear-btn { display: block; }
+
+    /* Table */
+    .table-wrap {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden; box-shadow: var(--shadow);
+      margin-bottom: 1.5rem;
+    }
+    .table-wrap table { width: 100%; border-collapse: collapse; }
+    .table-wrap th {
+      text-align: left; padding: 0.7rem 1rem; font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+      background: var(--bg-header); border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none; transition: color 0.15s;
+      white-space: nowrap;
+    }
+    .table-wrap th:hover { color: var(--accent); }
+    .table-wrap th.sorted { color: var(--accent); }
+    .table-wrap th .arrow { font-size: 0.6rem; margin-left: 0.3rem; opacity: 0.5; }
+    .table-wrap th.sorted .arrow { opacity: 1; }
+    .table-wrap td { padding: 0.55rem 1rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+    .table-wrap tr:last-child td { border-bottom: none; }
+    .table-wrap tbody tr { transition: background 0.1s; }
+    .table-wrap tbody tr:nth-child(even) { background: var(--row-alt); }
+    .table-wrap tbody tr:hover { background: var(--bg-hover); }
+    .col-artist { font-weight: 500; color: var(--text); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .col-album { color: var(--text-secondary); max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .col-year { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-muted); width: 5rem; }
+    .col-rating { width: 7rem; white-space: nowrap; }
+    .col-rating .s { color: var(--star); }
+    .col-rating .s.on { color: var(--star-filled); }
+    .col-rating .s.computed { color: var(--star-computed); opacity: 0.6; }
+    /* Ratings are 0-10: five stars in half steps. */
+    .col-rating .s.half {
+      background: linear-gradient(90deg, var(--star-filled) 50%, var(--star) 50%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .col-rating .s.half.computed {
+      background: linear-gradient(90deg, var(--star-computed) 50%, var(--star) 50%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .col-rating .no-rating { font-size: 0.75rem; color: var(--text-muted); }
+
+    /* Empty state */
+    .empty-row td { text-align: center; padding: 3rem 1rem; color: var(--text-muted); font-size: 0.9rem; }
+
+    /* Pagination */
+    .pagination {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 1rem;
+    }
+    .pagination .info {
+      font-size: 0.75rem; color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .pagination .controls { display: flex; align-items: center; gap: 0.5rem; }
+    .pagination select {
+      font-size: 0.75rem; padding: 0.35rem 0.5rem; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg-card); color: var(--text);
+      cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    }
+    .page-btn {
+      font-size: 0.75rem; padding: 0.35rem 0.75rem; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary);
+      cursor: pointer; transition: all 0.15s; font-family: inherit;
+    }
+    .page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .page-indicator {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: var(--text-secondary); min-width: 7rem; text-align: center;
+    }
+
+    @media (max-width: 640px) {
+      .container { padding: 1rem; }
+      .header-left h1 { font-size: 1.3rem; }
+      .table-wrap td, .table-wrap th { padding: 0.5rem 0.6rem; }
+      .col-artist, .col-album { max-width: 150px; }
+      .pagination { flex-direction: column; align-items: stretch; text-align: center; }
+      .pagination .controls { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <h1>Music Collection</h1>
+      <div class="subtitle">generated @@GENERATED@@</div>
+    </div>
+    <div class="header-right">
+      <span class="stat-badge" id="album-count"></span>
+      <button class="latest-toggle" id="latestToggle" aria-pressed="false"
+              title="Sort by when albums were added, newest first">Latest first</button>
+      <button class="theme-toggle" id="darkModeToggle" title="Toggle theme">
+        <span class="toggle-icon"></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="alpha-bar" id="alphabet-filter-buttons"></div>
+
+  <div class="search-bar" id="search-bar">
+    <span class="search-icon">&#x2315;</span>
+    <input type="text" id="filter" placeholder="Search artists, albums, years... or r=N for rating (0-10)">
+    <button class="clear-btn" id="clearFilter">&#x2715;</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="sorted" data-sort="artist">Artist <span class="arrow">&#9650;</span></th>
+          <th data-sort="album">Album <span class="arrow"></span></th>
+          <th data-sort="year">Year <span class="arrow"></span></th>
+          <th data-sort="rating">Rating <span class="arrow"></span></th>
+        </tr>
+      </thead>
+      <tbody id="album-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    <div class="info"><span id="pagination-info"></span></div>
+    <div class="controls">
+      <select id="itemsPerPage">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="250">250</option>
+      </select>
+      <button class="page-btn" id="prev-page">&#8592; Prev</button>
+      <span class="page-indicator" id="page-indicator"></span>
+      <button class="page-btn" id="next-page">Next &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const allAlbums = @@ALBUMS@@;
+const SYM = "#SYM#";
+let page = 1, perPage = 50, sortCol = 'artist', sortDir = 'asc', latest = false;
+let textFilter = '', letterFilter = null, filtered = [];
+
+const $ = id => document.getElementById(id);
+const tbody = $('album-tbody'), filterInput = $('filter'), clearBtn = $('clearFilter');
+const prevBtn = $('prev-page'), nextBtn = $('next-page');
+const pageInd = $('page-indicator'), pageInfo = $('pagination-info');
+const perPageSel = $('itemsPerPage'), alphaBar = $('alphabet-filter-buttons');
+const searchBar = $('search-bar'), countBadge = $('album-count');
+const headers = document.querySelectorAll('.table-wrap th[data-sort]');
+
+// Theme
+try {
+  const t = localStorage.theme, p = matchMedia('(prefers-color-scheme:dark)').matches;
+  if (t === 'dark' || (!t && p)) document.documentElement.classList.add('dark');
+} catch(_){}
+function updateThemeIcon() {
+  const d = document.documentElement.classList.contains('dark');
+  document.querySelector('.toggle-icon').textContent = d ? '\u2600' : '\u263E';
+}
+updateThemeIcon();
+$('darkModeToggle').onclick = () => {
+  const d = document.documentElement.classList.toggle('dark');
+  try { localStorage.theme = d ? 'dark' : 'light'; } catch(_){}
+  updateThemeIcon();
+};
+
+function norm(s) { return s ? s.normalize("NFD").replace(/\p{Diacritic}/gu,"").toUpperCase() : ""; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Ratings are 0-10, shown as five stars in half steps: 8 is four stars.
+function stars(rating, computed) {
+  const display = rating > 0 ? rating : (computed > 0 ? Math.round(computed) : 0);
+  const isComp = rating === 0 && computed > 0;
+  if (!display) return '<span class="no-rating">\u2014</span>';
+  let h = '';
+  for (let i = 1; i <= 5; i++) {
+    const fill = display >= 2*i ? (isComp ? ' computed' : ' on')
+               : display === 2*i - 1 ? (isComp ? ' half computed' : ' half') : '';
+    h += '<span class="s' + fill + '">\u2605</span>';
+  }
+  if (isComp) h = '<span title="Avg: ' + computed.toFixed(1) + '">' + h + '</span>';
+  return h;
+}
+
+// Alphabet
+function buildAlpha() {
+  const letters = new Set(); let sym = false;
+  allAlbums.forEach(a => {
+    const f = norm((a.artist||'')[0]||'');
+    if (!f) return;
+    if (f >= 'A' && f <= 'Z') letters.add(f); else sym = true;
+  });
+  alphaBar.innerHTML = '';
+  const all = ['All', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l=>letters.has(l)), ...(sym?['#']:[])];
+  all.forEach(l => {
+    const b = document.createElement('button');
+    b.textContent = l; b.className = 'alpha-btn';
+    b.dataset.letter = l === '#' ? SYM : l === 'All' ? 'ALL' : l;
+    b.onclick = () => {
+      const k = b.dataset.letter;
+      letterFilter = (k === 'ALL' || letterFilter === k) ? null : k;
+      styleAlpha(); run();
+    };
+    alphaBar.appendChild(b);
+  });
+  styleAlpha();
+}
+function styleAlpha() {
+  alphaBar.querySelectorAll('.alpha-btn').forEach(b => {
+    b.classList.toggle('active', (letterFilter===null && b.dataset.letter==='ALL') || b.dataset.letter===letterFilter);
+  });
+}
+
+function run() {
+  let rFilter = -1;
+  const raw = textFilter.toLowerCase().split(' ').filter(Boolean), terms = [];
+  raw.forEach(t => {
+    if (t.startsWith('r=')) { const n = parseInt(t.slice(2),10); if(!isNaN(n)&&n>=0&&n<=10) rFilter=n; else terms.push(t); }
+    else terms.push(t);
+  });
+  let a = [...allAlbums];
+  if (letterFilter) a = a.filter(al => {
+    const f = norm((al.artist||'')[0]||'');
+    return letterFilter === SYM ? !(f>='A'&&f<='Z') : f === letterFilter;
+  });
+  if (rFilter !== -1) a = a.filter(al => al.rating === rFilter);
+  if (terms.length) a = a.filter(al => {
+    const s = (al.artist+' '+al.album+' '+al.year).toLowerCase();
+    return terms.every(t => s.includes(t));
+  });
+  if (latest) a.sort((x,y) => (y.added||0) - (x.added||0));
+  else a.sort((x,y) => {
+    let xv, yv;
+    if (sortCol==='year') { xv=x.year_int; yv=y.year_int; }
+    else if (sortCol==='rating') { xv=x.rating||x.computed||0; yv=y.rating||y.computed||0; }
+    else { xv=norm(x[sortCol]); yv=norm(y[sortCol]); }
+    let c = xv>yv?1:xv<yv?-1:0;
+    return sortDir==='desc'?-c:c;
+  });
+  filtered = a; page = 1;
+  render(); paginate();
+}
+
+function render() {
+  tbody.innerHTML = '';
+  countBadge.textContent = filtered.length + ' albums';
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">\u266A No albums match your search.</td></tr>';
+    return;
+  }
+  const start = (page-1)*perPage, end = start+perPage;
+  filtered.slice(start, end).forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="col-artist">' + esc(a.artist) + '</td>' +
+      '<td class="col-album">' + esc(a.album) + '</td>' +
+      '<td class="col-year">' + esc(a.year) + '</td>' +
+      '<td class="col-rating">' + stars(a.rating, a.computed) + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function paginate() {
+  const total = filtered.length, pages = Math.ceil(total/perPage)||1;
+  pageInd.textContent = page + ' / ' + pages;
+  const s = total ? (page-1)*perPage+1 : 0, e = Math.min(page*perPage, total);
+  pageInfo.textContent = s + '\u2013' + e + ' of ' + total;
+  prevBtn.disabled = page === 1;
+  nextBtn.disabled = page === pages;
+}
+
+// Latest first: newest additions on top until a column is chosen again.
+const latestToggle = $('latestToggle');
+function setLatest(on) {
+  latest = on;
+  latestToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  headers.forEach(h => {
+    const shown = !on && h.dataset.sort === sortCol;
+    h.classList.toggle('sorted', shown);
+    h.querySelector('.arrow').textContent = shown ? (sortDir==='asc' ? '\u25B2' : '\u25BC') : '';
+  });
+  try { localStorage.latest = on ? '1' : ''; } catch(_){}
+}
+latestToggle.onclick = () => { setLatest(!latest); run(); };
+try { if (localStorage.latest === '1') setLatest(true); } catch(_){}
+
+// Sort headers
+headers.forEach(th => th.onclick = () => {
+  if (latest) setLatest(false);
+  const col = th.dataset.sort;
+  if (sortCol === col) sortDir = sortDir==='asc'?'desc':'asc';
+  else { sortCol = col; sortDir = 'asc'; }
+  headers.forEach(h => { h.classList.remove('sorted'); h.querySelector('.arrow').textContent = ''; });
+  th.classList.add('sorted');
+  th.querySelector('.arrow').textContent = sortDir==='asc' ? '\u25B2' : '\u25BC';
+  run();
+});
+
+filterInput.oninput = () => {
+  textFilter = filterInput.value;
+  searchBar.classList.toggle('has-value', !!textFilter);
+  run();
+};
+clearBtn.onclick = () => {
+  filterInput.value = ''; textFilter = ''; letterFilter = null;
+  searchBar.classList.remove('has-value');
+  styleAlpha(); run();
+};
+prevBtn.onclick = () => { if(page>1){page--;render();paginate();} };
+nextBtn.onclick = () => { if(page<Math.ceil(filtered.length/perPage)){page++;render();paginate();} };
+perPageSel.onchange = e => { perPage=parseInt(e.target.value,10); page=1; render(); paginate(); };
+
+buildAlpha();
+run();
+</script>
+</body>
+</html>"""
+
+
+if __name__ == "__main__":
+    main()

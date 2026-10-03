@@ -11,8 +11,11 @@ url='https://github.com/carnager/melody-next'
 license=(GPL-3.0-only)
 depends=(gcc-libs glibc libutf8proc)
 makedepends=(cmake git ninja nlohmann-json)
-provides=(melody-cli)
-conflicts=(melody-cli)
+optdepends=('python: melody-musiclist, the album page'
+            'openssh: melody-musiclist uploading it')
+# melody-musiclist comes with it now, built on melody-cli rather than MPD.
+provides=(melody-cli melody-musiclist)
+conflicts=(melody-cli melody-musiclist melody-musiclist-git)
 source=("melody-next::git+https://github.com/carnager/melody-next.git")
 sha256sums=('SKIP')
 

@@ -394,12 +394,16 @@ class ListRepository final {
                   const std::vector<EngineListItem>& items,
                   std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     // ADR-0256: applies `edits` in order to the list at `expected_revision`,
-    // in one transaction, and answers the list as it is afterwards. Refused
+    // with its name or kind when given -- "Save" is a change of kind -- in
+    // one transaction, and answers the list as it is afterwards -- its items
+    // only `with_items`, as reading a long one back costs. Refused
     // as a conflict at any other revision, as not_found without the list,
     // and as apply_list_edits refuses; nothing is written then.
     [[nodiscard]] core::Result<EngineList>
     edit_engine_list(const core::StableId& id, std::uint64_t expected_revision,
-                     const std::vector<ListEdit>& edits, std::int64_t now_ms);
+                     const std::vector<ListEdit>& edits, std::int64_t now_ms,
+                     std::optional<std::string_view> name = std::nullopt,
+                     std::optional<EngineListKind> kind = std::nullopt, bool with_items = true);
     [[nodiscard]] core::Result<EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);

@@ -215,6 +215,10 @@ unknown = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"
 check(unknown.get("error", {}).get("code") == "not_found", "an edit of an unknown entry is refused")
 check(a.call("list.get", {"id": edited["id"]})["result"]["revision"] == edited["revision"] + 2 and
       len(a.call("playback.queue")["result"]["entries"]) == 2, "and nothing of it is applied")
+renamed = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"] + 2, "edits": [],
+                               "name": "Kept", "kind": "saved"})["result"]
+check(renamed["name"] == "Kept" and renamed["kind"] == "saved" and
+      renamed["revision"] == edited["revision"] + 3, "a name and a kind are edits too")
 check(a.call("list.edit", {"id": edited["id"], "edits": []})["error"]["code"] == "invalid_argument",
       "an edit names the revision it was worked out from")
 PY

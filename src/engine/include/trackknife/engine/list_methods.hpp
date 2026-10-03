@@ -16,7 +16,7 @@ class Workspace;
 //   list.all                                   -> {"lists": [summary]}
 //   list.get {id}                              -> summary + {"items": [item]}
 //   list.save {id?, name, kind?, items, revision?} -> summary
-//   list.edit {id, revision, edits}           -> summary
+//   list.edit {id, revision, edits, name?, kind?} -> summary
 //   list.rename {id, name, revision?}          -> summary
 //   list.delete {id, revision?}                -> {"deleted": bool}
 //   list.play {id, entry?}                     -> {"playing": entry}

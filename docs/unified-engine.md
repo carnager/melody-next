@@ -423,8 +423,8 @@ held-open response, and binary on a separate channel.
   at design time, since it is free to allow for and expensive to retrofit.
 
 **What is built.** The catalogue is on the wire, and so is playback: starting a
-track in a list hands the engine the whole list and asks it to play one entry,
-and the transport buttons, the seek bar and the volume slider drive the engine
+track in a list asks the engine to play one entry of its own copy of that list
+(ADR-0256 -- it was once handed the whole list), and the transport buttons, the seek bar and the volume slider drive the engine
 rather than the window's own player. The window follows the engine's reported
 entry, so the highlighted row moves when the engine advances by itself.
 
@@ -505,8 +505,9 @@ engine's, so the buttons follow a one-shot expiring where playback actually
 happened.
 
 The playing list and the engine's queue are kept in step both ways. An edit
-here is pushed, because the engine keeps playing what it was handed and a
-track removed in the window would otherwise still play. A change the engine
+here is sent at once, as an edit of the list the queue was played from, and
+the engine's queue follows it (ADR-0256): a track removed in the window would
+otherwise still play. A change the engine
 made -- consuming, or another client editing -- is read back and merged into
 the rows rather than replacing them: the engine's entries are paths and the
 tags it was given, while the window's rows carry everything it has read from

@@ -197,9 +197,12 @@ Workspace::save_engine_list(const core::StableId& id, const std::string_view nam
 core::Result<persistence::EngineList>
 Workspace::edit_engine_list(const core::StableId& id, const std::uint64_t expected_revision,
                             const std::vector<persistence::ListEdit>& edits,
-                            const std::int64_t now_ms) {
+                            const std::int64_t now_ms, const std::optional<std::string_view> name,
+                            const std::optional<persistence::EngineListKind> kind,
+                            const bool with_items) {
     const std::lock_guard guard{*mutex_};
-    return repository_.edit_engine_list(id, expected_revision, edits, now_ms);
+    return repository_.edit_engine_list(id, expected_revision, edits, now_ms, name, kind,
+                                        with_items);
 }
 
 core::Result<persistence::EngineListSummary>

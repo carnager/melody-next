@@ -167,6 +167,11 @@ class EnginePlayback final : public QObject {
               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
               const core::StableId& entry, const QString& list = {});
 
+    // ADR-0256: plays `entry` of the engine's own copy of `list`, which
+    // becomes the queue -- nothing of the list is sent. The list's edits must
+    // have reached the engine first (EngineListSync::sendNow).
+    void playList(const QString& list, const core::StableId& entry);
+
     // The up-next order, stated rather than rebuilt one request at a time.
     // Entries not already in the engine's queue are added to it: an engine
     // only plays what it holds, and up-next can carry a track that was never
@@ -200,8 +205,13 @@ class EnginePlayback final : public QObject {
     // Any other request -- one whose answer is not a state document: sent in
     // order with the commands, and answered on this object's thread. With no
     // connection it is answered at once, with the error.
+    // `settles`: a write to what the engine plays -- ADR-0256's list edits,
+    // which the queue follows -- counted as settling() while on its way, like
+    // a command, so a state from before it is not taken for the engine's
+    // answer to it.
     using Answer = std::function<void(core::Result<protocol::Json>)>;
-    void request(const QString& method, protocol::Json params, Answer answer);
+    void request(const QString& method, protocol::Json params, Answer answer,
+                 bool settles = false);
 
     // For quitting: stops reconnecting, and never starts the engine again.
     // Its reconnect timer otherwise revives an engine that stopped -- the

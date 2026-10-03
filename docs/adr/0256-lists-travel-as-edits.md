@@ -33,8 +33,9 @@ megabytes it has already sent is wrong at any size.
 **A list is sent whole once, when it is made, and then only as edits.** The
 engine already holds it; what it needs to hear is what changed.
 
-**`list.edit {id, revision, ops}`** applies operations in order to the list
-at `revision` and answers its new summary. A `revision` that is not the
+**`list.edit {id, revision, edits, name?, kind?}`** applies operations in
+order to the list at `revision`, with its new name or kind when given -- Save
+is a change of kind -- and answers its new summary. A `revision` that is not the
 list's current one is refused as `conflict`; the client reads the list and
 works out its edits again against what it found. Operations:
 
@@ -82,16 +83,26 @@ queue came from (ADR-0253) is applied to the queue too, in the same request.
 The window no longer pushes the queue when the playing list changes; it
 edits the list, as it would any other.
 
-**Searches kept as tabs are made on the engine.** Keeping a library search
-asks the engine to make a working list from the query; the tracks never
-travel from the window. The window reads the list it was given, as for any
-list.
+**Making a long list costs what it adds.** On the engine an edit writes
+only from the first position it changed: appends -- a list being made, batch
+after batch -- write the new rows and read nothing back, and the items come
+back with an edit only when a queue follows the list. In the window, while
+what the engine holds leads what is shown, the rest is inserted without
+working out a plan. A kept search of 66,000 tracks reaches the engine in
+about 8 s in a debug build, in the background; the window's longest pause
+while it does is 34 ms (measured 2026-10-03; it took 33 s, and a quadratic
+amount of writing, before).
 
 **The line limit stays at 1 MiB**, and the engine answers a longer line as
 the call it was (`limit_exceeded`) instead of dropping the connection. No
 request the window makes comes near it.
 
 ## Not decided here
+
+- Making a kept search's list on the engine from the query, so its tracks do
+  not travel from the window at all. With batching it is no longer what
+  makes keeping a search slow, and the window still reads every row to show
+  it; it belongs with step 3d.
 
 - Reading a long list's rows in pages instead of whole. `list.get` of 66,000
   entries is one large answer; answers are not limited, and the window shows
@@ -118,6 +129,7 @@ request the window makes comes near it.
   randomised lists.
 - An engine test: an edit of the playing list changes the queue the same
   way, and the playing entry keeps playing.
-- A window test: a 20,000-row tab is made in batches under the limit;
-  dragging a row sends one move; a reconnect sends no items; playing sends
-  `list.play`.
+- A window test: an 8,000-row tab is made in batches under the limit;
+  dragging three rows is one edit; a reconnect writes nothing; playing names
+  the list, and the engine's queue is its copy, with the album artist; a row
+  removed from the playing list leaves the engine's queue.

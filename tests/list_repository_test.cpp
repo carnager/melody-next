@@ -2087,16 +2087,63 @@ void engine_lists_are_edited_in_place() {
         5);
     require(!stale && stale.error().code == ErrorCode::conflict,
             "an edit against an old revision is a conflict");
-    auto unknown = repository.edit_engine_list(
+
+    // Appends, in two inserts chained one after the other: added where the
+    // list ends, the rest untouched.
+    persistence::EngineListItem tail_one;
+    tail_one.raw_path = "/music/tail-1.flac";
+    persistence::EngineListItem tail_two;
+    tail_two.raw_path = "/music/tail-2.flac";
+    persistence::EngineListItem tail_three;
+    tail_three.raw_path = "/music/tail-3.flac";
+    auto appended = repository.edit_engine_list(
         id, 4U,
+        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_one, tail_two},
+                  .after = fresh.entry_id},
+         ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_three},
+                  .after = tail_two.entry_id}},
+        5);
+    const std::vector after_appends{items[4], items[1], items[3], fresh, tail_one, tail_two,
+                                    tail_three};
+    require(appended && appended->items == after_appends &&
+                (*repository.load_engine_list(id))->items == after_appends,
+            "appends land at the end");
+    auto quiet = repository.edit_engine_list(
+        id, 5U,
+        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_one},
+                  .after = tail_three.entry_id}},
+        6, std::nullopt, std::nullopt, false);
+    require(!quiet && (*repository.load_engine_list(id))->items == after_appends,
+            "an append of an entry already held is refused, nothing written");
+    persistence::EngineListItem tail_four;
+    tail_four.raw_path = "/music/tail-4.flac";
+    auto without = repository.edit_engine_list(
+        id, 5U,
+        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_four},
+                  .after = tail_three.entry_id}},
+        6, std::nullopt, std::nullopt, false);
+    require(without && without->items.empty() && without->summary.tracks == 8U,
+            "without items asked for, only the summary comes back");
+    // A move near the end rewrites from there; the order read back is right.
+    auto near_end = repository.edit_engine_list(
+        id, 6U,
+        {ListEdit{.kind = ListEdit::Kind::move, .entries = {tail_four.entry_id}, .items = {},
+                  .after = fresh.entry_id}},
+        7);
+    const std::vector after_move{items[4], items[1], items[3], fresh, tail_four, tail_one,
+                                 tail_two, tail_three};
+    require(near_end && (*repository.load_engine_list(id))->items == after_move,
+            "a move keeps the lead in place and writes the rest in order");
+    auto unknown = repository.edit_engine_list(
+        id, 7U,
         {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[1].entry_id}, .items = {},
                   .after = {}},
          ListEdit{.kind = ListEdit::Kind::remove, .entries = {StableId::random()}, .items = {},
                   .after = {}}},
         5);
     require(!unknown && unknown.error().code == ErrorCode::not_found &&
-                (*repository.load_engine_list(id))->items.size() == 4U &&
-                (*repository.load_engine_lists()).front().revision == 4U,
+                (*repository.load_engine_list(id))->items.size() == 8U &&
+                (*repository.load_engine_lists()).front().revision == 7U,
             "an edit naming an unknown entry writes nothing, not even its first part");
     require(repository.edit_engine_list(StableId::random(), 1U, {}, 5).error().code ==
                 ErrorCode::not_found,

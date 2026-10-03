@@ -491,6 +491,12 @@ class Workspace final : public QObject {
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
     // One list as it is stored, with its items; and without them.
     [[nodiscard]] persistence::ListDocument documentOf(const ListTab& tab) const;
+    // ADR-0256: a tab's entries as its engine stores them -- with what a
+    // queue entry needs that the engine cannot read, so the list plays by
+    // reference.
+    [[nodiscard]] static std::vector<persistence::EngineListItem> engineItemsOf(const ListTab& tab);
+    // The sync's way of reading them, by list.
+    [[nodiscard]] EngineListSync::ItemsOf engineItems();
     [[nodiscard]] static persistence::ListDocument headerOf(const ListTab& tab);
     [[nodiscard]] static ListTab::Saved savedStateOf(const ListTab& tab);
     // Every list for a save: with items where they changed since the last.

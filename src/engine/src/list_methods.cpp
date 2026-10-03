@@ -437,17 +437,42 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
             }
             parsed.push_back(std::move(*edit));
         }
-        auto edited = workspace.edit_engine_list(*id, revision->get<std::uint64_t>(), parsed,
-                                                 now_ms());
+        std::optional<std::string> name;
+        if (params.contains("name")) {
+            auto given = required_name(params);
+            if (!given) {
+                return std::unexpected(std::move(given.error()));
+            }
+            name = std::move(*given);
+        }
+        std::optional<persistence::EngineListKind> kind;
+        if (const auto given = params.find("kind"); given != params.end()) {
+            if (*given == "working") {
+                kind = persistence::EngineListKind::working;
+            } else if (*given == "saved") {
+                kind = persistence::EngineListKind::saved;
+            } else {
+                return std::unexpected(bad_params("kind is working or saved", "kind"));
+            }
+        }
+        // The items come back only for a queue to follow: reading a long
+        // list back for every batch it is made in would cost its length each
+        // time.
+        const bool played = player.queue_list() == id->to_string();
+        auto edited = workspace.edit_engine_list(
+            *id, revision->get<std::uint64_t>(), parsed, now_ms(),
+            name ? std::optional<std::string_view>{*name} : std::nullopt, kind, played);
         if (!edited) {
             return std::unexpected(std::move(edited.error()));
         }
-        std::vector<QueueEntry> entries;
-        entries.reserve(edited->items.size());
-        for (const auto& item : edited->items) {
-            entries.push_back(queue_entry(item));
+        if (played) {
+            std::vector<QueueEntry> entries;
+            entries.reserve(edited->items.size());
+            for (const auto& item : edited->items) {
+                entries.push_back(queue_entry(item));
+            }
+            player.follow_list(id->to_string(), std::move(entries), fresh);
         }
-        player.follow_list(id->to_string(), std::move(entries), fresh);
         changed(&edited->summary, *id);
         return summary_json(edited->summary);
     });

@@ -52,6 +52,8 @@ struct MetadataPropertiesSource {
     metadata::StagedMetadataSource source;
     QString track_label;
     MetadataPropertiesAudioSource audio{};
+    // The length the list knows, for matching to a release (ADR-0261).
+    std::optional<std::int64_t> duration_ms{};
 };
 
 using MetadataPropertiesSourceReader =
@@ -339,6 +341,16 @@ class TaggerSession final : public QObject {
     [[nodiscard]] std::optional<Identify> identifyRequest() const;
     void applyMusicBrainzProposals(metadata::MetadataProposalSet proposals);
 
+    // ADR-0261: what Identify albums… asks of the files open here.
+    [[nodiscard]] std::size_t itemCount() const;
+    // An item's file as it was read (or, until read, cached).
+    [[nodiscard]] const metadata::StagedMetadataSource* itemSource(std::size_t item) const;
+    // Its length: as the list knew it, else as probed here.
+    [[nodiscard]] std::optional<std::int64_t> durationOf(std::size_t item) const;
+    // Whether a proposal set can be staged now: the files are read and
+    // nothing else is being staged. proposalsSettled says when one was.
+    [[nodiscard]] bool canStageProposals() const;
+
     // Apply.
     void startWritePlan();
     // The folder images a plan writes were seen (accepted) or not.
@@ -388,6 +400,9 @@ class TaggerSession final : public QObject {
     void openDestinationsRequested();
     // Worth a line in the main window's status bar once the editor closes.
     void statusMessage(const QString& message);
+    // ADR-0261: a proposal set has been staged -- or not, saying why in the
+    // status.
+    void proposalsSettled(bool staged);
 
   private:
     using SelectionResult = core::Result<metadata::StagedMetadataSelection>;
@@ -484,6 +499,8 @@ class TaggerSession final : public QObject {
     std::vector<metadata::StagedMetadataSource> sources_;
     std::shared_ptr<std::vector<MetadataPropertiesAudioSource>> audio_sources_{
         std::make_shared<std::vector<MetadataPropertiesAudioSource>>()};
+    // Each source's length as its list knew it, by item.
+    std::vector<std::optional<std::int64_t>> durations_;
     std::vector<std::string> preferred_fields_;
     std::vector<std::string> recent_field_names_;
     std::vector<FieldLayout> field_layouts_;

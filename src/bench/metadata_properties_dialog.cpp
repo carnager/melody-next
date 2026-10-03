@@ -4,6 +4,7 @@
 
 #include "bench/cover_review.hpp"
 #include "bench/file_scope_view.hpp"
+#include "bench/identify_albums_dialog.hpp"
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_exact_value_dialog.hpp"
@@ -411,6 +412,13 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
                        "draft edits"));
     identify_button_->setEnabled(false);
     grid_tools_layout->addWidget(identify_button_);
+    identify_albums_button_ = new QPushButton(QStringLiteral("Identify albums…"), grid_tools_);
+    identify_albums_button_->setObjectName(QStringLiteral("bench-metadata-identify-albums"));
+    identify_albums_button_->setToolTip(
+        QStringLiteral("Every album open here at once: grouped, looked up on MusicBrainz in the "
+                       "background, and the clear matches staged by themselves"));
+    identify_albums_button_->setEnabled(false);
+    grid_tools_layout->addWidget(identify_albums_button_);
     auto* more_button = new QToolButton(grid_tools_);
     more_button->setObjectName(QStringLiteral("bench-metadata-more"));
     more_button->setText(QStringLiteral("More"));
@@ -498,6 +506,16 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     connect(suggest_button_, &QPushButton::clicked, session_, &TaggerSession::startProposals);
     connect(identify_button_, &QPushButton::clicked, this,
             &MetadataPropertiesDialog::startIdentify);
+    connect(identify_albums_button_, &QPushButton::clicked, this, [this] {
+        if (identify_albums_dialog_) {
+            identify_albums_dialog_->raise();
+            identify_albums_dialog_->activateWindow();
+            return;
+        }
+        auto* dialog = new IdentifyAlbumsDialog(*session_, session_->services().musicbrainz, this);
+        identify_albums_dialog_ = dialog;
+        dialog->show();
+    });
     connect(replaygain_scan_button_, &QPushButton::clicked, this,
             [this] { session_->startReplayGainScan(); });
     connect(replaygain_grouping_, &QComboBox::currentIndexChanged, session_,
@@ -650,6 +668,8 @@ void MetadataPropertiesDialog::sync() {
     suggest_button_->setEnabled(session.canSuggest());
     suggest_action_->setEnabled(session.canSuggest());
     identify_button_->setEnabled(session.canIdentify());
+    identify_albums_button_->setEnabled(session.itemCount() > 0U &&
+                                        static_cast<bool>(session.services().musicbrainz.fetch));
     replaygain_scan_button_->setEnabled(session.canScanReplayGain());
     replaygain_provenance_button_->setEnabled(session.canShowProvenance());
     transformation_list_->setEnabled(!session.scriptsLoading() && !session.scripts().empty() &&

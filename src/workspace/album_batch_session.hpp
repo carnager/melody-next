@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+
+#include "bench/musicbrainz_lookup.hpp"
+#include "trackknife/musicbrainz/album_groups.hpp"
+#include "trackknife/musicbrainz/album_lookup.hpp"
+
+#include <QObject>
+#include <QPointer>
+#include <QString>
+
+#include <cstddef>
+#include <deque>
+#include <optional>
+#include <vector>
+
+namespace trackknife::bench {
+
+class AlbumLookupQueue;
+class TaggerSession;
+
+// ADR-0261: Identify albums… over the files open in a tagger -- grouped into
+// albums, looked up in the background, and each clear match staged into the
+// tagger's draft by itself, one after another, as the person works.
+class AlbumBatchSession final : public QObject {
+    Q_OBJECT
+  public:
+    enum class State : std::uint8_t {
+        waiting,
+        searching,
+        // Matched clearly, waiting for the tagger to take it.
+        staging,
+        staged,
+        needs_choice,
+        no_match,
+        failed,
+        left_out,
+    };
+    struct Album {
+        musicbrainz::AlbumGroupBasis basis{musicbrainz::AlbumGroupBasis::folder};
+        // The tagger's items, by disc and track.
+        std::vector<std::size_t> items;
+        std::vector<std::string> folders;
+        QString artist;
+        QString title;
+        QString year;
+        State state{State::waiting};
+        // Why it failed, or could not be staged.
+        QString note;
+        std::optional<musicbrainz::AlbumLookupResult> result;
+    };
+
+    AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupService service,
+                      QObject* parent = nullptr);
+    ~AlbumBatchSession() override;
+
+    [[nodiscard]] const std::vector<Album>& albums() const { return albums_; }
+    [[nodiscard]] std::size_t fileCount() const;
+    [[nodiscard]] std::size_t count(State state) const;
+    [[nodiscard]] bool started() const { return started_; }
+    [[nodiscard]] bool lookingUp() const;
+    [[nodiscard]] std::size_t requestsLeft() const;
+
+    // Step 1, before anything is looked up.
+    // One album per folder it spans.
+    void splitByFolder(std::size_t album);
+    // `album` joins `into`; the album list keeps `into`'s place.
+    void merge(std::size_t album, std::size_t into);
+    void setIncluded(std::size_t album, bool included);
+
+    // Step 2: every album not left out, in turn.
+    void lookUp();
+    void stop();
+
+    static QString stateText(const Album& album);
+
+  signals:
+    void changed();
+
+  private:
+    void group();
+    void describe(Album& album) const;
+    [[nodiscard]] musicbrainz::AlbumQuery queryOf(const Album& album) const;
+    void lookedUp(std::size_t album, const musicbrainz::AlbumLookupResult& result);
+    void stageNext();
+    void settled(bool staged);
+
+    QPointer<TaggerSession> tagger_;
+    MusicBrainzLookupService service_;
+    AlbumLookupQueue* queue_;
+    std::vector<Album> albums_;
+    bool started_{false};
+    // Matched albums waiting for the tagger, and the one it is staging.
+    std::deque<std::size_t> to_stage_;
+    std::optional<std::size_t> staging_;
+};
+
+} // namespace trackknife::bench

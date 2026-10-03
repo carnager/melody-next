@@ -68,6 +68,7 @@ qt_add_library(
     settings_dialog.hpp
     metadata_transformation_dialog.cpp
     metadata_transformation_dialog.hpp
+    identify_albums_dialog.cpp
     musicbrainz_identify_dialog.cpp
     musicbrainz_identify_dialog.hpp
     musicbrainz_track_match_widget.cpp

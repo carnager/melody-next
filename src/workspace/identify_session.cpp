@@ -266,6 +266,7 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
         }
         rows_.push_back(std::move(entry));
     }
+    paired_count_ = count;
     status_ = tr("%1 files paired · %2 files unmatched · %3 album tracks without a file. "
                  "Pairings are suggestions until you Stage matches.")
                   .arg(count)

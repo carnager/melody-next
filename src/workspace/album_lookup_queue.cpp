@@ -37,6 +37,15 @@ void AlbumLookupQueue::stop() {
     }
 }
 
+void AlbumLookupQueue::forget(const std::size_t id) {
+    std::erase_if(waiting_, [id](const Album& album) { return album.id == id; });
+    if (current_ && current_->id == id) {
+        ++generation_;
+        current_.reset();
+        next();
+    }
+}
+
 std::size_t AlbumLookupQueue::requestsLeft() const {
     const auto of = [](const Album& album) {
         return album.query.release_id.empty() ? 1U + releases_per_search : 1U;

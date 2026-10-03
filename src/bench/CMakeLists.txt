@@ -2,6 +2,8 @@
 
 qt_add_library(
     trackknife_bench_ui STATIC
+    apply_actions_popover.cpp
+    apply_actions_popover.hpp
     bench_main_window.cpp
     bench_main_window.hpp
     bench_list_tabs.cpp

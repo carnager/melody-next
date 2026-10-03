@@ -1,6 +1,7 @@
 # ADR-0261: Identifying many albums at once
 
-Status: Accepted (2026-10-03)
+Status: Accepted (2026-10-03). Its Apply page, presets and ReplayGain as a
+second step are replaced by ADR-0262: one Apply, the tagger's.
 
 Extends the MusicBrainz identification of ADR-0089, ADR-0090, ADR-0158 and
 ADR-0162, which identify one album: the files selected are matched to one
@@ -146,7 +147,16 @@ presets…** opens them.
   staged. Meanwhile the tagger takes no edits; then it reads the files
   written again, at their new paths, and keeps the drafts of the rest.
   The plan is built as the tagger's own Apply builds it
-  (`planPreparation`). ReplayGain and Undo this batch are still to come.
+  (`planPreparation`). Undo this batch is still to come.
+- ReplayGain, step 4's second step (2026-10-03): **Scan ReplayGain** with
+  *Track and album gain* or *Track gain only*, and **Skip albums that
+  already have gain** (on), each album saying beforehand how many of those
+  chosen have it. Once the tags are written, the albums written are
+  scanned as the ReplayGain dialog scans (`ReplayGainJob`), grouped by
+  release -- every file of an album now carries its release id, so album
+  gain is the album's -- without touching that dialog's own choices. The
+  tagger stays closed to edits meanwhile and reads those files again
+  after.
 
 ## Verification
 

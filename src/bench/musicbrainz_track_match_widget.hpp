@@ -25,4 +25,9 @@ class TrackMatchSession;
 [[nodiscard]] QWidget* createMusicBrainzTrackMatchView(TrackMatchSession* session,
                                                        std::function<void()> back, QWidget* parent);
 
+// Only its panes and their buttons, inside a window that names the release,
+// says how the pairing stands and stages it (Identify albums…).
+[[nodiscard]] QWidget* createMusicBrainzTrackMatchPanes(TrackMatchSession* session,
+                                                        QWidget* parent);
+
 } // namespace trackknife::bench

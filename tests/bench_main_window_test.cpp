@@ -314,6 +314,8 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsWritesWhatIsChosen();
+    void applyMeasuresReplayGainAndWritesOnce();
+    void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
     void replayGainScanStagesMeasuredGainsAsDrafts();
     void replayGainScanUsesTruePeakWhenOptedIn();
@@ -481,6 +483,35 @@ namespace {
     list->setCurrentItem(wanted);
     QTest::mouseClick(use, Qt::LeftButton);
     return true;
+}
+
+} // namespace
+
+namespace {
+
+void write_sine_wav_fixture(const QString& path, const double amplitude,
+                            const std::optional<double> second_amplitude = std::nullopt) {
+    constexpr int wav_rate = 44'100;
+    const int frames = wav_rate * (second_amplitude ? 2 : 1);
+    QFile file{path};
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QDataStream stream{&file};
+    stream.setByteOrder(QDataStream::LittleEndian);
+    const quint32 data_bytes = static_cast<quint32>(frames) * 4U;
+    file.write("RIFF", 4);
+    stream << quint32{36U + data_bytes};
+    file.write("WAVE", 4);
+    file.write("fmt ", 4);
+    stream << quint32{16U} << quint16{1U} << quint16{2U} << quint32{wav_rate}
+           << quint32{wav_rate * 4U} << quint16{4U} << quint16{16U};
+    file.write("data", 4);
+    stream << data_bytes;
+    for (int frame = 0; frame < frames; ++frame) {
+        const auto level = frame >= wav_rate ? second_amplitude.value_or(amplitude) : amplitude;
+        const auto value = level * std::sin(2.0 * 3.14159265358979 * 997.0 * frame / wav_rate);
+        const auto sample = static_cast<qint16>(std::clamp(value, -1.0, 1.0) * 32'767.0);
+        stream << sample << sample;
+    }
 }
 
 } // namespace
@@ -4198,7 +4229,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QVERIFY(destination_combo != nullptr);
     QCOMPARE(layout_combo->count(), 1);
     QCOMPARE(layout_combo->currentText(), QStringLiteral("Albums"));
-    QCOMPARE(destination_combo->count(), 1);
+    // The saved one, then Choose folder… (ADR-0262).
+    QCOMPARE(destination_combo->count(), 2);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Library"));
 
     // ADR-0185: the Edit buttons ask for the Settings screen instead of
@@ -4740,7 +4772,7 @@ void BenchMainWindowTest::actionChoicesAreRemembered() {
     auto* elsewhere = open(QStringLiteral("other-engine"));
     destination_combo =
         elsewhere->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
-    QTRY_COMPARE(destination_combo->count(), 2);
+    QTRY_COMPARE(destination_combo->count(), 3);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Incoming"));
     QTRY_VERIFY(hidden(elsewhere, "bench-preparation-rename-files")->isChecked());
     QVERIFY(!hidden(elsewhere, "bench-preparation-move-files")->isChecked());
@@ -5903,22 +5935,24 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     QVERIFY(dialog != nullptr);
     auto* list = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
-    auto* look_up = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-look-up"));
-    QVERIFY(list != nullptr && look_up != nullptr);
+    auto* detail = dialog->findChild<QTextBrowser*>(QStringLiteral("bench-identify-albums-detail"));
+    QVERIFY(list != nullptr && detail != nullptr);
 
-    // Step 1: three albums, each saying how it was grouped.
+    // Three albums, each saying how it was grouped; looked up at once, one
+    // left out meanwhile.
     QCOMPARE(list->topLevelItemCount(), 3);
     QCOMPARE(list->topLevelItem(0)->text(0), QStringLiteral("Band — Alpha"));
-    QCOMPARE(list->topLevelItem(0)->text(2), QStringLiteral("release id"));
-    QCOMPARE(list->topLevelItem(1)->text(2), QStringLiteral("tags"));
     QCOMPARE(list->topLevelItem(2)->text(0), QStringLiteral("rip-0412"));
-    QCOMPARE(list->topLevelItem(2)->text(2), QStringLiteral("folder"));
-    QCOMPARE(look_up->text(), QStringLiteral("Look up 3 albums"));
+    for (const auto& [row, basis] : {std::pair{0, "grouped by release id"},
+                                     std::pair{1, "grouped by tags"},
+                                     std::pair{2, "grouped by folder"}}) {
+        list->setCurrentItem(list->topLevelItem(row));
+        QVERIFY2(detail->toPlainText().contains(QLatin1String(basis)),
+                 qPrintable(detail->toPlainText()));
+    }
     list->topLevelItem(2)->setCheckState(0, Qt::Unchecked);
-    QTRY_COMPARE(look_up->text(), QStringLiteral("Look up 2 albums"));
 
-    // Step 2: the one with an id by its id; the other by a search.
-    look_up->click();
+    // The one with an id by its id; the other by a search.
     auto* session = dialog->session();
     QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::staged), std::size_t{1U},
                               5'000);
@@ -5937,7 +5971,6 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
 
     // Staged into the tagger's draft: the release's id on both of its files.
     QVERIFY(grid_model->patches().patch_count() > 0U);
-    auto* detail = dialog->findChild<QTextBrowser*>(QStringLiteral("bench-identify-albums-detail"));
     list->setCurrentItem(list->topLevelItem(0));
     QVERIFY(detail->toPlainText().contains(QStringLiteral("Paired by track number")));
     QVERIFY(detail->toPlainText().contains(QStringLiteral("2 files, 2 tracks, 2 paired")));
@@ -5980,21 +6013,272 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     QCOMPARE(albums->topLevelItemCount(), 1);
     QVERIFY(albums->topLevelItem(0)->text(1).contains(QStringLiteral("2 folders")));
     albums->setCurrentItem(albums->topLevelItem(0));
-    QVERIFY(split->isEnabled());
+    QVERIFY(split->isVisibleTo(albums_dialog));
     split->click();
     QCOMPARE(albums->topLevelItemCount(), 2);
-    albums_dialog->session()->merge(1U, 0U);
+    const auto order = albums_dialog->session()->order();
+    QCOMPARE(order.size(), 2U);
+    albums_dialog->session()->merge(order[1], order[0]);
     QCOMPARE(albums->topLevelItemCount(), 1);
-    QCOMPARE(albums_dialog->session()->albums().front().items.size(), 2U);
+    QCOMPARE(albums_dialog->session()->albums()[order[0]].items.size(), 2U);
+    // Changed while being looked up: looked up again, as it now is.
+    QTRY_VERIFY_WITH_TIMEOUT(
+        [&] {
+            const auto state = albums_dialog->session()->albums()[order[0]].state;
+            return state != AlbumBatchSession::State::waiting &&
+                   state != AlbumBatchSession::State::searching;
+        }(),
+        5'000);
+    QCOMPARE(albums_dialog->session()->count(AlbumBatchSession::State::waiting), std::size_t{0U});
     delete split_dialog;
 }
 
-// ADR-0261: albums that fit more than one release wait for the person, who
-// goes through them from the keyboard.
-// ADR-0261: the albums chosen of those staged written in one go -- tags
-// only, or renamed and moved by two presets into the library folder they are
-// in -- an album with a file changed since it was read left out, and the
-// rest of the draft kept.
+// ADR-0262: Move into a folder that is no saved destination, the layout's
+// folders made inside it; offered again after.
+void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(engine_.socket()).toStdString(),
+        .host = {},
+        .port = 0,
+        .token = {}});
+    const auto path = media.filePath(QStringLiteral("in/one.flac"));
+    QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("in"))));
+    QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("chosen"))));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), path));
+    const auto raw_path = QFile::encodeName(path).toStdString();
+    const auto read = metadata::read_local_metadata(raw_path);
+    QVERIFY(read.has_value());
+    const MetadataPropertiesSource source{
+        .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                 .source_revision = read->source_revision,
+                                                 .baseline = read->document},
+        .track_label = {},
+    };
+    const std::vector layouts{persistence::SavedOutputLayoutProfile{
+        .id = core::StableId::random(),
+        .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                   .name = "Artist folders",
+                                                   .dialect = {},
+                                                   .relative_directory_expression = "%artist%",
+                                                   .basename_expression = "%title%",
+                                                   .sanitization_policy = {"linux", 1U}}}};
+    auto* properties = new MetadataPropertiesDialog(
+        1U,
+        [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index == 0U ? std::optional{source} : std::nullopt;
+        },
+        {},
+        TaggerServices{
+            .plan_applier_factory = {},
+            .apply_observer = {},
+            .transformation_store =
+                MetadataTransformationStore{
+                    .load =
+                        [](MetadataTransformationStore::LoadCompletion completion) {
+                            completion({}, {});
+                        },
+                    .save = {},
+                    .remove = {}},
+            .output_profile_store =
+                OutputProfileStore{
+                    .load =
+                        [layouts](OutputProfileStore::LoadCompletion completion) {
+                            completion(layouts, {}, {});
+                        },
+                    .save_layout = {},
+                    .remove_layout = {},
+                    .save_destination = {},
+                    .remove_destination = {},
+                    .destinations_on = {},
+                    .destinations_key = QStringLiteral("chosen-folder-test"),
+                    .places = {}},
+            .file_plan_applier_factory =
+                [work] {
+                    return FilePublicationPlanApplier{
+                        [work](const operations::PreparationPlan& plan,
+                               const operations::FilePublicationApplyProgressCallback& progress,
+                               const core::CancellationToken& cancellation) {
+                            return work->publish(plan, progress, cancellation);
+                        }};
+                },
+            .file_apply_observer = {},
+            .layout_store = {},
+            .musicbrainz = {},
+            .tools = engineFileWorkTools(work),
+            .library_roots = {},
+        });
+    const QPointer<MetadataPropertiesDialog> guard{properties};
+    properties->setProperty("trackknife-move-folder",
+                            QFile::encodeName(media.filePath(QStringLiteral("chosen"))));
+    properties->show();
+    auto* tagger = properties->findChild<TaggerSession*>();
+    auto* destinations =
+        properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QTRY_COMPARE(destinations->count(), 1);
+    QCOMPARE(destinations->itemText(0), QStringLiteral("Choose folder…"));
+    destinations->setCurrentIndex(0);
+    QTRY_COMPARE(destinations->count(), 2);
+    QCOMPARE(destinations->itemText(0), media.filePath(QStringLiteral("chosen")));
+    QCOMPARE(tagger->destinationIndex(), 0);
+    tagger->chooseRename(true);
+    tagger->chooseMove(true);
+    QTRY_VERIFY(tagger->moveFiles() && tagger->canApply());
+    properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"))->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 10'000);
+    const auto moved = media.filePath(QStringLiteral("chosen/Trackknife Project/Fixture Tone.flac"));
+    QVERIFY2(QFile::exists(moved), qPrintable(moved));
+    QVERIFY(!QFile::exists(path));
+    QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
+// ReplayGain as an Apply action: measured first, staged, and written with
+// the tag edits in the same write; an album with gain already left alone.
+void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(engine_.socket()).toStdString(),
+        .host = {},
+        .port = 0,
+        .token = {}});
+    const auto raw = [](const QString& path) { return QFile::encodeName(path).toStdString(); };
+    const auto wav = media.filePath(QStringLiteral("tone.wav"));
+    write_sine_wav_fixture(wav, 0.6);
+    const auto preset = convert::find_encoder_preset("flac");
+    QVERIFY(preset);
+    std::vector<MetadataPropertiesSource> sources;
+    for (const auto& [name, album, gain] :
+         {std::tuple{"a1.flac", "Measured", ""}, std::tuple{"a2.flac", "Measured", ""},
+          std::tuple{"b1.flac", "Has gain", "-3.00 dB"}, std::tuple{"b2.flac", "Has gain", "-3.00 dB"}}) {
+        const auto path = media.filePath(QLatin1String(name));
+        convert::AudioConversionRequest request{};
+        request.source_raw_path = raw(wav);
+        request.preset = *preset;
+        request.destination_raw_path = raw(path);
+        const auto field = [](const char* native, const char* value) {
+            return metadata::MetadataField{
+                .canonical_name = metadata::canonicalize_field_name(native),
+                .native_name = native,
+                .values = {value},
+                .qualifier = {},
+                .provenance = metadata::FieldProvenance::embedded};
+        };
+        request.metadata.fields = {field("ALBUM", album), field("ARTIST", "Band"),
+                                   field("TITLE", name)};
+        QVERIFY(convert::convert_audio_file(request));
+        // Conversion writes no gains: those it has already, written after.
+        if (std::string_view{gain}.size() > 0U) {
+            const auto before = metadata::read_local_metadata(raw(path));
+            QVERIFY(before.has_value());
+            auto selection = metadata::StagedMetadataSelection::create(
+                {metadata::StagedMetadataSource{.raw_path = raw(path),
+                                                .source_revision = before->source_revision,
+                                                .baseline = before->document}});
+            QVERIFY(selection.has_value());
+            metadata::StagedMetadataPatchSet patches;
+            for (const auto* native : {"REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_TRACK_GAIN"}) {
+                const auto canonical = metadata::canonicalize_field_name(native);
+                auto index = selection->field_index(canonical);
+                if (!index) {
+                    auto added = selection->ensure_missing_field(canonical, native);
+                    QVERIFY(added.has_value());
+                    index = *added;
+                }
+                QVERIFY(patches.replace_values(*selection, 0U, *index, {gain}).has_value());
+            }
+            const auto plan = metadata::build_metadata_write_plan(
+                *selection, patches, metadata::local_metadata_file_access());
+            QVERIFY(plan && plan->ready());
+            const auto written = work->apply(*plan, {}, {});
+            QVERIFY(written && written->committed_source_count() == 1U);
+        }
+        const auto read = metadata::read_local_metadata(raw(path));
+        QVERIFY(read.has_value());
+        sources.push_back(MetadataPropertiesSource{
+            .source = metadata::StagedMetadataSource{.raw_path = raw(path),
+                                                     .source_revision = read->source_revision,
+                                                     .baseline = read->document},
+            .track_label = {},
+        });
+    }
+    std::size_t writes = 0U;
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {},
+        TaggerServices{
+            .plan_applier_factory =
+                [work, &writes] {
+                    return MetadataWritePlanApplier{
+                        [work, &writes](const metadata::MetadataWritePlan& plan,
+                                        const operations::MetadataApplyProgressCallback& progress,
+                                        const core::CancellationToken& cancellation) {
+                            ++writes;
+                            return work->apply(plan, progress, cancellation);
+                        }};
+                },
+            .apply_observer = {},
+            .transformation_store =
+                MetadataTransformationStore{
+                    .load =
+                        [](MetadataTransformationStore::LoadCompletion completion) {
+                            completion({}, {});
+                        },
+                    .save = {},
+                    .remove = {}},
+            .output_profile_store = {},
+            .file_plan_applier_factory = {},
+            .file_apply_observer = {},
+            .layout_store = {},
+            .musicbrainz = {},
+            .tools = engineFileWorkTools(work),
+            .library_roots = {},
+        });
+    const QPointer<MetadataPropertiesDialog> guard{properties};
+    properties->show();
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* tagger = properties->findChild<TaggerSession*>();
+    QVERIFY(tagger != nullptr);
+    QTRY_VERIFY(tagger->canTransform());
+    const auto artist_row = aggregate_model->fieldRow(QStringLiteral("artist"));
+    QVERIFY(artist_row.has_value());
+    QVERIFY(aggregate_model->setData(aggregate_model->index(*artist_row, 2),
+                                     QStringLiteral("Renamed Band"), Qt::EditRole));
+    tagger->setReplayGainGrouping(0);
+    tagger->chooseReplayGain(true);
+    tagger->chooseSkipExistingGain(true);
+    QCOMPARE(tagger->itemsNeedingGain({0U, 1U, 2U, 3U}), (std::vector<std::size_t>{0U, 1U}));
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QTRY_VERIFY(apply->isEnabled());
+    apply->click();
+    // Written once, and the editor closes.
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    QCOMPARE(writes, std::size_t{1U});
+    const auto value_of = [&raw, &media](const char* name, std::string_view field) {
+        const auto read = metadata::read_local_metadata(raw(media.filePath(QLatin1String(name))));
+        return read ? read->document.first_effective_value(field).value_or(std::string{})
+                    : std::string{"unread"};
+    };
+    QCOMPARE(value_of("a1.flac", "artist"), std::string{"Renamed Band"});
+    QVERIFY(!value_of("a1.flac", "replaygainalbumgain").empty());
+    QVERIFY(!value_of("a2.flac", "replaygaintrackgain").empty());
+    QCOMPARE(value_of("b1.flac", "artist"), std::string{"Renamed Band"});
+    QCOMPARE(value_of("b1.flac", "replaygainalbumgain"), std::string{"-3.00 dB"});
+    QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
+// ADR-0261/0262: the staged albums written in one go as the tagger's Actions
+// say -- tags only, or renamed and moved into the library folder each is in,
+// ReplayGain measured first -- an album with a file changed since it was
+// read left out, those not chosen kept staged with their drafts.
 void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -6046,6 +6330,19 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         const auto applied = work->apply(*plan, {}, {});
         return applied && applied->committed_source_count() == 1U;
     };
+    // Long enough to measure loudness.
+    const auto tone = media.filePath(QStringLiteral("tone.flac"));
+    {
+        const auto wav = media.filePath(QStringLiteral("tone.wav"));
+        write_sine_wav_fixture(wav, 0.6);
+        const auto preset = convert::find_encoder_preset("flac");
+        QVERIFY(preset);
+        convert::AudioConversionRequest request{};
+        request.source_raw_path = raw(wav);
+        request.preset = *preset;
+        request.destination_raw_path = raw(tone);
+        QVERIFY(convert::convert_audio_file(request));
+    }
     std::vector<MetadataPropertiesSource> sources;
     for (const auto* artist : {"Band", "Cover", "Third"}) {
         const auto folder = QStringLiteral("%1/incoming/%2 - Alpha").arg(library, QLatin1String(artist));
@@ -6053,12 +6350,16 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         for (const auto& [number, title, length] :
              {std::tuple{"1", "One", 61'000}, std::tuple{"2", "Two", 59'000}}) {
             const auto path = raw(QStringLiteral("%1/0%2.flac").arg(folder, QLatin1String(number)));
-            QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"),
-                                              QString::fromStdString(path)));
-            QVERIFY(retag(path, {{"ALBUM", "Alpha"},
-                                 {"ARTIST", artist},
-                                 {"TITLE", title},
-                                 {"TRACKNUMBER", number}}));
+            QVERIFY(QFile::copy(tone, QString::fromStdString(path)));
+            std::vector<std::pair<std::string, std::string>> tags{{"ALBUM", "Alpha"},
+                                                                  {"ARTIST", artist},
+                                                                  {"TITLE", title},
+                                                                  {"TRACKNUMBER", number}};
+            // Cover has gain already.
+            if (std::string_view{artist} == "Cover") {
+                tags.emplace_back("REPLAYGAIN_ALBUM_GAIN", "-1.00 dB");
+            }
+            QVERIFY(retag(path, tags));
             const auto read = metadata::read_local_metadata(path);
             QVERIFY(read.has_value());
             sources.push_back(MetadataPropertiesSource{
@@ -6127,8 +6428,14 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                                                        .sanitization_policy = {"linux", 1U}}};
     };
     // The file name of one, the folders of the other.
-    const std::vector layouts{layout("By title", "", "%title%"),
-                              layout("Artist folders", "%artist%/%album%", "unused %title%")};
+    const std::vector layouts{
+        layout("By title", "", "%title%"),
+        layout("Artist folders", "%artist%/%album%", "%title%"),
+        // As long as one in use: it may not widen the window.
+        layout("Albumartist/Date Album/{CD}/Track-Title",
+               "$if2(%albumartist%,%artist%)/$if(%date%,$left(%date%,4) ,)%album%$if($or($gt("
+               "%totaldiscs%,1),$gt(%discnumber%,1)),/CD $num(%discnumber%,1),)",
+               "$num(%tracknumber%,2)-%title%")};
     auto* properties = new MetadataPropertiesDialog(
         sources.size(),
         [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
@@ -6202,18 +6509,11 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     const auto band = album_of(QStringLiteral("Band"));
     const auto cover = album_of(QStringLiteral("Cover"));
     const auto third = album_of(QStringLiteral("Third"));
-    dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-look-up"))->click();
+    // Looked up at once.
     QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::staged), std::size_t{3U},
                               10'000);
-    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-apply"));
-    QTRY_VERIFY(apply->isEnabled());
-    QCOMPARE(apply->text(), QStringLiteral("Apply 3 staged…"));
-    apply->click();
-
-    auto* list = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-apply-list"));
+    auto* list = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
     auto* write = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
-    QVERIFY(list->isVisible());
-    QCOMPARE(list->topLevelItemCount(), 3);
     const auto row_of = [list](const std::size_t album) {
         for (int row = 0; row < list->topLevelItemCount(); ++row) {
             if (list->topLevelItem(row)->data(0, Qt::UserRole).toInt() == static_cast<int>(album)) {
@@ -6222,19 +6522,32 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         }
         return static_cast<QTreeWidgetItem*>(nullptr);
     };
-    QVERIFY(row_of(band)->text(1).contains(QStringLiteral("1999-09-09 · DE")));
-    QVERIFY(row_of(band)->text(2).startsWith(QStringLiteral("2 files · ")));
-    QCOMPARE(write->text(), QStringLiteral("Write 3 albums"));
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 3 albums"));
+    QVERIFY2(dialog->minimumSizeHint().width() < 700,
+             qPrintable(QString::number(dialog->minimumSizeHint().width())));
+
+    // The tagger's own Actions: ReplayGain on, measured before the write.
+    auto* tagger = properties->findChild<TaggerSession*>();
+    QVERIFY(tagger != nullptr);
+    dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-actions"))->click();
+    QFrame* popover = nullptr;
+    QTRY_VERIFY((popover = dialog->findChild<QFrame*>(
+                     QStringLiteral("bench-metadata-actions-popover"))) != nullptr);
+    auto* replaygain = popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-replaygain"));
+    QVERIFY(!replaygain->isChecked());
+    replaygain->click();
+    QVERIFY(tagger->replayGainOnApply());
+    popover->close();
 
     // Tags only, and only Band's.
     row_of(cover)->setCheckState(0, Qt::Unchecked);
     row_of(third)->setCheckState(0, Qt::Unchecked);
-    QCOMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
     QTRY_VERIFY(write->isEnabled());
     write->click();
     QTRY_COMPARE_WITH_TIMEOUT(session->albums()[band].state, AlbumBatchSession::State::written,
-                              10'000);
-    QTRY_COMPARE(write->text(), QStringLiteral("Back to the list"));
+                              20'000);
+    QTRY_VERIFY(session->writing() == nullptr && !session->measuring());
     const auto band_file = sources[0].source.raw_path;
     const auto band_tags = metadata::read_local_metadata(band_file);
     QVERIFY(band_tags.has_value());
@@ -6246,10 +6559,12 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     };
     QCOMPARE(value_of(band_tags->document, "MUSICBRAINZ_ALBUMID"),
              ids.at(QStringLiteral("Band")).toStdString());
+    QVERIFY(!value_of(band_tags->document, "REPLAYGAIN_ALBUM_GAIN").empty());
+    QVERIFY(!value_of(band_tags->document, "REPLAYGAIN_TRACK_GAIN").empty());
     // Read again; Band's draft written, the others' kept.
-    auto* tagger = properties->findChild<TaggerSession*>();
-    QVERIFY(tagger != nullptr);
     QTRY_VERIFY(!tagger->writingElsewhere());
+    QVERIFY(tagger->sharedSelection()->source(0U).baseline.first_effective_value(
+        "replaygainalbumgain"));
     const auto has_patches = [&grid_model](std::size_t first, std::size_t last) {
         return std::ranges::any_of(grid_model->patches().patches(), [&](const auto& patch) {
             return patch.item_index >= first && patch.item_index <= last;
@@ -6258,31 +6573,27 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(!has_patches(0U, 1U));
     QVERIFY(has_patches(2U, 5U));
     QCOMPARE(session->albums()[cover].state, AlbumBatchSession::State::staged);
+    QVERIFY(row_of(band)->text(2).startsWith(QStringLiteral("Written")));
 
-    // Cover renamed by one preset and moved by the other; Third's file
-    // changed since it was read, so Third is left out.
-    write->click();
-    QTRY_VERIFY(apply->isEnabled());
-    apply->click();
-    QCOMPARE(list->topLevelItemCount(), 2);
-    auto* rename = dialog->findChild<QCheckBox*>(QStringLiteral("bench-identify-albums-apply-rename"));
-    auto* move = dialog->findChild<QCheckBox*>(QStringLiteral("bench-identify-albums-apply-move"));
-    auto* rename_preset =
-        dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-rename-preset"));
-    auto* move_preset =
-        dialog->findChild<QComboBox*>(QStringLiteral("bench-identify-albums-apply-move-preset"));
-    QTRY_COMPARE(rename_preset->count(), 2);
-    rename->setChecked(true);
-    rename_preset->setCurrentIndex(0);
-    move->setChecked(true);
-    move_preset->setCurrentIndex(1);
-    QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-move-pattern"))
-                 ->text(),
-             QStringLiteral("%artist%/%album%"));
+    // Cover renamed and moved by the layout into the library folder it is
+    // in, its gain kept; Third's file changed since it was read, so Third
+    // is left out.
+    row_of(cover)->setCheckState(0, Qt::Checked);
+    row_of(third)->setCheckState(0, Qt::Checked);
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 2 albums"));
+    QTRY_VERIFY(tagger->layoutsAvailable());
+    tagger->selectLayout(1);
+    QCOMPARE(tagger->destinations().back().name, QStringLiteral("The library folder each is in"));
+    tagger->selectDestination(static_cast<int>(tagger->destinations().size()) - 1);
+    tagger->chooseRename(true);
+    tagger->chooseMove(true);
+    QVERIFY(tagger->renameFiles() && tagger->moveFiles() && tagger->movesIntoLibraryFolders());
     QVERIFY(retag(sources[4].source.raw_path, {{"COMMENT", "changed elsewhere"}}));
     QTRY_VERIFY(write->isEnabled());
     write->click();
-    QTRY_VERIFY_WITH_TIMEOUT(session->writing() == nullptr, 10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(session->albums()[cover].state == AlbumBatchSession::State::written ||
+                                 session->albums()[cover].note.contains(QStringLiteral("not written")),
+                             20'000);
     QVERIFY2(session->albums()[cover].state == AlbumBatchSession::State::written,
              qPrintable(AlbumBatchSession::stateText(session->albums()[cover]) + QStringLiteral(" | ") +
                         AlbumBatchSession::stateText(session->albums()[third])));
@@ -6290,17 +6601,38 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     const auto moved = library + QStringLiteral("/Cover/Alpha/One.flac");
     QVERIFY2(QFile::exists(moved), qPrintable(moved));
     QVERIFY(QFile::exists(library + QStringLiteral("/Cover/Alpha/Two.flac")));
+    const auto cover_tags = metadata::read_local_metadata(raw(moved));
+    QVERIFY(cover_tags.has_value());
+    QCOMPARE(value_of(cover_tags->document, "REPLAYGAIN_ALBUM_GAIN"), std::string{"-1.00 dB"});
     QVERIFY(!QFile::exists(QString::fromStdString(sources[2].source.raw_path)));
     QCOMPARE(tagger->sharedSelection()->source(2U).raw_path, raw(moved));
     QCOMPARE(session->albums()[third].state, AlbumBatchSession::State::staged);
     QVERIFY2(session->albums()[third].note.contains(QStringLiteral("changed since it was read")),
              qPrintable(session->albums()[third].note));
     QVERIFY(QFile::exists(QString::fromStdString(sources[4].source.raw_path)));
-    QVERIFY(row_of(third)->text(3).contains(QStringLiteral("not written")));
+    QVERIFY(row_of(third)->text(2).contains(QStringLiteral("not written")));
     QVERIFY(has_patches(4U, 5U));
+    QVERIFY(dialog->isVisible());
+
+    // Third's changed file was read again, its draft kept: written now, and
+    // with nothing left to do the window closes, as Apply closes the editor.
+    const QPointer<IdentifyAlbumsDialog> guard{dialog};
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QTRY_VERIFY(write->isEnabled());
+    write->click();
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    const auto third_moved = library + QStringLiteral("/Third/Alpha/One.flac");
+    QVERIFY2(QFile::exists(third_moved), qPrintable(third_moved));
+    const auto third_tags = metadata::read_local_metadata(raw(third_moved));
+    QVERIFY(third_tags.has_value());
+    QCOMPARE(value_of(third_tags->document, "MUSICBRAINZ_ALBUMID"),
+             ids.at(QStringLiteral("Third")).toStdString());
+    QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }
 
+// ADR-0261: albums that fit more than one release wait for the person, who
+// goes through them from the keyboard.
 void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{
@@ -6388,28 +6720,39 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     auto* session = dialog->session();
     QCOMPARE(session->albums().size(), 2U);
-    dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-look-up"))->click();
-    QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::needs_choice),
-                              std::size_t{2U}, 5'000);
     auto* review_next =
         dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-next"));
-    QTRY_VERIFY(review_next->isEnabled());
-    QCOMPARE(review_next->text(), QStringLiteral("Review next needing you (2)"));
-    review_next->click();
-
+    // Looked up at once; the first album needing a person opens by itself.
     auto* heading = dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
-    auto* versions = dialog->findChild<QListWidget*>(QStringLiteral("bench-identify-albums-versions"));
-    QVERIFY(heading->isVisible());
+    auto* versions = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-versions"));
+    QTRY_VERIFY_WITH_TIMEOUT(heading->isVisible(), 5'000);
     QVERIFY(heading->text().contains(QStringLiteral("Band — Alpha")));
-    QVERIFY(heading->text().contains(QStringLiteral("1 of 2 needing you")));
-    QCOMPARE(versions->count(), 2);
+    QCOMPARE(versions->topLevelItemCount(), 2);
+    // Told apart by what differs; the title column only when titles do.
+    QCOMPARE(versions->topLevelItem(0)->text(1), QStringLiteral("1999-09-09"));
+    QCOMPARE(versions->topLevelItem(0)->text(5), QStringLiteral("1×CD"));
+    QVERIFY(versions->isColumnHidden(0));
+    // The file buttons once a file is chosen.
+    QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-up"))
+                 ->isVisibleTo(dialog));
+    QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::needs_choice),
+                              std::size_t{2U}, 5'000);
     // ↓ chooses the other version; the matcher follows.
     QTest::keyClick(versions, Qt::Key_Down);
-    QCOMPARE(versions->currentRow(), 1);
-    QPushButton* stage = nullptr;
-    QTRY_VERIFY((stage = dialog->findChild<QPushButton*>(
-                     QStringLiteral("bench-musicbrainz-match-stage"))) != nullptr &&
-                stage->isVisible() && stage->isEnabled());
+    QCOMPARE(versions->indexOfTopLevelItem(versions->currentItem()), 1);
+    auto* accept =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-accept"));
+    QTRY_VERIFY(accept->isEnabled());
+    QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-status"))
+                 ->text(),
+             QStringLiteral("2 of 2 files paired"));
+    // The matcher's own heading and Stage are the window's here.
+    QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"))
+                 ->isVisible());
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/identify-albums-review.png")));
+    }
     // Enter accepts, and the next album needing a person opens.
     QTest::keyClick(versions, Qt::Key_Return);
     QTRY_VERIFY(heading->text().contains(QStringLiteral("Cover — Alpha")));
@@ -6420,7 +6763,8 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     QTest::keyClick(versions, Qt::Key_S);
     QCOMPARE(session->count(AlbumBatchSession::State::skipped), std::size_t{1U});
     QTRY_VERIFY(!heading->isVisible());
-    QVERIFY(!review_next->isEnabled());
+    // Back in the list, nothing left to review: not offered.
+    QVERIFY(!review_next->isVisibleTo(dialog));
     delete properties;
 }
 
@@ -6833,35 +7177,6 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
              QStringList{QStringLiteral("Alpha")});
     delete properties;
 }
-
-namespace {
-
-void write_sine_wav_fixture(const QString& path, const double amplitude,
-                            const std::optional<double> second_amplitude = std::nullopt) {
-    constexpr int wav_rate = 44'100;
-    const int frames = wav_rate * (second_amplitude ? 2 : 1);
-    QFile file{path};
-    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    QDataStream stream{&file};
-    stream.setByteOrder(QDataStream::LittleEndian);
-    const quint32 data_bytes = static_cast<quint32>(frames) * 4U;
-    file.write("RIFF", 4);
-    stream << quint32{36U + data_bytes};
-    file.write("WAVE", 4);
-    file.write("fmt ", 4);
-    stream << quint32{16U} << quint16{1U} << quint16{2U} << quint32{wav_rate}
-           << quint32{wav_rate * 4U} << quint16{4U} << quint16{16U};
-    file.write("data", 4);
-    stream << data_bytes;
-    for (int frame = 0; frame < frames; ++frame) {
-        const auto level = frame >= wav_rate ? second_amplitude.value_or(amplitude) : amplitude;
-        const auto value = level * std::sin(2.0 * 3.14159265358979 * 997.0 * frame / wav_rate);
-        const auto sample = static_cast<qint16>(std::clamp(value, -1.0, 1.0) * 32'767.0);
-        stream << sample << sample;
-    }
-}
-
-} // namespace
 
 void BenchMainWindowTest::closingATabReturnsToThePreviousOne() {
     BenchMainWindow window;

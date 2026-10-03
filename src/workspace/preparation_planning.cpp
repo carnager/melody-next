@@ -111,6 +111,31 @@ core::Result<operations::PreparationPlan> planPreparation(PreparationRequest req
                                                  std::move(path_preflight));
 }
 
+std::optional<std::string> libraryFolderOf(const std::string& raw_path,
+                                           const std::vector<std::string>& roots) {
+    std::optional<std::string> found;
+    for (auto root : roots) {
+        while (root.size() > 1U && root.ends_with('/')) {
+            root.pop_back();
+        }
+        const auto holds = root == "/" ? raw_path.starts_with('/')
+                                       : raw_path.starts_with(root + '/');
+        if (holds && (!found || root.size() > found->size())) {
+            found = std::move(root);
+        }
+    }
+    return found;
+}
+
+operations::DestinationProfile folderDestination(std::string root_raw_path) {
+    return operations::DestinationProfile{
+        .schema_version = 1U,
+        .name = "Folder",
+        .root_raw_path = std::move(root_raw_path),
+        .containment_policy = {"lexical-beneath-root", 1U},
+    };
+}
+
 metadata::MetadataWritePlanOptions writePlanOptions() {
     const QSettings stored;
     return metadata::MetadataWritePlanOptions{

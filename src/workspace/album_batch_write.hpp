@@ -22,8 +22,8 @@ namespace trackknife::bench {
 
 // ADR-0261, Apply: the albums chosen of those staged, written in one go from
 // the tagger's draft -- their tags, and renamed or moved by a naming preset
-// when chosen. One plan per library folder when moving, each file going
-// under the library folder it is in. An album with a file that cannot be
+// when chosen. Moved below a destination, or, without one, one plan per
+// library folder, each album going under the library folder it is in. An album with a file that cannot be
 // written as planned -- changed since it was read, say -- is left out,
 // saying why, and the rest written.
 class AlbumBatchWrite final : public QObject {
@@ -34,6 +34,8 @@ class AlbumBatchWrite final : public QObject {
         // pattern moves; none, not done.
         std::optional<operations::OutputLayoutProfile> rename;
         std::optional<operations::OutputLayoutProfile> move;
+        // Where to move to; none, the library folder each album is in.
+        std::optional<operations::DestinationProfile> destination;
     };
     struct Album {
         std::size_t album{0U};
@@ -102,6 +104,8 @@ class AlbumBatchWrite final : public QObject {
     std::unordered_map<std::size_t, std::size_t> album_of_;
     std::unordered_map<std::string, std::vector<std::size_t>> items_at_;
     std::vector<TaggerSession::Rewritten> rewritten_;
+    // Found changed since they were read: read again after, drafts kept.
+    std::vector<std::size_t> changed_;
     std::size_t files_total_{0U};
     std::size_t files_before_{0U};
     std::shared_ptr<Progress> progress_;

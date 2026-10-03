@@ -15,23 +15,6 @@ namespace trackknife::bench {
 
 namespace {
 
-// The library folder `raw_path` is in: the deepest that holds it.
-std::optional<std::string> rootOf(const std::string& raw_path,
-                                  const std::vector<std::string>& roots) {
-    std::optional<std::string> found;
-    for (auto root : roots) {
-        while (root.size() > 1U && root.ends_with('/')) {
-            root.pop_back();
-        }
-        const auto holds = root == "/" ? raw_path.starts_with('/')
-                                       : raw_path.starts_with(root + '/');
-        if (holds && (!found || root.size() > found->size())) {
-            found = std::move(root);
-        }
-    }
-    return found;
-}
-
 QString issueText(const std::string& message) { return display_utf8(message); }
 
 } // namespace
@@ -113,10 +96,12 @@ void AlbumBatchWrite::start() {
             continue;
         }
         std::optional<std::string> root;
-        if (operations_.move_files) {
+        if (operations_.move_files && options_.destination) {
+            root = options_.destination->root_raw_path;
+        } else if (operations_.move_files) {
             root = album.items.empty() ? std::nullopt
-                                       : rootOf(selection->source(album.items.front()).raw_path,
-                                                roots);
+                                       : libraryFolderOf(selection->source(album.items.front()).raw_path,
+                                                        roots);
             if (!root) {
                 outcome.outcome = Outcome::left_out;
                 outcome.note = QStringLiteral("Not in a library folder, so not moved");
@@ -132,13 +117,9 @@ void AlbumBatchWrite::start() {
         });
         if (group == groups_.end()) {
             groups_.push_back(Group{
-                .destination = root ? std::optional{operations::DestinationProfile{
-                                          .schema_version = 1U,
-                                          .name = "Library folder",
-                                          .root_raw_path = *root,
-                                          .containment_policy = {"lexical-beneath-root", 1U},
-                                      }}
-                                    : std::nullopt,
+                .destination = options_.destination ? options_.destination
+                               : root               ? std::optional{folderDestination(*root)}
+                                                    : std::nullopt,
                 .albums = {}});
             group = std::prev(groups_.end());
         }
@@ -289,6 +270,8 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
                     !source.observed_revision ||
                     *source.expected_revision != *source.observed_revision ||
                     path->source_revision != *source.observed_revision) {
+                    changed_.insert(changed_.end(), source.occurrence_indexes.begin(),
+                                    source.occurrence_indexes.end());
                     per_item(source.occurrence_indexes,
                              QStringLiteral("A file changed since it was read"));
                 }
@@ -299,6 +282,10 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
                 for (const auto& issue : source.issues) {
                     if (!issue.blocking) {
                         continue;
+                    }
+                    if (issue.kind == metadata::MetadataWritePlanIssueKind::source_changed) {
+                        changed_.insert(changed_.end(), source.occurrence_indexes.begin(),
+                                        source.occurrence_indexes.end());
                     }
                     per_item(source.occurrence_indexes,
                              issue.kind == metadata::MetadataWritePlanIssueKind::source_changed
@@ -334,8 +321,12 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
         if (plan->path_preflight) {
             for (const auto& issue : plan->path_preflight->issues) {
                 if (issue.blocking) {
-                    per_item(issue.item_indexes.empty() ? itemsAt(issue.source_raw_path)
-                                                        : issue.item_indexes,
+                    const auto items = issue.item_indexes.empty() ? itemsAt(issue.source_raw_path)
+                                                                  : issue.item_indexes;
+                    if (issue.kind == operations::OutputPathPreflightIssueKind::source_changed) {
+                        changed_.insert(changed_.end(), items.begin(), items.end());
+                    }
+                    per_item(items,
                              issue.kind == operations::OutputPathPreflightIssueKind::source_changed
                                  ? QStringLiteral("A file changed since it was read")
                                  : issueText(issue.message));
@@ -520,7 +511,7 @@ void AlbumBatchWrite::finish() {
                 emit finished();
             },
             Qt::SingleShotConnection);
-    tagger_->finishWriteElsewhere(std::move(rewritten_));
+    tagger_->finishWriteElsewhere(std::move(rewritten_), std::move(changed_));
 }
 
 } // namespace trackknife::bench

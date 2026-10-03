@@ -130,18 +130,23 @@ class LocalFileOrderView final : public QTreeWidget {
 // side, scrolled together, a row's pair shaded.
 class TrackMatchWidget final : public QWidget {
   public:
-    TrackMatchWidget(TrackMatchSession* session, std::function<void()> back, QWidget* parent)
+    // Embedded, it is the panes and their buttons only: the window around it
+    // names the release, says how far the pairing is, and stages.
+    TrackMatchWidget(TrackMatchSession* session, std::function<void()> back, QWidget* parent,
+                     const bool embedded = false)
         : QWidget(parent), session_(session) {
         setObjectName(QStringLiteral("bench-musicbrainz-track-match"));
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        auto* heading = new QLabel(session_->heading(), this);
-        heading->setTextFormat(Qt::PlainText);
-        heading->setWordWrap(true);
-        layout->addWidget(heading);
-        auto* help = new QLabel(TrackMatchSession::help(), this);
-        help->setWordWrap(true);
-        layout->addWidget(help);
+        if (!embedded) {
+            auto* heading = new QLabel(session_->heading(), this);
+            heading->setTextFormat(Qt::PlainText);
+            heading->setWordWrap(true);
+            layout->addWidget(heading);
+            auto* help = new QLabel(TrackMatchSession::help(), this);
+            help->setWordWrap(true);
+            layout->addWidget(help);
+        }
         auto* splitter = new QSplitter(this);
         rows_ = new LocalFileOrderView(splitter);
         rows_->setObjectName(QStringLiteral("bench-musicbrainz-match-files"));
@@ -177,6 +182,9 @@ class TrackMatchWidget final : public QWidget {
         rows_->moveFile = [this](std::size_t from, std::size_t to) {
             session_->moveFile(from, to);
         };
+        if (embedded) {
+            rows_->setToolTip(TrackMatchSession::help());
+        }
         layout->addWidget(splitter, 1);
         auto* actions = new QHBoxLayout;
         const auto button = [this, actions](const QString& label, const QString& name) {
@@ -198,6 +206,18 @@ class TrackMatchWidget final : public QWidget {
         order_ = button(tr("Reset file order"), QStringLiteral("bench-musicbrainz-match-order"));
         order_->setToolTip(
             tr("Pair files in their original selection order with the album tracks."));
+        if (embedded) {
+            // Buttons as wide as their words, not a row of equal slabs; what
+            // works on a file at the right, there once a file is chosen.
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                actions->removeWidget(file_button);
+            }
+            actions->addStretch(1);
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                actions->addWidget(file_button);
+            }
+            embedded_ = true;
+        }
         layout->addLayout(actions);
         status_ = new QLabel(this);
         status_->setObjectName(QStringLiteral("bench-musicbrainz-match-status"));
@@ -215,6 +235,11 @@ class TrackMatchWidget final : public QWidget {
                               "Unmatched files are untouched; Apply writes the draft later."));
         footer->addWidget(stage_);
         layout->addLayout(footer);
+        if (embedded) {
+            status_->hide();
+            back_button->hide();
+            stage_->hide();
+        }
 
         connect(rows_, &QTreeWidget::itemSelectionChanged, this, [this] { updateButtons(); });
         connect(up_, &QPushButton::clicked, this, [this] { session_->move(selectedRow(), -1); });
@@ -252,6 +277,11 @@ class TrackMatchWidget final : public QWidget {
         up_->setEnabled(session_->canMoveUp(row));
         down_->setEnabled(session_->canMoveDown(row));
         unmatch_->setEnabled(session_->canUnmatch(row));
+        if (embedded_) {
+            for (auto* file_button : {up_, down_, unmatch_}) {
+                file_button->setVisible(row >= 0);
+            }
+        }
         sort_->setEnabled(session_->ready());
         order_->setEnabled(session_->ready());
         stage_->setEnabled(session_->canStage());
@@ -313,6 +343,7 @@ class TrackMatchWidget final : public QWidget {
     QPushButton* order_;
     QPushButton* stage_;
     QLabel* status_;
+    bool embedded_{false};
 };
 
 } // namespace
@@ -338,6 +369,10 @@ QWidget* createMusicBrainzTrackMatchWidget(
 QWidget* createMusicBrainzTrackMatchView(TrackMatchSession* session, std::function<void()> back,
                                          QWidget* parent) {
     return new TrackMatchWidget(session, std::move(back), parent);
+}
+
+QWidget* createMusicBrainzTrackMatchPanes(TrackMatchSession* session, QWidget* parent) {
+    return new TrackMatchWidget(session, {}, parent, true);
 }
 
 } // namespace trackknife::bench

@@ -42,6 +42,8 @@ class QVBoxLayout;
 
 namespace trackknife::bench {
 
+class ApplyActionsPopover;
+
 class MetadataFieldReviewBar;
 
 // The "Edit tags" window of the widgets workspace: a view over a
@@ -103,7 +105,8 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0238: the Actions popover -- what Apply does, and with which
     // layout, destination, grouping and scripts -- all in view at once.
     void showActionsPopover();
-    void syncActionsPopover();
+    // A destination list's entry taken: a destination, or Choose folder….
+    void destinationActivated(QComboBox* combo, int index);
     void startIdentify();
     void exportReplayGainResults();
     void showLoudnessProvenance();
@@ -128,14 +131,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QLabel* apply_summary_{nullptr};
     QToolButton* actions_button_{nullptr};
     // Deletes itself when it closes.
-    QPointer<QFrame> actions_popover_;
-    QCheckBox* actions_save_tags_{nullptr};
-    QCheckBox* actions_rename_{nullptr};
-    QCheckBox* actions_move_{nullptr};
-    QComboBox* actions_layout_{nullptr};
-    QComboBox* actions_destination_{nullptr};
-    QComboBox* actions_grouping_{nullptr};
-    QPushButton* actions_scan_{nullptr};
+    QPointer<ApplyActionsPopover> actions_popover_;
     QLabel* loading_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* undo_button_{nullptr};

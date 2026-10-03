@@ -29,7 +29,9 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <numeric>
 #include <ranges>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -43,6 +45,10 @@ constexpr auto remembered_rename_key = "properties/actions/rename-files";
 constexpr auto remembered_move_key = "properties/actions/move-files";
 constexpr auto remembered_layout_key = "properties/actions/naming-layout";
 constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
+constexpr auto remembered_move_target_prefix = "properties/actions/move-target/";
+constexpr auto remembered_move_folder_prefix = "properties/actions/move-folder/";
+constexpr auto remembered_replaygain_key = "properties/actions/replaygain";
+constexpr auto remembered_skip_existing_gain_key = "properties/actions/replaygain-skip-existing";
 
 constexpr auto properties_geometry_key = "workspace/metadata-properties-geometry-v1";
 constexpr auto properties_window_key = "workspace/metadata-properties-window-v1";
@@ -88,6 +94,10 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         save_tags_ = remembered.value(QLatin1String(remembered_save_tags_key), true).toBool();
         wants_rename_ = remembered.value(QLatin1String(remembered_rename_key), false).toBool();
         wants_move_ = remembered.value(QLatin1String(remembered_move_key), false).toBool();
+        replaygain_on_apply_ =
+            remembered.value(QLatin1String(remembered_replaygain_key), false).toBool();
+        skip_existing_gain_ =
+            remembered.value(QLatin1String(remembered_skip_existing_gain_key), true).toBool();
         const auto id_of = [&remembered](const QString& key) -> std::optional<core::StableId> {
             auto id = core::StableId::parse(remembered.value(key).toString().toStdString());
             return id ? std::optional{*id} : std::nullopt;
@@ -95,6 +105,18 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         editing_output_layout_id_ = id_of(QLatin1String(remembered_layout_key));
         editing_destination_id_ = id_of(QLatin1String(remembered_destination_prefix) +
                                         services_.output_profile_store.destinations_key);
+        const auto& engine = services_.output_profile_store.destinations_key;
+        const auto folder =
+            remembered.value(QLatin1String(remembered_move_folder_prefix) + engine).toByteArray();
+        if (!folder.isEmpty()) {
+            move_folder_ = std::string{folder.constData(), static_cast<std::size_t>(folder.size())};
+        }
+        const auto target =
+            remembered.value(QLatin1String(remembered_move_target_prefix) + engine).toString();
+        move_target_ = target == QLatin1String("library") && services_.library_roots
+                           ? MoveTarget::library
+                       : target == QLatin1String("folder") && move_folder_ ? MoveTarget::folder
+                                                                           : MoveTarget::saved;
     }
     preferred_fields_.reserve(preferred_fields.size());
     for (const auto field : preferred_fields) {
@@ -141,6 +163,19 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
             &TaggerSession::finishAutomaticStage);
     connect(&replaygain_watcher_, &QFutureWatcherBase::finished, this,
             &TaggerSession::finishReplayGainScan);
+    // The gains measured for a write staged: the write goes on.
+    connect(this, &TaggerSession::proposalsSettled, this, [this](const bool staged) {
+        if (measuring_for_write_) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(staged);
+        }
+    });
+    connect(this, &TaggerSession::gainsMeasured, this, [this](const bool ok) {
+        if (std::exchange(apply_after_gains_, false) && ok) {
+            gains_measured_ = true;
+            startWritePlan();
+        }
+    });
     connect(&proposal_watcher_, &QFutureWatcherBase::finished, this,
             &TaggerSession::finishProposals);
     connect(&write_plan_watcher_, &QFutureWatcherBase::finished, this,
@@ -1008,8 +1043,8 @@ bool TaggerSession::canScanReplayGain() const { return canSuggest() && !replayga
 bool TaggerSession::canApply() const {
     const auto has_metadata_effect = save_tags_ && draft_count_ > 0;
     const auto has_path_effect = rename_files_ || move_files_;
-    return grid_model_ != nullptr && !provisional_ &&
-           (has_metadata_effect || has_path_effect ||
+    return grid_model_ != nullptr && !provisional_ && !replaygain_running_ &&
+           (has_metadata_effect || has_path_effect || replaygain_on_apply_ ||
             (artwork_ != nullptr && artwork_->hasPendingChanges())) &&
            !transformation_catalog_loading_ && !write_plan_running_ && !apply_running_ &&
            !artwork_operation_running_ && !writing_elsewhere_;
@@ -1601,11 +1636,12 @@ bool TaggerSession::beginWriteElsewhere() {
     return true;
 }
 
-void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written) {
+void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written,
+                                         std::vector<std::size_t> stale) {
     if (!writing_elsewhere_) {
         return;
     }
-    if (written.empty() || grid_model_ == nullptr) {
+    if ((written.empty() && stale.empty()) || grid_model_ == nullptr) {
         writing_elsewhere_ = false;
         emit changed();
         emit writtenElsewhere();
@@ -1629,6 +1665,12 @@ void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written) {
         source.source_revision.reset();
         source.needs_metadata_capture = true;
         rewritten_items_.push_back(rewritten.item);
+    }
+    for (const auto item : stale) {
+        if (item < sources_.size()) {
+            sources_[item].source_revision.reset();
+            sources_[item].needs_metadata_capture = true;
+        }
     }
     provisional_ = true;
     setStatus(QStringLiteral("Reading the files written…"));
@@ -1726,30 +1768,13 @@ void TaggerSession::startReplayGainScan(std::vector<std::size_t> forced_items) {
     if (items.empty()) {
         return;
     }
-    loudness::LoudnessGrouping grouping;
-    switch (replaygain_grouping_) {
-    case 0:
-        grouping.mode = loudness::LoudnessGroupingMode::release;
-        break;
-    case 1:
-        grouping.mode = loudness::LoudnessGroupingMode::release_merged_discs;
-        break;
-    case 2:
-        grouping.mode = loudness::LoudnessGroupingMode::selection_album;
-        break;
-    case 3:
-        grouping.mode = loudness::LoudnessGroupingMode::track;
-        break;
-    default:
-        grouping.mode = loudness::LoudnessGroupingMode::format_expression;
-        grouping.expression = replaygain_expression_.trimmed().toStdString();
-        if (grouping.expression.empty()) {
-            setStatus(QStringLiteral("Enter a tkfmt-1 grouping expression, e.g. %album%"));
-            emit changed();
-            return;
-        }
-        break;
+    auto choice = replayGainGroupingChoice();
+    if (!choice) {
+        setStatus(QStringLiteral("Enter a tkfmt-1 grouping expression, e.g. %album%"));
+        emit changed();
+        return;
     }
+    auto grouping = std::move(*choice);
     replaygain_retry_items_.clear();
 
     replaygain_running_ = true;
@@ -1785,15 +1810,110 @@ void TaggerSession::startReplayGainScan(std::vector<std::size_t> forced_items) {
         }));
 }
 
+std::optional<loudness::LoudnessGrouping> TaggerSession::replayGainGroupingChoice() const {
+    loudness::LoudnessGrouping grouping;
+    switch (replaygain_grouping_) {
+    case 0:
+        grouping.mode = loudness::LoudnessGroupingMode::release;
+        break;
+    case 1:
+        grouping.mode = loudness::LoudnessGroupingMode::release_merged_discs;
+        break;
+    case 2:
+        grouping.mode = loudness::LoudnessGroupingMode::selection_album;
+        break;
+    case 3:
+        grouping.mode = loudness::LoudnessGroupingMode::track;
+        break;
+    default:
+        grouping.mode = loudness::LoudnessGroupingMode::format_expression;
+        grouping.expression = replaygain_expression_.trimmed().toStdString();
+        if (grouping.expression.empty()) {
+            return std::nullopt;
+        }
+        break;
+    }
+    return grouping;
+}
+
+void TaggerSession::chooseReplayGain(const bool on) {
+    replaygain_on_apply_ = on;
+    rememberActionChoices();
+    invalidateWritePlan();
+}
+
+void TaggerSession::chooseSkipExistingGain(const bool on) {
+    skip_existing_gain_ = on;
+    rememberActionChoices();
+    emit changed();
+}
+
+std::vector<std::size_t> TaggerSession::itemsNeedingGain(std::vector<std::size_t> items) const {
+    const auto grouping = replayGainGroupingChoice();
+    if (!skip_existing_gain_ || grid_model_ == nullptr || !grouping) {
+        return items;
+    }
+    const auto& selection = grid_model_->selection();
+    const auto* field = grouping->mode == loudness::LoudnessGroupingMode::track
+                            ? "replaygaintrackgain"
+                            : "replaygainalbumgain";
+    const auto has_gain = [&](const std::size_t item) {
+        const auto gain = selection.source(item).baseline.first_effective_value(field);
+        return gain.has_value() && !gain->empty();
+    };
+    std::vector<const metadata::MetadataDocument*> documents;
+    documents.reserve(items.size());
+    for (const auto item : items) {
+        documents.push_back(&selection.source(item).baseline);
+    }
+    const auto keys = loudness::assign_loudness_groups(*grouping, documents);
+    if (!keys) {
+        return items;
+    }
+    // A group lacks the gain when any of its files does.
+    std::set<std::string> lacking;
+    for (std::size_t position = 0U; position < items.size(); ++position) {
+        if ((*keys)[position] && !has_gain(items[position])) {
+            lacking.insert(*(*keys)[position]);
+        }
+    }
+    std::vector<std::size_t> needing;
+    for (std::size_t position = 0U; position < items.size(); ++position) {
+        const auto& key = (*keys)[position];
+        if (key ? lacking.contains(*key) : !has_gain(items[position])) {
+            needing.push_back(items[position]);
+        }
+    }
+    return needing;
+}
+
+bool TaggerSession::measureBeforeWrite(std::vector<std::size_t> items) {
+    if (items.empty() || measuring_for_write_) {
+        return false;
+    }
+    measuring_for_write_ = true;
+    startReplayGainScan(std::move(items));
+    if (!replaygain_running_) {
+        measuring_for_write_ = false;
+        return false;
+    }
+    return true;
+}
+
 void TaggerSession::finishReplayGainScan() {
     replaygain_running_ = false;
     replaygain_progress_timer_.stop();
     const auto outcome = replaygain_watcher_.result();
+    const auto for_write = measuring_for_write_;
     if (!outcome || !outcome->proposals) {
         const auto message = outcome ? display_utf8(outcome->proposals.error().message)
                                      : QStringLiteral("The loudness scan returned no result");
         setStatus(QStringLiteral("No ReplayGain values staged · %1").arg(message));
         emit changed();
+        if (for_write) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(false);
+        }
         return;
     }
     replaygain_retry_items_ = outcome->retry_items;
@@ -1811,6 +1931,10 @@ void TaggerSession::finishReplayGainScan() {
         showStickyStatus(QStringLiteral("No ReplayGain values staged · nothing measurable in "
                                         "the selection%1")
                              .arg(replayGainStatusLinks()));
+        if (for_write) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(true);
+        }
         return;
     }
     setStatus(status_);
@@ -1914,7 +2038,8 @@ bool TaggerSession::layoutsAvailable() const {
 }
 
 bool TaggerSession::destinationsAvailable() const {
-    return !output_profiles_loading_ && !destination_catalog_.empty();
+    // A folder can always be chosen.
+    return !output_profiles_loading_;
 }
 
 bool TaggerSession::layoutReady() const {
@@ -1925,6 +2050,12 @@ bool TaggerSession::layoutReady() const {
 }
 
 bool TaggerSession::destinationReady() const {
+    if (move_target_ == MoveTarget::library) {
+        return static_cast<bool>(services_.library_roots);
+    }
+    if (move_target_ == MoveTarget::folder) {
+        return move_folder_.has_value();
+    }
     return editing_destination_id_.has_value() &&
            std::ranges::any_of(destination_catalog_, [this](const auto& entry) {
                return entry.id == *editing_destination_id_;
@@ -2004,10 +2135,18 @@ std::vector<TaggerSession::Choice> TaggerSession::layouts() const {
 
 std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
     std::vector<Choice> choices;
-    choices.reserve(destination_catalog_.size());
+    choices.reserve(destination_catalog_.size() + 2U);
     for (const auto& saved : destination_catalog_) {
         choices.push_back(Choice{.id = QString::fromStdString(saved.id.to_string()),
                                  .name = display_utf8(saved.profile.name)});
+    }
+    if (services_.library_roots) {
+        choices.push_back(Choice{.id = QStringLiteral("library"),
+                                 .name = QStringLiteral("The library folder each is in")});
+    }
+    if (move_folder_) {
+        choices.push_back(Choice{.id = QStringLiteral("folder"),
+                                 .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
     }
     return choices;
 }
@@ -2024,6 +2163,13 @@ int TaggerSession::layoutIndex() const {
 }
 
 int TaggerSession::destinationIndex() const {
+    const auto saved = static_cast<int>(destination_catalog_.size());
+    if (move_target_ == MoveTarget::library) {
+        return saved;
+    }
+    if (move_target_ == MoveTarget::folder) {
+        return saved + (services_.library_roots ? 1 : 0);
+    }
     if (!editing_destination_id_) {
         return -1;
     }
@@ -2045,13 +2191,64 @@ void TaggerSession::selectLayout(const int index) {
 }
 
 void TaggerSession::selectDestination(const int index) {
-    if (index < 0 || static_cast<std::size_t>(index) >= destination_catalog_.size()) {
+    const auto saved = static_cast<int>(destination_catalog_.size());
+    const auto library = services_.library_roots ? saved : -1;
+    const auto folder = move_folder_ ? saved + (services_.library_roots ? 1 : 0) : -1;
+    if (index >= 0 && index == library) {
+        move_target_ = MoveTarget::library;
+    } else if (index >= 0 && index == folder) {
+        move_target_ = MoveTarget::folder;
+    } else if (index < 0 || index >= saved) {
+        move_target_ = MoveTarget::saved;
         editing_destination_id_.reset();
     } else {
+        move_target_ = MoveTarget::saved;
         editing_destination_id_ = destination_catalog_[static_cast<std::size_t>(index)].id;
     }
     reconcileOutputProfileChoices();
     invalidateWritePlan();
+}
+
+void TaggerSession::chooseMoveFolder(std::string raw_path) {
+    if (raw_path.empty()) {
+        return;
+    }
+    move_folder_ = std::move(raw_path);
+    move_target_ = MoveTarget::folder;
+    rememberActionChoices();
+    reconcileOutputProfileChoices();
+    invalidateWritePlan();
+    emit outputProfilesChanged();
+}
+
+EngineFolderLister TaggerSession::moveFolderLister() const {
+    const auto& store = services_.output_profile_store;
+    const auto place = std::ranges::find(store.places, store.destinations_key, &DestinationPlace::key);
+    return place == store.places.end() ? EngineFolderLister{} : place->folders;
+}
+
+std::string TaggerSession::moveFolderStart() const {
+    if (move_folder_) {
+        return *move_folder_;
+    }
+    const auto index = destinationIndex();
+    return index >= 0 && static_cast<std::size_t>(index) < destination_catalog_.size()
+               ? destination_catalog_[static_cast<std::size_t>(index)].profile.root_raw_path
+               : std::string{};
+}
+
+std::optional<operations::DestinationProfile> TaggerSession::moveDestination() const {
+    if (move_target_ == MoveTarget::folder && move_folder_) {
+        return folderDestination(*move_folder_);
+    }
+    if (move_target_ == MoveTarget::saved && editing_destination_id_) {
+        const auto found = std::ranges::find(destination_catalog_, *editing_destination_id_,
+                                             &persistence::SavedDestinationProfile::id);
+        if (found != destination_catalog_.end()) {
+            return found->profile;
+        }
+    }
+    return std::nullopt;
 }
 
 void TaggerSession::reloadOutputProfiles() { loadOutputProfiles(); }
@@ -2136,11 +2333,22 @@ void TaggerSession::rememberActionChoices() const {
     settings.setValue(QLatin1String(remembered_save_tags_key), save_tags_);
     settings.setValue(QLatin1String(remembered_rename_key), wants_rename_);
     settings.setValue(QLatin1String(remembered_move_key), wants_move_);
+    settings.setValue(QLatin1String(remembered_replaygain_key), replaygain_on_apply_);
+    settings.setValue(QLatin1String(remembered_skip_existing_gain_key), skip_existing_gain_);
     if (editing_output_layout_id_) {
         settings.setValue(QLatin1String(remembered_layout_key),
                           QString::fromStdString(editing_output_layout_id_->to_string()));
     }
     // Destinations are the engine's: one remembered for each.
+    const auto& engine = services_.output_profile_store.destinations_key;
+    settings.setValue(QLatin1String(remembered_move_target_prefix) + engine,
+                      move_target_ == MoveTarget::library  ? QStringLiteral("library")
+                      : move_target_ == MoveTarget::folder ? QStringLiteral("folder")
+                                                           : QStringLiteral("saved"));
+    if (move_folder_) {
+        settings.setValue(QLatin1String(remembered_move_folder_prefix) + engine,
+                          QByteArray{move_folder_->data(), static_cast<qsizetype>(move_folder_->size())});
+    }
     if (editing_destination_id_) {
         settings.setValue(QLatin1String(remembered_destination_prefix) +
                               services_.output_profile_store.destinations_key,
@@ -2164,6 +2372,17 @@ void TaggerSession::startWritePlan() {
         setStatus(QStringLiteral("Save waits for the tags to be read"));
         emit changed();
         return;
+    }
+    // ReplayGain first, into the draft; then this again, writing it all.
+    if (replaygain_on_apply_ && !std::exchange(gains_measured_, false) && grid_model_ != nullptr) {
+        std::vector<std::size_t> all(grid_model_->selection().item_count());
+        std::iota(all.begin(), all.end(), std::size_t{0U});
+        if (auto items = itemsNeedingGain(std::move(all)); !items.empty()) {
+            apply_after_gains_ = measureBeforeWrite(std::move(items));
+            if (apply_after_gains_) {
+                return;
+            }
+        }
     }
     const auto artwork_intents = artwork_ != nullptr
                                      ? artwork_->pendingIntents()
@@ -2203,19 +2422,33 @@ void TaggerSession::startWritePlan() {
             return;
         }
         output_layout = layout->profile;
-        if (operation_selection.move_files) {
-            if (!editing_destination_id_) {
-                refuse(QStringLiteral("Select a saved move destination before applying"));
+        if (operation_selection.move_files && move_target_ == MoveTarget::library) {
+            // One plan has one destination: the files' one library folder.
+            const auto roots = services_.library_roots ? services_.library_roots()
+                                                       : std::vector<std::string>{};
+            std::optional<std::string> root;
+            const auto& selection = grid_model_->selection();
+            for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+                const auto here = libraryFolderOf(selection.source(item).raw_path, roots);
+                if (!here) {
+                    refuse(QStringLiteral("A file is in no library folder; choose where to move "
+                                          "to"));
+                    return;
+                }
+                if (root && *root != *here) {
+                    refuse(QStringLiteral("These files are in more than one library folder; "
+                                          "choose where to move to"));
+                    return;
+                }
+                root = here;
+            }
+            destination = root ? std::optional{folderDestination(*root)} : std::nullopt;
+        } else if (operation_selection.move_files) {
+            destination = moveDestination();
+            if (!destination) {
+                refuse(QStringLiteral("Choose where to move to before applying"));
                 return;
             }
-            const auto selected_destination =
-                std::ranges::find(destination_catalog_, *editing_destination_id_,
-                                  &persistence::SavedDestinationProfile::id);
-            if (selected_destination == destination_catalog_.end()) {
-                refuse(QStringLiteral("The selected move destination is unavailable"));
-                return;
-            }
-            destination = selected_destination->profile;
         }
     }
     auto draft = save_tags_ ? grid_model_->patches() : metadata::StagedMetadataPatchSet{};

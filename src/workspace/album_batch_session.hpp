@@ -41,6 +41,10 @@ class AlbumBatchSession final : public QObject {
         skipped,
         // Its staged tags are in its files.
         written,
+        // Split into albums of its own folders, or merged into another:
+        // gone from the list, kept so that no album's place changes.
+        replaced,
+        merged,
     };
     struct Album {
         musicbrainz::AlbumGroupBasis basis{musicbrainz::AlbumGroupBasis::folder};
@@ -57,6 +61,8 @@ class AlbumBatchSession final : public QObject {
         // The version of result's candidates staged: the best, unless the
         // person chose another.
         std::size_t version{0U};
+        // Staged, but not to be written by the next Write.
+        bool excluded{false};
     };
 
     AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupService service,
@@ -64,17 +70,23 @@ class AlbumBatchSession final : public QObject {
     ~AlbumBatchSession() override;
 
     [[nodiscard]] const std::vector<Album>& albums() const { return albums_; }
+    // The albums shown, in their order: an album's place in albums() never
+    // changes, so split and merge can happen while albums are looked up.
+    [[nodiscard]] const std::vector<std::size_t>& order() const { return order_; }
+    // Not staged nor written: its grouping can still change.
+    [[nodiscard]] bool editable(std::size_t album) const;
     [[nodiscard]] std::size_t fileCount() const;
     [[nodiscard]] std::size_t count(State state) const;
     [[nodiscard]] bool started() const { return started_; }
     [[nodiscard]] bool lookingUp() const;
     [[nodiscard]] std::size_t requestsLeft() const;
 
-    // Step 1, before anything is looked up.
+    // Grouping, on albums not yet staged; those changed are looked up again.
     // One album per folder it spans.
     void splitByFolder(std::size_t album);
     // `album` joins `into`; the album list keeps `into`'s place.
     void merge(std::size_t album, std::size_t into);
+    // Left out of the lookup; a staged album, out of the next Write.
     void setIncluded(std::size_t album, bool included);
 
     // Step 2: every album not left out, in turn.
@@ -97,13 +109,23 @@ class AlbumBatchSession final : public QObject {
     void choose(std::size_t album, std::size_t version, metadata::MetadataProposalSet proposals);
     void skip(std::size_t album);
 
-    // Step 4, Apply: the albums chosen of those staged written, the rest
-    // staying staged; one write at a time, once nothing is being staged.
+    // Write (ADR-0262): the staged albums not excluded, written as the
+    // tagger's Actions say -- renamed, moved, ReplayGain measured first --
+    // the rest staying staged; once nothing is being staged.
     [[nodiscard]] bool canWrite() const;
-    // The fields each album's staged draft changes, over all its files.
-    [[nodiscard]] std::vector<std::size_t> changes() const;
-    void write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options);
+    [[nodiscard]] std::vector<std::size_t> toWrite() const;
+    void write();
     [[nodiscard]] const AlbumBatchWrite* writing() const { return writer_; }
+    // Measuring ReplayGain before the write.
+    [[nodiscard]] bool measuring() const { return measuring_; }
+    // How the last Write went, said once it is over.
+    [[nodiscard]] QString writeSummary() const { return write_summary_; }
+    // The last Write wrote every album it was given.
+    [[nodiscard]] bool wroteAll() const { return wrote_all_; }
+    // Nothing left that the batch can still do: nothing being looked up,
+    // needing a person, or staged for a Write. Albums found nothing for,
+    // skipped or left out are left as they are.
+    [[nodiscard]] bool nothingLeftToDo() const;
     void stopWriting();
 
     static QString stateText(const Album& album);
@@ -134,7 +156,14 @@ class AlbumBatchSession final : public QObject {
     };
     std::deque<ToStage> to_stage_;
     std::optional<std::size_t> staging_;
+    void startWriter(std::vector<std::size_t> albums);
+    void queueLookUp(std::size_t album);
+
+    std::vector<std::size_t> order_;
     QPointer<AlbumBatchWrite> writer_;
+    bool measuring_{false};
+    QString write_summary_;
+    bool wrote_all_{false};
 };
 
 } // namespace trackknife::bench

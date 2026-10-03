@@ -53,12 +53,17 @@ AlbumBatchSession::AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupSer
     : QObject(parent), tagger_(&tagger), service_(std::move(service)),
       queue_(new AlbumLookupQueue(service_, this)) {
     connect(queue_, &AlbumLookupQueue::looking, this, [this](const std::size_t album) {
-        albums_[album].state = State::searching;
-        emit changed();
+        if (albums_[album].state == State::waiting) {
+            albums_[album].state = State::searching;
+            emit changed();
+        }
     });
     connect(queue_, &AlbumLookupQueue::lookedUp, this, &AlbumBatchSession::lookedUp);
     connect(queue_, &AlbumLookupQueue::failed, this,
             [this](const std::size_t album, const QString& why) {
+                if (albums_[album].state != State::searching) {
+                    return;
+                }
                 albums_[album].state = State::failed;
                 albums_[album].note = why;
                 emit changed();
@@ -74,6 +79,7 @@ AlbumBatchSession::~AlbumBatchSession() { queue_->stop(); }
 
 void AlbumBatchSession::group() {
     albums_.clear();
+    order_.clear();
     if (tagger_.isNull()) {
         return;
     }
@@ -102,6 +108,7 @@ void AlbumBatchSession::group() {
                     .note = {},
                     .result = std::nullopt};
         describe(album);
+        order_.push_back(albums_.size());
         albums_.push_back(std::move(album));
     }
 }
@@ -161,10 +168,36 @@ musicbrainz::AlbumQuery AlbumBatchSession::queryOf(const Album& album) const {
 
 std::size_t AlbumBatchSession::fileCount() const {
     std::size_t files = 0U;
-    for (const auto& album : albums_) {
-        files += album.items.size();
+    for (const auto album : order_) {
+        files += albums_[album].items.size();
     }
     return files;
+}
+
+bool AlbumBatchSession::editable(const std::size_t album) const {
+    if (album >= albums_.size()) {
+        return false;
+    }
+    switch (albums_[album].state) {
+    case State::staging:
+    case State::staged:
+    case State::written:
+    case State::replaced:
+    case State::merged:
+        return false;
+    default:
+        return true;
+    }
+}
+
+void AlbumBatchSession::queueLookUp(const std::size_t album) {
+    albums_[album].state = State::waiting;
+    albums_[album].note.clear();
+    albums_[album].result.reset();
+    albums_[album].version = 0U;
+    if (started_) {
+        queue_->add(album, queryOf(albums_[album]));
+    }
 }
 
 std::size_t AlbumBatchSession::count(const State state) const {
@@ -176,12 +209,14 @@ bool AlbumBatchSession::lookingUp() const { return queue_->running(); }
 std::size_t AlbumBatchSession::requestsLeft() const { return queue_->requestsLeft(); }
 
 void AlbumBatchSession::splitByFolder(const std::size_t index) {
-    if (started_ || index >= albums_.size() || albums_[index].folders.size() < 2U) {
+    if (!editable(index) || albums_[index].folders.size() < 2U || tagger_.isNull()) {
         return;
     }
-    const auto original = std::move(albums_[index]);
-    albums_.erase(albums_.begin() + static_cast<std::ptrdiff_t>(index));
-    std::vector<Album> parts;
+    queue_->forget(index);
+    const auto left_out = albums_[index].state == State::left_out;
+    albums_[index].state = State::replaced;
+    const auto original = albums_[index];
+    std::vector<std::size_t> parts;
     for (const auto& folder : original.folders) {
         Album part{.basis = original.basis,
                    .items = {},
@@ -189,7 +224,7 @@ void AlbumBatchSession::splitByFolder(const std::size_t index) {
                    .artist = {},
                    .title = {},
                    .year = {},
-                   .state = original.state,
+                   .state = State::left_out,
                    .note = {},
                    .result = std::nullopt};
         for (const auto item : original.items) {
@@ -199,17 +234,25 @@ void AlbumBatchSession::splitByFolder(const std::size_t index) {
             }
         }
         describe(part);
-        parts.push_back(std::move(part));
+        parts.push_back(albums_.size());
+        albums_.push_back(std::move(part));
+        if (!left_out) {
+            queueLookUp(parts.back());
+        }
     }
-    albums_.insert(albums_.begin() + static_cast<std::ptrdiff_t>(index),
-                   std::make_move_iterator(parts.begin()), std::make_move_iterator(parts.end()));
+    // The parts where the album was.
+    const auto at = std::ranges::find(order_, index);
+    const auto place = order_.erase(at);
+    order_.insert(place, parts.begin(), parts.end());
     emit changed();
 }
 
 void AlbumBatchSession::merge(const std::size_t index, const std::size_t into) {
-    if (started_ || index == into || index >= albums_.size() || into >= albums_.size()) {
+    if (index == into || !editable(index) || !editable(into)) {
         return;
     }
+    queue_->forget(index);
+    queue_->forget(into);
     auto& target = albums_[into];
     auto& joining = albums_[index];
     target.items.insert(target.items.end(), joining.items.begin(), joining.items.end());
@@ -219,15 +262,33 @@ void AlbumBatchSession::merge(const std::size_t index, const std::size_t into) {
         }
     }
     describe(target);
-    albums_.erase(albums_.begin() + static_cast<std::ptrdiff_t>(index));
+    joining.state = State::merged;
+    std::erase(order_, index);
+    if (target.state != State::left_out) {
+        queueLookUp(into);
+    }
     emit changed();
 }
 
 void AlbumBatchSession::setIncluded(const std::size_t index, const bool included) {
-    if (started_ || index >= albums_.size()) {
+    if (index >= albums_.size()) {
         return;
     }
-    albums_[index].state = included ? State::waiting : State::left_out;
+    auto& album = albums_[index];
+    if (album.state == State::staged || album.state == State::staging) {
+        album.excluded = !included;
+        emit changed();
+        return;
+    }
+    if (!editable(index) || (album.state == State::left_out) != included) {
+        return;
+    }
+    if (included) {
+        queueLookUp(index);
+    } else {
+        queue_->forget(index);
+        album.state = State::left_out;
+    }
     emit changed();
 }
 
@@ -235,13 +296,14 @@ void AlbumBatchSession::lookUp() {
     if (tagger_.isNull()) {
         return;
     }
+    const auto again = started_;
     started_ = true;
-    for (std::size_t index = 0; index < albums_.size(); ++index) {
-        auto& album = albums_[index];
-        if (album.state == State::waiting || album.state == State::failed) {
-            album.state = State::waiting;
-            album.note.clear();
-            queue_->add(index, queryOf(album));
+    for (const auto index : order_) {
+        const auto state = albums_[index].state;
+        // Again: those that failed, and those found nothing for.
+        if (state == State::waiting || state == State::failed ||
+            (again && state == State::no_match)) {
+            queueLookUp(index);
         }
     }
     emit changed();
@@ -260,6 +322,10 @@ void AlbumBatchSession::stop() {
 void AlbumBatchSession::lookedUp(const std::size_t index,
                                  const musicbrainz::AlbumLookupResult& result) {
     auto& album = albums_[index];
+    if (album.state != State::searching && album.state != State::waiting) {
+        // Changed while it was asked about.
+        return;
+    }
     album.result = result;
     switch (result.outcome) {
     case musicbrainz::AlbumLookupOutcome::matched:
@@ -323,10 +389,13 @@ void AlbumBatchSession::settled(const bool staged) {
 
 std::optional<std::size_t>
 AlbumBatchSession::nextNeedingYou(const std::optional<std::size_t> after) const {
-    const auto count = albums_.size();
-    const auto first = after ? *after + 1U : 0U;
+    // In the order shown, from the one after `after`.
+    const auto count = order_.size();
+    const auto at = after ? std::ranges::find(order_, *after) : order_.end();
+    const auto first = at == order_.end() ? 0U
+                                          : static_cast<std::size_t>(at - order_.begin()) + 1U;
     for (std::size_t step = 0; step < count; ++step) {
-        const auto index = (first + step) % count;
+        const auto index = order_[(first + step) % count];
         if (after && index == *after) {
             continue;
         }
@@ -377,34 +446,112 @@ void AlbumBatchSession::skip(const std::size_t index) {
 }
 
 bool AlbumBatchSession::canWrite() const {
-    return writer_ == nullptr && !staging_ && to_stage_.empty() && !tagger_.isNull() &&
-           tagger_->canWriteElsewhere() &&
-           std::ranges::any_of(albums_, [](const Album& album) { return album.state == State::staged; });
+    return writer_ == nullptr && !measuring_ && !staging_ && to_stage_.empty() &&
+           !tagger_.isNull() && tagger_->canWriteElsewhere() && !toWrite().empty();
 }
 
-void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options) {
+bool AlbumBatchSession::nothingLeftToDo() const {
+    return std::ranges::none_of(order_, [this](const std::size_t album) {
+        switch (albums_[album].state) {
+        case State::waiting:
+        case State::searching:
+        case State::staging:
+        case State::staged:
+        case State::needs_choice:
+        case State::failed:
+            return true;
+        default:
+            return false;
+        }
+    });
+}
+
+std::vector<std::size_t> AlbumBatchSession::toWrite() const {
+    std::vector<std::size_t> albums;
+    for (const auto album : order_) {
+        if (albums_[album].state == State::staged && !albums_[album].excluded) {
+            albums.push_back(album);
+        }
+    }
+    return albums;
+}
+
+void AlbumBatchSession::write() {
     if (!canWrite()) {
         return;
     }
+    auto albums = toWrite();
+    write_summary_.clear();
+    wrote_all_ = false;
+    if (tagger_->replayGainOnApply()) {
+        std::vector<std::size_t> items;
+        for (const auto album : albums) {
+            items.insert(items.end(), albums_[album].items.begin(), albums_[album].items.end());
+        }
+        if (auto needing = tagger_->itemsNeedingGain(std::move(items)); !needing.empty()) {
+            // Measured first, into the draft; then all written at once.
+            measuring_ = true;
+            auto measured = std::make_shared<QMetaObject::Connection>();
+            *measured = connect(tagger_, &TaggerSession::gainsMeasured, this,
+                                [this, albums, measured](const bool ok) {
+                                    disconnect(*measured);
+                                    measuring_ = false;
+                                    if (ok) {
+                                        startWriter(albums);
+                                        return;
+                                    }
+                                    write_summary_ =
+                                        QStringLiteral("Nothing written: ReplayGain could not be "
+                                                       "measured · %1")
+                                            .arg(tagger_->status());
+                                    emit changed();
+                                    emit writeFinished();
+                                });
+            if (!tagger_->measureBeforeWrite(std::move(needing))) {
+                disconnect(*measured);
+                measuring_ = false;
+                write_summary_ = QStringLiteral("Nothing written: ReplayGain could not start");
+                emit changed();
+                emit writeFinished();
+                return;
+            }
+            emit changed();
+            return;
+        }
+    }
+    startWriter(std::move(albums));
+}
+
+void AlbumBatchSession::startWriter(std::vector<std::size_t> albums) {
     std::vector<AlbumBatchWrite::Album> chosen;
     for (const auto album : albums) {
-        if (album < albums_.size() && albums_[album].state == State::staged) {
+        if (albums_[album].state == State::staged) {
             chosen.push_back({.album = album, .items = albums_[album].items});
         }
     }
-    if (chosen.empty()) {
-        return;
+    // As the tagger's Actions say: one naming layout, its file name when
+    // renaming, its folders inside the destination when moving.
+    AlbumBatchWrite::Options options;
+    const auto layout = tagger_->layoutProfile(tagger_->layoutIndex());
+    if (tagger_->renameFiles()) {
+        options.rename = layout;
+    }
+    if (tagger_->moveFiles()) {
+        options.move = layout;
+        options.destination = tagger_->moveDestination();
     }
     writer_ = new AlbumBatchWrite(*tagger_, std::move(chosen), std::move(options), this);
     connect(writer_, &AlbumBatchWrite::progressed, this, &AlbumBatchSession::changed);
     connect(writer_, &AlbumBatchWrite::finished, this, [this] {
         using Outcome = AlbumBatchWrite::Outcome;
+        std::size_t written = 0U;
         for (const auto& outcome : writer_->outcomes()) {
             auto& album = albums_[outcome.album];
             switch (outcome.outcome) {
             case Outcome::written:
                 album.state = State::written;
                 album.note = outcome.note;
+                ++written;
                 break;
             case Outcome::partly_written:
                 // What was not written is still staged.
@@ -421,6 +568,17 @@ void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::
                 break;
             }
         }
+        const auto total = writer_->outcomes().size();
+        wrote_all_ = written == total;
+        write_summary_ = written == total
+                             ? QStringLiteral("Wrote %1 %2")
+                                   .arg(written)
+                                   .arg(written == 1U ? QStringLiteral("album")
+                                                      : QStringLiteral("albums"))
+                             : QStringLiteral("Wrote %1 of %2 albums · the rest stay staged, "
+                                              "saying why")
+                                   .arg(written)
+                                   .arg(total);
         writer_->deleteLater();
         writer_ = nullptr;
         emit changed();
@@ -429,26 +587,6 @@ void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::
     });
     emit changed();
     writer_->start();
-}
-
-std::vector<std::size_t> AlbumBatchSession::changes() const {
-    std::vector<std::size_t> counts(albums_.size(), 0U);
-    const auto* draft = tagger_.isNull() ? nullptr : tagger_->draft();
-    if (draft == nullptr) {
-        return counts;
-    }
-    std::unordered_map<std::size_t, std::size_t> album_of;
-    for (std::size_t album = 0U; album < albums_.size(); ++album) {
-        for (const auto item : albums_[album].items) {
-            album_of.emplace(item, album);
-        }
-    }
-    for (const auto& patch : draft->patches()) {
-        if (const auto found = album_of.find(patch.item_index); found != album_of.end()) {
-            ++counts[found->second];
-        }
-    }
-    return counts;
 }
 
 void AlbumBatchSession::stopWriting() {
@@ -490,6 +628,9 @@ QString AlbumBatchSession::stateText(const Album& album) {
     case State::written:
         return album.note.isEmpty() ? QStringLiteral("Written")
                                     : QStringLiteral("Written · %1").arg(album.note);
+    case State::replaced:
+    case State::merged:
+        return {};
     }
     return {};
 }

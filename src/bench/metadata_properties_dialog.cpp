@@ -1105,7 +1105,10 @@ void MetadataPropertiesDialog::showActionsPopover() {
     manage->addStretch(1);
     grid->addLayout(manage, row++, 1);
 
-    auto* replaygain = new QLabel(QStringLiteral("ReplayGain"), actions_popover_);
+    // Measured when applying, and written with the rest.
+    actions_replaygain_ = new QCheckBox(QStringLiteral("ReplayGain"), actions_popover_);
+    actions_replaygain_->setObjectName(QStringLiteral("bench-actions-replaygain"));
+    connect(actions_replaygain_, &QCheckBox::clicked, session_, &TaggerSession::chooseReplayGain);
     actions_grouping_ = new QComboBox(actions_popover_);
     actions_grouping_->setObjectName(QStringLiteral("bench-actions-replaygain-grouping"));
     actions_grouping_->setAccessibleName(QStringLiteral("ReplayGain grouping"));
@@ -1122,16 +1125,18 @@ void MetadataPropertiesDialog::showActionsPopover() {
             }
         }
     });
-    actions_scan_ = new QPushButton(QStringLiteral("Scan now"), actions_popover_);
-    actions_scan_->setObjectName(QStringLiteral("bench-actions-replaygain-scan"));
-    connect(actions_scan_, &QPushButton::clicked, this, [this] {
-        actions_popover_->close();
-        replaygain_scan_button_->click();
-    });
+    actions_skip_gain_ =
+        new QCheckBox(QStringLiteral("Skip existing"), actions_popover_);
+    actions_skip_gain_->setObjectName(QStringLiteral("bench-actions-replaygain-skip-existing"));
+    actions_skip_gain_->setToolTip(
+        QStringLiteral("Leave albums alone whose files all have the gain already (tracks, for "
+                       "track gains only)"));
+    connect(actions_skip_gain_, &QCheckBox::clicked, session_,
+            &TaggerSession::chooseSkipExistingGain);
     auto* replaygain_row = new QHBoxLayout;
     replaygain_row->addWidget(actions_grouping_, 1);
-    replaygain_row->addWidget(actions_scan_);
-    grid->addWidget(replaygain, row, 0);
+    replaygain_row->addWidget(actions_skip_gain_);
+    grid->addWidget(actions_replaygain_, row, 0);
     grid->addLayout(replaygain_row, row++, 1);
     auto* replaygain_links = new QHBoxLayout;
     replaygain_links->setSpacing(16);
@@ -1201,7 +1206,14 @@ void MetadataPropertiesDialog::syncActionsPopover() {
     mirror(actions_move_, move_files_check_);
     actions_layout_->setEnabled(output_layout_combo_->isEnabled());
     actions_destination_->setEnabled(destination_combo_->isEnabled());
-    actions_scan_->setEnabled(replaygain_scan_button_->isEnabled());
+    {
+        const QSignalBlocker replaygain_blocker{actions_replaygain_};
+        const QSignalBlocker skip_blocker{actions_skip_gain_};
+        actions_replaygain_->setChecked(session_->replayGainOnApply());
+        actions_skip_gain_->setChecked(session_->skipExistingGain());
+    }
+    actions_grouping_->setEnabled(session_->replayGainOnApply());
+    actions_skip_gain_->setEnabled(session_->replayGainOnApply());
 }
 
 void MetadataPropertiesDialog::startIdentify() {

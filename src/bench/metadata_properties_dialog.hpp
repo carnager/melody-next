@@ -135,7 +135,8 @@ class MetadataPropertiesDialog final : public QDialog {
     QComboBox* actions_layout_{nullptr};
     QComboBox* actions_destination_{nullptr};
     QComboBox* actions_grouping_{nullptr};
-    QPushButton* actions_scan_{nullptr};
+    QCheckBox* actions_replaygain_{nullptr};
+    QCheckBox* actions_skip_gain_{nullptr};
     QLabel* loading_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* undo_button_{nullptr};

@@ -326,6 +326,18 @@ class TaggerSession final : public QObject {
     void setReplayGainGrouping(int index);
     void setReplayGainExpression(const QString& expression);
     void startReplayGainScan(std::vector<std::size_t> forced_items = {});
+    // ReplayGain as an Apply action: measured first and staged into the
+    // draft, then written with everything else in one write -- tagging and
+    // moving never change the audio. Albums (or, track gain only, tracks)
+    // that have the gain already are left alone when asked.
+    [[nodiscard]] bool replayGainOnApply() const { return replaygain_on_apply_; }
+    [[nodiscard]] bool skipExistingGain() const { return skip_existing_gain_; }
+    void chooseReplayGain(bool on);
+    void chooseSkipExistingGain(bool on);
+    // Of `items`, those to measure: all, or those whose group lacks the gain.
+    [[nodiscard]] std::vector<std::size_t> itemsNeedingGain(std::vector<std::size_t> items) const;
+    // Measured and staged, then gainsMeasured(); false when it cannot start.
+    bool measureBeforeWrite(std::vector<std::size_t> items);
     void exportReplayGainResults(const QString& path);
     [[nodiscard]] Provenance loudnessProvenance() const;
     [[nodiscard]] bool hasReplayGainExport() const { return !replaygain_export_rows_.isEmpty(); }
@@ -426,6 +438,9 @@ class TaggerSession final : public QObject {
     void proposalsSettled(bool staged);
     // A write made elsewhere is over, and the files it wrote read again.
     void writtenElsewhere();
+    // measureBeforeWrite() is over: the gains are in the draft (or there
+    // was nothing to measure), or not, saying why in the status.
+    void gainsMeasured(bool ok);
 
   private:
     using SelectionResult = core::Result<metadata::StagedMetadataSelection>;
@@ -481,6 +496,7 @@ class TaggerSession final : public QObject {
     [[nodiscard]] std::optional<AutomaticChainPlan> combinedAutomaticChain();
     [[nodiscard]] QString replayGainStatusLinks() const;
     void finishReplayGainScan();
+    [[nodiscard]] std::optional<loudness::LoudnessGrouping> replayGainGroupingChoice() const;
     void finishWritePlan();
     void startApply(std::shared_ptr<const operations::PreparationPlan> plan);
     void startMetadataApply(std::shared_ptr<const operations::PreparationPlan> plan);
@@ -599,6 +615,12 @@ class TaggerSession final : public QObject {
     // suggestions and Save wait for the files' own.
     bool provisional_{false};
     bool writing_elsewhere_{false};
+    bool replaygain_on_apply_{false};
+    bool skip_existing_gain_{true};
+    // A scan for a write is under way; Apply waits for it; it has been made.
+    bool measuring_for_write_{false};
+    bool apply_after_gains_{false};
+    bool gains_measured_{false};
     // Read again after a write elsewhere: their drafts were written.
     std::vector<std::size_t> rewritten_items_;
     // The files that could not be read, one a line, for a tooltip.

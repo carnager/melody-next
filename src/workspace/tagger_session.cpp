@@ -29,7 +29,9 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <numeric>
 #include <ranges>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -43,6 +45,8 @@ constexpr auto remembered_rename_key = "properties/actions/rename-files";
 constexpr auto remembered_move_key = "properties/actions/move-files";
 constexpr auto remembered_layout_key = "properties/actions/naming-layout";
 constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
+constexpr auto remembered_replaygain_key = "properties/actions/replaygain";
+constexpr auto remembered_skip_existing_gain_key = "properties/actions/replaygain-skip-existing";
 
 constexpr auto properties_geometry_key = "workspace/metadata-properties-geometry-v1";
 constexpr auto properties_window_key = "workspace/metadata-properties-window-v1";
@@ -88,6 +92,10 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         save_tags_ = remembered.value(QLatin1String(remembered_save_tags_key), true).toBool();
         wants_rename_ = remembered.value(QLatin1String(remembered_rename_key), false).toBool();
         wants_move_ = remembered.value(QLatin1String(remembered_move_key), false).toBool();
+        replaygain_on_apply_ =
+            remembered.value(QLatin1String(remembered_replaygain_key), false).toBool();
+        skip_existing_gain_ =
+            remembered.value(QLatin1String(remembered_skip_existing_gain_key), true).toBool();
         const auto id_of = [&remembered](const QString& key) -> std::optional<core::StableId> {
             auto id = core::StableId::parse(remembered.value(key).toString().toStdString());
             return id ? std::optional{*id} : std::nullopt;
@@ -141,6 +149,19 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
             &TaggerSession::finishAutomaticStage);
     connect(&replaygain_watcher_, &QFutureWatcherBase::finished, this,
             &TaggerSession::finishReplayGainScan);
+    // The gains measured for a write staged: the write goes on.
+    connect(this, &TaggerSession::proposalsSettled, this, [this](const bool staged) {
+        if (measuring_for_write_) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(staged);
+        }
+    });
+    connect(this, &TaggerSession::gainsMeasured, this, [this](const bool ok) {
+        if (std::exchange(apply_after_gains_, false) && ok) {
+            gains_measured_ = true;
+            startWritePlan();
+        }
+    });
     connect(&proposal_watcher_, &QFutureWatcherBase::finished, this,
             &TaggerSession::finishProposals);
     connect(&write_plan_watcher_, &QFutureWatcherBase::finished, this,
@@ -1008,8 +1029,8 @@ bool TaggerSession::canScanReplayGain() const { return canSuggest() && !replayga
 bool TaggerSession::canApply() const {
     const auto has_metadata_effect = save_tags_ && draft_count_ > 0;
     const auto has_path_effect = rename_files_ || move_files_;
-    return grid_model_ != nullptr && !provisional_ &&
-           (has_metadata_effect || has_path_effect ||
+    return grid_model_ != nullptr && !provisional_ && !replaygain_running_ &&
+           (has_metadata_effect || has_path_effect || replaygain_on_apply_ ||
             (artwork_ != nullptr && artwork_->hasPendingChanges())) &&
            !transformation_catalog_loading_ && !write_plan_running_ && !apply_running_ &&
            !artwork_operation_running_ && !writing_elsewhere_;
@@ -1730,30 +1751,13 @@ void TaggerSession::startReplayGainScan(std::vector<std::size_t> forced_items) {
     if (items.empty()) {
         return;
     }
-    loudness::LoudnessGrouping grouping;
-    switch (replaygain_grouping_) {
-    case 0:
-        grouping.mode = loudness::LoudnessGroupingMode::release;
-        break;
-    case 1:
-        grouping.mode = loudness::LoudnessGroupingMode::release_merged_discs;
-        break;
-    case 2:
-        grouping.mode = loudness::LoudnessGroupingMode::selection_album;
-        break;
-    case 3:
-        grouping.mode = loudness::LoudnessGroupingMode::track;
-        break;
-    default:
-        grouping.mode = loudness::LoudnessGroupingMode::format_expression;
-        grouping.expression = replaygain_expression_.trimmed().toStdString();
-        if (grouping.expression.empty()) {
-            setStatus(QStringLiteral("Enter a tkfmt-1 grouping expression, e.g. %album%"));
-            emit changed();
-            return;
-        }
-        break;
+    auto choice = replayGainGroupingChoice();
+    if (!choice) {
+        setStatus(QStringLiteral("Enter a tkfmt-1 grouping expression, e.g. %album%"));
+        emit changed();
+        return;
     }
+    auto grouping = std::move(*choice);
     replaygain_retry_items_.clear();
 
     replaygain_running_ = true;
@@ -1789,15 +1793,110 @@ void TaggerSession::startReplayGainScan(std::vector<std::size_t> forced_items) {
         }));
 }
 
+std::optional<loudness::LoudnessGrouping> TaggerSession::replayGainGroupingChoice() const {
+    loudness::LoudnessGrouping grouping;
+    switch (replaygain_grouping_) {
+    case 0:
+        grouping.mode = loudness::LoudnessGroupingMode::release;
+        break;
+    case 1:
+        grouping.mode = loudness::LoudnessGroupingMode::release_merged_discs;
+        break;
+    case 2:
+        grouping.mode = loudness::LoudnessGroupingMode::selection_album;
+        break;
+    case 3:
+        grouping.mode = loudness::LoudnessGroupingMode::track;
+        break;
+    default:
+        grouping.mode = loudness::LoudnessGroupingMode::format_expression;
+        grouping.expression = replaygain_expression_.trimmed().toStdString();
+        if (grouping.expression.empty()) {
+            return std::nullopt;
+        }
+        break;
+    }
+    return grouping;
+}
+
+void TaggerSession::chooseReplayGain(const bool on) {
+    replaygain_on_apply_ = on;
+    rememberActionChoices();
+    invalidateWritePlan();
+}
+
+void TaggerSession::chooseSkipExistingGain(const bool on) {
+    skip_existing_gain_ = on;
+    rememberActionChoices();
+    emit changed();
+}
+
+std::vector<std::size_t> TaggerSession::itemsNeedingGain(std::vector<std::size_t> items) const {
+    const auto grouping = replayGainGroupingChoice();
+    if (!skip_existing_gain_ || grid_model_ == nullptr || !grouping) {
+        return items;
+    }
+    const auto& selection = grid_model_->selection();
+    const auto* field = grouping->mode == loudness::LoudnessGroupingMode::track
+                            ? "replaygaintrackgain"
+                            : "replaygainalbumgain";
+    const auto has_gain = [&](const std::size_t item) {
+        const auto gain = selection.source(item).baseline.first_effective_value(field);
+        return gain.has_value() && !gain->empty();
+    };
+    std::vector<const metadata::MetadataDocument*> documents;
+    documents.reserve(items.size());
+    for (const auto item : items) {
+        documents.push_back(&selection.source(item).baseline);
+    }
+    const auto keys = loudness::assign_loudness_groups(*grouping, documents);
+    if (!keys) {
+        return items;
+    }
+    // A group lacks the gain when any of its files does.
+    std::set<std::string> lacking;
+    for (std::size_t position = 0U; position < items.size(); ++position) {
+        if ((*keys)[position] && !has_gain(items[position])) {
+            lacking.insert(*(*keys)[position]);
+        }
+    }
+    std::vector<std::size_t> needing;
+    for (std::size_t position = 0U; position < items.size(); ++position) {
+        const auto& key = (*keys)[position];
+        if (key ? lacking.contains(*key) : !has_gain(items[position])) {
+            needing.push_back(items[position]);
+        }
+    }
+    return needing;
+}
+
+bool TaggerSession::measureBeforeWrite(std::vector<std::size_t> items) {
+    if (items.empty() || measuring_for_write_) {
+        return false;
+    }
+    measuring_for_write_ = true;
+    startReplayGainScan(std::move(items));
+    if (!replaygain_running_) {
+        measuring_for_write_ = false;
+        return false;
+    }
+    return true;
+}
+
 void TaggerSession::finishReplayGainScan() {
     replaygain_running_ = false;
     replaygain_progress_timer_.stop();
     const auto outcome = replaygain_watcher_.result();
+    const auto for_write = measuring_for_write_;
     if (!outcome || !outcome->proposals) {
         const auto message = outcome ? display_utf8(outcome->proposals.error().message)
                                      : QStringLiteral("The loudness scan returned no result");
         setStatus(QStringLiteral("No ReplayGain values staged · %1").arg(message));
         emit changed();
+        if (for_write) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(false);
+        }
         return;
     }
     replaygain_retry_items_ = outcome->retry_items;
@@ -1815,6 +1914,10 @@ void TaggerSession::finishReplayGainScan() {
         showStickyStatus(QStringLiteral("No ReplayGain values staged · nothing measurable in "
                                         "the selection%1")
                              .arg(replayGainStatusLinks()));
+        if (for_write) {
+            measuring_for_write_ = false;
+            emit gainsMeasured(true);
+        }
         return;
     }
     setStatus(status_);
@@ -2140,6 +2243,8 @@ void TaggerSession::rememberActionChoices() const {
     settings.setValue(QLatin1String(remembered_save_tags_key), save_tags_);
     settings.setValue(QLatin1String(remembered_rename_key), wants_rename_);
     settings.setValue(QLatin1String(remembered_move_key), wants_move_);
+    settings.setValue(QLatin1String(remembered_replaygain_key), replaygain_on_apply_);
+    settings.setValue(QLatin1String(remembered_skip_existing_gain_key), skip_existing_gain_);
     if (editing_output_layout_id_) {
         settings.setValue(QLatin1String(remembered_layout_key),
                           QString::fromStdString(editing_output_layout_id_->to_string()));
@@ -2168,6 +2273,17 @@ void TaggerSession::startWritePlan() {
         setStatus(QStringLiteral("Save waits for the tags to be read"));
         emit changed();
         return;
+    }
+    // ReplayGain first, into the draft; then this again, writing it all.
+    if (replaygain_on_apply_ && !std::exchange(gains_measured_, false) && grid_model_ != nullptr) {
+        std::vector<std::size_t> all(grid_model_->selection().item_count());
+        std::iota(all.begin(), all.end(), std::size_t{0U});
+        if (auto items = itemsNeedingGain(std::move(all)); !items.empty()) {
+            apply_after_gains_ = measureBeforeWrite(std::move(items));
+            if (apply_after_gains_) {
+                return;
+            }
+        }
     }
     const auto artwork_intents = artwork_ != nullptr
                                      ? artwork_->pendingIntents()

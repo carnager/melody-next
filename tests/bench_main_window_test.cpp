@@ -314,6 +314,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsWritesWhatIsChosen();
+    void applyMeasuresReplayGainAndWritesOnce();
     void musicBrainzFingerprintScanRanksAndStages();
     void replayGainScanStagesMeasuredGainsAsDrafts();
     void replayGainScanUsesTruePeakWhenOptedIn();
@@ -6024,6 +6025,148 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
 // only, or renamed and moved by two presets into the library folder they are
 // in -- an album with a file changed since it was read left out, and the
 // rest of the draft kept.
+// ReplayGain as an Apply action: measured first, staged, and written with
+// the tag edits in the same write; an album with gain already left alone.
+void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(engine_.socket()).toStdString(),
+        .host = {},
+        .port = 0,
+        .token = {}});
+    const auto raw = [](const QString& path) { return QFile::encodeName(path).toStdString(); };
+    const auto wav = media.filePath(QStringLiteral("tone.wav"));
+    write_sine_wav_fixture(wav, 0.6);
+    const auto preset = convert::find_encoder_preset("flac");
+    QVERIFY(preset);
+    std::vector<MetadataPropertiesSource> sources;
+    for (const auto& [name, album, gain] :
+         {std::tuple{"a1.flac", "Measured", ""}, std::tuple{"a2.flac", "Measured", ""},
+          std::tuple{"b1.flac", "Has gain", "-3.00 dB"}, std::tuple{"b2.flac", "Has gain", "-3.00 dB"}}) {
+        const auto path = media.filePath(QLatin1String(name));
+        convert::AudioConversionRequest request{};
+        request.source_raw_path = raw(wav);
+        request.preset = *preset;
+        request.destination_raw_path = raw(path);
+        const auto field = [](const char* native, const char* value) {
+            return metadata::MetadataField{
+                .canonical_name = metadata::canonicalize_field_name(native),
+                .native_name = native,
+                .values = {value},
+                .qualifier = {},
+                .provenance = metadata::FieldProvenance::embedded};
+        };
+        request.metadata.fields = {field("ALBUM", album), field("ARTIST", "Band"),
+                                   field("TITLE", name)};
+        QVERIFY(convert::convert_audio_file(request));
+        // Conversion writes no gains: those it has already, written after.
+        if (std::string_view{gain}.size() > 0U) {
+            const auto before = metadata::read_local_metadata(raw(path));
+            QVERIFY(before.has_value());
+            auto selection = metadata::StagedMetadataSelection::create(
+                {metadata::StagedMetadataSource{.raw_path = raw(path),
+                                                .source_revision = before->source_revision,
+                                                .baseline = before->document}});
+            QVERIFY(selection.has_value());
+            metadata::StagedMetadataPatchSet patches;
+            for (const auto* native : {"REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_TRACK_GAIN"}) {
+                const auto canonical = metadata::canonicalize_field_name(native);
+                auto index = selection->field_index(canonical);
+                if (!index) {
+                    auto added = selection->ensure_missing_field(canonical, native);
+                    QVERIFY(added.has_value());
+                    index = *added;
+                }
+                QVERIFY(patches.replace_values(*selection, 0U, *index, {gain}).has_value());
+            }
+            const auto plan = metadata::build_metadata_write_plan(
+                *selection, patches, metadata::local_metadata_file_access());
+            QVERIFY(plan && plan->ready());
+            const auto written = work->apply(*plan, {}, {});
+            QVERIFY(written && written->committed_source_count() == 1U);
+        }
+        const auto read = metadata::read_local_metadata(raw(path));
+        QVERIFY(read.has_value());
+        sources.push_back(MetadataPropertiesSource{
+            .source = metadata::StagedMetadataSource{.raw_path = raw(path),
+                                                     .source_revision = read->source_revision,
+                                                     .baseline = read->document},
+            .track_label = {},
+        });
+    }
+    std::size_t writes = 0U;
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {},
+        TaggerServices{
+            .plan_applier_factory =
+                [work, &writes] {
+                    return MetadataWritePlanApplier{
+                        [work, &writes](const metadata::MetadataWritePlan& plan,
+                                        const operations::MetadataApplyProgressCallback& progress,
+                                        const core::CancellationToken& cancellation) {
+                            ++writes;
+                            return work->apply(plan, progress, cancellation);
+                        }};
+                },
+            .apply_observer = {},
+            .transformation_store =
+                MetadataTransformationStore{
+                    .load =
+                        [](MetadataTransformationStore::LoadCompletion completion) {
+                            completion({}, {});
+                        },
+                    .save = {},
+                    .remove = {}},
+            .output_profile_store = {},
+            .file_plan_applier_factory = {},
+            .file_apply_observer = {},
+            .layout_store = {},
+            .musicbrainz = {},
+            .tools = engineFileWorkTools(work),
+            .library_roots = {},
+        });
+    const QPointer<MetadataPropertiesDialog> guard{properties};
+    properties->show();
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* tagger = properties->findChild<TaggerSession*>();
+    QVERIFY(tagger != nullptr);
+    QTRY_VERIFY(tagger->canTransform());
+    const auto artist_row = aggregate_model->fieldRow(QStringLiteral("artist"));
+    QVERIFY(artist_row.has_value());
+    QVERIFY(aggregate_model->setData(aggregate_model->index(*artist_row, 2),
+                                     QStringLiteral("Renamed Band"), Qt::EditRole));
+    tagger->setReplayGainGrouping(0);
+    tagger->chooseReplayGain(true);
+    tagger->chooseSkipExistingGain(true);
+    QCOMPARE(tagger->itemsNeedingGain({0U, 1U, 2U, 3U}), (std::vector<std::size_t>{0U, 1U}));
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QTRY_VERIFY(apply->isEnabled());
+    apply->click();
+    // Written once, and the editor closes.
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    QCOMPARE(writes, std::size_t{1U});
+    const auto value_of = [&raw, &media](const char* name, std::string_view field) {
+        const auto read = metadata::read_local_metadata(raw(media.filePath(QLatin1String(name))));
+        return read ? read->document.first_effective_value(field).value_or(std::string{})
+                    : std::string{"unread"};
+    };
+    QCOMPARE(value_of("a1.flac", "artist"), std::string{"Renamed Band"});
+    QVERIFY(!value_of("a1.flac", "replaygainalbumgain").empty());
+    QVERIFY(!value_of("a2.flac", "replaygaintrackgain").empty());
+    QCOMPARE(value_of("b1.flac", "artist"), std::string{"Renamed Band"});
+    QCOMPARE(value_of("b1.flac", "replaygainalbumgain"), std::string{"-3.00 dB"});
+    QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
 void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTemporaryDir media;
     QVERIFY(media.isValid());

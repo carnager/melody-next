@@ -152,6 +152,10 @@ class RemoteFileWork final {
 
   private:
     [[nodiscard]] core::Result<std::shared_ptr<protocol::Client>> client();
+    // ADR-0237: files read a batch to a request, in order, one result each.
+    [[nodiscard]] core::Result<std::vector<core::Result<metadata::LocalMetadataRead>>>
+    read_many(const std::vector<std::string>& raw_paths,
+              const core::CancellationToken& cancellation);
     [[nodiscard]] core::Result<protocol::Json>
     read_one(const std::string& raw_path, const core::CancellationToken& cancellation);
 

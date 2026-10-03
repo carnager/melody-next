@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -308,7 +309,8 @@ MetadataFileAccess local_metadata_file_access() {
         .revision =
             [](const std::string& raw_path) {
                 return core::observe_local_source_revision(raw_path);
-            }};
+            },
+        .read_many = {}};
 }
 
 core::Result<std::vector<StagedMetadataSource>>
@@ -346,6 +348,110 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
         source.needs_metadata_capture = false;
     }
     return sources;
+}
+
+core::Result<CapturedMetadataSources>
+capture_metadata_sources(std::vector<StagedMetadataSource> sources,
+                         const MetadataFileAccess& access,
+                         const core::CancellationToken& cancellation,
+                         const MetadataCaptureProgress& progress) {
+    // Each file once, however often it is listed.
+    std::vector<std::string> wanted;
+    {
+        std::set<std::string> seen;
+        for (const auto& source : sources) {
+            if (source.needs_metadata_capture && !source.source_revision &&
+                !source.logical_track && seen.insert(source.raw_path).second) {
+                wanted.push_back(source.raw_path);
+            }
+        }
+    }
+    std::map<std::string, core::Result<LocalMetadataRead>> read;
+    std::map<std::string, core::LocalSourceRevision> tagless;
+    std::vector<std::pair<std::string, core::Error>> unreadable;
+    if (progress) {
+        progress(0U, wanted.size());
+    }
+    for (std::size_t first = 0; first < wanted.size(); first += metadata_capture_batch) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(cancelled(wanted[first]));
+        }
+        const auto last = std::min(wanted.size(), first + metadata_capture_batch);
+        const std::vector<std::string> batch{wanted.begin() + static_cast<std::ptrdiff_t>(first),
+                                             wanted.begin() + static_cast<std::ptrdiff_t>(last)};
+        std::vector<core::Result<LocalMetadataRead>> results;
+        if (access.read_many) {
+            auto asked = access.read_many(batch, cancellation);
+            if (!asked) {
+                return std::unexpected(std::move(asked.error()));
+            }
+            results = std::move(*asked);
+        } else {
+            results.reserve(batch.size());
+            for (const auto& path : batch) {
+                results.push_back(access.read(path, cancellation));
+            }
+        }
+        if (results.size() != batch.size()) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                               .message = "a batch of files was answered in part",
+                                               .context = {}});
+        }
+        for (std::size_t index = 0; index < batch.size(); ++index) {
+            auto& result = results[index];
+            if (result) {
+                read.emplace(batch[index], std::move(result));
+                continue;
+            }
+            switch (result.error().code) {
+            case core::ErrorCode::cancelled:
+                return std::unexpected(std::move(result.error()));
+            case core::ErrorCode::unsupported: {
+                // Tagless decodable formats can still store gains in a
+                // sidecar. No native metadata baseline is claimed for them.
+                auto revision = access.revision(batch[index]);
+                if (revision) {
+                    tagless.emplace(batch[index], *revision);
+                } else {
+                    unreadable.emplace_back(batch[index], std::move(revision.error()));
+                }
+                break;
+            }
+            default:
+                unreadable.emplace_back(batch[index], std::move(result.error()));
+                break;
+            }
+        }
+        if (progress) {
+            progress(last, wanted.size());
+        }
+    }
+    CapturedMetadataSources captured;
+    captured.unreadable = std::move(unreadable);
+    captured.sources.reserve(sources.size());
+    for (auto& source : sources) {
+        if (!source.needs_metadata_capture || source.source_revision || source.logical_track) {
+            captured.sources.push_back(std::move(source));
+            continue;
+        }
+        if (const auto found = read.find(source.raw_path); found != read.end()) {
+            source.source_revision = found->second->source_revision;
+            source.baseline = found->second->document;
+            source.needs_metadata_capture = false;
+            captured.sources.push_back(std::move(source));
+        } else if (const auto revision = tagless.find(source.raw_path);
+                   revision != tagless.end()) {
+            source.source_revision = revision->second;
+            source.needs_metadata_capture = false;
+            captured.sources.push_back(std::move(source));
+        } else {
+            // Unreadable: kept as cached, with no revision -- shown, never
+            // written from.
+            source.needs_metadata_capture = false;
+            captured.sources.push_back(std::move(source));
+        }
+    }
+    return captured;
 }
 
 } // namespace trackknife::metadata

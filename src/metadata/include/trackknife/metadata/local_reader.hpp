@@ -53,7 +53,29 @@ struct MetadataFileAccess {
                                                   const core::CancellationToken&)>
         read;
     std::function<core::Result<core::LocalSourceRevision>(const std::string&)> revision;
+    // Many files in one go, answered in order, one result each: an engine
+    // elsewhere reads a batch in one request rather than one request a file.
+    // Its own error is the batch not asked at all -- the engine gone -- as
+    // against a file it could not read. Empty, `read` is asked file by file.
+    std::function<core::Result<std::vector<core::Result<LocalMetadataRead>>>(
+        const std::vector<std::string>&, const core::CancellationToken&)>
+        read_many;
 };
+
+// What capture_metadata_sources made of a selection: every source, in order,
+// and the files that could not be read, with why -- one unreadable file among
+// thousands is no reason to show none. Such a file stays in with what was
+// cached and no source revision, which no write takes as its baseline.
+struct CapturedMetadataSources {
+    std::vector<StagedMetadataSource> sources;
+    std::vector<std::pair<std::string, core::Error>> unreadable;
+};
+
+// Told how many of the files to read have been, of how many.
+using MetadataCaptureProgress = std::function<void(std::size_t read, std::size_t total)>;
+
+// As many files as one read_many is given.
+inline constexpr std::size_t metadata_capture_batch = 256U;
 
 // This process's own file access.
 [[nodiscard]] MetadataFileAccess local_metadata_file_access();
@@ -68,5 +90,14 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
 capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
                                   const MetadataFileAccess& access,
                                   const core::CancellationToken& cancellation = {});
+// The same, for a selection of any size: files read in batches (read_many
+// where the access has it), progress told after each, and a file that cannot
+// be read kept unread rather than failing the rest. Fails only when cancelled,
+// or when the engine cannot be reached at all. Run on a worker.
+[[nodiscard]] core::Result<CapturedMetadataSources>
+capture_metadata_sources(std::vector<StagedMetadataSource> sources,
+                         const MetadataFileAccess& access,
+                         const core::CancellationToken& cancellation = {},
+                         const MetadataCaptureProgress& progress = {});
 
 } // namespace trackknife::metadata

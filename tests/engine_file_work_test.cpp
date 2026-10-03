@@ -1236,6 +1236,13 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(revision && *revision == here->source_revision, "and so is its revision");
     require(!access.read((directory / "absent.flac").string(), {}),
             "a file that is not there fails through the engine too");
+    // A batch in one request, read at once on the engine: answered in order,
+    // each file for itself, the missing one failing alone.
+    const auto absent = (directory / "absent.flac").string();
+    const auto many = access.read_many({flac, absent, flac}, {});
+    require(many && many->size() == 3U && (*many)[0] && *(*many)[0] == *here &&
+                !(*many)[1] && (*many)[2] && *(*many)[2] == *here,
+            "a batch read through the engine is each file read here, in order");
     const auto probed_there = remote.probe(flac, {});
     const auto probed_here = engine::probe_local_technicals(flac, {});
     require(probed_there && probed_here && *probed_there == *probed_here &&

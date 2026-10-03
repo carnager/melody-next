@@ -249,6 +249,79 @@ void readsWavPackAndRawBytePath(const std::filesystem::path& fixture_directory) 
         trackknife::metadata::capture_uncached_metadata_sources({cached}, cancel.token());
     CHECK(!stopped && stopped.error().code == trackknife::core::ErrorCode::cancelled);
 
+    // ADR-0237, at scale: files read in batches through read_many, progress
+    // told after each, an unreadable file kept as cached rather than failing
+    // the rest, a repeated file read once.
+    {
+        namespace metadata = trackknife::metadata;
+        std::vector<metadata::StagedMetadataSource> many;
+        for (int index = 0; index < 600; ++index) {
+            auto source = cached;
+            source.raw_path = "/batch/" + std::to_string(index % 590) + ".flac";
+            many.push_back(std::move(source));
+        }
+        std::vector<std::size_t> batches;
+        std::vector<std::pair<std::size_t, std::size_t>> told;
+        const auto bad = std::string{"/batch/7.flac"};
+        metadata::MetadataFileAccess access{
+            .read = [](const std::string&, const trackknife::core::CancellationToken&)
+                -> trackknife::core::Result<metadata::LocalMetadataRead> {
+                return std::unexpected(trackknife::core::Error{
+                    .code = trackknife::core::ErrorCode::invariant,
+                    .message = "read file by file",
+                    .context = {}});
+            },
+            .revision = [](const std::string&) -> trackknife::core::Result<trackknife::core::LocalSourceRevision> {
+                return trackknife::core::LocalSourceRevision{};
+            },
+            .read_many =
+                [&](const std::vector<std::string>& paths, const trackknife::core::CancellationToken&)
+                -> trackknife::core::Result<
+                    std::vector<trackknife::core::Result<metadata::LocalMetadataRead>>> {
+                batches.push_back(paths.size());
+                std::vector<trackknife::core::Result<metadata::LocalMetadataRead>> results;
+                for (const auto& path : paths) {
+                    if (path == bad) {
+                        results.emplace_back(std::unexpected(trackknife::core::Error{
+                            .code = trackknife::core::ErrorCode::io,
+                            .message = "unreadable",
+                            .context = {}}));
+                        continue;
+                    }
+                    auto read = *raw_read;
+                    read.raw_path = path;
+                    results.emplace_back(std::move(read));
+                }
+                return results;
+            }};
+        auto captured = metadata::capture_metadata_sources(
+            many, access, {},
+            [&told](const std::size_t read, const std::size_t total) { told.emplace_back(read, total); });
+        CHECK(captured.has_value());
+        CHECK(batches == (std::vector<std::size_t>{256U, 256U, 78U}));
+        CHECK(told.front() == (std::pair<std::size_t, std::size_t>{0U, 590U}) &&
+              told.back() == (std::pair<std::size_t, std::size_t>{590U, 590U}) &&
+              told.size() == 4U);
+        CHECK(captured && captured->sources.size() == 600U &&
+              captured->unreadable.size() == 1U && captured->unreadable.front().first == bad);
+        CHECK(captured && captured->sources[7].raw_path == bad &&
+              !captured->sources[7].source_revision &&
+              !captured->sources[7].needs_metadata_capture);
+        CHECK(captured && captured->sources[8].source_revision == raw_read->source_revision &&
+              captured->sources[8].baseline == raw_read->document);
+
+        // The engine away: the batch not asked at all fails the capture.
+        access.read_many = [](const std::vector<std::string>&,
+                              const trackknife::core::CancellationToken&)
+            -> trackknife::core::Result<
+                std::vector<trackknife::core::Result<metadata::LocalMetadataRead>>> {
+            return std::unexpected(trackknife::core::Error{
+                .code = trackknife::core::ErrorCode::io, .message = "no engine", .context = {}});
+        };
+        CHECK(!metadata::capture_metadata_sources(many, access));
+        CHECK(!metadata::capture_metadata_sources(many, access, cancel.token()));
+    }
+
     std::filesystem::remove(wavpack, error);
     CHECK(!error);
     std::filesystem::remove_all(directory, error);

@@ -113,6 +113,16 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
                       .arg(replaygain_total_),
                   true);
     });
+    reading_progress_timer_.setInterval(100);
+    connect(&reading_progress_timer_, &QTimer::timeout, this, [this] {
+        if (reading_ == nullptr || reading_->total.load() == 0U) {
+            return;
+        }
+        loading_text_ = QStringLiteral("Reading tags · %L1 of %L2 files · <a href=\"stop\">Stop</a>")
+                            .arg(reading_->read.load())
+                            .arg(reading_->total.load());
+        emit changed();
+    });
     connect(&selection_watcher_, &QFutureWatcherBase::finished, this,
             &TaggerSession::finishSelection);
     connect(&automatic_watcher_, &QFutureWatcherBase::finished, this,
@@ -458,26 +468,49 @@ void TaggerSession::captureSources() {
 }
 
 void TaggerSession::startSelection() {
+    // Every file's own tags are the baseline a write starts from, so each is
+    // read -- in batches, the engine reading a batch at once -- and how far
+    // it has got is shown, with a way to stop.
+    reading_ = std::make_shared<Reading>();
+    reading_progress_timer_.start();
     selection_watcher_.setFuture(QtConcurrent::run(
         [sources = std::move(sources_), preferred = std::move(preferred_fields_),
-         access = services_.tools.access, token = technical_cancellation_.token()]() mutable {
-            auto prepared =
-                metadata::capture_uncached_metadata_sources(std::move(sources), access, token);
-            if (!prepared) {
-                return std::make_shared<SelectionResult>(std::unexpected(prepared.error()));
+         access = services_.tools.access, token = technical_cancellation_.token(),
+         reading = reading_]() mutable {
+            auto captured = metadata::capture_metadata_sources(
+                std::move(sources), access, token,
+                [&reading](const std::size_t read, const std::size_t total) {
+                    reading->total.store(total);
+                    reading->read.store(read);
+                });
+            if (!captured) {
+                return std::make_shared<SelectionResult>(std::unexpected(captured.error()));
             }
+            reading->unreadable = std::move(captured->unreadable);
             std::vector<std::string_view> preferred_views;
             preferred_views.reserve(preferred.size());
             for (const auto& field : preferred) {
                 preferred_views.emplace_back(field);
             }
             return std::make_shared<SelectionResult>(
-                metadata::StagedMetadataSelection::create(std::move(*prepared), preferred_views));
+                metadata::StagedMetadataSelection::create(std::move(captured->sources),
+                                                          preferred_views));
         }));
 }
 
+void TaggerSession::stopReading() { technical_cancellation_.request_cancellation(); }
+
 void TaggerSession::finishSelection() {
+    reading_progress_timer_.stop();
     const auto result = selection_watcher_.result();
+    if (result && !*result && (*result).error().code == core::ErrorCode::cancelled) {
+        summary_ = QStringLiteral("Properties unavailable");
+        setStatus(QStringLiteral("Read-only metadata preview"));
+        loading_text_ = QStringLiteral("Reading stopped. Close this window, or open it again to "
+                                       "read the tags anew.");
+        emit changed();
+        return;
+    }
     if (!result || !*result) {
         const auto message = result ? display_utf8(result->error().message)
                                     : QStringLiteral("The selection task returned no result");
@@ -488,6 +521,27 @@ void TaggerSession::finishSelection() {
         return;
     }
     buildGrid(std::move(**result));
+    // Shown, but as cached and never written: said, with which and why.
+    if (reading_ != nullptr && !reading_->unreadable.empty()) {
+        const auto& unreadable = reading_->unreadable;
+        QStringList named;
+        for (std::size_t index = 0; index < unreadable.size() && index < 20U; ++index) {
+            named << QStringLiteral("%1: %2").arg(
+                         display_utf8(core::display_raw_path(unreadable[index].first)),
+                         display_utf8(unreadable[index].second.message));
+        }
+        if (unreadable.size() > 20U) {
+            named << QStringLiteral("… and %L1 more").arg(unreadable.size() - 20U);
+        }
+        sticky_status_ = QStringLiteral("%L1 %2 could not be read; shown as cached, and not "
+                                        "written")
+                             .arg(unreadable.size())
+                             .arg(unreadable.size() == 1U ? QStringLiteral("file")
+                                                          : QStringLiteral("files"));
+        unreadable_details_ = named.join(QLatin1Char('\n'));
+        setStatus(sticky_status_);
+        emit changed();
+    }
 }
 
 void TaggerSession::buildGrid(metadata::StagedMetadataSelection selection) {

@@ -292,7 +292,8 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
                            .revision =
                                [](const std::string& raw_path) {
                                    return core::observe_local_source_revision(raw_path);
-                               }},
+                               },
+                           .read_many = {}},
         cancellation, options);
 }
 

@@ -124,6 +124,58 @@ core::Result<Json> RemoteFileWork::read_one(const std::string& raw_path,
     return files->front();
 }
 
+namespace {
+
+// One file of a metadata.read answer: what was read, or why not.
+[[nodiscard]] core::Result<metadata::LocalMetadataRead> read_of(const Json& file) {
+    if (const auto read = file.find("read"); read != file.end()) {
+        return wire::decode_metadata_read(*read);
+    }
+    const auto error = file.find("error");
+    auto decoded = error != file.end() ? wire::decode_error(*error)
+                                       : core::Result<core::Error>{std::unexpected(
+                                             unexpected_answer("metadata.read"))};
+    return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
+}
+
+} // namespace
+
+core::Result<std::vector<core::Result<metadata::LocalMetadataRead>>>
+RemoteFileWork::read_many(const std::vector<std::string>& raw_paths,
+                          const core::CancellationToken& cancellation) {
+    std::vector<core::Result<metadata::LocalMetadataRead>> results;
+    results.reserve(raw_paths.size());
+    // As many a request as the engine reads in one (metadata_read_limit).
+    constexpr std::size_t per_request = 256U;
+    for (std::size_t first = 0; first < raw_paths.size(); first += per_request) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::cancelled, .message = "reading cancelled", .context = {}});
+        }
+        auto connection = client();
+        if (!connection) {
+            return std::unexpected(std::move(connection.error()));
+        }
+        const auto last = std::min(raw_paths.size(), first + per_request);
+        auto paths = Json::array();
+        for (auto index = first; index < last; ++index) {
+            paths.push_back(protocol::encode_raw_path(raw_paths[index]));
+        }
+        auto answer = (*connection)->call("metadata.read", Json{{"paths", std::move(paths)}});
+        if (!answer) {
+            return std::unexpected(std::move(answer.error()));
+        }
+        const auto files = answer->find("files");
+        if (files == answer->end() || !files->is_array() || files->size() != last - first) {
+            return std::unexpected(unexpected_answer("metadata.read"));
+        }
+        for (const auto& file : *files) {
+            results.push_back(read_of(file));
+        }
+    }
+    return results;
+}
+
 metadata::MetadataFileAccess RemoteFileWork::access() {
     return metadata::MetadataFileAccess{
         .read = [this](const std::string& raw_path, const core::CancellationToken& cancellation)
@@ -132,14 +184,7 @@ metadata::MetadataFileAccess RemoteFileWork::access() {
             if (!file) {
                 return std::unexpected(std::move(file.error()));
             }
-            if (const auto read = file->find("read"); read != file->end()) {
-                return wire::decode_metadata_read(*read);
-            }
-            const auto error = file->find("error");
-            auto decoded = error != file->end() ? wire::decode_error(*error)
-                                                : core::Result<core::Error>{std::unexpected(
-                                                      unexpected_answer("metadata.read"))};
-            return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
+            return read_of(*file);
         },
         .revision = [this](const std::string& raw_path) -> core::Result<core::LocalSourceRevision> {
             auto file = read_one(raw_path, {});
@@ -162,6 +207,10 @@ metadata::MetadataFileAccess RemoteFileWork::access() {
                                                 : core::Result<core::Error>{std::unexpected(
                                                       unexpected_answer("metadata.read"))};
             return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
+        },
+        .read_many = [this](const std::vector<std::string>& raw_paths,
+                            const core::CancellationToken& cancellation) {
+            return read_many(raw_paths, cancellation);
         }};
 }
 

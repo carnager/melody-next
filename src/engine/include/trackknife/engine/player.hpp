@@ -83,6 +83,13 @@ class Player final {
     [[nodiscard]] std::vector<QueueEntry> queue() const;
     // The list the queue came from; empty when not known.
     [[nodiscard]] std::string queue_list() const;
+    // ADR-0256: the list `list` changed, and these are its entries now. When
+    // the queue was played from it, the queue follows: in the list's order,
+    // without what the list dropped, with what it gained -- `fresh` -- and
+    // without what had already left the queue (consumed, say). Answers
+    // whether it did.
+    bool follow_list(const std::string& list, std::vector<QueueEntry> entries,
+                     const std::vector<core::StableId>& fresh);
     // ADR-0253: whether nothing would follow the entry playing now -- the
     // list ends after it under the modes and asks in force. Repeat never
     // ends a list; single stops on purpose, which is not ending either.
@@ -357,6 +364,7 @@ class Player final {
     // none does, having dropped the ones that do not.
     [[nodiscard]] std::optional<core::Result<void>> start_next_request_locked();
     // An entry by identity, in the list or among the asks; null when neither.
+    void replace_queue_locked(std::vector<QueueEntry> entries, std::string list);
     [[nodiscard]] const QueueEntry* find_locked(const core::StableId& entry_id) const;
     // Drops asks nothing refers to any more: not requested, not playing.
     void prune_asks_locked();

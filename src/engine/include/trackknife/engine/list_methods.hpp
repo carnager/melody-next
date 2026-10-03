@@ -16,6 +16,7 @@ class Workspace;
 //   list.all                                   -> {"lists": [summary]}
 //   list.get {id}                              -> summary + {"items": [item]}
 //   list.save {id?, name, kind?, items, revision?} -> summary
+//   list.edit {id, revision, edits}           -> summary
 //   list.rename {id, name, revision?}          -> summary
 //   list.delete {id, revision?}                -> {"deleted": bool}
 //   list.play {id, entry?}                     -> {"playing": entry}
@@ -27,6 +28,12 @@ class Workspace;
 // selection, duration_ms -- plus logical, title, artist and album. A write
 // with `revision` is refused as a conflict when the list has moved on since;
 // for a new list, `revision` 0 refuses if the id is taken.
+//
+// ADR-0256: `edits` are applied in order, all or none, and the queue played
+// from the list follows them: {"remove": [entry]}, {"insert": [item],
+// "after": entry|null}, {"move": [entry], "after": entry|null},
+// {"update": [item]}. An item also carries album_artist, date and an optional
+// replay_gain {track_gain_db, track_peak, album_gain_db, album_peak}.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
                            Player& player);
 

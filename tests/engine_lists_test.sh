@@ -178,6 +178,45 @@ for _ in range(10):
         break
     heard.add(event["data"]["id"])
 check({one["id"], other["id"]} <= heard, "and other clients hear of both")
+
+# ADR-0256: a list changes by edits, and the queue played from it follows.
+import uuid
+edited = a.call("list.save", {"name": "Edited", "items": [{"path": encode(f"{work}/one.wav")},
+                                                          {"path": encode(f"{work}/two.wav")}]})["result"]
+first, second = [i["entry"] for i in a.call("list.get", {"id": edited["id"]})["result"]["items"]]
+check("result" in a.call("list.play", {"id": edited["id"], "entry": second}), "the list plays")
+fresh = str(uuid.uuid4())
+changed = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"], "edits": [
+    {"insert": [{"entry": fresh, "path": encode(f"{work}/one.wav"), "title": "Again",
+                 "album_artist": "Various", "date": "1999",
+                 "replay_gain": {"track_gain_db": -6.5}}], "after": None},
+    {"remove": [first]}]})
+check("result" in changed and changed["result"]["revision"] == edited["revision"] + 1,
+      "an edit answers the next revision: " + json.dumps(changed))
+stored = a.call("list.get", {"id": edited["id"]})["result"]["items"]
+check([i["entry"] for i in stored] == [fresh, second], "the edits are applied in order")
+check(stored[0]["album_artist"] == "Various" and stored[0]["date"] == "1999" and
+      stored[0]["replay_gain"]["track_gain_db"] == -6.5, "an item keeps what a queue entry needs")
+queue = a.call("playback.queue")["result"]["entries"]
+check([e["entry"] for e in queue] == [fresh, second], "the queue follows the list it was played from")
+check(queue[0]["group"]["album_artist"] == "Various" and queue[0]["replay_gain"]["track_gain_db"] == -6.5,
+      "with the item's album artist and ReplayGain")
+check(a.call("playback.state")["result"]["entry"] == second, "and what plays keeps playing")
+moved = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"] + 1,
+                             "edits": [{"move": [second], "after": None}]})
+check("result" in moved, "a move is an edit")
+check([e["entry"] for e in a.call("playback.queue")["result"]["entries"]] == [second, fresh],
+      "and the queue moves with it")
+stale = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"],
+                             "edits": [{"remove": [second]}]})
+check(stale.get("error", {}).get("code") == "conflict", "an edit against an old revision is refused")
+unknown = a.call("list.edit", {"id": edited["id"], "revision": edited["revision"] + 2,
+                               "edits": [{"remove": [second]}, {"remove": [str(uuid.uuid4())]}]})
+check(unknown.get("error", {}).get("code") == "not_found", "an edit of an unknown entry is refused")
+check(a.call("list.get", {"id": edited["id"]})["result"]["revision"] == edited["revision"] + 2 and
+      len(a.call("playback.queue")["result"]["entries"]) == 2, "and nothing of it is applied")
+check(a.call("list.edit", {"id": edited["id"], "edits": []})["error"]["code"] == "invalid_argument",
+      "an edit names the revision it was worked out from")
 PY
 
 echo "engine lists: ok"

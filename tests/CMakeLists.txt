@@ -212,6 +212,13 @@ target_link_libraries(
 )
 add_test(NAME list-repository COMMAND trackknife_list_repository_tests)
 
+add_executable(trackknife_list_edits_tests list_edits_test.cpp)
+target_link_libraries(
+    trackknife_list_edits_tests
+    PRIVATE Trackknife::Persistence trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME list-edits COMMAND trackknife_list_edits_tests)
+
 add_executable(trackknife_musicbrainz_cache_tests musicbrainz_cache_test.cpp)
 target_link_libraries(
     trackknife_musicbrainz_cache_tests

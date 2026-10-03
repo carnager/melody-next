@@ -3,6 +3,7 @@
 add_library(
     trackknife_persistence STATIC
     src/file_publication_journal.cpp
+    src/list_edits.cpp
     src/list_repository.cpp
     src/local_library.cpp
     src/musicbrainz_cache.cpp

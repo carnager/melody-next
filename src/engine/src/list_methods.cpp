@@ -72,7 +72,19 @@ using protocol::Json;
                   {"duration_ms", item.duration_ms ? Json(*item.duration_ms) : Json(nullptr)},
                   {"title", protocol::displayable_text(item.title)},
                   {"artist", protocol::displayable_text(item.artist)},
-                  {"album", protocol::displayable_text(item.album)}};
+                  {"album", protocol::displayable_text(item.album)},
+                  {"album_artist", protocol::displayable_text(item.album_artist)},
+                  {"date", protocol::displayable_text(item.date)}};
+    if (item.replay_gain) {
+        const auto& gain = *item.replay_gain;
+        const auto number = [](const std::optional<double>& value) {
+            return value ? Json(*value) : Json(nullptr);
+        };
+        rendered["replay_gain"] = Json{{"track_gain_db", number(gain.track_gain_db)},
+                                       {"track_peak", number(gain.track_peak)},
+                                       {"album_gain_db", number(gain.album_gain_db)},
+                                       {"album_peak", number(gain.album_peak)}};
+    }
     rendered["logical"] = item.logical_reference
                               ? Json(protocol::encode_raw_path(*item.logical_reference))
                               : Json(nullptr);
@@ -159,6 +171,23 @@ using protocol::Json;
     item.title = value.value("title", std::string{});
     item.artist = value.value("artist", std::string{});
     item.album = value.value("album", std::string{});
+    item.album_artist = value.value("album_artist", std::string{});
+    item.date = value.value("date", std::string{});
+    if (const auto gain = value.find("replay_gain"); gain != value.end() && gain->is_object()) {
+        persistence::ListItemReplayGain read;
+        const auto number = [&gain](const char* member) -> std::optional<double> {
+            const auto found = gain->find(member);
+            return found != gain->end() && found->is_number() ? std::optional{found->get<double>()}
+                                                              : std::nullopt;
+        };
+        read.track_gain_db = number("track_gain_db");
+        read.track_peak = number("track_peak");
+        read.album_gain_db = number("album_gain_db");
+        read.album_peak = number("album_peak");
+        if (read != persistence::ListItemReplayGain{}) {
+            item.replay_gain = read;
+        }
+    }
     return item;
 }
 
@@ -179,9 +208,95 @@ using protocol::Json;
     }
     entry.duration_ms = item.duration_ms;
     entry.title = item.title;
+    entry.group.album_artist = item.album_artist;
     entry.group.artist = item.artist;
     entry.group.album = item.album;
+    entry.group.date = item.date;
+    if (item.replay_gain) {
+        entry.replay_gain = formats::ReplayGainInfo{.track_gain_db = item.replay_gain->track_gain_db,
+                                                    .track_peak = item.replay_gain->track_peak,
+                                                    .album_gain_db = item.replay_gain->album_gain_db,
+                                                    .album_peak = item.replay_gain->album_peak};
+    }
     return entry;
+}
+
+[[nodiscard]] core::Result<core::StableId> entry_of(const Json& value) {
+    if (!value.is_string()) {
+        return std::unexpected(bad_params("an entry is named by its identity", "edits"));
+    }
+    auto parsed = core::StableId::parse(value.get<std::string>());
+    if (!parsed || parsed->is_nil()) {
+        return std::unexpected(bad_params("an entry is named by its identity", "edits"));
+    }
+    return *parsed;
+}
+
+// One edit of list.edit, as ADR-0256 has it.
+[[nodiscard]] core::Result<persistence::ListEdit> edit_from_json(const Json& value) {
+    using persistence::ListEdit;
+    if (!value.is_object() || value.size() < 1U) {
+        return std::unexpected(bad_params("each edit is an object", "edits"));
+    }
+    ListEdit edit;
+    const auto entries = [&edit](const Json& list) -> core::Result<void> {
+        if (!list.is_array()) {
+            return std::unexpected(bad_params("an edit names its entries in a list", "edits"));
+        }
+        for (const auto& each : list) {
+            auto entry = entry_of(each);
+            if (!entry) {
+                return std::unexpected(std::move(entry.error()));
+            }
+            edit.entries.push_back(*entry);
+        }
+        return {};
+    };
+    const auto items = [&edit](const Json& list) -> core::Result<void> {
+        if (!list.is_array()) {
+            return std::unexpected(bad_params("an edit gives its items in a list", "edits"));
+        }
+        for (const auto& each : list) {
+            auto item = item_from_json(each);
+            if (!item) {
+                return std::unexpected(std::move(item.error()));
+            }
+            if (!each.contains("entry")) {
+                return std::unexpected(bad_params("an edited item names its entry", "edits"));
+            }
+            edit.items.push_back(std::move(*item));
+        }
+        return {};
+    };
+    core::Result<void> read;
+    if (const auto found = value.find("remove"); found != value.end()) {
+        edit.kind = ListEdit::Kind::remove;
+        read = entries(*found);
+    } else if (const auto inserted = value.find("insert"); inserted != value.end()) {
+        edit.kind = ListEdit::Kind::insert;
+        read = items(*inserted);
+    } else if (const auto moved = value.find("move"); moved != value.end()) {
+        edit.kind = ListEdit::Kind::move;
+        read = entries(*moved);
+    } else if (const auto updated = value.find("update"); updated != value.end()) {
+        edit.kind = ListEdit::Kind::update;
+        read = items(*updated);
+    } else {
+        return std::unexpected(bad_params("an edit is remove, insert, move or update", "edits"));
+    }
+    if (!read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (edit.kind == ListEdit::Kind::insert || edit.kind == ListEdit::Kind::move) {
+        if (const auto after = value.find("after"); after != value.end() && !after->is_null()) {
+            auto anchor = entry_of(*after);
+            if (!anchor) {
+                return std::unexpected(std::move(anchor.error()));
+            }
+            edit.after = *anchor;
+        }
+    }
+    return edit;
 }
 
 } // namespace
@@ -287,6 +402,54 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         }
         changed(&*saved, saved->id);
         return summary_json(*saved);
+    });
+
+    // ADR-0256: what changed, not the list again. The queue played from the
+    // list follows it in the same request.
+    dispatcher.on("list.edit",
+                  [&workspace, &player, changed](const Json& params) -> core::Result<Json> {
+        auto id = required_id(params);
+        if (!id) {
+            return std::unexpected(std::move(id.error()));
+        }
+        const auto revision = params.find("revision");
+        if (revision == params.end() || !revision->is_number_unsigned()) {
+            return std::unexpected(
+                bad_params("an edit is made against the revision it was worked out from",
+                           "revision"));
+        }
+        const auto edits = params.find("edits");
+        if (edits == params.end() || !edits->is_array()) {
+            return std::unexpected(bad_params("edits must be a list", "edits"));
+        }
+        std::vector<persistence::ListEdit> parsed;
+        parsed.reserve(edits->size());
+        std::vector<core::StableId> fresh;
+        for (const auto& value : *edits) {
+            auto edit = edit_from_json(value);
+            if (!edit) {
+                return std::unexpected(std::move(edit.error()));
+            }
+            if (edit->kind == persistence::ListEdit::Kind::insert) {
+                for (const auto& item : edit->items) {
+                    fresh.push_back(item.entry_id);
+                }
+            }
+            parsed.push_back(std::move(*edit));
+        }
+        auto edited = workspace.edit_engine_list(*id, revision->get<std::uint64_t>(), parsed,
+                                                 now_ms());
+        if (!edited) {
+            return std::unexpected(std::move(edited.error()));
+        }
+        std::vector<QueueEntry> entries;
+        entries.reserve(edited->items.size());
+        for (const auto& item : edited->items) {
+            entries.push_back(queue_entry(item));
+        }
+        player.follow_list(id->to_string(), std::move(entries), fresh);
+        changed(&edited->summary, *id);
+        return summary_json(edited->summary);
     });
 
     dispatcher.on("list.rename", [&workspace, changed](const Json& params) -> core::Result<Json> {

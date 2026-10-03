@@ -116,6 +116,16 @@ struct ListDocumentWrite {
     bool items{true};
 };
 
+// A ReplayGain given with a list entry rather than read from its file.
+struct ListItemReplayGain {
+    std::optional<double> track_gain_db;
+    std::optional<double> track_peak;
+    std::optional<double> album_gain_db;
+    std::optional<double> album_peak;
+
+    friend bool operator==(const ListItemReplayGain&, const ListItemReplayGain&) = default;
+};
+
 // ADR-0233: one entry of a list, as its engine stores it. The track
 // is named by its path on the engine's machine; the entry keeps its identity
 // (ADR-0221). Title, artist and album are what the client that saved it
@@ -130,6 +140,12 @@ struct EngineListItem {
     std::string title;
     std::string artist;
     std::string album;
+    // ADR-0256: what a queue entry needs that the engine cannot read for
+    // itself -- the album shuffle groups by album artist and date, and a
+    // sidecar's or CUE sheet's ReplayGain (ADR-0139/0141) is not in the file.
+    std::string album_artist;
+    std::string date;
+    std::optional<ListItemReplayGain> replay_gain;
 
     friend bool operator==(const EngineListItem&, const EngineListItem&) = default;
 };
@@ -149,6 +165,8 @@ struct EngineListSummary {
 
     friend bool operator==(const EngineListSummary&, const EngineListSummary&) = default;
 };
+
+struct ListEdit;
 
 struct EngineList {
     EngineListSummary summary;
@@ -375,6 +393,13 @@ class ListRepository final {
     save_engine_list(const core::StableId& id, std::string_view name, EngineListKind kind,
                   const std::vector<EngineListItem>& items,
                   std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    // ADR-0256: applies `edits` in order to the list at `expected_revision`,
+    // in one transaction, and answers the list as it is afterwards. Refused
+    // as a conflict at any other revision, as not_found without the list,
+    // and as apply_list_edits refuses; nothing is written then.
+    [[nodiscard]] core::Result<EngineList>
+    edit_engine_list(const core::StableId& id, std::uint64_t expected_revision,
+                     const std::vector<ListEdit>& edits, std::int64_t now_ms);
     [[nodiscard]] core::Result<EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);

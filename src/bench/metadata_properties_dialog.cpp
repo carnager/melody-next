@@ -89,7 +89,9 @@ class EmptyStateListWidget final : public QListWidget {
     QString empty_state_;
 };
 
-[[nodiscard]] SettingsDialog::Page settingsPage(const TaggerSession::SettingsPage page) {
+} // namespace
+
+SettingsDialog::Page settingsPage(const TaggerSession::SettingsPage page) {
     switch (page) {
     case TaggerSession::SettingsPage::naming:
         return SettingsDialog::Page::naming;
@@ -100,8 +102,6 @@ class EmptyStateListWidget final : public QListWidget {
     }
     return SettingsDialog::Page::naming;
 }
-
-} // namespace
 
 MetadataPropertiesDialog::MetadataPropertiesDialog(
     const std::size_t requested_item_count, MetadataPropertiesSourceReader source_reader,

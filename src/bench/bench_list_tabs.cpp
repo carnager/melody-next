@@ -1035,6 +1035,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addSeparator();
     auto* tools = track_context_menu_->addMenu(tr("Tools"));
     tools->addAction(properties_action_);
+    tools->addAction(identify_albums_action_);
     tools->addAction(replaygain_action_);
     tools->addAction(convert_action_);
 

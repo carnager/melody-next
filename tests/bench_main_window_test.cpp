@@ -314,6 +314,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsWritesWhatIsChosen();
+    void identifyAlbumsOpensFromTools();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -6633,6 +6634,64 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
 
 // ADR-0261: albums that fit more than one release wait for the person, who
 // goes through them from the keyboard.
+// ADR-0262: Identify albums… straight from Tools, without the tag editor:
+// the selected tracks, or with none selected the whole list.
+void BenchMainWindowTest::identifyAlbumsOpensFromTools() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    std::vector<std::string> paths;
+    for (const auto* name : {"one.flac", "two.flac"}) {
+        const auto path = media.filePath(QLatin1String(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), path));
+        paths.push_back(QFile::encodeName(path).toStdString());
+    }
+    BenchMainWindow window;
+    window.setProperty("trackknife-identify-hold-lookup", true);
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    window.openLocalPaths(paths);
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 2, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto* identify = window.findChild<QAction*>(QStringLiteral("action-identify-albums"));
+    QVERIFY(identify != nullptr);
+    view->selectionModel()->clearSelection();
+    window.refreshSelectionStatus();
+    QTRY_VERIFY(identify->isEnabled());
+
+    const auto open = [&window, identify] {
+        identify->trigger();
+        IdentifyAlbumsDialog* dialog = nullptr;
+        for (auto* candidate : window.findChildren<IdentifyAlbumsDialog*>()) {
+            if (candidate->isVisible()) {
+                dialog = candidate;
+            }
+        }
+        return dialog;
+    };
+    // None selected: the whole list, read and grouped -- and no tag editor.
+    auto* whole = open();
+    QVERIFY(whole != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(whole->session() != nullptr, 10'000);
+    QCOMPARE(whole->session()->fileCount(), 2U);
+    QCOMPARE(whole->session()->order().size(), 1U);
+    QVERIFY(window.findChildren<MetadataPropertiesDialog*>().isEmpty());
+    delete whole;
+
+    // One selected: that one.
+    view->selectionModel()->select(list_model->index(1, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    auto* chosen = open();
+    QVERIFY(chosen != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(chosen->session() != nullptr, 10'000);
+    QCOMPARE(chosen->session()->fileCount(), 1U);
+    QCOMPARE(chosen->tagger()->itemSource(0U)->raw_path, paths[1]);
+    delete chosen;
+}
+
 void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{

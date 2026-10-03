@@ -415,6 +415,14 @@ void BenchMainWindow::buildWorkspace() {
     properties_action_->setEnabled(false);
     connect(properties_action_, &QAction::triggered, this,
             &BenchMainWindow::showMetadataProperties);
+    identify_albums_action_ = edit_menu->addAction(QStringLiteral("Identify albums…"));
+    identify_albums_action_->setObjectName(QStringLiteral("action-identify-albums"));
+    identify_albums_action_->setToolTip(
+        QStringLiteral("Look up the selected tracks' albums on MusicBrainz -- the whole list "
+                       "when none are selected -- and write them"));
+    identify_albums_action_->setEnabled(false);
+    connect(identify_albums_action_, &QAction::triggered, this,
+            &BenchMainWindow::showIdentifyAlbums);
     convert_action_ = edit_menu->addAction(QStringLiteral("Convert files…"));
     convert_action_->setObjectName(QStringLiteral("action-convert-files"));
     convert_action_->setEnabled(false);

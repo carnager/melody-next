@@ -312,6 +312,9 @@ void BenchMainWindow::refreshSelectionStatus() {
     if (convert_action_ != nullptr) {
         convert_action_->setEnabled(!rows.empty());
     }
+    if (identify_albums_action_ != nullptr) {
+        identify_albums_action_->setEnabled(viewed && tab->model->rowCount() > 0);
+    }
     const auto summary = workspace_.selectionSummary(viewed ? tab : nullptr, rows);
     selection_status_->setText(summary.text);
     selection_status_->setToolTip(summary.tooltip);

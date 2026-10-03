@@ -2062,7 +2062,93 @@ void lists_of_an_older_release_name_their_engine() {
     std::filesystem::remove_all(directory, ignored);
 }
 
+// A workspace save writes a list's items only when they changed: an
+// unchanged list is its header, and what is stored of it stands. Two kept
+// searches of 66,841 tracks had every save rewrite 3.2 million rows.
+void a_workspace_save_writes_only_what_changed() {
+    namespace persistence = trackknife::persistence;
+    const auto database_path = std::filesystem::temp_directory_path() /
+                               ("trackknife-workspace-save-" +
+                                trackknife::core::StableId::random().to_string() + ".sqlite3");
+    const auto cleanup = [&database_path] {
+        std::error_code ignored;
+        std::filesystem::remove(database_path, ignored);
+        std::filesystem::remove(database_path.string() + "-wal", ignored);
+        std::filesystem::remove(database_path.string() + "-shm", ignored);
+    };
+    cleanup();
+    const auto item = [](const std::string& path, const std::string& title) {
+        persistence::ListItem made;
+        made.source = persistence::ListSource::local;
+        made.source_reference = path;
+        made.duration_ms = 1000;
+        made.fields = {{"title", title}};
+        return made;
+    };
+    const auto big_id = trackknife::core::StableId::random();
+    const auto small_id = trackknife::core::StableId::random();
+    const auto gone_id = trackknife::core::StableId::random();
+    const auto list = [](const trackknife::core::StableId& id, const std::string& name) {
+        persistence::ListDocument made;
+        made.id = id;
+        made.kind = persistence::ListKind::scratch;
+        made.name = name;
+        return made;
+    };
+    auto big = list(big_id, "Big");
+    for (int index = 0; index < 50; ++index) {
+        big.items.push_back(item("/music/" + std::to_string(index) + ".flac", "Song"));
+    }
+    auto small = list(small_id, "Small");
+    small.items.push_back(item("/music/a.flac", "A"));
+    auto gone = list(gone_id, "Gone");
+    gone.items.push_back(item("/music/g.flac", "G"));
+    {
+        auto repository = persistence::ListRepository::open(database_path);
+        require(repository.has_value(), "the repository opens");
+        require(repository->save_workspace(std::vector<persistence::ListDocumentWrite>{
+                                               {.document = big, .items = true},
+                                               {.document = small, .items = true},
+                                               {.document = gone, .items = true}})
+                    .has_value(),
+                "a first save writes every list");
+
+        // Big unchanged but renamed and moved to the front; Small changed;
+        // Gone closed.
+        auto header = big;
+        header.items.clear();
+        header.name = "Big, renamed";
+        small.items.push_back(item("/music/b.flac", "B"));
+        require(repository->save_workspace(std::vector<persistence::ListDocumentWrite>{
+                                               {.document = small, .items = true},
+                                               {.document = header, .items = false}})
+                    .has_value(),
+                "a save with one list's header only");
+        auto loaded = repository->load_all();
+        require(loaded.has_value() && loaded->size() == 2U, "the closed list is gone");
+        require((*loaded)[0].id == small_id && (*loaded)[1].id == big_id,
+                "the lists trade places");
+        require((*loaded)[1].name == "Big, renamed", "a header change is written");
+        require((*loaded)[1].items.size() == 50U &&
+                    (*loaded)[1].items[49].source_reference == "/music/49.flac",
+                "an unchanged list's items stand");
+        require((*loaded)[0].items.size() == 2U &&
+                    (*loaded)[0].items[1].source_reference == "/music/b.flac",
+                "a changed list's items are replaced");
+
+        // And replace_all still replaces everything.
+        require(repository->replace_all(std::vector<persistence::ListDocument>{gone}).has_value(),
+                "replace_all writes the workspace whole");
+        loaded = repository->load_all();
+        require(loaded.has_value() && loaded->size() == 1U && (*loaded)[0].id == gone_id &&
+                    (*loaded)[0].items.size() == 1U,
+                "replace_all leaves only what it was given");
+    }
+    cleanup();
+}
+
 int main() {
+    a_workspace_save_writes_only_what_changed();
     saved_searches_are_persistent_and_conflict_checked();
     local_listening_history_is_monotonic_and_persistent();
     local_listening_occurrences_are_idempotent_and_source_qualified();

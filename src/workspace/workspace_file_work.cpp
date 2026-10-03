@@ -449,7 +449,7 @@ ArtworkWritePlanApplierFactory
 Workspace::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
     return [this, persistence_service, work = std::move(work)] {
-        auto documents = collectDocuments();
+        auto documents = collectWrites();
         auto view_layouts = collectTrackViewLayouts();
         return ArtworkWritePlanApplier{[persistence_service, work, documents = std::move(documents),
                                         view_layouts = std::move(view_layouts)](
@@ -493,7 +493,7 @@ MetadataWritePlanApplierFactory
 Workspace::engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
     return [this, persistence_service, work = std::move(work)] {
-        auto documents = collectDocuments();
+        auto documents = collectWrites();
         auto view_layouts = collectTrackViewLayouts();
         return MetadataWritePlanApplier{
             [persistence_service, work, documents = std::move(documents),
@@ -556,11 +556,24 @@ Workspace::enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFil
     auto* const persistence_service = persistence_;
     return [this, persistence_service, work = std::move(work), elsewhere, mount = std::move(mount),
             mounted = std::move(mounted)] {
-        auto documents = collectDocuments();
+        auto documents = collectWrites();
         auto view_layouts = collectTrackViewLayouts();
+        // What this computer's lists last saw of each file, for a move
+        // elsewhere to be followed here under its own revision: read from
+        // the lists themselves, not from a copy of every one.
+        std::map<std::string, core::LocalSourceRevision> seen_here;
+        if (elsewhere) {
+            for (const auto& tab : list_tabs_) {
+                for (const auto& row : tab->model->rows()) {
+                    if (row.source_revision) {
+                        seen_here.emplace(row.raw_path, *row.source_revision);
+                    }
+                }
+            }
+        }
         return FilePublicationPlanApplier{
             [persistence_service, work, elsewhere, mount, mounted, documents = std::move(documents),
-             view_layouts = std::move(view_layouts)](
+             view_layouts = std::move(view_layouts), seen_here = std::move(seen_here)](
                 const operations::PreparationPlan& plan,
                 const operations::FilePublicationApplyProgressCallback& progress,
                 const core::CancellationToken& cancellation) mutable
@@ -571,19 +584,6 @@ Workspace::enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFil
                         .message = "Trackknife closed during file publication",
                         .context = {},
                     });
-                }
-                // What this computer's lists last saw of each file, for a
-                // move elsewhere to be followed here under its own revision.
-                std::map<std::string, core::LocalSourceRevision> seen_here;
-                if (elsewhere) {
-                    for (const auto& document : documents) {
-                        for (const auto& item : document.items) {
-                            if (item.source == persistence::ListSource::local &&
-                                item.source_revision) {
-                                seen_here.emplace(item.source_reference, *item.source_revision);
-                            }
-                        }
-                    }
                 }
                 const auto persistence_error = persistence_service->saveWorkspaceAndWait(
                     std::move(documents), std::move(view_layouts));

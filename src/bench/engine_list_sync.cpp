@@ -260,9 +260,11 @@ EngineKey EngineListSync::keyOf(const EnginePlayback* playback) const {
     return {};
 }
 
-void EngineListSync::update(const std::vector<persistence::ListDocument>& documents) {
+void EngineListSync::update(const std::vector<persistence::ListDocumentWrite>& documents,
+                            const WholeList& whole) {
     std::unordered_set<std::string> present;
-    for (const auto& document : documents) {
+    for (const auto& write : documents) {
+        const auto& document = write.document;
         // Server URIs of the retired MPD backend: no engine plays those.
         if (document.kind == persistence::ListKind::mpd) {
             continue;
@@ -274,7 +276,18 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
         const auto engine = EngineKey::of(document);
         known.engine = engine;
         known.dirty = document.dirty;
-        const auto print = fingerprint(document);
+        // Unchanged since the last save, a list keeps the fingerprint taken
+        // then; one this window has not fingerprinted yet is read whole once.
+        std::optional<persistence::ListDocument> read;
+        const persistence::ListDocument* items = write.items ? &document : nullptr;
+        if (items == nullptr && !known.local) {
+            read = whole(document.id);
+            if (!read) {
+                continue;
+            }
+            items = &*read;
+        }
+        const auto print = items != nullptr ? fingerprint(*items) : *known.local;
         known.local = print;
         if (engineFor(engine) == nullptr) {
             continue;
@@ -300,12 +313,20 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
         if (known.fingerprint == print) {
             continue;
         }
+        // Sent only now: the items, read if the save did not carry them.
+        if (items == nullptr) {
+            read = whole(document.id);
+            if (!read) {
+                continue;
+            }
+            items = &*read;
+        }
         if (known.in_flight) {
             known.again = true;
-            waiting_.insert_or_assign(id, document);
+            waiting_.insert_or_assign(id, *items);
             continue;
         }
-        send(document, print);
+        send(*items, print);
     }
     std::vector<EngineKey> keys;
     for (const auto& [key, engine] : engines_) {

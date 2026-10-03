@@ -9,6 +9,7 @@
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
 
+#include <array>
 #include <filesystem>
 #include <cstdint>
 #include <string>
@@ -185,7 +186,37 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // A page, with every field -- or, when the query names some, those and
     // the key: a picker listing the whole library wants four of sixteen,
     // and the rest is most of what is built, written and sent.
+    //
+    // With "compact", the field names come once, as "columns", and each
+    // entry is a row of values in their order: a search of "a" found 62,498
+    // tracks of a real library, and the names repeated in every one were
+    // 40% of 35 MB -- and objects are what makes a page slow to parse.
     const auto render_page = [](const persistence::LibraryPage& page, const Json& params) {
+        using Entry = persistence::LibraryEntry;
+        struct Column {
+            const char* name;
+            Json (*value)(const Entry&);
+        };
+        static constexpr std::array<Column, 18> columns{{
+            {"kind", [](const Entry& e) { return Json(static_cast<int>(e.kind)); }},
+            {"key", [](const Entry& e) { return Json(protocol::encode_raw_path(e.key)); }},
+            {"label", [](const Entry& e) { return Json(protocol::displayable_text(e.label)); }},
+            {"artist", [](const Entry& e) { return Json(protocol::displayable_text(e.artist)); }},
+            {"album", [](const Entry& e) { return Json(protocol::displayable_text(e.album)); }},
+            {"tracks", [](const Entry& e) { return Json(e.tracks); }},
+            {"available", [](const Entry& e) { return Json(e.available); }},
+            {"track_number", [](const Entry& e) { return Json(e.track_number); }},
+            {"albums", [](const Entry& e) { return Json(e.albums); }},
+            {"rating_hash", [](const Entry& e) { return Json(e.rating_hash); }},
+            {"rating", [](const Entry& e) { return Json(e.rating); }},
+            {"album_rating_hash", [](const Entry& e) { return Json(e.album_rating_hash); }},
+            {"album_rating", [](const Entry& e) { return Json(e.album_rating); }},
+            {"date", [](const Entry& e) { return Json(protocol::displayable_text(e.date)); }},
+            {"title", [](const Entry& e) { return Json(protocol::displayable_text(e.title)); }},
+            {"added", [](const Entry& e) { return Json(e.added); }},
+            {"duration_ms", [](const Entry& e) { return Json(e.duration_ms); }},
+            {"view_value", [](const Entry& e) { return Json(protocol::encode_raw_path(e.view_value)); }},
+        }};
         std::vector<std::string> wanted;
         if (const auto fields = params.find("fields");
             fields != params.end() && fields->is_array()) {
@@ -195,46 +226,38 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 }
             }
         }
-        const auto chosen = [&wanted](const std::string_view name) {
-            return wanted.empty() || name == "key" || std::ranges::contains(wanted, name);
-        };
+        std::vector<const Column*> chosen;
+        for (const auto& column : columns) {
+            const std::string_view name{column.name};
+            if (wanted.empty() || name == "key" || std::ranges::contains(wanted, name)) {
+                chosen.push_back(&column);
+            }
+        }
+        if (params.value("compact", false)) {
+            auto names = Json::array();
+            for (const auto* column : chosen) {
+                names.push_back(column->name);
+            }
+            auto rows = Json::array();
+            for (const auto& entry : page.entries) {
+                auto row = Json::array();
+                for (const auto* column : chosen) {
+                    row.push_back(column->value(entry));
+                }
+                rows.push_back(std::move(row));
+            }
+            return Json{{"columns", std::move(names)}, {"rows", std::move(rows)}, {"more", page.more}};
+        }
         auto entries = Json::array();
         for (const auto& entry : page.entries) {
             Json rendered = Json::object();
-            const auto put = [&rendered, &chosen](const char* name, auto&& value) {
-                if (chosen(name)) {
-                    rendered[name] = std::forward<decltype(value)>(value);
+            for (const auto* column : chosen) {
+                // A view's node says its value; anything else has none.
+                if (std::string_view{column->name} == "view_value" && entry.view_value.empty() &&
+                    entry.kind != persistence::LibraryEntryKind::group) {
+                    continue;
                 }
-            };
-            put("kind", static_cast<int>(entry.kind));
-            put("key", protocol::encode_raw_path(entry.key));
-            if (chosen("label")) {
-                put("label", protocol::displayable_text(entry.label));
-            }
-            if (chosen("artist")) {
-                put("artist", protocol::displayable_text(entry.artist));
-            }
-            if (chosen("album")) {
-                put("album", protocol::displayable_text(entry.album));
-            }
-            put("tracks", entry.tracks);
-            put("available", entry.available);
-            put("track_number", entry.track_number);
-            put("albums", entry.albums);
-            put("rating_hash", entry.rating_hash);
-            put("rating", entry.rating);
-            put("album_rating_hash", entry.album_rating_hash);
-            put("album_rating", entry.album_rating);
-            if (chosen("date")) {
-                put("date", protocol::displayable_text(entry.date));
-            }
-            if (chosen("title")) {
-                put("title", protocol::displayable_text(entry.title));
-            }
-            put("added", entry.added);
-            put("duration_ms", entry.duration_ms);
-            if (!entry.view_value.empty() || entry.kind == persistence::LibraryEntryKind::group) {
-                put("view_value", protocol::encode_raw_path(entry.view_value));
+                rendered[column->name] = column->value(entry);
             }
             entries.push_back(std::move(rendered));
         }
@@ -326,36 +349,18 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             limit = found->get<std::size_t>();
         }
-        auto program = compile_client_format(std::move(*format),
-                                             titleformat::FormatContextKind::track_display);
-        if (!program) {
-            return std::unexpected(std::move(program.error()));
-        }
         auto compiled = query::compile_tkq(*source);
         if (!compiled) {
             return std::unexpected(std::move(compiled.error()));
         }
-        auto paths = catalogue.filter_paths(*compiled);
-        if (!paths) {
-            return std::unexpected(std::move(paths.error()));
-        }
-        if (limit > 0U && paths->size() > limit) {
-            paths->resize(limit);
-        }
-        auto snapshots = catalogue.cached_tracks(*paths);
-        if (!snapshots) {
-            return std::unexpected(std::move(snapshots.error()));
+        auto found = catalogue.find(*compiled, *format, limit);
+        if (!found) {
+            return std::unexpected(std::move(found.error()));
         }
         auto tracks = Json::array();
-        for (auto& snapshot : *snapshots) {
-            name_by_file(snapshot.facts, snapshot.raw_path);
-            auto text = persistence::tkq_format(*program, snapshot.facts,
-                                                track_fields(snapshot.facts, snapshot.raw_path));
-            if (!text) {
-                return std::unexpected(std::move(text.error()));
-            }
-            tracks.push_back(Json{{"key", protocol::encode_raw_path(snapshot.raw_path)},
-                                  {"text", protocol::displayable_text(*text)}});
+        for (const auto& track : *found) {
+            tracks.push_back(Json{{"key", protocol::encode_raw_path(track.raw_path)},
+                                  {"text", protocol::displayable_text(track.text)}});
         }
         return Json{{"tracks", std::move(tracks)}};
     });

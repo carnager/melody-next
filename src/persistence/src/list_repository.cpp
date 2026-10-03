@@ -1515,7 +1515,8 @@ UPDATE schema_version SET version = 49;
     return {};
 }
 
-[[nodiscard]] core::Result<void> validate(std::span<const ListDocument> documents) {
+template <typename Documents, typename DocumentOf>
+[[nodiscard]] core::Result<void> validate_each(const Documents& documents, DocumentOf document_of) {
     if (documents.size() > maximum_documents) {
         return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
                                            .message = "At most 1024 list documents can be stored",
@@ -1523,7 +1524,8 @@ UPDATE schema_version SET version = 49;
     }
     std::unordered_set<std::string> ids;
     ids.reserve(documents.size());
-    for (const auto& document : documents) {
+    for (const auto& entry : documents) {
+        const ListDocument& document = document_of(entry);
         const auto id = document.id.to_string();
         if (document.id.is_nil() || !ids.insert(id).second) {
             return std::unexpected(core::Error{
@@ -2377,7 +2379,20 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
 }
 
 core::Result<void> ListRepository::replace_all(const std::span<const ListDocument> documents) {
-    if (auto result = validate(documents); !result) {
+    std::vector<ListDocumentWrite> writes;
+    writes.reserve(documents.size());
+    for (const auto& document : documents) {
+        writes.push_back({.document = document, .items = true});
+    }
+    return save_workspace(writes);
+}
+
+core::Result<void> ListRepository::save_workspace(const std::span<const ListDocumentWrite> documents) {
+    if (auto result = validate_each(documents,
+                                    [](const ListDocumentWrite& write) -> const ListDocument& {
+                                        return write.document;
+                                    });
+        !result) {
         return result;
     }
     auto* database = implementation_->database;
@@ -2391,14 +2406,58 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
         rollback();
         return std::unexpected(std::move(error));
     }
-    if (auto result = execute(database, "DELETE FROM list_documents"); !result) {
+    // Lists no longer in the workspace go, their items with them.
+    {
+        std::unordered_set<std::string> kept;
+        for (const auto& write : documents) {
+            kept.insert(write.document.id.to_string());
+        }
+        std::vector<std::string> gone;
+        auto existing = prepare(database, "SELECT id FROM list_documents");
+        if (!existing) {
+            auto error = std::move(existing.error());
+            rollback();
+            return std::unexpected(std::move(error));
+        }
+        while (sqlite3_step(existing->get()) == SQLITE_ROW) {
+            const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(existing->get(), 0));
+            if (text != nullptr && !kept.contains(text)) {
+                gone.emplace_back(text);
+            }
+        }
+        auto remove = prepare(database, "DELETE FROM list_documents WHERE id = ?");
+        if (!remove) {
+            auto error = std::move(remove.error());
+            rollback();
+            return std::unexpected(std::move(error));
+        }
+        for (const auto& id : gone) {
+            sqlite3_reset(remove->get());
+            if (!bind_text(remove->get(), 1, id)) {
+                auto error = database_error(database, "Could not bind list removal");
+                rollback();
+                return std::unexpected(std::move(error));
+            }
+            if (auto result = step_done(database, remove->get(), "Could not remove list document");
+                !result) {
+                rollback();
+                return result;
+            }
+        }
+    }
+    // Places are unique: moved out of the way first, so lists can trade them.
+    if (auto result = execute(database, "UPDATE list_documents SET position = -1 - position");
+        !result) {
         rollback();
         return result;
     }
     auto insert_document = prepare(
         database,
         "INSERT INTO list_documents(id, kind, name, pinned, dirty, position, remote, engine) "
-        "VALUES(?,?,?,?,?,?,?,?)");
+        "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, "
+        "name = excluded.name, pinned = excluded.pinned, dirty = excluded.dirty, "
+        "position = excluded.position, remote = excluded.remote, engine = excluded.engine");
+    auto remove_items = prepare(database, "DELETE FROM list_items WHERE document_id = ?");
     auto insert_item = prepare(
         database,
         "INSERT INTO list_items(document_id, position, source, profile_id, source_reference, "
@@ -2409,8 +2468,9 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
     auto insert_field = prepare(
         database, "INSERT INTO list_item_fields(document_id, item_position, position, name, value, "
                   "native_name, provenance, language, description) VALUES(?,?,?,?,?,?,?,?,?)");
-    if (!insert_document || !insert_item || !insert_field) {
+    if (!insert_document || !remove_items || !insert_item || !insert_field) {
         auto error = !insert_document ? std::move(insert_document.error())
+                     : !remove_items  ? std::move(remove_items.error())
                      : !insert_item   ? std::move(insert_item.error())
                                       : std::move(insert_field.error());
         rollback();
@@ -2419,9 +2479,10 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
 
     for (std::size_t document_position = 0U; document_position < documents.size();
          ++document_position) {
-        const auto& document = documents[document_position];
+        const auto& document = documents[document_position].document;
         const auto id = document.id.to_string();
         auto* document_statement = insert_document->get();
+        sqlite3_reset(document_statement);
         if (!bind_text(document_statement, 1, id) ||
             sqlite3_bind_int(document_statement, 2, static_cast<int>(document.kind)) != SQLITE_OK ||
             !bind_blob(document_statement, 3, document.name) ||
@@ -2439,6 +2500,21 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
             !result) {
             rollback();
             return std::unexpected(std::move(result.error()));
+        }
+        // Unchanged since the last save: what is stored stands.
+        if (!documents[document_position].items) {
+            continue;
+        }
+        sqlite3_reset(remove_items->get());
+        if (!bind_text(remove_items->get(), 1, id)) {
+            auto error = database_error(database, "Could not bind list item removal");
+            rollback();
+            return std::unexpected(std::move(error));
+        }
+        if (auto result = step_done(database, remove_items->get(), "Could not clear list items");
+            !result) {
+            rollback();
+            return result;
         }
 
         // Entry identities are unique within a document; see the stamping

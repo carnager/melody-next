@@ -94,6 +94,10 @@ class IdentifyAlbumsDialog final : public QDialog {
     QCheckBox* move_;
     QComboBox* move_preset_;
     QLabel* move_pattern_;
+    QCheckBox* replaygain_;
+    QComboBox* replaygain_mode_;
+    QCheckBox* replaygain_skip_;
+    QLabel* replaygain_hint_;
     QLabel* apply_note_;
     QProgressBar* write_progress_;
     QPushButton* write_stop_;

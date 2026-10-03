@@ -292,6 +292,25 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
     options->addWidget(move_pattern_, 1, 2);
     options->addWidget(new QLabel(QStringLiteral("under the library folder they are in"), apply_page),
                        1, 3);
+    // A second step, once the tags are written.
+    replaygain_ = new QCheckBox(QStringLiteral("Scan ReplayGain"), apply_page);
+    replaygain_->setObjectName(QStringLiteral("bench-identify-albums-apply-replaygain"));
+    replaygain_mode_ = new QComboBox(apply_page);
+    replaygain_mode_->setObjectName(QStringLiteral("bench-identify-albums-apply-replaygain-mode"));
+    replaygain_mode_->setAccessibleName(QStringLiteral("What to scan"));
+    replaygain_mode_->addItems({QStringLiteral("Track and album gain"),
+                                QStringLiteral("Track gain only")});
+    replaygain_skip_ = new QCheckBox(QStringLiteral("Skip albums that already have gain"), apply_page);
+    replaygain_skip_->setObjectName(QStringLiteral("bench-identify-albums-apply-replaygain-skip"));
+    replaygain_skip_->setChecked(true);
+    replaygain_hint_ = new QLabel(apply_page);
+    replaygain_hint_->setObjectName(QStringLiteral("bench-identify-albums-apply-replaygain-hint"));
+    auto* replaygain_row = new QHBoxLayout;
+    replaygain_row->addWidget(replaygain_skip_);
+    replaygain_row->addWidget(replaygain_hint_, 1);
+    options->addWidget(replaygain_, 2, 0);
+    options->addWidget(replaygain_mode_, 2, 1);
+    options->addLayout(replaygain_row, 2, 2, 1, 2);
     options->setColumnStretch(2, 1);
     apply_layout->addLayout(options);
     auto* write_row = new QHBoxLayout;
@@ -337,10 +356,10 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(TaggerSession& tagger, MusicBrainzLoo
             emit tagger_->openSettingsRequested(TaggerSession::SettingsPage::naming);
         }
     });
-    for (auto* box : {rename_, move_}) {
+    for (auto* box : {rename_, move_, replaygain_, replaygain_skip_}) {
         connect(box, &QCheckBox::toggled, this, &IdentifyAlbumsDialog::syncApply);
     }
-    for (auto* combo : {rename_preset_, move_preset_}) {
+    for (auto* combo : {rename_preset_, move_preset_, replaygain_mode_}) {
         connect(combo, &QComboBox::currentIndexChanged, this, &IdentifyAlbumsDialog::syncApply);
     }
     connect(apply_list_, &QTreeWidget::itemChanged, this, [this] {
@@ -641,7 +660,7 @@ void IdentifyAlbumsDialog::skip() {
 }
 
 void IdentifyAlbumsDialog::backToList() {
-    if (session_->writing() != nullptr) {
+    if (session_->writing() != nullptr || session_->scanning() != nullptr) {
         return;
     }
     reviewing_.reset();
@@ -705,7 +724,8 @@ std::vector<std::size_t> IdentifyAlbumsDialog::albumsToWrite() const {
 void IdentifyAlbumsDialog::syncApply() {
     const auto& albums = session_->albums();
     const auto* writing = session_->writing();
-    const auto running = writing != nullptr;
+    const auto* scanning = session_->scanning();
+    const auto running = writing != nullptr || scanning != nullptr;
     const auto done = !written_.empty() && !running;
     const auto chosen = albumsToWrite();
     std::size_t files = 0U;
@@ -729,12 +749,26 @@ void IdentifyAlbumsDialog::syncApply() {
     move_->setEnabled(editable && move_preset_->count() > 0);
     rename_preset_->setEnabled(editable && rename_->isChecked());
     move_preset_->setEnabled(editable && move_->isChecked());
+    replaygain_->setEnabled(editable);
+    replaygain_mode_->setEnabled(editable && replaygain_->isChecked());
+    replaygain_skip_->setEnabled(editable && replaygain_->isChecked());
+    const auto album_gain = replaygain_mode_->currentIndex() == 0;
+    const auto with_gain = static_cast<std::size_t>(std::ranges::count_if(
+        chosen, [this, album_gain](auto album) { return session_->hasGain(album, album_gain); }));
+    replaygain_hint_->setText(chosen.empty() ? QString{}
+                                             : QStringLiteral("%1 of these %2 have it")
+                                                   .arg(with_gain)
+                                                   .arg(chosen.size()));
     write_progress_->setVisible(running);
     write_stop_->setVisible(running);
     apply_back_->setEnabled(!running);
-    if (running) {
+    if (writing != nullptr) {
         write_progress_->setMaximum(static_cast<int>(std::max<std::size_t>(writing->filesTotal(), 1U)));
         write_progress_->setValue(static_cast<int>(writing->filesDone()));
+    } else if (scanning != nullptr) {
+        // 0: under way, without a count.
+        write_progress_->setMaximum(scanning->progressMaximum());
+        write_progress_->setValue(scanning->progressValue());
     }
 
     // After a write, each album as it came out.
@@ -744,19 +778,28 @@ void IdentifyAlbumsDialog::syncApply() {
             auto* item = apply_list_->topLevelItem(row);
             const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
             if (std::ranges::find(written_, album) != written_.end()) {
-                item->setText(3, running ? QStringLiteral("Writing…")
-                                         : AlbumBatchSession::stateText(albums[album]));
+                item->setText(3, writing != nullptr ? QStringLiteral("Writing…")
+                                                    : AlbumBatchSession::stateText(albums[album]));
             }
         }
     }
-    if (done) {
+    const auto replaygain_status = session_->replayGainStatus();
+    if (scanning != nullptr) {
+        apply_heading_->setText(QStringLiteral("<b>Scanning ReplayGain</b><br>%1")
+                                    .arg(escaped(scanning->status())));
+    } else if (done) {
         const auto wrote = static_cast<std::size_t>(std::ranges::count_if(
             written_, [&albums](auto album) { return albums[album].state == State::written; }));
         apply_heading_->setText(
             QStringLiteral("<b>Wrote %1 of %2 albums</b><br>Those not written stay staged, saying "
-                           "why; apply again once that is seen to.")
+                           "why; apply again once that is seen to.%3")
                 .arg(wrote)
-                .arg(written_.size()));
+                .arg(written_.size())
+                .arg(replaygain_status.isEmpty()
+                         ? QString{}
+                         : QStringLiteral("<br>ReplayGain: %1")
+                               .arg(escaped(replaygain_status.section(QLatin1Char('\n'), 0, 0)))));
+        apply_heading_->setToolTip(replaygain_status);
     } else {
         apply_heading_->setText(
             QStringLiteral("<b>%1 of %2 staged albums · %3 to write</b><br>One write, each file "
@@ -776,7 +819,8 @@ void IdentifyAlbumsDialog::syncApply() {
         write_->setText(QStringLiteral("Back to the list"));
         write_->setEnabled(true);
     } else if (running) {
-        write_->setText(QStringLiteral("Writing…"));
+        write_->setText(scanning != nullptr ? QStringLiteral("Scanning…")
+                                            : QStringLiteral("Writing…"));
         write_->setEnabled(false);
     } else {
         write_->setText(QStringLiteral("Write %1 %2")
@@ -811,8 +855,15 @@ void IdentifyAlbumsDialog::write() {
     if (albums.empty()) {
         return;
     }
+    std::optional<AlbumBatchSession::ReplayGain> replaygain;
+    if (replaygain_->isChecked()) {
+        replaygain = AlbumBatchSession::ReplayGain{
+            .album_gain = replaygain_mode_->currentIndex() == 0,
+            .skip_existing = replaygain_skip_->isChecked(),
+        };
+    }
     written_ = albums;
-    session_->write(std::move(albums), std::move(options));
+    session_->write(std::move(albums), std::move(options), replaygain);
     if (session_->writing() == nullptr) {
         written_.clear();
     }
@@ -821,7 +872,7 @@ void IdentifyAlbumsDialog::write() {
 
 void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
     // The files under way are finished first.
-    if (session_->writing() != nullptr) {
+    if (session_->writing() != nullptr || session_->scanning() != nullptr) {
         session_->stopWriting();
         event->ignore();
         return;
@@ -830,7 +881,7 @@ void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
 }
 
 void IdentifyAlbumsDialog::reject() {
-    if (session_->writing() != nullptr) {
+    if (session_->writing() != nullptr || session_->scanning() != nullptr) {
         session_->stopWriting();
         return;
     }

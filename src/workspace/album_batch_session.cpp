@@ -382,10 +382,13 @@ bool AlbumBatchSession::canWrite() const {
            std::ranges::any_of(albums_, [](const Album& album) { return album.state == State::staged; });
 }
 
-void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options) {
+void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options,
+                              std::optional<ReplayGain> replaygain) {
     if (!canWrite()) {
         return;
     }
+    replaygain_ = replaygain;
+    replaygain_status_.clear();
     std::vector<AlbumBatchWrite::Album> chosen;
     for (const auto album : albums) {
         if (album < albums_.size() && albums_[album].state == State::staged) {
@@ -421,8 +424,18 @@ void AlbumBatchSession::write(std::vector<std::size_t> albums, AlbumBatchWrite::
                 break;
             }
         }
+        std::vector<std::size_t> written;
+        for (const auto& outcome : writer_->outcomes()) {
+            if (outcome.outcome == Outcome::written) {
+                written.push_back(outcome.album);
+            }
+        }
         writer_->deleteLater();
         writer_ = nullptr;
+        if (replaygain_ && !written.empty()) {
+            scanReplayGain(std::move(written));
+            return;
+        }
         emit changed();
         emit writeFinished();
         stageNext();
@@ -454,6 +467,107 @@ std::vector<std::size_t> AlbumBatchSession::changes() const {
 void AlbumBatchSession::stopWriting() {
     if (writer_ != nullptr) {
         writer_->stop();
+    }
+    if (scan_ != nullptr) {
+        scan_->stop();
+    }
+}
+
+bool AlbumBatchSession::hasGain(const std::size_t album, const bool album_gain) const {
+    const auto selection = tagger_.isNull() ? nullptr : tagger_->sharedSelection();
+    if (selection == nullptr || album >= albums_.size() || albums_[album].items.empty()) {
+        return false;
+    }
+    const auto* field = album_gain ? "replaygainalbumgain" : "replaygaintrackgain";
+    return std::ranges::all_of(albums_[album].items, [&](const std::size_t item) {
+        const auto gain = selection->source(item).baseline.first_effective_value(field);
+        return gain.has_value() && !gain->empty();
+    });
+}
+
+void AlbumBatchSession::scanReplayGain(std::vector<std::size_t> albums) {
+    const auto choice = *replaygain_;
+    replaygain_.reset();
+    std::vector<std::size_t> items;
+    std::size_t skipped = 0U;
+    for (const auto album : albums) {
+        if (choice.skip_existing && hasGain(album, choice.album_gain)) {
+            ++skipped;
+            continue;
+        }
+        items.insert(items.end(), albums_[album].items.begin(), albums_[album].items.end());
+    }
+    const auto skipped_text =
+        skipped == 0U ? QString{}
+                      : QStringLiteral(" · %1 %2 already had gain")
+                            .arg(skipped)
+                            .arg(skipped == 1U ? QStringLiteral("album") : QStringLiteral("albums"));
+    const auto selection = tagger_.isNull() ? nullptr : tagger_->sharedSelection();
+    if (items.empty() || selection == nullptr || !tagger_->beginWriteElsewhere()) {
+        replaygain_status_ = items.empty() ? QStringLiteral("Nothing to scan%1").arg(skipped_text)
+                                           : QStringLiteral("The tagger is busy; not scanned");
+        emit changed();
+        emit writeFinished();
+        stageNext();
+        return;
+    }
+    // The files as read again after the write: their paths, their tags.
+    std::vector<MetadataPropertiesSource> sources;
+    sources.reserve(items.size());
+    for (const auto item : items) {
+        sources.push_back(MetadataPropertiesSource{
+            .source = selection->source(item),
+            .track_label = {},
+            .audio = tagger_->audioOf(item),
+            .duration_ms = tagger_->durationOf(item),
+        });
+    }
+    const auto& services = tagger_->services();
+    const auto count = sources.size();
+    scan_ = new ReplayGainJob(
+        count,
+        [sources = std::move(sources)](const std::size_t index)
+            -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        services.plan_applier_factory, services.apply_observer, services.tools, this);
+    scan_->setRememberChoices(false);
+    // Each album is its release now: its files carry its id.
+    scan_->setGrouping(choice.album_gain ? 0 : 3);
+    connect(scan_, &ReplayGainJob::changed, this, &AlbumBatchSession::changed);
+    connect(scan_, &ReplayGainJob::finished, this, [this, items, skipped_text] {
+        replaygain_status_ = scan_->status() + skipped_text;
+        for (const auto& problem : scan_->problems()) {
+            replaygain_status_ += QLatin1Char('\n') + problem;
+        }
+        scan_->deleteLater();
+        scan_ = nullptr;
+        // Read again: the gains changed the files.
+        std::vector<TaggerSession::Rewritten> rewritten;
+        if (const auto now = tagger_.isNull() ? nullptr : tagger_->sharedSelection()) {
+            for (const auto item : items) {
+                rewritten.push_back({.item = item, .raw_path = now->source(item).raw_path});
+            }
+        }
+        if (tagger_.isNull()) {
+            emit changed();
+            emit writeFinished();
+            return;
+        }
+        connect(tagger_, &TaggerSession::writtenElsewhere, this,
+                [this] {
+                    emit changed();
+                    emit writeFinished();
+                    stageNext();
+                },
+                Qt::SingleShotConnection);
+        tagger_->finishWriteElsewhere(std::move(rewritten));
+    });
+    emit changed();
+    scan_->run();
+    if (scan_ != nullptr && !scan_->running()) {
+        // Refused before starting: said in its status, and over.
+        emit scan_->finished();
     }
 }
 

@@ -3,6 +3,7 @@
 
 #include "bench/musicbrainz_lookup.hpp"
 #include "workspace/album_batch_write.hpp"
+#include "workspace/replaygain_job.hpp"
 #include "trackknife/musicbrainz/album_groups.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/album_lookup.hpp"
@@ -99,11 +100,26 @@ class AlbumBatchSession final : public QObject {
 
     // Step 4, Apply: the albums chosen of those staged written, the rest
     // staying staged; one write at a time, once nothing is being staged.
+    // Then, when chosen, ReplayGain for the albums written, as the
+    // ReplayGain dialog scans it: a second step, as a scan is no part of a
+    // tag write.
+    struct ReplayGain {
+        // Off: track gain only.
+        bool album_gain{true};
+        // An album whose files all have the gain asked for is left alone.
+        bool skip_existing{true};
+    };
     [[nodiscard]] bool canWrite() const;
+    // Whether every file of the album has that gain already.
+    [[nodiscard]] bool hasGain(std::size_t album, bool album_gain) const;
     // The fields each album's staged draft changes, over all its files.
     [[nodiscard]] std::vector<std::size_t> changes() const;
-    void write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options);
+    void write(std::vector<std::size_t> albums, AlbumBatchWrite::Options options,
+               std::optional<ReplayGain> replaygain = std::nullopt);
     [[nodiscard]] const AlbumBatchWrite* writing() const { return writer_; }
+    [[nodiscard]] const ReplayGainJob* scanning() const { return scan_; }
+    // How the last ReplayGain step went; empty when there was none.
+    [[nodiscard]] QString replayGainStatus() const { return replaygain_status_; }
     void stopWriting();
 
     static QString stateText(const Album& album);
@@ -134,7 +150,12 @@ class AlbumBatchSession final : public QObject {
     };
     std::deque<ToStage> to_stage_;
     std::optional<std::size_t> staging_;
+    void scanReplayGain(std::vector<std::size_t> albums);
+
     QPointer<AlbumBatchWrite> writer_;
+    std::optional<ReplayGain> replaygain_;
+    QPointer<ReplayGainJob> scan_;
+    QString replaygain_status_;
 };
 
 } // namespace trackknife::bench

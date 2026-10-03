@@ -349,6 +349,8 @@ class TaggerSession final : public QObject {
     [[nodiscard]] const metadata::StagedMetadataSource* itemSource(std::size_t item) const;
     // Its length: as the list knew it, else as probed here.
     [[nodiscard]] std::optional<std::int64_t> durationOf(std::size_t item) const;
+    // What of its file is its audio: a stream, a range.
+    [[nodiscard]] MetadataPropertiesAudioSource audioOf(std::size_t item) const;
     // Whether a proposal set can be staged now: the files are read and
     // nothing else is being staged. proposalsSettled says when one was.
     [[nodiscard]] bool canStageProposals() const;

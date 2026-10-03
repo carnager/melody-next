@@ -485,6 +485,35 @@ namespace {
 
 } // namespace
 
+namespace {
+
+void write_sine_wav_fixture(const QString& path, const double amplitude,
+                            const std::optional<double> second_amplitude = std::nullopt) {
+    constexpr int wav_rate = 44'100;
+    const int frames = wav_rate * (second_amplitude ? 2 : 1);
+    QFile file{path};
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QDataStream stream{&file};
+    stream.setByteOrder(QDataStream::LittleEndian);
+    const quint32 data_bytes = static_cast<quint32>(frames) * 4U;
+    file.write("RIFF", 4);
+    stream << quint32{36U + data_bytes};
+    file.write("WAVE", 4);
+    file.write("fmt ", 4);
+    stream << quint32{16U} << quint16{1U} << quint16{2U} << quint32{wav_rate}
+           << quint32{wav_rate * 4U} << quint16{4U} << quint16{16U};
+    file.write("data", 4);
+    stream << data_bytes;
+    for (int frame = 0; frame < frames; ++frame) {
+        const auto level = frame >= wav_rate ? second_amplitude.value_or(amplitude) : amplitude;
+        const auto value = level * std::sin(2.0 * 3.14159265358979 * 997.0 * frame / wav_rate);
+        const auto sample = static_cast<qint16>(std::clamp(value, -1.0, 1.0) * 32'767.0);
+        stream << sample << sample;
+    }
+}
+
+} // namespace
+
 void BenchMainWindowTest::initTestCase() {
     QVERIFY(home_directory_.isValid());
     qputenv("HOME", QFile::encodeName(home_directory_.path()));
@@ -6046,6 +6075,19 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         const auto applied = work->apply(*plan, {}, {});
         return applied && applied->committed_source_count() == 1U;
     };
+    // Long enough to measure loudness.
+    const auto tone = media.filePath(QStringLiteral("tone.flac"));
+    {
+        const auto wav = media.filePath(QStringLiteral("tone.wav"));
+        write_sine_wav_fixture(wav, 0.6);
+        const auto preset = convert::find_encoder_preset("flac");
+        QVERIFY(preset);
+        convert::AudioConversionRequest request{};
+        request.source_raw_path = raw(wav);
+        request.preset = *preset;
+        request.destination_raw_path = raw(tone);
+        QVERIFY(convert::convert_audio_file(request));
+    }
     std::vector<MetadataPropertiesSource> sources;
     for (const auto* artist : {"Band", "Cover", "Third"}) {
         const auto folder = QStringLiteral("%1/incoming/%2 - Alpha").arg(library, QLatin1String(artist));
@@ -6053,12 +6095,16 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
         for (const auto& [number, title, length] :
              {std::tuple{"1", "One", 61'000}, std::tuple{"2", "Two", 59'000}}) {
             const auto path = raw(QStringLiteral("%1/0%2.flac").arg(folder, QLatin1String(number)));
-            QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"),
-                                              QString::fromStdString(path)));
-            QVERIFY(retag(path, {{"ALBUM", "Alpha"},
-                                 {"ARTIST", artist},
-                                 {"TITLE", title},
-                                 {"TRACKNUMBER", number}}));
+            QVERIFY(QFile::copy(tone, QString::fromStdString(path)));
+            std::vector<std::pair<std::string, std::string>> tags{{"ALBUM", "Alpha"},
+                                                                  {"ARTIST", artist},
+                                                                  {"TITLE", title},
+                                                                  {"TRACKNUMBER", number}};
+            // Cover has gain already.
+            if (std::string_view{artist} == "Cover") {
+                tags.emplace_back("REPLAYGAIN_ALBUM_GAIN", "-1.00 dB");
+            }
+            QVERIFY(retag(path, tags));
             const auto read = metadata::read_local_metadata(path);
             QVERIFY(read.has_value());
             sources.push_back(MetadataPropertiesSource{
@@ -6226,15 +6272,29 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(row_of(band)->text(2).startsWith(QStringLiteral("2 files · ")));
     QCOMPARE(write->text(), QStringLiteral("Write 3 albums"));
 
-    // Tags only, and only Band's.
+    // Tags only, and only Band's; then its ReplayGain.
+    auto* replaygain =
+        dialog->findChild<QCheckBox*>(QStringLiteral("bench-identify-albums-apply-replaygain"));
+    auto* replaygain_hint =
+        dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-replaygain-hint"));
+    QVERIFY(!replaygain->isChecked());
+    QCOMPARE(replaygain_hint->text(), QStringLiteral("1 of these 3 have it"));
     row_of(cover)->setCheckState(0, Qt::Unchecked);
     row_of(third)->setCheckState(0, Qt::Unchecked);
     QCOMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QCOMPARE(replaygain_hint->text(), QStringLiteral("0 of these 1 have it"));
+    replaygain->setChecked(true);
     QTRY_VERIFY(write->isEnabled());
     write->click();
     QTRY_COMPARE_WITH_TIMEOUT(session->albums()[band].state, AlbumBatchSession::State::written,
                               10'000);
-    QTRY_COMPARE(write->text(), QStringLiteral("Back to the list"));
+    QTRY_VERIFY2_WITH_TIMEOUT(
+        write->text() == QStringLiteral("Back to the list"),
+        qPrintable(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-heading"))
+                       ->text()),
+        20'000);
+    QVERIFY2(session->replayGainStatus().startsWith(QStringLiteral("Saved ReplayGain")),
+             qPrintable(session->replayGainStatus()));
     const auto band_file = sources[0].source.raw_path;
     const auto band_tags = metadata::read_local_metadata(band_file);
     QVERIFY(band_tags.has_value());
@@ -6246,10 +6306,15 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     };
     QCOMPARE(value_of(band_tags->document, "MUSICBRAINZ_ALBUMID"),
              ids.at(QStringLiteral("Band")).toStdString());
+    QVERIFY(!value_of(band_tags->document, "REPLAYGAIN_ALBUM_GAIN").empty());
+    QVERIFY(!value_of(band_tags->document, "REPLAYGAIN_TRACK_GAIN").empty());
     // Read again; Band's draft written, the others' kept.
     auto* tagger = properties->findChild<TaggerSession*>();
     QVERIFY(tagger != nullptr);
     QTRY_VERIFY(!tagger->writingElsewhere());
+    // Read again after the gains, too.
+    QVERIFY(tagger->sharedSelection()->source(0U).baseline.first_effective_value(
+        "replaygainalbumgain"));
     const auto has_patches = [&grid_model](std::size_t first, std::size_t last) {
         return std::ranges::any_of(grid_model->patches().patches(), [&](const auto& patch) {
             return patch.item_index >= first && patch.item_index <= last;
@@ -6279,6 +6344,9 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-apply-move-pattern"))
                  ->text(),
              QStringLiteral("%artist%/%album%"));
+    // Cover has its gain, so is not scanned.
+    QVERIFY(replaygain->isChecked());
+    QCOMPARE(replaygain_hint->text(), QStringLiteral("1 of these 2 have it"));
     QVERIFY(retag(sources[4].source.raw_path, {{"COMMENT", "changed elsewhere"}}));
     QTRY_VERIFY(write->isEnabled());
     write->click();
@@ -6290,6 +6358,12 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     const auto moved = library + QStringLiteral("/Cover/Alpha/One.flac");
     QVERIFY2(QFile::exists(moved), qPrintable(moved));
     QVERIFY(QFile::exists(library + QStringLiteral("/Cover/Alpha/Two.flac")));
+    QTRY_VERIFY(session->scanning() == nullptr);
+    QVERIFY2(session->replayGainStatus().contains(QStringLiteral("1 album already had gain")),
+             qPrintable(session->replayGainStatus()));
+    const auto cover_tags = metadata::read_local_metadata(raw(moved));
+    QVERIFY(cover_tags.has_value());
+    QCOMPARE(value_of(cover_tags->document, "REPLAYGAIN_ALBUM_GAIN"), std::string{"-1.00 dB"});
     QVERIFY(!QFile::exists(QString::fromStdString(sources[2].source.raw_path)));
     QCOMPARE(tagger->sharedSelection()->source(2U).raw_path, raw(moved));
     QCOMPARE(session->albums()[third].state, AlbumBatchSession::State::staged);
@@ -6833,35 +6907,6 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
              QStringList{QStringLiteral("Alpha")});
     delete properties;
 }
-
-namespace {
-
-void write_sine_wav_fixture(const QString& path, const double amplitude,
-                            const std::optional<double> second_amplitude = std::nullopt) {
-    constexpr int wav_rate = 44'100;
-    const int frames = wav_rate * (second_amplitude ? 2 : 1);
-    QFile file{path};
-    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    QDataStream stream{&file};
-    stream.setByteOrder(QDataStream::LittleEndian);
-    const quint32 data_bytes = static_cast<quint32>(frames) * 4U;
-    file.write("RIFF", 4);
-    stream << quint32{36U + data_bytes};
-    file.write("WAVE", 4);
-    file.write("fmt ", 4);
-    stream << quint32{16U} << quint16{1U} << quint16{2U} << quint32{wav_rate}
-           << quint32{wav_rate * 4U} << quint16{4U} << quint16{16U};
-    file.write("data", 4);
-    stream << data_bytes;
-    for (int frame = 0; frame < frames; ++frame) {
-        const auto level = frame >= wav_rate ? second_amplitude.value_or(amplitude) : amplitude;
-        const auto value = level * std::sin(2.0 * 3.14159265358979 * 997.0 * frame / wav_rate);
-        const auto sample = static_cast<qint16>(std::clamp(value, -1.0, 1.0) * 32'767.0);
-        stream << sample << sample;
-    }
-}
-
-} // namespace
 
 void BenchMainWindowTest::closingATabReturnsToThePreviousOne() {
     BenchMainWindow window;

@@ -1567,6 +1567,10 @@ std::optional<std::int64_t> TaggerSession::durationOf(const std::size_t item) co
     return std::nullopt;
 }
 
+MetadataPropertiesAudioSource TaggerSession::audioOf(const std::size_t item) const {
+    return item < audio_sources_->size() ? (*audio_sources_)[item] : MetadataPropertiesAudioSource{};
+}
+
 bool TaggerSession::canStageProposals() const {
     return grid_model_ != nullptr && !proposal_running_ && !provisional_ && !writing_elsewhere_;
 }

@@ -146,7 +146,16 @@ presets…** opens them.
   staged. Meanwhile the tagger takes no edits; then it reads the files
   written again, at their new paths, and keeps the drafts of the rest.
   The plan is built as the tagger's own Apply builds it
-  (`planPreparation`). ReplayGain and Undo this batch are still to come.
+  (`planPreparation`). Undo this batch is still to come.
+- ReplayGain, step 4's second step (2026-10-03): **Scan ReplayGain** with
+  *Track and album gain* or *Track gain only*, and **Skip albums that
+  already have gain** (on), each album saying beforehand how many of those
+  chosen have it. Once the tags are written, the albums written are
+  scanned as the ReplayGain dialog scans (`ReplayGainJob`), grouped by
+  release -- every file of an album now carries its release id, so album
+  gain is the album's -- without touching that dialog's own choices. The
+  tagger stays closed to edits meanwhile and reads those files again
+  after.
 
 ## Verification
 

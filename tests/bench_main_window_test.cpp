@@ -326,6 +326,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
+    void aNotificationWaitsForItsCover();
     void theRemoteTabTakesTheNameItsEngineAnnounces();
     void anUnreachableRemoteDoesNotHoldTheWindow();
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();
@@ -7148,6 +7149,59 @@ void BenchMainWindowTest::anUnreachableRemoteDoesNotHoldTheWindow() {
     QVERIFY2(longest < 1'000, QByteArray::number(longest).constData());
     settings.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
     settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
+}
+
+// An album queued and played by another client -- melody-cli -- is in no
+// list this window has shown, so its cover is not at hand when it starts.
+// The notification waits for the cover rather than going out without it.
+void BenchMainWindowTest::aNotificationWaitsForItsCover() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    // A minute long, so it is still playing when the window looks, with its
+    // cover beside it as an album folder has.
+    const auto path = media.filePath(QStringLiteral("track.wav"));
+    write_wave(path, wave_sample_rate * 60U);
+    QImage cover{64, 64, QImage::Format_RGB32};
+    cover.fill(Qt::darkCyan);
+    QVERIFY(cover.save(media.filePath(QStringLiteral("cover.jpg")), "JPEG"));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QVERIFY(window.notifier_ != nullptr);
+    window.notifier_->setEnabled(true);
+    window.notifier_->setBackgroundOnly(false);
+    QStringList sent;
+    window.notifier_->setSendOverride(
+        [&sent](const QString& summary, const QString&) { sent << summary; });
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto entry = core::StableId::random().to_string();
+    auto entries = protocol::Json::array();
+    entries.push_back(protocol::Json{
+        {"entry", entry},
+        {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
+        {"title", "With a cover"},
+        {"group", protocol::Json{{"album_artist", "Band"},
+                                 {"artist", "Band"},
+                                 {"album", "Covered"},
+                                 {"date", "1992"}}}});
+    QVERIFY((*other)
+                ->call("playback.replace_queue", protocol::Json{{"entries", std::move(entries)}})
+                .has_value());
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", entry}}).has_value());
+
+    QTRY_VERIFY_WITH_TIMEOUT(!sent.isEmpty(), 10'000);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.front(), QStringLiteral("With a cover"));
+    QVERIFY2(!window.notifier_->lastImage().isEmpty(), "the notification shows the cover");
+    QVERIFY(QFileInfo::exists(window.notifier_->lastImage()));
 }
 
 void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {

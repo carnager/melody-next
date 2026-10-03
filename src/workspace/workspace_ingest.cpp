@@ -782,6 +782,11 @@ void Workspace::finishArtworkLoad() {
         }
         view_->artworkLoaded(outcome->key);
     }
+    // The cover a notification waits for: it goes now, with it.
+    if (outcome->key == desktop_cover_waiting_) {
+        desktop_cover_waiting_.clear();
+        publishDesktopState();
+    }
     pumpArtworkQueue();
 }
 

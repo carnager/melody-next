@@ -5,6 +5,7 @@
 #include "trackknife/core/local_sources.hpp"
 
 #include <algorithm>
+#include <set>
 #include <utility>
 
 namespace trackknife::engine {
@@ -471,6 +472,26 @@ void Player::follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot)
 
 void Player::replace_queue(std::vector<QueueEntry> entries, std::string list) {
     const std::lock_guard guard{mutex_};
+    replace_queue_locked(std::move(entries), std::move(list));
+}
+
+bool Player::follow_list(const std::string& list, std::vector<QueueEntry> entries,
+                         const std::vector<core::StableId>& fresh) {
+    const std::lock_guard guard{mutex_};
+    if (list.empty() || queue_list_ != list) {
+        return false;
+    }
+    std::set<core::StableId> held;
+    for (const auto& entry : queue_) {
+        held.insert(entry.entry_id);
+    }
+    held.insert(fresh.begin(), fresh.end());
+    std::erase_if(entries, [&held](const QueueEntry& entry) { return !held.contains(entry.entry_id); });
+    replace_queue_locked(std::move(entries), list);
+    return true;
+}
+
+void Player::replace_queue_locked(std::vector<QueueEntry> entries, std::string list) {
     queue_ = std::move(entries);
     queue_list_ = std::move(list);
     ++revision_;

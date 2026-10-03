@@ -69,6 +69,50 @@ local_replay_gain_override(const LocalTrackRow& row) {
 
 } // namespace
 
+std::vector<persistence::EngineListItem> Workspace::engineItemsOf(const ListTab& tab) {
+    std::vector<persistence::EngineListItem> items;
+    items.reserve(tab.model->rows().size());
+    for (const auto& row : tab.model->rows()) {
+        persistence::EngineListItem item;
+        item.entry_id = row.entry_id;
+        item.raw_path = row.raw_path;
+        item.logical_reference = row.logical_reference;
+        if (row.segment) {
+            item.segment = persistence::ListItemSegment{.start_sample = row.segment->start_sample,
+                                                        .end_sample = row.segment->end_sample};
+        }
+        if (row.selection.stream_index || row.selection.subsong_index) {
+            item.source_selection =
+                persistence::ListItemSourceSelection{.audio_stream_index = row.selection.stream_index,
+                                                     .subsong_index = row.selection.subsong_index};
+        }
+        item.duration_ms = row.duration_ms;
+        item.title = row.title;
+        item.artist = row.artist;
+        item.album = row.album;
+        item.album_artist = row.album_artist;
+        item.date = row.date;
+        if (const auto gain = local_replay_gain_override(row)) {
+            item.replay_gain = persistence::ListItemReplayGain{.track_gain_db = gain->track_gain_db,
+                                                               .track_peak = gain->track_peak,
+                                                               .album_gain_db = gain->album_gain_db,
+                                                               .album_peak = gain->album_peak};
+        }
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+EngineListSync::ItemsOf Workspace::engineItems() {
+    return [this](const core::StableId& id) -> std::optional<std::vector<persistence::EngineListItem>> {
+        const auto* tab = tabForDocument(id);
+        if (tab == nullptr) {
+            return std::nullopt;
+        }
+        return engineItemsOf(*tab);
+    };
+}
+
 namespace {
 // Not an engine's status: the one this window told to stop, until it has.
 const QString stopping_status = QStringLiteral("stopping (asked)");
@@ -208,14 +252,35 @@ void Workspace::syncEngineQueue() {
         return;
     }
     engine_queue_ = stated;
-    std::vector<std::optional<formats::ReplayGainInfo>> overrides;
-    overrides.reserve(rows.size());
-    for (const auto& row : rows) {
-        overrides.push_back(local_replay_gain_override(row));
+    // A queue asked for before this edit answers with what the edit changed:
+    // taken up, it would bring a removed row back.
+    ++engine_queue_asked_;
+    // ADR-0256: the list is edited, now rather than at the next save, and
+    // the engine's queue played from it follows in the same request. The
+    // engine follows identity, so the playing entry survives its row moving
+    // -- or going.
+    const auto id = tab->document.id;
+    const QPointer<EnginePlayback> playback{transport_};
+    const auto replace = [this, id, playback](const bool on_engine) {
+        auto* playing = tabForDocument(id);
+        if (on_engine || playing == nullptr || playback == nullptr || playback != transport_) {
+            return;
+        }
+        // Not on the engine as shown: its rows are the queue, as before.
+        const auto& shown = playing->model->rows();
+        std::vector<std::optional<formats::ReplayGainInfo>> overrides;
+        overrides.reserve(shown.size());
+        for (const auto& row : shown) {
+            overrides.push_back(local_replay_gain_override(row));
+        }
+        playback->replaceQueue(shown, overrides, document_text(id));
+    };
+    if (list_sync_ != nullptr) {
+        list_sync_->sendNow(persistence::ListDocumentWrite{.document = headerOf(*tab), .items = true},
+                            engineItems(), replace);
+    } else {
+        replace(false);
     }
-    // The engine follows identity, so the playing entry survives being handed
-    // a queue that no longer holds it in the same row -- or at all.
-    transport_->replaceQueue(rows, overrides, document_text(tab->document.id));
 }
 
 
@@ -509,20 +574,43 @@ void Workspace::playRow(ListTab& tab, const int row) {
         return;
     }
     followPlayback(target);
-    // The engine owns the queue, so it is given the whole list rather than
-    // one track: skipping, shuffling and gapless are its decisions, and it
-    // cannot make them from a single entry.
     const auto& rows = tab.model->rows();
     if (row < 0 || static_cast<std::size_t>(row) >= rows.size()) {
         return;
     }
-    std::vector<std::optional<formats::ReplayGainInfo>> overrides;
-    overrides.reserve(rows.size());
-    for (const auto& source_row : rows) {
-        overrides.push_back(local_replay_gain_override(source_row));
+    // The engine owns the queue, so it plays the whole list rather than one
+    // track: skipping, shuffling and gapless are its decisions, and it cannot
+    // make them from a single entry. ADR-0256: the list is on the engine
+    // already, so it is named, not sent -- once the edits the engine has not
+    // had yet have reached it.
+    const auto id = tab.document.id;
+    const auto entry = rows[static_cast<std::size_t>(row)].entry_id;
+    const QPointer<EnginePlayback> playback{target};
+    const auto play = [this, id, entry, playback](const bool on_engine) {
+        auto* playing = tabForDocument(id);
+        if (playing == nullptr || playback == nullptr || playback != transport_) {
+            return;
+        }
+        if (on_engine) {
+            playback->playList(document_text(id), entry);
+            return;
+        }
+        // Not on the engine as it is shown here -- a saved list's unsaved
+        // edits, an engine from before ADR-0256 -- so its rows are the queue.
+        const auto& shown = playing->model->rows();
+        std::vector<std::optional<formats::ReplayGainInfo>> overrides;
+        overrides.reserve(shown.size());
+        for (const auto& source_row : shown) {
+            overrides.push_back(local_replay_gain_override(source_row));
+        }
+        playback->play(shown, overrides, entry, document_text(id));
+    };
+    if (list_sync_ != nullptr) {
+        list_sync_->sendNow(persistence::ListDocumentWrite{.document = headerOf(tab), .items = true},
+                            engineItems(), play);
+    } else {
+        play(false);
     }
-    transport_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id,
-                     document_text(tab.document.id));
     if (playback_.anchors.document != tab.document.id) {
         if (auto* previous = tabForDocument(playback_.anchors.document); previous != nullptr) {
             previous->model->setCurrentSource({}, -1);

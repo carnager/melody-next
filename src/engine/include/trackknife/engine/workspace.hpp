@@ -4,6 +4,7 @@
 
 #include "trackknife/core/result.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "trackknife/persistence/list_edits.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 
 #include <cstdint>
@@ -106,6 +107,13 @@ class Workspace final {
                   persistence::EngineListKind kind,
                   const std::vector<persistence::EngineListItem>& items,
                   std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    // ADR-0256: see ListRepository::edit_engine_list.
+    [[nodiscard]] core::Result<persistence::EngineList>
+    edit_engine_list(const core::StableId& id, std::uint64_t expected_revision,
+                     const std::vector<persistence::ListEdit>& edits, std::int64_t now_ms,
+                     std::optional<std::string_view> name = std::nullopt,
+                     std::optional<persistence::EngineListKind> kind = std::nullopt,
+                     bool with_items = true);
     [[nodiscard]] core::Result<persistence::EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);

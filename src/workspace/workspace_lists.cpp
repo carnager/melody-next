@@ -224,7 +224,7 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
             if (auto* open = tabForDocument(document->id); open != nullptr) {
                 view_->showList(*open);
             } else {
-                list_sync_->opened(*document, answer->value("revision", std::uint64_t{0}));
+                list_sync_->opened(*answer, key);
                 static_cast<void>(addList(std::move(*document), true));
                 schedulePersist();
             }
@@ -386,10 +386,7 @@ void Workspace::persistNow(const bool wait) {
         }
     }
     if (list_sync_ != nullptr) {
-        list_sync_->update(writes, [this](const core::StableId& id) {
-            const auto* tab = tabForDocument(id);
-            return tab != nullptr ? std::optional{documentOf(*tab)} : std::nullopt;
-        });
+        list_sync_->update(writes, engineItems());
     }
     const auto settle = [this](const std::vector<std::pair<core::StableId, ListTab::Saved>>& states) {
         for (const auto& [id, state] : states) {

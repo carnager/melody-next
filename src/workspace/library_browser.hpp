@@ -205,6 +205,11 @@ class LibraryBrowser final : public QObject {
     void addToListRequested(std::vector<persistence::LibraryEntry> entries, const QString& id);
     void newListRequested(std::vector<persistence::LibraryEntry> entries, const QString& name);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
+    // Enter was pressed on a search: kept, once its results are collected
+    // (searchCommitted), or found nothing or failed (searchFailed). Each
+    // started search ends in one of the two, in the order they started.
+    void searchStarted(QString query);
+    void searchFailed(QString query, QString why);
     void ratingsChanged();
     void libraryContentChanged();
 

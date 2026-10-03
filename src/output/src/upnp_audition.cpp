@@ -698,13 +698,10 @@ core::Result<void> UpnpAudition::set_volume_percent(int percent) {
         return set ? core::Result<void>{} : std::unexpected(set.error());
     }, Topic::device);
 }
-core::Result<void> UpnpAudition::set_replay_gain_mode(audio::ReplayGainMode mode) {
-    if (mode != audio::ReplayGainMode::off) {
-        return std::unexpected(
-            unsupported("ReplayGain is unsupported on UPnP outputs; audio plays at unity gain"));
-    }
-    return {};
-}
+// The mode is the engine's setting, kept for whatever output plays next; this
+// one plays at unity gain whatever it is, as its replay_gain: false says. A
+// refusal here was shown as an error every time a client set ReplayGain.
+core::Result<void> UpnpAudition::set_replay_gain_mode(audio::ReplayGainMode) { return {}; }
 core::Result<void> UpnpAudition::set_replay_gain_preamps(audio::ReplayGainPreamps) { return {}; }
 core::Result<void> UpnpAudition::set_buffer_config(audio::PlaybackBufferDurationConfig) {
     return {};

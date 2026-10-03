@@ -14,7 +14,10 @@
 #include <iostream>
 #include <mutex>
 #include <net/if.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -100,31 +103,69 @@ std::string serialized(IXML_Document* document) {
     return result;
 }
 
-std::string default_interface() {
-#ifdef __APPLE__
+std::vector<NetworkInterface> network_interfaces() {
+    std::vector<NetworkInterface> found;
     ifaddrs* raw = nullptr;
     if (::getifaddrs(&raw) != 0) {
-        return {};
+        return found;
     }
     const std::unique_ptr<ifaddrs, decltype(&freeifaddrs)> addresses{raw, freeifaddrs};
     for (auto* address = addresses.get(); address != nullptr; address = address->ifa_next) {
-        if (address->ifa_addr == nullptr || address->ifa_addr->sa_family != AF_INET ||
-            (address->ifa_flags & (IFF_UP | IFF_RUNNING | IFF_MULTICAST)) !=
-                (IFF_UP | IFF_RUNNING | IFF_MULTICAST) ||
-            (address->ifa_flags & IFF_LOOPBACK) != 0) {
+        if (address->ifa_addr == nullptr || address->ifa_addr->sa_family != AF_INET) {
             continue;
         }
-        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(address->ifa_addr);
-        const auto host = ntohl(ipv4->sin_addr.s_addr);
-        if ((host & 0xffff0000U) == 0xa9fe0000U) {
-            continue;
-        }
-        return address->ifa_name;
+        constexpr auto wanted = IFF_UP | IFF_RUNNING | IFF_MULTICAST;
+        found.push_back(NetworkInterface{
+            .name = address->ifa_name,
+            .address = ntohl(reinterpret_cast<const sockaddr_in*>(address->ifa_addr)->sin_addr.s_addr),
+            .usable = (address->ifa_flags & wanted) == wanted &&
+                      (address->ifa_flags & IFF_LOOPBACK) == 0,
+        });
     }
-#endif
-    return {};
+    return found;
+}
+
+// The address this machine would send from to reach the network. Connecting
+// a UDP socket only consults the routing table: nothing is sent.
+std::optional<std::uint32_t> route_address() {
+    const int probe = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (probe < 0) {
+        return std::nullopt;
+    }
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(9);
+    remote.sin_addr.s_addr = htonl(0xc0000201U); // 192.0.2.1, TEST-NET-1
+    std::optional<std::uint32_t> local;
+    if (::connect(probe, reinterpret_cast<const sockaddr*>(&remote), sizeof(remote)) == 0) {
+        sockaddr_in bound{};
+        socklen_t length = sizeof(bound);
+        if (::getsockname(probe, reinterpret_cast<sockaddr*>(&bound), &length) == 0 &&
+            bound.sin_addr.s_addr != 0) {
+            local = ntohl(bound.sin_addr.s_addr);
+        }
+    }
+    ::close(probe);
+    return local;
 }
 } // namespace
+
+std::string choose_upnp_interface(const std::vector<NetworkInterface>& interfaces,
+                                  const std::optional<std::uint32_t> route_address) {
+    if (route_address) {
+        for (const auto& candidate : interfaces) {
+            if (candidate.usable && candidate.address == *route_address) {
+                return candidate.name;
+            }
+        }
+    }
+    for (const auto& candidate : interfaces) {
+        if (candidate.usable && (candidate.address & 0xffff0000U) != 0xa9fe0000U) {
+            return candidate.name;
+        }
+    }
+    return {};
+}
 
 std::string upnp_xml_escape(const std::string& value) {
     std::string result;
@@ -437,7 +478,11 @@ struct UpnpDiscovery::Impl {
 UpnpDiscovery::UpnpDiscovery(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 core::Result<std::shared_ptr<UpnpDiscovery>> UpnpDiscovery::start(Changed changed,
                                                                   const std::string& interface) {
-    const auto selected_interface = interface.empty() ? default_interface() : interface;
+    // Never libupnp's own pick, the first interface that is up: on a machine
+    // running containers that is a bridge, where no renderer lives.
+    const auto selected_interface =
+        interface.empty() ? choose_upnp_interface(network_interfaces(), route_address())
+                          : interface;
     const auto initialized =
         UpnpInit2(selected_interface.empty() ? nullptr : selected_interface.c_str(), 0);
     if (initialized != UPNP_E_SUCCESS) {

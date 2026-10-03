@@ -3,9 +3,11 @@
 
 #include "trackknife/core/result.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +38,19 @@ struct UpnpRenderer final {
 [[nodiscard]] UpnpValues parse_upnp_values(const std::string& xml);
 [[nodiscard]] UpnpValues parse_upnp_last_change(const std::string& xml);
 [[nodiscard]] std::string upnp_xml_escape(const std::string& text);
+
+// An IPv4 interface as the system lists it, for choosing where to discover.
+struct NetworkInterface final {
+    std::string name;
+    std::uint32_t address{0}; // host byte order
+    bool usable{false};       // up, running, multicast, not loopback
+};
+// The interface discovery listens on: the one holding `route_address` -- the
+// address the system would send from to reach the network, so the LAN rather
+// than a container bridge or VPN listed before it -- else the first usable
+// one that is not link-local. Empty when there is none.
+[[nodiscard]] std::string choose_upnp_interface(const std::vector<NetworkInterface>& interfaces,
+                                                std::optional<std::uint32_t> route_address);
 
 // Injectable transport: tests can model a renderer without multicast or hardware.
 class UpnpControl {

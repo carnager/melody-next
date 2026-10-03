@@ -211,6 +211,18 @@ void the_socket_answers_plain_lines(const std::filesystem::path& path) {
     const auto after = protocol::Json::parse(client.line(), nullptr, false);
     require(after.at("id") == 7, "a notification produces no response");
 
+    // A line past the limit is answered as the call it was, and the
+    // connection carries on: dropping it had a client reconnect and send the
+    // same line again, for good.
+    client.send("{\"id\":8,\"method\":\"list.save\",\"params\":{\"items\":\"" +
+                std::string(3U << 20U, 'x') + "\"}}\n");
+    const auto refused = protocol::Json::parse(client.line(), nullptr, false);
+    require(refused.at("id") == 8 && refused.at("error").at("code") == "limit_exceeded",
+            "an over-long request is refused as itself");
+    client.send("{\"id\":9,\"method\":\"playback.state\"}\n");
+    const auto still = protocol::Json::parse(client.line(), nullptr, false);
+    require(still.at("id") == 9, "the connection still answers after a refusal");
+
     (*server)->stop();
 }
 

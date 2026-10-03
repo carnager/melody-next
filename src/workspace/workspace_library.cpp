@@ -45,6 +45,17 @@ void Workspace::attachLibrary(LibraryBrowser* browser) {
                     libraryAddToList(*guard, std::move(entries), id);
                 }
             });
+    connect(browser, &LibraryBrowser::searchStarted, this, [this, guard](const QString& query) {
+        if (guard) {
+            librarySearchStarted(*guard, query);
+        }
+    });
+    connect(browser, &LibraryBrowser::searchFailed, this,
+            [this, guard](const QString& /*query*/, const QString& why) {
+                if (guard) {
+                    librarySearchFailed(*guard, why);
+                }
+            });
     connect(browser, &LibraryBrowser::searchCommitted, this,
             [this, guard](const QString& query, std::vector<LocalTrackRow> rows) {
                 if (guard) {
@@ -286,9 +297,10 @@ void Workspace::libraryAddToList(LibraryBrowser& browser,
     });
 }
 
-// ADR-0140: a search kept as an ordinary working list of its engine.
-void Workspace::librarySearchCommitted(LibraryBrowser& browser, const QString& query,
-                                       std::vector<LocalTrackRow> rows) {
+// ADR-0140: a search kept as an ordinary working list of its engine --
+// opened as Enter is pressed, saying it is being collected, and filled when
+// the results come.
+void Workspace::librarySearchStarted(LibraryBrowser& browser, const QString& query) {
     persistence::ListDocument document{
         .id = core::StableId::random(),
         .kind = persistence::ListKind::scratch,
@@ -300,7 +312,55 @@ void Workspace::librarySearchCommitted(LibraryBrowser& browser, const QString& q
     if (!browser.engine().isLocal()) {
         document.engine = browser.engine().stored();
     }
-    auto* destination = addList(std::move(document), true);
+    auto* opened = addList(std::move(document), true);
+    opened->notice = tr("Collecting the tracks for “%1”…").arg(query);
+    view_->refreshEmptyMessage(*opened);
+    pending_searches_[&browser].push_back(opened->document.id);
+}
+
+void Workspace::librarySearchFailed(LibraryBrowser& browser, const QString& why) {
+    auto& pending = pending_searches_[&browser];
+    if (pending.empty()) {
+        return;
+    }
+    const auto id = pending.front();
+    pending.pop_front();
+    // Left open, saying why: closed by itself, it would be gone before it
+    // was read.
+    if (auto* tab = tabForDocument(id); tab != nullptr) {
+        tab->notice = why;
+        view_->refreshEmptyMessage(*tab);
+    }
+}
+
+void Workspace::librarySearchCommitted(LibraryBrowser& browser, const QString& query,
+                                       std::vector<LocalTrackRow> rows) {
+    auto& pending = pending_searches_[&browser];
+    ListTab* destination = nullptr;
+    if (!pending.empty()) {
+        const auto id = pending.front();
+        pending.pop_front();
+        destination = tabForDocument(id);
+        // Closed while it was being collected: not wanted any more.
+        if (destination == nullptr) {
+            return;
+        }
+        destination->notice.clear();
+        view_->refreshEmptyMessage(*destination);
+    } else {
+        persistence::ListDocument document{
+            .id = core::StableId::random(),
+            .kind = persistence::ListKind::scratch,
+            .name = utf8Bytes(QStringLiteral("Search: %1").arg(query)),
+            .pinned = false,
+            .dirty = false,
+            .items = {},
+        };
+        if (!browser.engine().isLocal()) {
+            document.engine = browser.engine().stored();
+        }
+        destination = addList(std::move(document), true);
+    }
     destination->model->appendRows(std::move(rows));
     markTabDirty(*destination);
     syncArtwork(*destination);

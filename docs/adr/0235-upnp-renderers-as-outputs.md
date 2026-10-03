@@ -71,7 +71,10 @@ are delivered as lossless FLAC capped at 48 kHz. Sources already within that
 limit and renderers without that identified constraint keep the original.
 
 **ReplayGain is unsupported.** UPnP outputs play at unity gain and report
-`replay_gain: false` in their output capability. Originals therefore remain
+`replay_gain: false` in their output capability. The engine's ReplayGain mode
+is still accepted while one is selected -- it is the engine's setting, kept
+for the next output -- and simply not applied; refusing it surfaced as an
+error each time a client set ReplayGain (2026-10-03). Originals therefore remain
 originals when the renderer supports their format, and conversion is limited
 to unsupported formats and logical track segments.
 

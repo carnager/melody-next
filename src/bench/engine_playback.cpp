@@ -214,7 +214,8 @@ void EnginePlayback::maintain() {
     emit changed();
 }
 
-void EnginePlayback::request(const QString& method, protocol::Json params, Answer answer) {
+void EnginePlayback::request(const QString& method, protocol::Json params, Answer answer,
+                             const bool settles) {
     if (!client_) {
         answer(std::unexpected(core::Error{.code = core::ErrorCode::io,
                                            .message = "no engine is connected",
@@ -222,17 +223,33 @@ void EnginePlayback::request(const QString& method, protocol::Json params, Answe
         return;
     }
     const QPointer self{this};
+    if (settles) {
+        ++in_flight_;
+    }
     static_cast<void>(QtConcurrent::run(
-        &pool_, [self, this, method, params = std::move(params), answer = std::move(answer)] {
+        &pool_, [self, this, method, params = std::move(params), answer = std::move(answer),
+                 settles] {
             if (!self || client_ == nullptr) {
+                if (settles) {
+                    --in_flight_;
+                }
                 return;
             }
             auto result = client_->call(method.toStdString(), params);
+            if (settles) {
+                --in_flight_;
+            }
             QMetaObject::invokeMethod(
                 self,
-                [self, answer, result = std::move(result)] {
-                    if (self) {
-                        answer(result);
+                [self, answer, result = std::move(result), settles] {
+                    if (!self) {
+                        return;
+                    }
+                    answer(result);
+                    // A state skipped while this was on its way is looked at
+                    // again now.
+                    if (settles) {
+                        emit self->changed();
                     }
                 },
                 Qt::QueuedConnection);
@@ -541,8 +558,12 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
                 }
                 continue;
             }
-            adopt(*answer);
-            adopted = true;
+            // Only a state is taken as one: list.play answers what it
+            // started, and the state asked for after it says the rest.
+            if (answer->contains("status")) {
+                adopt(*answer);
+                adopted = true;
+            }
         }
         // Before the change is announced, so whoever looks at it sees the
         // engine as having caught up.
@@ -741,6 +762,14 @@ void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
     calls.emplace_back(QStringLiteral("playback.replace_queue"), std::move(queue));
     calls.emplace_back(QStringLiteral("playback.play"),
                        protocol::Json{{"entry", entry.to_string()}});
+    send(std::move(calls));
+}
+
+void EnginePlayback::playList(const QString& list, const core::StableId& entry) {
+    std::vector<std::pair<QString, protocol::Json>> calls;
+    calls.emplace_back(QStringLiteral("list.play"),
+                       protocol::Json{{"id", list.toStdString()}, {"entry", entry.to_string()}});
+    calls.emplace_back(QStringLiteral("playback.state"), protocol::Json::object());
     send(std::move(calls));
 }
 

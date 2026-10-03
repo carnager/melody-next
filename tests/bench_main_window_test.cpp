@@ -259,6 +259,7 @@ class BenchMainWindowTest final : public QObject {
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void quittingStopsTheEngineForGood();
     void theWindowsListsAreOnItsEngine();
+    void listsTravelAsEdits();
     void anotherClientsListChangesReachTheWindow();
     void aListChangedWhileClosedIsTakenUpOnOpening();
     void aListFromElsewhereOpensAsATab();
@@ -334,6 +335,7 @@ class BenchMainWindowTest final : public QObject {
     void remoteUpNextKeepsItsIdentityAcrossARestart();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
+    void aKeptSearchOpensAtOnce();
     void narrowWindowKeepsListAndUpNextCompact();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
@@ -1668,6 +1670,115 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     QTest::qWait(300);
     QTRY_VERIFY(!window.list_sync_->busy());
     QVERIFY(listed(id).has_value());
+    (*engine)->close();
+}
+
+// ADR-0256: a list is sent whole once, in batches the engine takes, and
+// then as edits; a reconnect sends nothing; playing names the list.
+void BenchMainWindowTest::listsTravelAsEdits() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto summary = [&engine](const std::string& id) -> protocol::Json {
+        auto all = (*engine)->call("list.all");
+        for (const auto& list : all ? all->value("lists", protocol::Json::array())
+                                    : protocol::Json::array()) {
+            if (list.value("id", std::string{}) == id) {
+                return list;
+            }
+        }
+        return protocol::Json::object();
+    };
+    const auto entries = [&engine](const std::string& id) {
+        std::vector<std::string> found;
+        auto got = (*engine)->call("list.get", protocol::Json{{"id", id}});
+        for (const auto& item : got ? got->value("items", protocol::Json::array())
+                                    : protocol::Json::array()) {
+            found.push_back(item.value("entry", std::string{}));
+        }
+        return found;
+    };
+    const auto shown = [](const LocalListModel& model) {
+        std::vector<std::string> found;
+        for (const auto& row : model.rows()) {
+            found.push_back(row.entry_id.to_string());
+        }
+        return found;
+    };
+
+    // 8,000 tracks, over two megabytes of list: more than the engine takes
+    // in one line, so it arrives in batches.
+    auto* tab = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Long",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto id = tab->document.id.to_string();
+    std::vector<LocalTrackRow> made;
+    for (int index = 0; index < 8'000; ++index) {
+        LocalTrackRow row;
+        row.raw_path = "/music/a rather long folder name/an album of some length/" +
+                       std::to_string(index) + " - a title of usual length.flac";
+        row.title = "A title of usual length " + std::to_string(index);
+        row.artist = "Someone";
+        row.album = "An album of some length";
+        row.album_artist = "Someone";
+        row.date = "1999";
+        row.duration_ms = 200'000;
+        made.push_back(std::move(row));
+    }
+    tab->model->appendRows(std::move(made));
+    window.markTabDirty(*tab);
+    window.persistNow(false);
+    QTRY_VERIFY_WITH_TIMEOUT(summary(id).value("tracks", 0) == 8'000 && !window.list_sync_->busy(),
+                             30'000);
+    QCOMPARE(entries(id), shown(*tab->model));
+    const auto made_at = summary(id).value("revision", std::uint64_t{0});
+
+    // Three rows dragged: one edit, the list as shown.
+    auto rows = tab->model->rows();
+    std::rotate(rows.begin() + 5, rows.begin() + 8, rows.begin() + 101);
+    tab->model->replaceRows(std::move(rows));
+    window.markTabDirty(*tab);
+    window.persistNow(false);
+    QTRY_VERIFY(summary(id).value("revision", std::uint64_t{0}) == made_at + 1U &&
+                !window.list_sync_->busy());
+    QCOMPARE(entries(id), shown(*tab->model));
+
+    // Reconnecting compares; nothing is written.
+    window.list_sync_->reconnected(window.localPlayback());
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QCOMPARE(summary(id).value("revision", std::uint64_t{0}), made_at + 1U);
+
+    // Playing names the list: the engine's queue is its copy, entry for entry.
+    window.playRow(*tab, 10);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback()->state().queue_size == 8'000U, 10'000);
+    auto queue = (*engine)->call("playback.queue");
+    QVERIFY(queue.has_value());
+    const auto& held = queue->at("entries");
+    QCOMPARE(held.size(), std::size_t{8'000});
+    QCOMPARE(held.at(10).value("entry", std::string{}), tab->model->rows()[10].entry_id.to_string());
+    QCOMPARE(held.at(10).at("group").value("album_artist", std::string{}), std::string{"Someone"});
+    QCOMPARE(summary(id).value("revision", std::uint64_t{0}), made_at + 1U);
+
+    // A row taken from the playing list leaves the engine's queue as well.
+    tab->model->removeRowIndexes({0});
+    window.markTabDirty(*tab);
+    QTRY_VERIFY(window.localPlayback()->state().queue_size == 7'999U);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QTest::qWait(300);
+    QCOMPARE(tab->model->rowCount(), 7'999);
+    QCOMPARE(entries(id), shown(*tab->model));
+    QVERIFY2(!engine_.log().contains("refused a"), "nothing the window sent was too long");
     (*engine)->close();
 }
 
@@ -7191,6 +7302,15 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         QVERIFY(!sources->isTabVisible(library_tab));
         QCOMPARE(sources->tabData(sources->currentIndex()).toString(),
                  window.remoteEngine()->key.text());
+        // Gone from the bar too: two segments, not three with one blank, and
+        // the remote's lifted over the right half where a click finds it.
+        QTest::qWait(250);
+        const auto drawn = sources->grab().toImage();
+        const QPoint left_of_middle{drawn.width() * 55 / 100, drawn.height() / 2};
+        QCOMPARE(drawn.pixelColor(left_of_middle * drawn.devicePixelRatio()).rgb(),
+                 TrackknifeStyle::raised(sources->palette()).rgb());
+        QCOMPARE(sources->tabAt(QPoint{sources->width() * 55 / 100, sources->height() / 2}),
+                 sources->currentIndex());
         QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));
@@ -7467,6 +7587,44 @@ void BenchMainWindowTest::narrowWindowKeepsListAndUpNextCompact() {
     // The list's columns fit, so no scroll bar is left standing under it.
     QTRY_COMPARE(tab->view->horizontalHeader()->length(), tab->view->viewport()->width());
     QTRY_VERIFY(!tab->view->horizontalScrollBar()->isVisible());
+}
+
+// ADR-0140: Enter opens the kept search's tab at once, saying the tracks are
+// being collected, and fills that tab when they come; nothing found, it says
+// so there.
+void BenchMainWindowTest::aKeptSearchOpensAtOnce() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* browser = window.findChild<LibraryBrowser*>();
+    QVERIFY(browser != nullptr);
+    const auto tabs_before = window.tabs_->count();
+
+    emit browser->searchStarted(QStringLiteral("ALL"));
+    QCOMPARE(window.tabs_->count(), tabs_before + 1);
+    auto* view = qobject_cast<QTableView*>(window.tabs_->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* tab = window.tabForDocument(view->property("bench-document-id").toString());
+    QVERIFY(tab != nullptr && tab->model->rowCount() == 0);
+    QCOMPARE(window.tabs_->tabText(window.tabs_->currentIndex()), QStringLiteral("Search: ALL"));
+    QVERIFY(static_cast<ui::QueueTableView*>(view)->emptyTitle().contains(QStringLiteral("ALL")));
+
+    LocalTrackRow row;
+    row.raw_path = "/music/found.flac";
+    row.title = "Found";
+    emit browser->searchCommitted(QStringLiteral("ALL"), {row});
+    QCOMPARE(window.tabs_->count(), tabs_before + 1);
+    QCOMPARE(tab->model->rowCount(), 1);
+    QCOMPARE(static_cast<ui::QueueTableView*>(view)->emptyTitle(),
+             window.emptyListTitle(EngineKey::of(tab->document)));
+
+    emit browser->searchStarted(QStringLiteral("nothing like it"));
+    auto* empty = window.tabForDocument(
+        qobject_cast<QTableView*>(window.tabs_->currentWidget())->property("bench-document-id").toString());
+    QVERIFY(empty != nullptr && empty != tab);
+    emit browser->searchFailed(QStringLiteral("nothing like it"), QStringLiteral("Nothing matches"));
+    QCOMPARE(static_cast<ui::QueueTableView*>(empty->view)->emptyTitle(), QStringLiteral("Nothing matches"));
+    QCOMPARE(empty->model->rowCount(), 0);
 }
 
 void BenchMainWindowTest::emptyListsSayHowToFillThem() {

@@ -8,6 +8,7 @@
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
 #include "uicommon/debug_log.hpp"
+#include "workspace/tab_store.hpp"
 #include "workspace/workspace_view.hpp"
 
 #include <QFile>
@@ -461,7 +462,7 @@ std::vector<persistence::TrackViewPreset> Workspace::collectTrackViewLayouts() {
 
 
 void Workspace::persistNow(const bool wait) {
-    if (persistence_ == nullptr) {
+    if (tab_store_ == nullptr || !lists_restored_) {
         return;
     }
     auto writes = collectWrites();
@@ -484,26 +485,50 @@ void Workspace::persistNow(const bool wait) {
             }
         }
     };
-    auto view_layouts = collectTrackViewLayouts();
-    if (wait) {
-        const auto error =
-            persistence_->saveWorkspaceAndWait(std::move(writes), std::move(view_layouts));
-        if (!error.isEmpty()) {
-            view_->showMessage(QStringLiteral("List save failed: %1").arg(error), 5'000);
-            return;
-        }
-        settle(written);
-        return;
-    }
-    persistence_->saveWorkspace(
-        std::move(writes), std::move(view_layouts),
-        [this, settle, written = std::move(written)](QString error) {
-            if (!error.isEmpty()) {
-                view_->showMessage(QStringLiteral("List save failed: %1").arg(error), 5'000);
-                return;
+    // ADR-0259: the window keeps its tabs -- which, in what order, how shown
+    // -- and a cache of the rows of each that changed; the lists are their
+    // engines'.
+    TabStore::State state;
+    const auto layouts = collectTrackViewLayouts();
+    const auto shown = view_->listsInOrder();
+    state.tabs.reserve(shown.size());
+    for (const auto* tab : shown) {
+        TabStore::Tab kept{.id = tab->document.id,
+                           .engine = tab->document.engine,
+                           .name = tab->document.name,
+                           .kind = tab->document.kind,
+                           .pinned = tab->document.pinned,
+                           .dirty = tab->document.dirty,
+                           .layout = {}};
+        const auto binding = utf8Bytes(
+            QStringLiteral("local:%1").arg(QString::fromStdString(tab->document.id.to_string())));
+        for (const auto& layout : layouts) {
+            if (layout.binding == binding) {
+                kept.layout = QByteArray{layout.header_state.data(),
+                                         static_cast<qsizetype>(layout.header_state.size())};
             }
-            settle(written);
-        });
+        }
+        state.tabs.push_back(std::move(kept));
+    }
+    if (const auto* current = view_->currentList(); current != nullptr) {
+        state.active = current->document.id;
+    }
+    for (auto& write : writes) {
+        if (write.items) {
+            tab_store_->writeRows(std::move(write.document));
+        }
+    }
+    TabStore::saveState(state);
+    if (wait) {
+        tab_store_->flush();
+        std::vector<core::StableId> open;
+        open.reserve(state.tabs.size());
+        for (const auto& tab : state.tabs) {
+            open.push_back(tab.id);
+        }
+        tab_store_->dropAllBut(open);
+    }
+    settle(written);
 }
 
 
@@ -520,8 +545,10 @@ void Workspace::restoreLists(std::vector<PreparedList> documents) {
         if (document.kind == persistence::ListKind::mpd) {
             continue;
         }
-        // As stored: saving it again writes its header, not its items.
-        if (auto* tab = addList(std::move(prepared), false); tab != nullptr) {
+        // As stored: saving it again writes its header, not its items --
+        // unless it is stored nowhere yet but in the lists this window kept
+        // before.
+        if (auto* tab = addList(std::move(prepared), false); tab != nullptr && !migrating_) {
             tab->saved = savedStateOf(*tab);
         }
     }
@@ -537,7 +564,8 @@ void Workspace::restoreLists(std::vector<PreparedList> documents) {
             },
             true));
     } else {
-        view_->showList(*list_tabs_.front());
+        auto* shown = restored_active_ ? tabForDocument(*restored_active_) : nullptr;
+        view_->showList(shown != nullptr ? *shown : *list_tabs_.front());
     }
     if (!pending_open_paths_.empty()) {
         auto pending = std::exchange(pending_open_paths_, std::vector<std::string>{});

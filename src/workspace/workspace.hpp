@@ -59,6 +59,7 @@ namespace trackknife::bench {
 class LocalLibraryPanel;
 class LibraryBrowser;
 enum class LocalLibraryAction;
+class TabStore;
 class WorkspaceView;
 
 // Widget properties, persisted UI state and JSON all carry a document identity
@@ -277,6 +278,13 @@ class Workspace final : public QObject {
     quint64 engine_queue_asked_{0};
     quint64 engine_reattach_asked_{0};
     QTimer* persistence_timer_{nullptr};
+    // ADR-0259: what of its tabs this window keeps -- not the lists.
+    std::unique_ptr<TabStore> tab_store_;
+    // The tab that was shown when the window last closed.
+    std::optional<core::StableId> restored_active_;
+    // ADR-0259: the tabs restored come from the lists this window used to
+    // keep, so none of them is in the tab store yet.
+    bool migrating_{false};
     QFutureWatcher<DiscoveryOutcome> discovery_watcher_;
     QString discovery_target_document_;
     int discovery_insertion_row_{-1};
@@ -511,6 +519,9 @@ class Workspace final : public QObject {
     static void scheduleWorkspaceRestore(const QString& path);
     // The lists as the workspace starts: those saved, or one to begin with.
     void restoreLists(std::vector<PreparedList> documents);
+    // ADR-0259: the tabs as this window keeps them, each from its cache --
+    // or, its cache gone, empty until its engine answers.
+    void restoreFromTabStore();
     // What a start does once the lists are restored.
     void restoredWorkspace(const QString& error);
     // What is saved of each open list, in the order they are shown.

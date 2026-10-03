@@ -16,6 +16,7 @@
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "workspace/lastfm_settings_session.hpp"
+#include "workspace/tab_store.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -415,6 +416,7 @@ class BenchMainWindowTest final : public QObject {
     void trackListFindActionsFollowActiveTab();
     void noncontiguousLocalReorderPreservesOccurrences();
     void persistsPinnedDuplicatedAndDirtyTabs();
+    void theWindowKeepsItsTabsNotTheLists();
     void richMetadataValuesAndIdentitiesSurviveListRestart();
     void metadataPropertiesFileSelectionDrivesIndividualAndBulkEdits();
     void metadataFieldReviewPreservesDraftAndSelectionScope();
@@ -540,6 +542,7 @@ void BenchMainWindowTest::cleanup() {
     settings.clear();
     settings.sync();
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
+    QDir{QStandardPaths::writableLocation(QStandardPaths::CacheLocation)}.removeRecursively();
 }
 
 void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
@@ -2546,18 +2549,13 @@ void BenchMainWindowTest::theRemotesListsTakeItsIdOnceItSaysIt() {
         window.persistNow(true);
         window.close();
     }
-    // Stored under the id, not the placeholder.
+    // Kept under the id, not the placeholder (ADR-0259: as the window keeps
+    // its tabs).
     {
-        auto repository = persistence::ListRepository::open(
-            std::filesystem::path{
-                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString()} /
-            "lists.sqlite");
-        QVERIFY(repository.has_value());
-        const auto loaded = repository->load_all();
-        QVERIFY(loaded.has_value());
+        const auto kept = TabStore::loadState();
         const auto found = std::ranges::find(
-            *loaded, list_id, [](const auto& document) { return document.id.to_string(); });
-        QVERIFY(found != loaded->end());
+            kept.tabs, list_id, [](const TabStore::Tab& tab) { return tab.id.to_string(); });
+        QVERIFY(found != kept.tabs.end());
         QCOMPARE(QString::fromStdString(found->engine), id);
     }
     // Again: known by its id from the start, and its tab with it.
@@ -13516,19 +13514,12 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
 
     const QByteArray future_layout{
         R"({"schema":99,"presentation":"future","columns":[],"keep":true})"};
-    const auto database_path = std::filesystem::path{
-        QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
-                          QStringLiteral("/lists.sqlite"))
-            .toStdString()};
+    // ADR-0259: a layout this release cannot read, as a later one would keep it.
     {
-        auto repository = persistence::ListRepository::open(database_path);
-        QVERIFY(repository.has_value());
-        const std::vector presets{persistence::TrackViewPreset{
-            .binding = binding.toStdString(),
-            .header_state = std::string{future_layout.constData(),
-                                        static_cast<std::size_t>(future_layout.size())},
-        }};
-        QVERIFY(repository->replace_view_presets(presets).has_value());
+        auto kept = TabStore::loadState();
+        QCOMPARE(kept.tabs.size(), 1U);
+        kept.tabs.front().layout = future_layout;
+        TabStore::saveState(kept);
     }
     {
         BenchMainWindow fallback;
@@ -13540,18 +13531,153 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         QVERIFY(fallback.statusBar()->currentMessage().contains(QStringLiteral("preserved")));
         QVERIFY(fallback.close());
     }
-    auto repository = persistence::ListRepository::open(database_path);
-    QVERIFY(repository.has_value());
-    const auto presets = repository->load_view_presets();
-    QVERIFY(presets.has_value());
-    // One per list tab; the MPD queue's own preset went with the queue.
-    QCOMPARE(presets->size(), 1U);
-    const auto stored =
-        std::ranges::find(*presets, binding.toStdString(), &persistence::TrackViewPreset::binding);
-    QVERIFY(stored != presets->end());
-    const QByteArray stored_layout{stored->header_state.data(),
-                                   static_cast<qsizetype>(stored->header_state.size())};
-    QCOMPARE(stored_layout, future_layout);
+    const auto kept = TabStore::loadState();
+    // One per list tab, kept as it was.
+    QCOMPARE(kept.tabs.size(), 1U);
+    QCOMPARE(QStringLiteral("local:%1").arg(QString::fromStdString(kept.tabs.front().id.to_string())),
+             binding);
+    QCOMPARE(kept.tabs.front().layout, future_layout);
+}
+
+// ADR-0259: the window keeps which lists it has open, and a cache of their
+// rows -- not the lists. Its former copy is read once, as the migration, and
+// neither read nor written after; a tab whose engine is away opens from its
+// cache, and one whose cache is gone from its engine.
+void BenchMainWindowTest::theWindowKeepsItsTabsNotTheLists() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("kept.wav"));
+    write_wave(path, wave_sample_rate / 10U);
+    const auto raw_path = QFile::encodeName(path).toStdString();
+    const auto database = std::filesystem::path{
+        QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+                          QStringLiteral("/lists.sqlite"))
+            .toStdString()};
+    QDir{}.mkpath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    const auto kept_id = core::StableId::random();
+    const auto scratch_id = core::StableId::random();
+    {
+        // As an earlier release left it: the lists in the window's database.
+        auto repository = persistence::ListRepository::open(database);
+        QVERIFY(repository.has_value());
+        persistence::ListItem item;
+        item.source = persistence::ListSource::local;
+        item.source_reference = raw_path;
+        item.duration_ms = 100;
+        item.fields.push_back({.name = "title", .value = "Seeded"});
+        const std::vector<persistence::ListDocument> seeded{
+            persistence::ListDocument{.id = kept_id,
+                                                             .kind = persistence::ListKind::saved,
+                                                             .name = "Kept",
+                                                             .pinned = true,
+                                                             .dirty = false,
+                                                             .items = {item},
+                                                             .engine = {}},
+            persistence::ListDocument{.id = scratch_id,
+                                      .kind = persistence::ListKind::scratch,
+                                      .name = "Scratch",
+                                      .pinned = false,
+                                      .dirty = false,
+                                      .items = {},
+                                      .engine = {}}};
+        QVERIFY(repository->replace_all(seeded).has_value());
+    }
+    QVERIFY(!TabStore::hasState());
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        auto* kept = window.tabForDocument(QString::fromStdString(kept_id.to_string()));
+        QVERIFY(kept != nullptr);
+        QCOMPARE(kept->document.name, std::string{"Kept"});
+        QVERIFY(kept->document.pinned);
+        QCOMPARE(kept->model->rows().front().title, std::string{"Seeded"});
+        QVERIFY(window.tabForDocument(QString::fromStdString(scratch_id.to_string())) != nullptr);
+        window.persistNow(true);
+        QVERIFY(TabStore::hasState());
+        // On its engine, as ADR-0233's migration has it.
+        auto other = protocol::Client::connect(protocol::Endpoint{
+            .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+        QVERIFY(other.has_value());
+        QTRY_VERIFY_WITH_TIMEOUT(
+            (*other)->call("list.get", protocol::Json{{"id", kept_id.to_string()}}).has_value(),
+            5'000);
+        (*other)->close();
+        QVERIFY(window.close());
+    }
+    {
+        // Changed where the lists used to be: no longer read, so not seen.
+        auto repository = persistence::ListRepository::open(database);
+        QVERIFY(repository.has_value());
+        auto lists = repository->load_all();
+        QVERIFY(lists.has_value());
+        for (auto& list : *lists) {
+            if (list.id == kept_id) {
+                list.name = "Changed in the old table";
+            }
+        }
+        QVERIFY(repository->replace_all(*lists).has_value());
+    }
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        auto* kept = window.tabForDocument(QString::fromStdString(kept_id.to_string()));
+        QVERIFY(kept != nullptr);
+        QCOMPARE(kept->document.name, std::string{"Kept"});
+        QVERIFY(kept->document.pinned);
+        QCOMPARE(kept->model->rowCount(), 1);
+        // Shown last, shown first.
+        window.tabs_->setCurrentWidget(kept->view);
+        QTRY_VERIFY(!window.list_sync_->busy());
+        window.persistNow(true);
+        QVERIFY(window.close());
+    }
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QCOMPARE(window.currentListTab()->document.id, kept_id);
+        QVERIFY(window.close());
+    }
+    {
+        // Nor written: the old table still says what it was changed to.
+        auto repository = persistence::ListRepository::open(database);
+        QVERIFY(repository.has_value());
+        const auto lists = repository->load_all();
+        QVERIFY(lists.has_value());
+        const auto old = std::ranges::find(*lists, kept_id, &persistence::ListDocument::id);
+        QVERIFY(old != lists->end());
+        QCOMPARE(old->name, std::string{"Changed in the old table"});
+    }
+
+    // The engine away: the tab opens from its cache.
+    engine_.stop();
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        auto* kept = window.tabForDocument(QString::fromStdString(kept_id.to_string()));
+        QVERIFY(kept != nullptr);
+        QCOMPARE(kept->model->rowCount(), 1);
+        QCOMPARE(kept->model->rows().front().title, std::string{"Seeded"});
+        QVERIFY(window.close());
+    }
+    QVERIFY2(engine_.start(), engine_.log().constData());
+
+    // The cache gone: the tab is its engine's list again once it answers.
+    QDir{QStandardPaths::writableLocation(QStandardPaths::CacheLocation)}.removeRecursively();
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        auto* kept = window.tabForDocument(QString::fromStdString(kept_id.to_string()));
+        QVERIFY(kept != nullptr);
+        QCOMPARE(kept->document.name, std::string{"Kept"});
+        QTRY_COMPARE_WITH_TIMEOUT(kept->model->rowCount(), 1, 5'000);
+        QCOMPARE(kept->model->rows().front().raw_path, raw_path);
+        QVERIFY(window.close());
+    }
 }
 
 void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {

@@ -144,16 +144,18 @@ ListPersistenceService::~ListPersistenceService() {
     thread_->wait();
 }
 
-void ListPersistenceService::initialize(WorkspaceCallback callback) {
+void ListPersistenceService::initialize(WorkspaceCallback callback, const bool lists_too) {
     const QPointer self{this};
-    invokeQueued(worker_, [self, state = state_, callback = std::move(callback)]() mutable {
+    invokeQueued(worker_, [self, state = state_, callback = std::move(callback),
+                           lists_too]() mutable {
         PersistedWorkspace snapshot;
         auto opened = engine::Workspace::open(state->database_path);
         if (!opened) {
             state->initialization_error = errorText(opened.error());
         } else {
             state->workspace.emplace(std::move(*opened));
-            auto lists = state->workspace->load_all();
+            auto lists = lists_too ? state->workspace->load_all()
+                                   : core::Result<std::vector<persistence::ListDocument>>{};
             auto profiles = state->workspace->load_profiles();
             auto presets = state->workspace->load_view_presets();
             if (!lists) {

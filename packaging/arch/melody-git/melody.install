@@ -11,8 +11,9 @@ the old one left behind:
   - no melodyd.toml and no setup wizard: options are flags, in
     ~/.config/melody/melodyd.conf for the user service
   - a new library database: add your music again and let it scan
-  - melody-tui, melody-rofi, melody-musiclist, melody-lrcmatch and
-    melody-watcher do not work with it; remove them if you have them
+  - melody-tui, melody-rofi, melody-lrcmatch and melody-watcher do not
+    work with it; remove them if you have them. melody-musiclist does again:
+    it comes with melody-cli-git
 
 What talks to it: trackknife-git (the desktop app), melody-cli-git, the
 Android app, and melody-agent-git for speakers elsewhere.

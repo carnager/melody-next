@@ -185,6 +185,28 @@ with `melody-rofi tracks`, a track) in rofi and puts it in Up Next, adds it to
 the list that plays, or replaces that list and plays it (`melody-rofi tracks
 --engine gemenon` for a particular engine).
 
+## melody-musiclist
+
+Every album of an engine's library with its rating, as one sortable HTML
+page, copied with `scp` to where a web server serves it. It asks the engine
+through `melody-cli`, so it needs that and Python. Configured in
+`~/.config/melody/melody-musiclist.toml` (or the `melody-musicpage.toml` of
+earlier releases); the first run writes one to fill in:
+
+```toml
+[engine]
+name = "gemenon"        # or server = "HOST:PORT"; neither: this computer's
+password_file = ""      # for a TCP connection
+
+[upload]
+host = "webhost"
+path = "/srv/http/list"
+```
+
+An album's computed rating is the mean of its tracks' ratings, once at least
+70% of them are rated. `melody-musiclist --output page.html` writes the page
+and uploads nothing.
+
 ## When something doesn't work
 
 - **The engine isn't found by name.** Multicast DNS needs 5353/udp between

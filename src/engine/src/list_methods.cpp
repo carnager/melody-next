@@ -18,6 +18,9 @@
 namespace trackknife::engine {
 namespace {
 
+// ADR-0259: entries described in one request.
+constexpr std::size_t describe_limit = 2'000U;
+
 using protocol::Json;
 
 [[nodiscard]] core::Error bad_params(std::string message, std::string member) {
@@ -381,7 +384,7 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         return Json{{"lists", std::move(rendered)}};
     });
 
-    dispatcher.on("list.get", [&workspace, catalogue](const Json& params) -> core::Result<Json> {
+    dispatcher.on("list.get", [&workspace](const Json& params) -> core::Result<Json> {
         auto id = required_id(params);
         if (!id) {
             return std::unexpected(std::move(id.error()));
@@ -399,22 +402,6 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         auto items = Json::array();
         for (const auto& item : (*list)->items) {
             items.push_back(item_json(item));
-        }
-        if (catalogue != nullptr && params.value("describe", false)) {
-            std::vector<std::string> paths;
-            paths.reserve((*list)->items.size());
-            for (const auto& item : (*list)->items) {
-                paths.push_back(item.raw_path);
-            }
-            auto described = catalogue->described_tracks(paths);
-            if (!described) {
-                return std::unexpected(std::move(described.error()));
-            }
-            for (std::size_t index = 0; index < described->size(); ++index) {
-                if (const auto& track = (*described)[index]) {
-                    items[index]["library"] = describe_track(*track);
-                }
-            }
         }
         rendered["items"] = std::move(items);
         return rendered;
@@ -590,6 +577,66 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
             }
         }
         return Json{{"deleted", *deleted}};
+    });
+
+    // ADR-0259: what the library knows of some of a list's entries, for a
+    // client that shows the list's own names first and fills in the rest a
+    // part at a time.
+    dispatcher.on("list.describe",
+                  [&workspace, catalogue](const Json& params) -> core::Result<Json> {
+        auto id = required_id(params);
+        if (!id) {
+            return std::unexpected(std::move(id.error()));
+        }
+        const auto asked = params.find("entries");
+        if (asked == params.end() || !asked->is_array() || asked->size() > describe_limit) {
+            return std::unexpected(
+                bad_params("entries names at most 2000 of the list's entries", "entries"));
+        }
+        std::vector<core::StableId> entries;
+        entries.reserve(asked->size());
+        for (const auto& value : *asked) {
+            auto entry = value.is_string() ? core::StableId::parse(value.get<std::string>())
+                                           : core::Result<core::StableId>{
+                                                 std::unexpected(core::Error{})};
+            if (!entry) {
+                return std::unexpected(bad_params("an entry is named by its identity", "entries"));
+            }
+            entries.push_back(*entry);
+        }
+        auto paths = workspace.engine_list_entry_paths(*id, entries);
+        if (!paths) {
+            return std::unexpected(std::move(paths.error()));
+        }
+        std::vector<std::string> held;
+        for (const auto& path : paths->second) {
+            if (path) {
+                held.push_back(*path);
+            }
+        }
+        std::vector<std::optional<persistence::LibraryTrackSnapshot>> tracks;
+        if (catalogue != nullptr && !held.empty()) {
+            auto described = catalogue->described_tracks(held);
+            if (!described) {
+                return std::unexpected(std::move(described.error()));
+            }
+            tracks = std::move(*described);
+        }
+        auto items = Json::array();
+        std::size_t next = 0U;
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            Json item{{"entry", entries[index].to_string()}, {"library", nullptr}};
+            if (paths->second[index]) {
+                if (next < tracks.size() && tracks[next]) {
+                    item["library"] = describe_track(*tracks[next]);
+                }
+                ++next;
+            } else {
+                item["missing"] = true;
+            }
+            items.push_back(std::move(item));
+        }
+        return Json{{"revision", paths->first}, {"items", std::move(items)}};
     });
 
     // ADR-0259: a kept search, made here: a working list of a query's

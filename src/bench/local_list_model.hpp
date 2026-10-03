@@ -176,6 +176,10 @@ class LocalListModel final : public QAbstractTableModel {
     // several logical chapter rows. The first row keeps the original model
     // position and any following rows are inserted directly after it.
     bool applyProbeRows(const std::string& raw_path, int hint_row, std::vector<LocalTrackRow> rows);
+    // ADR-0259: the row at `row`, when it is still entry `entry`, takes what
+    // its engine's library knows of its file; its place, identity and the
+    // part of the file it plays stay. False when it is not that entry.
+    bool describeRow(int row, const core::StableId& entry, LocalTrackRow described);
     // Refreshes every duplicate/logical occurrence of one verified physical
     // source while retaining annotation, segment, and sidecar layers.
     [[nodiscard]] core::Result<std::size_t>

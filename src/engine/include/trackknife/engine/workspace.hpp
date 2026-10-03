@@ -119,6 +119,10 @@ class Workspace final {
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
                                                      std::optional<std::uint64_t> expected_revision);
+    // ADR-0259: see ListRepository::engine_list_entry_paths.
+    [[nodiscard]] core::Result<std::pair<std::uint64_t, std::vector<std::optional<std::string>>>>
+    engine_list_entry_paths(const core::StableId& id,
+                            const std::vector<core::StableId>& entries) const;
     // ADR-0259: see ListRepository::draft_engine_list and
     // commit_engine_list_draft.
     [[nodiscard]] core::Result<persistence::EngineListSummary>

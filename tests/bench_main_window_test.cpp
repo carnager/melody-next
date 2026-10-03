@@ -2045,7 +2045,7 @@ void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
 
 // ADR-0259: a list opened from its engine shows what the engine's library
 // knows of each file -- every tag and the revision -- not only the few names
-// the list was saved with.
+// the list was saved with, described after it opens.
 void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -2079,7 +2079,8 @@ void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
                 nullptr);
     QTRY_COMPARE(tab->model->rowCount(), 2);
     const auto& rows = tab->model->rows();
-    QCOMPARE(rows[0].title, std::string{"Metadata Fixture"});
+    // The names it was saved with first, then the library's.
+    QTRY_COMPARE(rows[0].title, std::string{"Metadata Fixture"});
     QCOMPARE(rows[0].album, std::string{"Rich Metadata"});
     QStringList names;
     for (const auto& field : rows[0].metadata.fields) {
@@ -2092,6 +2093,24 @@ void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
              static_cast<std::uint64_t>(QFileInfo{file}.size()));
     QCOMPARE(rows[1].title, std::string{"Outside"});
     QVERIFY(!rows[1].source_revision.has_value());
+
+    // Described a part at a time: the indexed file comes after a part's worth
+    // of others.
+    std::vector<std::string> many;
+    for (int index = 0; index < 2'000; ++index) {
+        many.push_back("/music/not-indexed/" + std::to_string(index) + ".flac");
+    }
+    many.push_back(raw);
+    auto long_list = (*other)->call("list.save", protocol::Json{{"name", "Long"},
+                                                                {"kind", "saved"},
+                                                                {"items", listItems(many)}});
+    QVERIFY(long_list.has_value());
+    const auto long_id = QString::fromStdString(long_list->value("id", std::string{}));
+    window.openEngineList(EngineKey::local(), long_id);
+    auto* long_tab = static_cast<BenchMainWindow::ListTab*>(nullptr);
+    QTRY_VERIFY((long_tab = window.tabForDocument(long_id)) != nullptr);
+    QTRY_COMPARE(long_tab->model->rowCount(), 2'001);
+    QTRY_COMPARE(long_tab->model->rows().back().title, std::string{"Metadata Fixture"});
     (*other)->close();
 }
 

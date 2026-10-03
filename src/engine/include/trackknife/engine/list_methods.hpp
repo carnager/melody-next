@@ -23,6 +23,8 @@ class Workspace;
 //   list.draft {of}                            -> summary (ADR-0259)
 //   list.commit {id, force?}                   -> summary of the saved list
 //   list.from_query {query, name, words?}      -> summary of a new working list
+//   list.describe {id, entries}                -> {revision, items: [{entry,
+//                                                 library|null, missing?}]}
 //   list.play {id, entry?}                     -> {"playing": entry}
 //   list.relocate {moves: [{from, to}]}        -> {"changed": [id]}
 //   event list.changed {id, revision?, deleted}
@@ -41,9 +43,9 @@ class Workspace;
 // {"update": [item]}. An item also carries album_artist, date and an optional
 // replay_gain {track_gain_db, track_peak, album_gain_db, album_peak}.
 //
-// ADR-0259: `list.get {id, describe: true}` gives each item the library
-// indexes a "library" description (track_description.hpp), from `catalogue`;
-// its own title, artist and album are only for a file it does not.
+// ADR-0259: `list.describe` gives each entry the library indexes a "library"
+// description (track_description.hpp), from `catalogue`; an item's own
+// title, artist and album are only for a file it does not.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
                            Player& player, const LocalCatalogue* catalogue = nullptr);
 

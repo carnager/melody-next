@@ -182,10 +182,6 @@ class EngineListSync final : public QObject {
     void compare(const EngineKey& key);
     void compared(const EngineKey& key);
     void fetch(const std::string& id, const EngineKey& key, Fetch why);
-    // ADR-0259: a list taken up from its engine, read again with what the
-    // engine's library knows of each entry -- asked only then, as for a long
-    // list that is many times the entries alone.
-    void adoptDescribed(const std::string& id, const EngineKey& key);
     void create(const std::string& id, Known& known,
                 const std::vector<persistence::EngineListItem>& items);
     void edit(const std::string& id, Known& known,

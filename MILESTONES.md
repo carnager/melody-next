@@ -77,7 +77,10 @@ Where they stand (2026-10-03): M11's step 3d is done as ADR-0259 has it --
 the window keeps its tabs, not the lists; drafts in the window and kept
 searches made on the engine are deferred past 1.0 -- and the version check
 and compatibility policy are ADR-0260 (`docs/protocol-levels.md`). The quiet
-period starts from the last level bump.
+period starts from the last level bump. Optimised builds pass the suite: the
+release preset with makepkg's flags (`-O3`, LTO, `_FORTIFY_SOURCE=3`,
+`_GLIBCXX_ASSERTIONS`), GCC 16.2.1, 101 of 101, with no warnings once a test
+reading past a string literal and an unbounded encoder result were fixed.
 
 Flathub and other distribution beyond the AUR come after 1.0.
 

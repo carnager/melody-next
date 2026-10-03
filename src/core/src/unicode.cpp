@@ -162,7 +162,8 @@ Result<std::string> unicodeEncodeCodePoint(const std::uint32_t code_point) {
     std::array<utf8proc_uint8_t, 4> encoded{};
     const auto encoded_size =
         utf8proc_encode_char(static_cast<utf8proc_int32_t>(code_point), encoded.data());
-    if (encoded_size <= 0) {
+    // At most four bytes, which utf8proc promises and the compiler cannot see.
+    if (encoded_size <= 0 || static_cast<std::size_t>(encoded_size) > encoded.size()) {
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "invalid Unicode scalar value", {}});
     }

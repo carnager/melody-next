@@ -205,7 +205,7 @@ void the_method_surface_speaks_for_the_player(engine::Player& player) {
     engine::register_playback_methods(dispatcher, player);
 
     // Paths cross as base64, because a path is bytes.
-    const std::string raw{"/music/broken-\xff.flac", 22U};
+    const std::string raw{"/music/broken-\xff.flac"};
     protocol::Json entries = protocol::Json::array();
     protocol::Json one = protocol::Json::object();
     one["path"] = protocol::encode_raw_path(raw);

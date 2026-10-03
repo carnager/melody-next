@@ -169,6 +169,12 @@ class DeferredCatalogue final : public engine::Catalogue {
          const core::CancellationToken& cancellation) const override {
         return get().find(compiled, format, limit, cancellation);
     }
+    // Forwarded, so an engine elsewhere chooses where its library is.
+    [[nodiscard]] core::Result<engine::DynamicSelected>
+    select(const engine::DynamicSelection& selection, const std::set<std::string>& exclude,
+           const core::CancellationToken& cancellation) const override {
+        return get().select(selection, exclude, cancellation);
+    }
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation) const override {

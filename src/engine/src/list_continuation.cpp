@@ -4,6 +4,7 @@
 
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/dynamic_selection.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -31,9 +32,37 @@ constexpr std::string_view store_key = "list-continuation.v1";
 
 // The rule, without what played in the last `days` days: a track never
 // played has no age, and a missing age matches no comparison -- hence both.
+// The rule's own query when it cannot be narrowed so.
 [[nodiscard]] std::string without_recent(const std::string& query, const int days) {
-    return "(" + query + ") AND (HISTORY(dayssinceplayed) MISSING OR HISTORY(dayssinceplayed) " +
-           "GREATER " + std::to_string(days - 1) + ")";
+    auto narrowed = query::narrow_tkq_source(
+        query, "HISTORY(dayssinceplayed) MISSING OR HISTORY(dayssinceplayed) GREATER " +
+                   std::to_string(days - 1));
+    return narrowed ? std::move(*narrowed) : query;
+}
+
+// A rule as it is stored, told and set: {rule|id, name, query, ...}.
+[[nodiscard]] Json rule_json(const ContinuationRule& rule) {
+    return Json{{"rule", rule.rule_id},     {"name", rule.name},
+                {"query", rule.query},      {"group_by", rule.group_by},
+                {"groups", rule.groups},    {"per_group", rule.per_group},
+                {"limit", rule.limit},      {"shuffle", rule.shuffle}};
+}
+
+[[nodiscard]] ContinuationRule rule_from(const Json& value, const char* id_key) {
+    const auto count = [&value](const char* key, const std::size_t fallback) {
+        const auto found = value.find(key);
+        return found != value.end() && found->is_number_integer() && found->get<std::int64_t>() >= 0
+                   ? found->get<std::size_t>()
+                   : fallback;
+    };
+    return ContinuationRule{.rule_id = value.value(id_key, std::string{}),
+                            .name = value.value("name", std::string{}),
+                            .query = value.value("query", std::string{}),
+                            .group_by = value.value("group_by", std::string{}),
+                            .groups = count("groups", 0U),
+                            .per_group = count("per_group", 0U),
+                            .limit = std::min(count("limit", 100U), dynamic_selection_limit),
+                            .shuffle = value.value("shuffle", false)};
 }
 
 [[nodiscard]] std::string first_value(const persistence::TkqRowFacts& facts,
@@ -64,9 +93,7 @@ void ListContinuation::load() {
         if (!value.is_object() || !core::StableId::parse(list)) {
             continue;
         }
-        ContinuationRule rule{.rule_id = value.value("rule", std::string{}),
-                              .name = value.value("name", std::string{}),
-                              .query = value.value("query", std::string{})};
+        auto rule = rule_from(value, "rule");
         if (!rule.query.empty()) {
             rules_.emplace(list, std::move(rule));
         }
@@ -76,7 +103,7 @@ void ListContinuation::load() {
 void ListContinuation::store_locked() {
     Json lists = Json::object();
     for (const auto& [list, rule] : rules_) {
-        lists[list] = Json{{"rule", rule.rule_id}, {"name", rule.name}, {"query", rule.query}};
+        lists[list] = rule_json(rule);
     }
     const Json document{{"version", 1}, {"lists", std::move(lists)}};
     static_cast<void>(workspace_->save_engine_state(store_key, document.dump(), now_ms()));
@@ -88,8 +115,9 @@ void ListContinuation::announce_locked() const {
     }
     auto lists = Json::array();
     for (const auto& [list, rule] : rules_) {
-        lists.push_back(Json{
-            {"list", list}, {"rule", rule.rule_id}, {"name", rule.name}, {"query", rule.query}});
+        auto told = rule_json(rule);
+        told["list"] = list;
+        lists.push_back(std::move(told));
     }
     sink_(protocol::Event{.name = "list.continuations",
                           .data = Json{{"continuations", std::move(lists)}}});
@@ -159,36 +187,40 @@ std::size_t ListContinuation::continue_if_ending(Player& player) {
         queued.insert(entry.source.raw_path);
     }
     // Not what is queued; preferably not what played lately either, but
-    // rather that than nothing, should the rule be narrow.
+    // rather that than nothing, should the rule be narrow. A rule that picks
+    // groups continues with its selection -- the next album, whole -- and one
+    // that does not with batch_size tracks at random (ADR-0258).
+    const bool grouped = rule.groups > 0U && !rule.group_by.empty();
     std::vector<std::string> candidates;
     for (const auto& source : {without_recent(rule.query, recent_days), rule.query}) {
-        auto compiled = query::compile_tkq(source);
-        if (!compiled) {
-            std::cerr << "melodyd: the continuation of " << list << " (" << rule.name
-                      << ") does not compile: " << compiled.error().message << "\n";
+        const DynamicSelection selection{
+            .query = source,
+            .limit = grouped ? rule.limit : batch_size,
+            .shuffle = grouped ? rule.shuffle : true,
+            .group_by = grouped ? rule.group_by : std::string{},
+            .groups = grouped ? rule.groups : 0U,
+            .per_group = grouped ? rule.per_group : 0U};
+        core::Result<DynamicSelected> selected = std::unexpected(core::Error{});
+        {
+            std::mt19937 random;
+            {
+                const std::lock_guard guard{mutex_};
+                random.seed(random_());
+            }
+            selected = select_dynamic(*catalogue_, selection, queued, random);
+        }
+        if (!selected) {
+            std::cerr << "melodyd: continuing " << list << " (" << rule.name
+                      << ") failed: " << selected.error().message << "\n";
             return 0U;
         }
-        auto paths = catalogue_->filter_paths(*compiled);
-        if (!paths) {
-            std::cerr << "melodyd: continuing " << list << " failed: " << paths.error().message
-                      << "\n";
-            return 0U;
-        }
-        std::erase_if(*paths, [&queued](const std::string& path) { return queued.contains(path); });
-        if (!paths->empty()) {
-            candidates = std::move(*paths);
+        if (!selected->paths.empty()) {
+            candidates = std::move(selected->paths);
             break;
         }
     }
     if (candidates.empty()) {
         return 0U;
-    }
-    {
-        const std::lock_guard guard{mutex_};
-        std::ranges::shuffle(candidates, random_);
-    }
-    if (candidates.size() > batch_size) {
-        candidates.resize(batch_size);
     }
     auto tracks = catalogue_->cached_tracks(candidates);
     if (!tracks) {
@@ -220,10 +252,9 @@ void register_list_continuation_methods(protocol::Dispatcher& dispatcher,
     dispatcher.on("list.continuations", [&continuation](const Json&) -> core::Result<Json> {
         auto lists = Json::array();
         for (const auto& [list, rule] : continuation.all()) {
-            lists.push_back(Json{{"list", list},
-                                 {"rule", rule.rule_id},
-                                 {"name", rule.name},
-                                 {"query", rule.query}});
+            auto told = rule_json(rule);
+            told["list"] = list;
+            lists.push_back(std::move(told));
         }
         return Json{{"continuations", std::move(lists)}};
     });
@@ -233,9 +264,7 @@ void register_list_continuation_methods(protocol::Dispatcher& dispatcher,
                       std::optional<ContinuationRule> rule;
                       if (const auto given = params.find("rule");
                           given != params.end() && given->is_object()) {
-                          rule = ContinuationRule{.rule_id = given->value("id", std::string{}),
-                                                  .name = given->value("name", std::string{}),
-                                                  .query = given->value("query", std::string{})};
+                          rule = rule_from(*given, "id");
                       }
                       if (auto set = continuation.set(list, std::move(rule)); !set) {
                           return std::unexpected(std::move(set.error()));

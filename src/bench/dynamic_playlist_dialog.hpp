@@ -76,6 +76,9 @@ class DynamicPlaylistDialog final : public QDialog {
     QLineEdit* tag_;
     QSpinBox* limit_;
     QCheckBox* shuffle_;
+    QLineEdit* group_by_;
+    QSpinBox* groups_;
+    QSpinBox* per_group_;
     QFormLayout* form_;
     QLabel* status_;
     QPushButton* refresh_;

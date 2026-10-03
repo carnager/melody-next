@@ -25,6 +25,13 @@ struct ContinuationRule {
     std::string rule_id;
     std::string name;
     std::string query;
+    // ADR-0258: a rule that picks groups -- an album, artists -- continues
+    // with its selection; one that does not, with batch_size tracks.
+    std::string group_by;
+    std::size_t groups{0U};
+    std::size_t per_group{0U};
+    std::size_t limit{100U};
+    bool shuffle{false};
 
     friend bool operator==(const ContinuationRule&, const ContinuationRule&) = default;
 };
@@ -72,8 +79,9 @@ class ListContinuation final {
 };
 
 // list.continuations -- every continued list and its rule -- and
-// list.continuation.set {list, rule?: {id, name, query}}, which sets or, with
-// no rule, ends one. Changes are told as the list.continuations event.
+// list.continuation.set {list, rule?: {id, name, query, group_by?, groups?,
+// per_group?, limit?, shuffle?}}, which sets or, with no rule, ends one.
+// Changes are told as the list.continuations event.
 void register_list_continuation_methods(protocol::Dispatcher& dispatcher,
                                         ListContinuation& continuation);
 

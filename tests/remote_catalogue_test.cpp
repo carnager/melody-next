@@ -11,10 +11,12 @@
 #include "trackknife/engine/server.hpp"
 #include "trackknife/query/tkq.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -129,6 +131,35 @@ void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std:
         require(!(*facts)[0].facts.history.has_value() || (*facts)[0].facts.history->size() == 6U,
                 label + ": history is absent or complete");
     }
+
+    // ADR-0258: the engine selects -- here one group of everything,
+    // whole, and a shuffled sample of one -- leaving out what is
+    // excluded, and tells how many matched.
+    engine::DynamicSelection grouped;
+    grouped.query = "ALL";
+    grouped.limit = 500U;
+    grouped.group_by = "one";
+    grouped.groups = 1U;
+    const auto whole = catalogue.select(grouped);
+    require(whole.has_value(), label + ": selecting a group");
+    require(whole->matched == indexed->size(), label + ": everything matched");
+    require(whole->paths == *indexed, label + ": the one group, whole, in library order");
+    engine::DynamicSelection sample;
+    sample.query = "ALL";
+    sample.limit = 1U;
+    sample.shuffle = true;
+    const std::set<std::string> excluded =
+        indexed->empty() ? std::set<std::string>{} : std::set<std::string>{(*indexed)[0]};
+    const auto one = catalogue.select(sample, excluded);
+    require(one.has_value(), label + ": selecting a sample");
+    require(one->paths.size() == std::min<std::size_t>(1U, indexed->size() - excluded.size()),
+            label + ": as many as asked for");
+    require(one->paths.empty() || !excluded.contains(one->paths[0]),
+            label + ": never what is excluded");
+    engine::DynamicSelection ungroupable;
+    ungroupable.query = "ALL";
+    ungroupable.groups = 1U;
+    require(!catalogue.select(ungroupable), label + ": groups need an expression");
 
     require(catalogue.remove_root(music.string()).has_value(), label + ": removing a root");
     const auto after = catalogue.roots();

@@ -548,4 +548,61 @@ core::Result<CompiledTkq> compile_tkq(const std::string_view source, const TkqLi
     return compiled;
 }
 
+core::Result<std::string> narrow_tkq_source(const std::string_view query,
+                                            const std::string_view condition,
+                                            const TkqLimits& limits) {
+    auto compiled = compile_tkq(query, limits);
+    if (!compiled) {
+        return std::unexpected(std::move(compiled.error()));
+    }
+    if (auto checked = compile_tkq(condition, limits); !checked) {
+        return std::unexpected(std::move(checked.error()));
+    }
+    auto tokens = internal::lex_tkq(query, limits.maximum_source_bytes);
+    if (!tokens) {
+        return std::unexpected(std::move(tokens.error()));
+    }
+    // The expression and its SORT clause, found as the parser finds them.
+    auto expression_end = tokens->size();
+    for (std::size_t index = 0U; index < tokens->size(); ++index) {
+        if ((*tokens)[index].kind == internal::TokenKind::word && (*tokens)[index].keyword &&
+            (*tokens)[index].text == "SORT") {
+            expression_end = index;
+            break;
+        }
+    }
+    const auto sort =
+        expression_end < tokens->size()
+            ? " " + std::string{query.substr((*tokens)[expression_end].begin)}
+            : std::string{};
+    std::string narrowed;
+    if (compiled->match_all) {
+        narrowed = "(" + std::string{condition} + ")";
+    } else {
+        const auto structured = std::any_of(
+            tokens->begin(), tokens->begin() + static_cast<std::ptrdiff_t>(expression_end),
+            [](const internal::Token& token) {
+                return token.kind != internal::TokenKind::word || token.keyword;
+            });
+        std::string expression;
+        if (structured) {
+            expression = std::string{query.substr(
+                0U, (*tokens)[expression_end - 1U].end)};
+        } else {
+            // Bare words hold no quote, so they quote as they are.
+            expression = "* HAS \"";
+            for (std::size_t index = 0U; index < expression_end; ++index) {
+                expression += (index == 0U ? "" : " ") + (*tokens)[index].text;
+            }
+            expression += "\"";
+        }
+        narrowed = "(" + expression + ") AND (" + std::string{condition} + ")";
+    }
+    narrowed += sort;
+    if (auto checked = compile_tkq(narrowed, limits); !checked) {
+        return std::unexpected(std::move(checked.error()));
+    }
+    return narrowed;
+}
+
 } // namespace trackknife::query

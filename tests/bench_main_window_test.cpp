@@ -759,7 +759,7 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
     std::vector<Service::Completion> pending;
     DynamicPlaylistDialog dialog(
         QStringLiteral("local"), {},
-        [&](const EngineKey&, query::CompiledTkq, core::CancellationToken,
+        [&](const EngineKey&, engine::DynamicSelection, core::CancellationToken,
             Service::Completion done) { pending.push_back(std::move(done)); });
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
@@ -792,7 +792,7 @@ void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
     {
         Service::Completion pending;
         DynamicPlaylistDialog dialog(QStringLiteral("local"), {},
-                                     [&](const EngineKey&, query::CompiledTkq,
+                                     [&](const EngineKey&, engine::DynamicSelection,
                                          core::CancellationToken,
                                          Service::Completion done) { pending = std::move(done); });
         dialog.setAttribute(Qt::WA_DeleteOnClose, false);
@@ -8473,9 +8473,11 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
     {
         std::vector<Service::Completion> pending;
         std::vector<query::CompiledTkq> queries;
-        Service service([&](query::CompiledTkq compiled, core::CancellationToken,
+        Service service([&](engine::DynamicSelection selection, core::CancellationToken,
                             Service::Completion completion) {
-            queries.push_back(std::move(compiled));
+            auto compiled = query::compile_tkq(selection.query);
+            QVERIFY(compiled);
+            queries.push_back(std::move(*compiled));
             pending.push_back(std::move(completion));
         });
         int completions = 0;
@@ -8552,9 +8554,9 @@ void BenchMainWindowTest::lastFmRefreshSelectsFreshTracksFromLargerPool() {
         QStringList selection;
         std::size_t matched = 0;
         const auto run = [&](QVector<RecommendationTrack> candidates, bool cancel = false) {
-            Service service([](query::CompiledTkq compiled, core::CancellationToken,
+            Service service([](engine::DynamicSelection asked, core::CancellationToken,
                                Service::Completion completion) {
-                const auto title = compiled.predicates.back().text;
+                const auto title = query::compile_tkq(asked.query)->predicates.back().text;
                 LocalTrackRow row;
                 row.raw_path = std::string("/raw-\xff/") + title;
                 row.artist = "Artist";
@@ -8621,14 +8623,63 @@ void BenchMainWindowTest::lastFmRefreshSelectsFreshTracksFromLargerPool() {
 void BenchMainWindowTest::dynamicPlaylistCatalogAndEditor() {
     DynamicPlaylistDefinition local{.id = QStringLiteral("favorites"),
                                     .name = QStringLiteral("Favorites"),
-                                    .profile = QStringLiteral("local")};
+                                    .profile = QStringLiteral("local"),
+                                    .group_by = QStringLiteral("%albumartist%"),
+                                    .groups = 4,
+                                    .per_group = 2};
     QVERIFY(saveDynamicPlaylists(local.profile, {local}));
     auto loaded = loadDynamicPlaylists(local.profile);
     QVERIFY(loaded);
     QCOMPARE(loaded->size(), 1);
     QCOMPARE(loaded->front().query, local.query);
+    QCOMPARE(loaded->front().group_by, local.group_by);
+    QCOMPARE(loaded->front().groups, 4);
+    QCOMPARE(loaded->front().per_group, 2);
+    // Groups need an expression to group by.
+    auto ungroupable = local;
+    ungroupable.group_by.clear();
+    QVERIFY(!saveDynamicPlaylists(local.profile, {ungroupable}));
     QVERIFY(loadDynamicPlaylists(QStringLiteral("mpd/other"))->isEmpty());
     QVERIFY(!saveDynamicPlaylists(QStringLiteral("mpd/other"), {local}));
+    // ADR-0258: the shipped rules are always there, first, valid, and
+    // never written.
+    const auto shipped = shippedDynamicPlaylists(local.profile);
+    QCOMPARE(shipped.size(), 7);
+    for (const auto& rule : shipped) {
+        QVERIFY(rule.shipped());
+        QVERIFY2(query::compile_tkq(rule.query.toStdString()), qPrintable(rule.query));
+        QVERIFY(saveDynamicPlaylists(local.profile, {rule}).has_value() == false);
+    }
+    const auto random_album = std::ranges::find(shipped, QStringLiteral("shipped:random-album"),
+                                                &DynamicPlaylistDefinition::id);
+    QVERIFY(random_album != shipped.end());
+    QCOMPARE(random_album->selection().groups, 1U);
+    QCOMPARE(random_album->selection().per_group, 0U);
+    auto catalog_definitions = dynamicPlaylistCatalog(local.profile);
+    QVERIFY(catalog_definitions);
+    QCOMPARE(catalog_definitions->size(), 8);
+    QCOMPARE(catalog_definitions->front().id, shipped.front().id);
+    QCOMPARE(catalog_definitions->back().id, local.id);
+    // Definitions the MPD backend saved under its own profile move over once.
+    DynamicPlaylistDefinition old{.id = QStringLiteral("grunge"),
+                                  .name = QStringLiteral("Last.fm: Grunge"),
+                                  .profile = QStringLiteral("mpd/3cd2aea9"),
+                                  .source = QStringLiteral("tag"),
+                                  .tag = QStringLiteral("grunge")};
+    QSettings{}.remove(QStringLiteral("dynamic-playlists/adopted-v1"));
+    QVERIFY(saveDynamicPlaylists(old.profile, {old}));
+    adoptDynamicPlaylists(local.profile);
+    loaded = loadDynamicPlaylists(local.profile);
+    QVERIFY(loaded);
+    QCOMPARE(loaded->size(), 2);
+    QCOMPARE(loaded->back().id, old.id);
+    QCOMPARE(loaded->back().profile, local.profile);
+    QVERIFY(loadDynamicPlaylists(old.profile)->isEmpty());
+    QVERIFY(saveDynamicPlaylists(old.profile, {old}));
+    adoptDynamicPlaylists(local.profile);
+    QCOMPARE(loadDynamicPlaylists(old.profile)->size(), 1);
+    QSettings{}.remove(QStringLiteral("dynamic-playlists/v1/mpd/3cd2aea9"));
+    QVERIFY(saveDynamicPlaylists(local.profile, {local}));
     QSettings{}.setValue(QStringLiteral("dynamic-playlists/v1/mpd/future"),
                          QByteArray{"{\"version\":99,\"definitions\":[]}"});
     QVERIFY(!loadDynamicPlaylists(QStringLiteral("mpd/future")));
@@ -8642,12 +8693,35 @@ void BenchMainWindowTest::dynamicPlaylistCatalogAndEditor() {
     QVERIFY(dialog);
     auto* catalog = dialog->findChild<QComboBox*>(QStringLiteral("dynamic-catalog"));
     QVERIFY(catalog);
-    QCOMPARE(catalog->count(), 2);
+    // "New", the seven that ship, and the one saved.
+    QCOMPARE(catalog->count(), 9);
+    auto* save = dialog->findChild<QPushButton*>(QStringLiteral("dynamic-save"));
+    auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("dynamic-remove"));
+    // A shipped rule is used and copied, not changed or removed.
+    catalog->setCurrentIndex(2);
+    emit catalog->activated(2);
+    QCOMPARE(catalog->itemText(2), QStringLiteral("Random album"));
+    QCOMPARE(dialog->findChild<QSpinBox*>(QStringLiteral("dynamic-groups"))->value(), 1);
+    QVERIFY(!remove->isEnabled());
+    QCOMPARE(save->text(), QStringLiteral("Save as copy"));
+    dialog->findChild<QSpinBox*>(QStringLiteral("dynamic-per-group"))->setValue(2);
+    save->click();
+    QCOMPARE(catalog->count(), 10);
+    QCOMPARE(catalog->itemText(catalog->currentIndex()), QStringLiteral("Random album (copy)"));
+    QVERIFY(remove->isEnabled());
+    QCOMPARE(shippedDynamicPlaylists(QStringLiteral("local"))[1].per_group, 0);
+    loaded = loadDynamicPlaylists(QStringLiteral("local"));
+    QCOMPARE(loaded->size(), 2);
+    QCOMPARE(loaded->back().per_group, 2);
+    remove->click();
+    QCOMPARE(catalog->count(), 9);
+    catalog->setCurrentIndex(0);
+    emit catalog->activated(0);
     dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-name"))->setText(QStringLiteral("Rock"));
     dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-query"))
         ->setText(QStringLiteral("genre HAS rock"));
-    dialog->findChild<QPushButton*>(QStringLiteral("dynamic-save"))->click();
-    QCOMPARE(catalog->count(), 3);
+    save->click();
+    QCOMPARE(catalog->count(), 10);
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("dynamic-status"));
     QTRY_VERIFY(status->text().startsWith(QStringLiteral("0 tracks")));
@@ -8674,7 +8748,7 @@ void BenchMainWindowTest::dynamicPlaylistCatalogAndEditor() {
     action->trigger();
     dialog = window.findChild<DynamicPlaylistDialog*>();
     QVERIFY(dialog);
-    QCOMPARE(dialog->findChild<QComboBox*>(QStringLiteral("dynamic-catalog"))->count(), 3);
+    QCOMPARE(dialog->findChild<QComboBox*>(QStringLiteral("dynamic-catalog"))->count(), 10);
     dialog->close();
 }
 

@@ -4,6 +4,7 @@
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
+#include "trackknife/engine/dynamic_selection.hpp"
 #include "trackknife/engine/library_views.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -137,6 +139,12 @@ class Catalogue {
     [[nodiscard]] virtual core::Result<std::vector<FoundTrack>>
     find(const query::CompiledTkq& compiled, const std::string& format, std::size_t limit,
          const core::CancellationToken& cancellation = {}) const;
+    // ADR-0258: what a dynamic playlist's library rule picks -- at most 500
+    // files, chosen where the library is, so the matches never travel whole.
+    // Never what `exclude` names.
+    [[nodiscard]] virtual core::Result<DynamicSelected>
+    select(const DynamicSelection& selection, const std::set<std::string>& exclude = {},
+           const core::CancellationToken& cancellation = {}) const;
 
     // Play counts and timestamps for the given sources, in input order.
     [[nodiscard]] virtual core::Result<std::vector<std::array<std::int64_t, 6>>>

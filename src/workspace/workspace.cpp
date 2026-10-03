@@ -3,6 +3,7 @@
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/dynamic_playlist_service.hpp"
 #include "bench/remote_engines.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -46,6 +47,8 @@ void Workspace::start() {
     const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
+    // ADR-0258: one set of dynamic playlists, whichever backend saved them.
+    adoptDynamicPlaylists(QStringLiteral("local"));
     rememberContinuationRules();
     connectLocalEngine();
     persistence_ = new ui::ListPersistenceService(database_path_, this);

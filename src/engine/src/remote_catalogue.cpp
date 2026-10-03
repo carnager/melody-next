@@ -449,6 +449,38 @@ RemoteCatalogue::find(const query::CompiledTkq& compiled, const std::string& for
     return found;
 }
 
+core::Result<DynamicSelected> RemoteCatalogue::select(const DynamicSelection& selection,
+                                                      const std::set<std::string>& exclude,
+                                                      const core::CancellationToken&) const {
+    // Chosen there, where the library is: only the chosen files cross.
+    auto excluded = Json::array();
+    for (const auto& path : exclude) {
+        excluded.push_back(protocol::encode_raw_path(path));
+    }
+    auto answer = client_->call("catalogue.select", Json{{"query", selection.query},
+                                                         {"limit", selection.limit},
+                                                         {"shuffle", selection.shuffle},
+                                                         {"group_by", selection.group_by},
+                                                         {"groups", selection.groups},
+                                                         {"per_group", selection.per_group},
+                                                         {"exclude", std::move(excluded)}});
+    if (!answer) {
+        if (answer.error().code == core::ErrorCode::unsupported) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::unsupported,
+                .message = "this engine is too old for dynamic playlist rules; update melodyd",
+                .context = {}});
+        }
+        return std::unexpected(std::move(answer.error()));
+    }
+    auto paths = decode_paths(*answer, "paths");
+    if (!paths) {
+        return std::unexpected(std::move(paths.error()));
+    }
+    return DynamicSelected{.paths = std::move(*paths),
+                           .matched = answer->value("matched", std::size_t{0})};
+}
+
 core::Result<persistence::LibraryPage>
 RemoteCatalogue::query(const persistence::LibraryQuery& request,
                        const core::CancellationToken&) const {

@@ -106,6 +106,23 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     limit_->setRange(1, 500);
     limit_->setValue(100);
     limit_->setObjectName(QStringLiteral("dynamic-limit"));
+    // ADR-0258: groups of the matches -- albums, artists -- each as likely
+    // as any other, whatever its size.
+    group_by_ = line(QStringLiteral("Pick groups by:"), QStringLiteral("dynamic-group-by"));
+    group_by_->setPlaceholderText(QStringLiteral("%albumartist%"));
+    group_by_->setToolTip(QStringLiteral(
+        "A formatting expression; tracks giving the same text form a group. "
+        "Example: %albumartist% — %album% for albums"));
+    groups_ = new QSpinBox(this);
+    groups_->setObjectName(QStringLiteral("dynamic-groups"));
+    groups_->setRange(0, 500);
+    groups_->setSpecialValueText(QStringLiteral("No groups"));
+    form_->addRow(QStringLiteral("Groups:"), groups_);
+    per_group_ = new QSpinBox(this);
+    per_group_->setObjectName(QStringLiteral("dynamic-per-group"));
+    per_group_->setRange(0, 500);
+    per_group_->setSpecialValueText(QStringLiteral("All"));
+    form_->addRow(QStringLiteral("Tracks per group:"), per_group_);
     form_->addRow(QStringLiteral("Maximum tracks:"), limit_);
     shuffle_ = new QCheckBox(QStringLiteral("Shuffle results on refresh"), this);
     shuffle_->setObjectName(QStringLiteral("dynamic-shuffle"));
@@ -178,6 +195,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     connect(tag_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setTag);
     connect(limit_, &QSpinBox::valueChanged, session_, &DynamicPlaylistSession::setLimit);
     connect(shuffle_, &QCheckBox::toggled, session_, &DynamicPlaylistSession::setShuffle);
+    connect(group_by_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setGroupBy);
+    connect(groups_, &QSpinBox::valueChanged, session_, &DynamicPlaylistSession::setGroups);
+    connect(per_group_, &QSpinBox::valueChanged, session_, &DynamicPlaylistSession::setPerGroup);
     connect(save_, &QPushButton::clicked, session_, &DynamicPlaylistSession::save);
     connect(remove_, &QPushButton::clicked, session_, &DynamicPlaylistSession::remove);
     syncCatalog();
@@ -202,7 +222,9 @@ void DynamicPlaylistDialog::syncCatalog() {
     catalog_->addItems(session_->catalogNames());
     catalog_->setCurrentIndex(session_->catalogIndex());
     save_->setEnabled(session_->catalogWritable());
-    remove_->setEnabled(session_->catalogWritable());
+    remove_->setEnabled(session_->catalogWritable() && !session_->definitionShipped());
+    save_->setText(session_->definitionShipped() ? QStringLiteral("Save as copy")
+                                                 : QStringLiteral("Save definition"));
 }
 void DynamicPlaylistDialog::sync() {
     const auto show = [](QLineEdit* field, const QString& text) {
@@ -216,6 +238,10 @@ void DynamicPlaylistDialog::sync() {
         const QSignalBlocker source_blocker{source_};
         const QSignalBlocker limit_blocker{limit_};
         const QSignalBlocker shuffle_blocker{shuffle_};
+        const QSignalBlocker groups_blocker{groups_};
+        const QSignalBlocker per_group_blocker{per_group_};
+        groups_->setValue(session_->groups());
+        per_group_->setValue(session_->perGroup());
         library_->setCurrentIndex(session_->library());
         source_->setCurrentIndex(source_->findData(session_->source()));
         limit_->setValue(session_->limit());
@@ -227,10 +253,14 @@ void DynamicPlaylistDialog::sync() {
     show(track_, session_->track());
     show(user_, session_->user());
     show(tag_, session_->tag());
+    show(group_by_, session_->groupBy());
     const auto source = session_->source();
     shuffle_->setText(session_->shuffleText());
     shuffle_->setToolTip(session_->shuffleTip());
     form_->setRowVisible(query_, source == QStringLiteral("rules"));
+    form_->setRowVisible(group_by_, source == QStringLiteral("rules"));
+    form_->setRowVisible(groups_, source == QStringLiteral("rules"));
+    form_->setRowVisible(per_group_, source == QStringLiteral("rules") && session_->groups() > 0);
     form_->setRowVisible(artist_, source == QStringLiteral("similar"));
     form_->setRowVisible(track_, source == QStringLiteral("similar"));
     form_->setRowVisible(user_,

@@ -965,7 +965,12 @@ void BenchMainWindow::fillContinueMenu() {
         continue_menu_->addSeparator();
     }
     bool listed = !current;
-    for (const auto& choice : choices) {
+    for (std::size_t index = 0U; index < choices.size(); ++index) {
+        const auto& choice = choices[index];
+        // The rules that ship, then those saved here.
+        if (index > 0U && choices[index - 1U].shipped && !choice.shipped) {
+            continue_menu_->addSeparator();
+        }
         auto* action = continue_menu_->addAction(
             choice.name.isEmpty() ? tr("Unnamed dynamic playlist") : choice.name);
         action->setObjectName(QStringLiteral("continue-rule-") + choice.rule_id);
@@ -985,7 +990,8 @@ void BenchMainWindow::fillContinueMenu() {
         group->addAction(other);
     }
     if (choices.empty()) {
-        auto* none = continue_menu_->addAction(tr("No rule-based dynamic playlists yet"));
+        auto* none = continue_menu_->addAction(
+            tr("Save a library rule in File → Dynamic playlists to continue a list with it"));
         none->setEnabled(false);
     }
 }

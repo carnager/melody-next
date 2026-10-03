@@ -219,6 +219,13 @@ target_link_libraries(
 )
 add_test(NAME list-edits COMMAND trackknife_list_edits_tests)
 
+add_executable(trackknife_dynamic_selection_tests dynamic_selection_test.cpp)
+target_link_libraries(
+    trackknife_dynamic_selection_tests
+    PRIVATE Trackknife::Engine trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME dynamic-selection COMMAND trackknife_dynamic_selection_tests)
+
 add_executable(trackknife_musicbrainz_cache_tests musicbrainz_cache_test.cpp)
 target_link_libraries(
     trackknife_musicbrainz_cache_tests

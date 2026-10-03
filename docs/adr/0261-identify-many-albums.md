@@ -104,6 +104,17 @@ presets…** opens them.
   paired, the worst length difference, the weakest title): done
   (2026-10-03). Identify now uses a file's length where the technical probe
   has it.
+- The lookup (2026-10-03): `AlbumLookupQueue` takes one album at a time
+  and asks one thing at a time -- by the release id the files carry, else
+  (also when MusicBrainz does not know that id) a search and the three
+  releases of it most worth a look, those with as many tracks as files
+  first. `judge_album` aligns them: matched when exactly one is a clear
+  match, a choice when any fits at all (its pairing at least 0.5
+  confident), else no match; two editions that both fit clearly are a
+  choice, as they differ in what would be written. The engine now asks
+  MusicBrainz again when it is told to slow down, twice at most, waiting
+  as long as it is asked up to 30 s. Untagged albums ask nothing yet:
+  AcoustID for them comes with the window.
 
 ## Verification
 

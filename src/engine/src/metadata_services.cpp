@@ -68,11 +68,14 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
 
 // One HTTPS request: GET, or POST with a form body. Redirects are followed,
 // over HTTPS only -- the Cover Art Archive hands images out from archive.org.
-// `status`, when given, is told the HTTP status of the answer.
+// `status`, when given, is told the HTTP status of the answer, and
+// `retry_after_seconds` how long the service asked to be left alone (0: it
+// did not say).
 [[nodiscard]] core::Result<std::string> perform(const std::string& url,
                                                 const std::optional<std::string>& form,
                                                 const core::CancellationToken& cancellation,
-                                                long* status_out = nullptr) {
+                                                long* status_out = nullptr,
+                                                std::int64_t* retry_after_seconds = nullptr) {
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl{curl_easy_init(), curl_easy_cleanup};
     if (!curl) {
         return std::unexpected(service_error(core::ErrorCode::backend, "curl did not start"));
@@ -111,6 +114,11 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
     if (status_out != nullptr) {
         *status_out = status;
     }
+    if (retry_after_seconds != nullptr) {
+        curl_off_t after = 0;
+        curl_easy_getinfo(curl.get(), CURLINFO_RETRY_AFTER, &after);
+        *retry_after_seconds = static_cast<std::int64_t>(after);
+    }
     // A client error still carries the service's own message, which the
     // tagger shows; only a server that said nothing is an error here.
     if (status >= 500 && body.empty()) {
@@ -139,6 +147,23 @@ namespace {
 
 MetadataServices::MetadataServices(std::filesystem::path database, std::filesystem::path state)
     : database_(std::move(database)), key_file_(std::move(state) / "acoustid.key") {}
+
+MetadataServices::Throttle MetadataServices::throttle(const long status,
+                                                      const std::int64_t retry_after_seconds,
+                                                      const int attempt) {
+    constexpr int retries = 2;
+    constexpr std::int64_t longest_wait_seconds = 30;
+    if (status != 429 && status != 503) {
+        return {};
+    }
+    // Unsaid: 2 s, then 4.
+    const auto wait = retry_after_seconds > 0 ? retry_after_seconds
+                                              : std::int64_t{2} << std::min(attempt, 4);
+    if (attempt >= retries || wait > longest_wait_seconds) {
+        return Throttle{.kind = Throttle::Kind::give_up, .seconds = wait};
+    }
+    return Throttle{.kind = Throttle::Kind::wait, .seconds = wait};
+}
 
 bool MetadataServices::fetchable(const std::string_view url) {
     return url.starts_with("https://musicbrainz.org/ws/2/") ||
@@ -180,11 +205,36 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
             }
         }
     }
-    pace(last_musicbrainz_, std::chrono::milliseconds{musicbrainz::minimum_request_interval_ms});
+    // ADR-0261: asked to slow down, MusicBrainz is asked again rather than
+    // its refusal handed on as if it were an answer.
     long status = 0;
-    auto body = perform(url, std::nullopt, cancellation, &status);
-    if (!body) {
-        return body;
+    core::Result<std::string> body = std::unexpected(core::Error{});
+    for (int attempt = 0;; ++attempt) {
+        pace(last_musicbrainz_,
+             std::chrono::milliseconds{musicbrainz::minimum_request_interval_ms});
+        std::int64_t retry_after = 0;
+        body = perform(url, std::nullopt, cancellation, &status, &retry_after);
+        if (!body) {
+            return body;
+        }
+        const auto next = answers_json(url) ? throttle(status, retry_after, attempt) : Throttle{};
+        if (next.kind == Throttle::Kind::answer) {
+            break;
+        }
+        if (next.kind == Throttle::Kind::give_up) {
+            return std::unexpected(service_error(
+                core::ErrorCode::limit_exceeded,
+                "MusicBrainz is busy and asked to wait " + std::to_string(next.seconds) +
+                    " s; try again later"));
+        }
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{next.seconds};
+        while (std::chrono::steady_clock::now() < until) {
+            if (cancellation.is_cancellation_requested()) {
+                return std::unexpected(
+                    service_error(core::ErrorCode::cancelled, "the lookup was cancelled"));
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
     }
     // The archive says a release has no covers with a 404 page: as a listing,
     // that is an empty one -- the answer, not an error.

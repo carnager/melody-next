@@ -228,6 +228,14 @@ class TrackMatchWidget final : public QWidget {
         }
         connect(unmatch_, &QPushButton::clicked, this,
                 [this] { session_->unmatch(selectedRow()); });
+        // ADR-0261: U leaves the file unmatched, from the keyboard.
+        auto* unmatch_key = new QShortcut(QKeySequence{Qt::Key_U}, rows_);
+        unmatch_key->setContext(Qt::WidgetWithChildrenShortcut);
+        connect(unmatch_key, &QShortcut::activated, this, [this] {
+            if (session_->canUnmatch(selectedRow())) {
+                session_->unmatch(selectedRow());
+            }
+        });
         connect(sort_, &QPushButton::clicked, this, [this] { session_->resetOrder(true); });
         connect(order_, &QPushButton::clicked, this, [this] { session_->resetOrder(false); });
         connect(stage_, &QPushButton::clicked, session_, &TrackMatchSession::stage);

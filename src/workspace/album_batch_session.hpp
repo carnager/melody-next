@@ -3,6 +3,7 @@
 
 #include "bench/musicbrainz_lookup.hpp"
 #include "trackknife/musicbrainz/album_groups.hpp"
+#include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/album_lookup.hpp"
 
 #include <QObject>
@@ -35,6 +36,8 @@ class AlbumBatchSession final : public QObject {
         no_match,
         failed,
         left_out,
+        // Passed over in review: stays for later.
+        skipped,
     };
     struct Album {
         musicbrainz::AlbumGroupBasis basis{musicbrainz::AlbumGroupBasis::folder};
@@ -72,6 +75,22 @@ class AlbumBatchSession final : public QObject {
     void lookUp();
     void stop();
 
+    // Step 3, review.
+    // The first album after `after` (from the start without one) that needs
+    // a person, wrapping round; none when none does.
+    [[nodiscard]] std::optional<std::size_t> nextNeedingYou(std::optional<std::size_t> after) const;
+    // What the matcher pairs for an album: its files, as descriptors and
+    // paths, and the tagger's items they are.
+    struct Files {
+        std::vector<musicbrainz::LocalTrackDescriptor> descriptors;
+        std::vector<QString> paths;
+        std::vector<std::size_t> items;
+    };
+    [[nodiscard]] Files filesOf(std::size_t album) const;
+    // The pairing the person confirmed, staged as a clear match would be.
+    void choose(std::size_t album, metadata::MetadataProposalSet proposals);
+    void skip(std::size_t album);
+
     static QString stateText(const Album& album);
 
   signals:
@@ -90,8 +109,13 @@ class AlbumBatchSession final : public QObject {
     AlbumLookupQueue* queue_;
     std::vector<Album> albums_;
     bool started_{false};
-    // Matched albums waiting for the tagger, and the one it is staging.
-    std::deque<std::size_t> to_stage_;
+    // Albums waiting for the tagger -- with the person's pairing, or the
+    // best candidate's -- and the one it is staging.
+    struct ToStage {
+        std::size_t album{0U};
+        std::optional<metadata::MetadataProposalSet> proposals;
+    };
+    std::deque<ToStage> to_stage_;
     std::optional<std::size_t> staging_;
 };
 

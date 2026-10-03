@@ -263,7 +263,7 @@ void AlbumBatchSession::lookedUp(const std::size_t index,
     switch (result.outcome) {
     case musicbrainz::AlbumLookupOutcome::matched:
         album.state = State::staging;
-        to_stage_.push_back(index);
+        to_stage_.push_back(ToStage{.album = index, .proposals = std::nullopt});
         break;
     case musicbrainz::AlbumLookupOutcome::needs_choice:
         album.state = State::needs_choice;
@@ -280,12 +280,17 @@ void AlbumBatchSession::stageNext() {
     if (staging_ || to_stage_.empty() || tagger_.isNull() || !tagger_->canStageProposals()) {
         return;
     }
-    const auto index = to_stage_.front();
+    auto next = std::move(to_stage_.front());
     to_stage_.pop_front();
+    const auto index = next.album;
     const auto& album = albums_[index];
-    const auto& best = album.result->candidates.front();
-    auto proposals =
-        musicbrainz::release_metadata_proposals(best.release, best.alignment, album.items);
+    auto proposals = [&]() -> core::Result<metadata::MetadataProposalSet> {
+        if (next.proposals) {
+            return std::move(*next.proposals);
+        }
+        const auto& best = album.result->candidates.front();
+        return musicbrainz::release_metadata_proposals(best.release, best.alignment, album.items);
+    }();
     if (!proposals) {
         albums_[index].state = State::needs_choice;
         albums_[index].note = text(proposals.error().message);
@@ -314,6 +319,59 @@ void AlbumBatchSession::settled(const bool staged) {
     stageNext();
 }
 
+std::optional<std::size_t>
+AlbumBatchSession::nextNeedingYou(const std::optional<std::size_t> after) const {
+    const auto count = albums_.size();
+    const auto first = after ? *after + 1U : 0U;
+    for (std::size_t step = 0; step < count; ++step) {
+        const auto index = (first + step) % count;
+        if (after && index == *after) {
+            continue;
+        }
+        const auto& album = albums_[index];
+        if (album.state == State::needs_choice && album.result &&
+            !album.result->candidates.empty()) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+AlbumBatchSession::Files AlbumBatchSession::filesOf(const std::size_t index) const {
+    Files files;
+    if (tagger_.isNull() || index >= albums_.size()) {
+        return files;
+    }
+    const auto& album = albums_[index];
+    files.descriptors = queryOf(album).tracks;
+    files.items = album.items;
+    for (const auto item : album.items) {
+        const auto& path = tagger_->itemSource(item)->raw_path;
+        files.paths.push_back(QString::fromLocal8Bit(QByteArray{
+            path.data(), static_cast<qsizetype>(path.size())}));
+    }
+    return files;
+}
+
+void AlbumBatchSession::choose(const std::size_t index, metadata::MetadataProposalSet proposals) {
+    if (index >= albums_.size()) {
+        return;
+    }
+    albums_[index].state = State::staging;
+    albums_[index].note.clear();
+    to_stage_.push_back(ToStage{.album = index, .proposals = std::move(proposals)});
+    emit changed();
+    stageNext();
+}
+
+void AlbumBatchSession::skip(const std::size_t index) {
+    if (index >= albums_.size()) {
+        return;
+    }
+    albums_[index].state = State::skipped;
+    emit changed();
+}
+
 QString AlbumBatchSession::stateText(const Album& album) {
     const auto confidence = [&album] {
         return album.result && !album.result->candidates.empty()
@@ -340,6 +398,8 @@ QString AlbumBatchSession::stateText(const Album& album) {
         return QStringLiteral("Failed · %1").arg(album.note);
     case State::left_out:
         return QStringLiteral("Left out");
+    case State::skipped:
+        return QStringLiteral("Skipped");
     }
     return {};
 }

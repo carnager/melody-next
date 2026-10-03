@@ -12,6 +12,7 @@
 #include <array>
 
 #include <chrono>
+#include <iostream>
 #include <utility>
 
 namespace trackknife::engine {
@@ -147,6 +148,18 @@ std::vector<Outputs::Listed> Outputs::list() const {
                                 .selected = selected_ == id,
                                 .files = agent->files()});
     }
+#if TRACKKNIFE_ENABLE_UPNP
+    for (const auto& [udn, renderer] : renderers_) {
+        const auto id = "upnp:" + udn;
+        listed.push_back(Listed{.id = id,
+                                .name = renderer->name(),
+                                .local = false,
+                                .online = renderer->online(),
+                                .selected = selected_ == id,
+                                .files = false,
+                                .replay_gain = false});
+    }
+#endif
     return listed;
 }
 
@@ -161,6 +174,14 @@ core::Result<void> Outputs::select(const std::string& id) {
                                                    .message = "this machine has no audio output",
                                                    .context = {}});
             }
+#if TRACKKNIFE_ENABLE_UPNP
+        } else if (id.starts_with("upnp:")) {
+            auto found = renderers_.find(id.substr(5));
+            if (found == renderers_.end()) {
+                return std::unexpected(not_found(id));
+            }
+            chosen = found->second.get();
+#endif
         } else if (id.starts_with(agent_prefix)) {
             const auto found = agents_.find(id.substr(agent_prefix.size()));
             if (found == agents_.end()) {
@@ -178,7 +199,10 @@ core::Result<void> Outputs::select(const std::string& id) {
     // An agent chosen while it is away is where playback waits; switching
     // reports that it could not take the music up yet, which is not a
     // refusal of the choice.
-    static_cast<void>(player_->set_output(chosen));
+    if (auto moved = player_->set_output(chosen); !moved) {
+        std::cerr << "melodyd: selected output " << id
+                  << " but could not move playback yet: " << moved.error().message << '\n';
+    }
     announce();
     return {};
 }
@@ -202,10 +226,58 @@ void Outputs::restore() {
             slot = make_agent(id.substr(agent_prefix.size()));
         }
     }
+#if TRACKKNIFE_ENABLE_UPNP
+    if (id.starts_with("upnp:")) {
+        const std::lock_guard guard{mutex_};
+        auto& slot = renderers_[id.substr(5)];
+        if (!slot) {
+            slot =
+                std::make_unique<output::UpnpAudition>(id.substr(5), upnp_control_, upnp_prepare_);
+        }
+    }
+#endif
     if (!id.empty()) {
         static_cast<void>(select(id));
     }
 }
+
+#if TRACKKNIFE_ENABLE_UPNP
+void Outputs::configure_upnp(std::shared_ptr<discovery::UpnpControl> control,
+                             output::UpnpAudition::Prepare prepare) {
+    const std::lock_guard guard{mutex_};
+    upnp_control_ = std::move(control);
+    upnp_prepare_ = std::move(prepare);
+}
+
+void Outputs::renderer_changed(const discovery::UpnpRenderer& renderer) {
+    output::UpnpAudition* audition = nullptr;
+    bool selected = false;
+    bool reconnect = false;
+    {
+        const std::lock_guard guard{mutex_};
+        auto& slot = renderers_[renderer.udn];
+        if (!slot) {
+            slot =
+                std::make_unique<output::UpnpAudition>(renderer.udn, upnp_control_, upnp_prepare_);
+        }
+        audition = slot.get();
+        reconnect = !audition->online() && renderer.online;
+        selected = selected_ == "upnp:" + renderer.udn;
+    }
+    const auto before = audition->snapshot();
+    audition->update(renderer);
+    if (selected && reconnect) {
+        if (before.format && before.format->sample_rate > 0) {
+            static_cast<void>(
+                player_->resume_output(before.position_sample * 1000 / before.format->sample_rate,
+                                       audition->wants_playing()));
+        } else {
+            static_cast<void>(player_->resume_output(std::nullopt, std::nullopt));
+        }
+    }
+    announce();
+}
+#endif
 
 void Outputs::announce() {
     if (!sink_) {
@@ -218,7 +290,8 @@ void Outputs::announce() {
                                {"local", listed.local},
                                {"online", listed.online},
                                {"selected", listed.selected},
-                               {"files", listed.files}});
+                               {"files", listed.files},
+                               {"replay_gain", listed.replay_gain}});
     }
     sink_(protocol::Event{.name = "outputs.changed", .data = Json{{"outputs", outputs}}});
 }
@@ -232,7 +305,8 @@ void register_output_methods(protocol::Dispatcher& dispatcher, Outputs& outputs)
                                   {"local", output.local},
                                   {"online", output.online},
                                   {"selected", output.selected},
-                                  {"files", output.files}});
+                                  {"files", output.files},
+                                  {"replay_gain", output.replay_gain}});
         }
         return Json{{"outputs", std::move(listed)}};
     });

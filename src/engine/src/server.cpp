@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/engine/server.hpp"
 
@@ -261,7 +262,7 @@ core::Result<std::unique_ptr<Server>> Server::listen(std::filesystem::path socke
     // A socket file left by a crash is stale; one with a listener behind it is
     // another engine, and clobbering that would steal its clients.
     if (std::filesystem::exists(socket_path)) {
-        const auto probe = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        const auto probe = core::socket_cloexec(AF_UNIX, SOCK_STREAM, 0);
         if (probe >= 0) {
             const auto connected =
                 ::connect(probe, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
@@ -277,7 +278,7 @@ core::Result<std::unique_ptr<Server>> Server::listen(std::filesystem::path socke
         std::filesystem::remove(socket_path, ignored);
     }
 
-    const auto listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    const auto listener = core::socket_cloexec(AF_UNIX, SOCK_STREAM, 0);
     if (listener < 0) {
         return std::unexpected(system_error("could not create the socket"));
     }
@@ -337,7 +338,8 @@ core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host
     }
     int listener = -1;
     for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
-        listener = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        listener = core::socket_cloexec(candidate->ai_family, candidate->ai_socktype,
+                                        candidate->ai_protocol);
         if (listener < 0) {
             continue;
         }
@@ -503,7 +505,7 @@ void Server::accept_loop() {
         if ((watched[0].revents & POLLIN) == 0) {
             continue;
         }
-        const auto accepted = ::accept4(listener_, nullptr, nullptr, SOCK_CLOEXEC);
+        const auto accepted = core::accept_cloexec(listener_);
         if (accepted < 0) {
             if (errno == EINTR || errno == ECONNABORTED) {
                 continue;
@@ -624,7 +626,10 @@ void Server::serve(Connection& connection_ref) {
             finish_reading();
             pollfd watched{.fd = connection->descriptor, .events = 0, .revents = 0};
             while (connection->open.load()) {
-                const auto ready = ::poll(&watched, 1, -1);
+                // Darwin does not reliably wake poll(events=0) when another
+                // thread calls shutdown(). Recheck open periodically so an
+                // engine restart can always join a half-closed client.
+                const auto ready = ::poll(&watched, 1, 250);
                 if (ready < 0 && errno == EINTR) {
                     continue;
                 }

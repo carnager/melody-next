@@ -39,6 +39,8 @@ class TranscodeCache final {
     [[nodiscard]] core::Result<std::filesystem::path> ensure(const TranscodeSource& source,
                                                              const StreamFormat& format);
 
+    [[nodiscard]] core::Result<std::filesystem::path> artwork(const std::string& raw_path);
+
   private:
     [[nodiscard]] core::Result<std::filesystem::path> convert(const TranscodeSource& source,
                                                               const StreamFormat& format,

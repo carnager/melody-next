@@ -366,6 +366,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
     void coverPolicyRoundTrip();
+    void upnpSettingRoundTrip();
     void aSaveWritesOnlyListsThatChanged();
     void playbackSettingsApplyLiveAndCancel();
     void librarySettingsManageFoldersWithoutScanning();
@@ -10128,6 +10129,33 @@ void BenchMainWindowTest::playbackSettingsApplyLiveAndCancel() {
     QVERIFY(!dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-notifications"))
                  ->isChecked());
     dialog->reject();
+}
+
+// ADR-0235: the UPnP choice is saved and shown as saved when Settings opens
+// again -- it was saved, and then shown off.
+void BenchMainWindowTest::upnpSettingRoundTrip() {
+#if TRACKKNIFE_ENABLE_UPNP
+    QSettings{}.remove(QStringLiteral("engine/upnp"));
+    {
+        SettingsDialog dialog;
+        dialog.showPage(SettingsDialog::Page::engine);
+        auto* upnp = dialog.findChild<QCheckBox*>(QStringLiteral("bench-settings-engine-upnp"));
+        auto* buttons =
+            dialog.findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
+        QVERIFY(upnp != nullptr && buttons != nullptr);
+        QVERIFY(upnp->isEnabled() && !upnp->isChecked());
+        upnp->setChecked(true);
+        buttons->button(QDialogButtonBox::Save)->click();
+    }
+    QVERIFY(QSettings{}.value(QStringLiteral("engine/upnp")).toBool());
+    SettingsDialog reopened;
+    QVERIFY(reopened.findChild<QCheckBox*>(QStringLiteral("bench-settings-engine-upnp"))
+                ->isChecked());
+    reopened.reject();
+    QSettings{}.remove(QStringLiteral("engine/upnp"));
+#else
+    QSKIP("built without UPnP");
+#endif
 }
 
 // A save writes a list's items only when they changed since the last save:

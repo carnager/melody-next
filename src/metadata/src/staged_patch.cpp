@@ -96,7 +96,7 @@ void StagedMetadataPatchSet::clear() {
     if (state_->patches.empty()) {
         return;
     }
-    if (!state_.unique()) {
+    if (state_.use_count() != 1) {
         state_ = std::make_shared<State>();
         return;
     }
@@ -353,7 +353,7 @@ std::size_t StagedMetadataPatchSet::text_bytes(const StagedMetadataPatch& patch_
 }
 
 void StagedMetadataPatchSet::detach() {
-    if (!state_.unique()) {
+    if (state_.use_count() != 1) {
         state_ = std::make_shared<State>(*state_);
     }
 }

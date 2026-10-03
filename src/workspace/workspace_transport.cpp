@@ -240,7 +240,11 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
         syncReplayGain();
         view_->refreshLocalPlaybackControls();
     }
-    if (state.modes != playback_.modes) {
+    // Not while a command of this window's is unanswered: a state the engine
+    // reported before it -- Random still off just after Random was turned on
+    // -- would undo it, and the ReplayGain it resolves to would follow. The
+    // command's answer brings the state after it.
+    if (!transport_->settling() && state.modes != playback_.modes) {
         // The engine owns the modes while it owns playback: a one-shot
         // expires where the track actually ended. Adopted rather than pushed
         // back, or the two would argue.

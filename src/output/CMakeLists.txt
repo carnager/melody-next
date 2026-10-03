@@ -24,3 +24,8 @@ target_link_libraries(
     PRIVATE trackknife_project_warnings
 )
 target_compile_features(trackknife_output PUBLIC cxx_std_23)
+
+if(TRACKKNIFE_ENABLE_UPNP)
+    target_sources(trackknife_output PRIVATE src/upnp_audition.cpp)
+    target_link_libraries(trackknife_output PUBLIC Trackknife::UPnP)
+endif()

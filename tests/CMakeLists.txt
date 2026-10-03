@@ -453,6 +453,7 @@ add_test(
 set_tests_properties(melody-cli PROPERTIES TIMEOUT 90)
 
 # ADR-0232: melody-watch, its parts and against a real engine.
+if(TARGET melody_watch)
 add_executable(trackknife_watch_tests watch_test.cpp)
 target_link_libraries(
     trackknife_watch_tests
@@ -468,6 +469,7 @@ add_test(
             "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_watch>"
 )
 set_tests_properties(melody-watch PROPERTIES TIMEOUT 90)
+endif()
 
 if(TARGET trackknife_bench_ui)
     qt_add_executable(trackknife_remote_mount_tests remote_mount_test.cpp)
@@ -783,19 +785,22 @@ if(TRACKKNIFE_BUILD_UI)
     set_tests_properties(library-views-panel PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 
-    # ADR-0220 Phase 2: playing a track drives the engine's player, not the
-    # window's own.
-    qt_add_executable(trackknife_engine_playback_tests engine_playback_test.cpp)
-    target_link_libraries(
-        trackknife_engine_playback_tests
-        PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
-                trackknife_project_options trackknife_project_warnings
-    )
-    target_compile_definitions(trackknife_engine_playback_tests PRIVATE
-        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
-    add_test(NAME engine-playback COMMAND trackknife_engine_playback_tests)
-    set_tests_properties(engine-playback PROPERTIES TIMEOUT 120 ENVIRONMENT
-        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+    # ADR-0220 Phase 2: playing a track drives the engine's local player, not
+    # the window's own. Builds without a local audio backend exercise playback
+    # through the output-specific integration tests instead.
+    if(TRACKKNIFE_ENABLE_LOCAL_AUDIO)
+        qt_add_executable(trackknife_engine_playback_tests engine_playback_test.cpp)
+        target_link_libraries(
+            trackknife_engine_playback_tests
+            PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
+                    trackknife_project_options trackknife_project_warnings
+        )
+        target_compile_definitions(trackknife_engine_playback_tests PRIVATE
+            TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+        add_test(NAME engine-playback COMMAND trackknife_engine_playback_tests)
+        set_tests_properties(engine-playback PROPERTIES TIMEOUT 120 ENVIRONMENT
+            "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+    endif()
 
     qt_add_executable(trackknife_local_list_edit_tests local_list_edit_test.cpp)
     target_link_libraries(trackknife_local_list_edit_tests PRIVATE Trackknife::BenchUi Qt6::Test
@@ -838,12 +843,14 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
+if(TRACKKNIFE_BUILD_UI)
 add_executable(trackknife_debug_log_tests debug_log_test.cpp)
 target_link_libraries(
     trackknife_debug_log_tests
     PRIVATE Trackknife::UiCommon trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME debug-log COMMAND trackknife_debug_log_tests)
+endif()
 
 add_executable(trackknife_discovery_tests discovery_test.cpp)
 target_link_libraries(
@@ -869,3 +876,9 @@ foreach(trackknife_test IN LISTS trackknife_all_tests)
         # own: not found by the real ones on the network, nor by other tests.
         "TRACKKNIFE_DISCOVERY_SERVICE=_mt-${trackknife_test}._tcp")
 endforeach()
+
+if(TRACKKNIFE_ENABLE_UPNP)
+    add_executable(trackknife_upnp_tests upnp_test.cpp)
+    target_link_libraries(trackknife_upnp_tests PRIVATE Trackknife::Output trackknife_project_warnings)
+    add_test(NAME upnp COMMAND trackknife_upnp_tests)
+endif()

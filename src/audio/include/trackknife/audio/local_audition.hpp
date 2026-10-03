@@ -41,7 +41,7 @@ enum class PlaybackBufferPreset {
 
 // Stable preset identifiers are persisted by frontends. The durations size
 // Trackknife's decoded-PCM ring at the source rate; they do not force a
-// PipeWire graph quantum or promise a particular device latency.
+// platform callback quantum or promise a particular device latency.
 [[nodiscard]] std::string_view playback_buffer_preset_id(PlaybackBufferPreset preset) noexcept;
 [[nodiscard]] std::optional<PlaybackBufferPreset>
 playback_buffer_preset_from_id(std::string_view id) noexcept;
@@ -203,8 +203,8 @@ class LocalAuditionService final : public Audition {
     // Queued time-domain seek for protocol adapters that do not know the
     // source rate when they enqueue a load followed by a seek.
     [[nodiscard]] core::Result<void> seek_to_seconds(double target_seconds) override;
-    // Perceptual volume in percent [0, 100]; mapped cubically onto PipeWire's
-    // linear stream mixer and reapplied when a new source connects.
+    // Perceptual volume in percent [0, 100], mapped cubically onto the
+    // platform adapter's linear stream gain and reapplied on reconnect.
     [[nodiscard]] core::Result<void> set_volume_percent(int percent) override;
     [[nodiscard]] core::Result<void> set_replay_gain_mode(ReplayGainMode mode) override;
     [[nodiscard]] core::Result<void> set_replay_gain_info(formats::ReplayGainInfo info);
@@ -215,10 +215,10 @@ class LocalAuditionService final : public Audition {
     // next track boundary.
     [[nodiscard]] core::Result<void>
     set_buffer_config(PlaybackBufferDurationConfig buffer_config) override;
-    // Starts or restarts the persistent PipeWire registry/default monitor on
+    // Starts or restarts the persistent platform device/default monitor on
     // the worker. Its initial synchronization is bounded.
     [[nodiscard]] core::Result<void> refresh_output_devices() override;
-    // Selects the PipeWire sink for current and future sources; nullopt is the
+    // Selects the platform output for current and future sources; nullopt is the
     // system default. A loaded source reconnects in place, preserving its
     // position, volume, and play/pause state.
     [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target) override;

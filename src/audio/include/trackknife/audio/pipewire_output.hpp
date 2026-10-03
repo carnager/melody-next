@@ -22,6 +22,8 @@ enum class PipeWireOutputState {
     error,
 };
 
+// Historical internal names retained while this contract is implemented by
+// PipeWire on Linux and CoreAudio on macOS (ADR-0255).
 struct PipeWireOutputConfig {
     std::string stream_name{"Trackknife local playback"};
     std::optional<std::string> target_object;
@@ -49,7 +51,7 @@ struct PipeWireOutputSnapshot {
 };
 
 struct PipeWireDevice {
-    std::string name;        // node.name — usable as a stream target_object
+    std::string name;        // stable backend id, usable as target_object
     std::string description; // human-readable device label
 
     friend bool operator==(const PipeWireDevice&, const PipeWireDevice&) = default;
@@ -64,9 +66,8 @@ struct PipeWireDeviceSnapshot {
     friend bool operator==(const PipeWireDeviceSnapshot&, const PipeWireDeviceSnapshot&) = default;
 };
 
-// Owns one persistent registry connection. Global add/remove events and the
-// session manager's default.audio.sink metadata increment generation; callers
-// take immutable snapshots without running PipeWire work on their own thread.
+// Owns one device inventory monitor. Backend device/default changes increment
+// generation; callers take immutable snapshots on the playback worker.
 class PipeWireDeviceMonitor final {
   public:
     [[nodiscard]] static core::Result<PipeWireDeviceMonitor>
@@ -87,8 +88,8 @@ class PipeWireDeviceMonitor final {
     std::unique_ptr<Impl> implementation_;
 };
 
-// Enumerates the currently available PipeWire audio sinks via one bounded
-// registry roundtrip. Blocking — intended for a worker thread, never the UI.
+// Enumerates the currently available platform audio outputs. Blocking —
+// intended for a worker thread, never the UI.
 [[nodiscard]] core::Result<std::vector<PipeWireDevice>>
 list_pipewire_output_devices(std::chrono::milliseconds timeout = std::chrono::milliseconds{2'000});
 
@@ -108,16 +109,15 @@ class PipeWireOutput final {
     [[nodiscard]] PipeWireOutputSnapshot snapshot() const;
     [[nodiscard]] core::Result<void> activate();
 
-    // Linear soft volume [0, 1] applied by PipeWire's stream mixer; samples
-    // rendered by the source are never modified by Trackknife itself.
+    // Linear soft volume [0, 1], applied per stream by the platform adapter.
     [[nodiscard]] core::Result<void> set_volume(double volume);
 
     // Deactivation waits for the paused state, flushes queued device data, and
     // waits for an in-flight real-time callback to leave the source.
     [[nodiscard]] core::Result<void> quiesce();
 
-    // Drain is valid once the source has reached its end. It waits until
-    // PipeWire reports that every already-queued device buffer was consumed.
+    // Drain is valid once the source has reached its end. It waits until the
+    // platform has consumed already-queued device audio.
     [[nodiscard]] core::Result<void> drain();
 
   private:

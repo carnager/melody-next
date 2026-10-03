@@ -4,7 +4,9 @@
 
 #include <ifaddrs.h>
 #include <net/if.h>
+#ifdef __linux__
 #include <net/if_arp.h>
+#endif
 #include <netinet/in.h>
 
 #include <algorithm>
@@ -65,9 +67,14 @@ void copy_address(const sockaddr* from, sockaddr_storage& to) {
 
 // A link that carries no hardware addresses: WireGuard and tun say so.
 [[nodiscard]] bool headerless(const std::string& name) {
+#ifdef __linux__
     std::ifstream type{"/sys/class/net/" + name + "/type"};
     int value = 0;
     return type >> value && value == ARPHRD_NONE;
+#else
+    static_cast<void>(name);
+    return false;
+#endif
 }
 
 [[nodiscard]] std::vector<InterfaceAddress> interface_addresses() {
@@ -113,7 +120,9 @@ std::optional<output::StreamFormat> format_for_kbps(const int kbps) {
     if (kbps <= 0) {
         return std::nullopt;
     }
-    return output::StreamFormat{.bitrate_kbps = std::clamp(kbps, 16, 512)};
+    return output::StreamFormat{.bitrate_kbps = std::clamp(kbps, 16, 512),
+                                .codec = output::StreamCodec::opus,
+                                .sample_rate_cap = {}};
 }
 
 std::string describe(const std::optional<output::StreamFormat>& format) {
@@ -126,8 +135,9 @@ RouteFinding classify_route(const sockaddr_storage& local, const sockaddr_storag
     if (local.ss_family == AF_UNIX) {
         return {.route = Route::nearby, .why = "on this machine"};
     }
-    const auto carrier = std::ranges::find_if(
-        interfaces, [&local](const InterfaceAddress& entry) { return same_address(entry.address, local); });
+    const auto carrier = std::ranges::find_if(interfaces, [&local](const InterfaceAddress& entry) {
+        return same_address(entry.address, local);
+    });
     if (carrier == interfaces.end()) {
         return {.route = Route::away, .why = "by a way this machine cannot tell"};
     }

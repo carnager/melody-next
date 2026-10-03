@@ -416,6 +416,19 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         "Lets output agents play this computer's music, and other Trackknife windows control it"));
     bind(engine_share_, engine_share_key);
     sharing_form->addRow(engine_share_);
+    engine_upnp_ = new QCheckBox(QStringLiteral("Discover UPnP speakers"), sharing);
+    engine_upnp_->setObjectName(QStringLiteral("bench-settings-engine-upnp"));
+    bind(engine_upnp_, engine_upnp_key);
+    engine_upnp_->setToolTip(
+        QStringLiteral("Play on network speakers. ReplayGain is unavailable on these outputs. "
+                       "Changing this restarts the engine."));
+#if !TRACKKNIFE_ENABLE_UPNP
+    engine_upnp_->setChecked(false);
+    engine_upnp_->setEnabled(false);
+    engine_upnp_->setToolTip(
+        QStringLiteral("UPnP support was disabled when this build was configured"));
+#endif
+    sharing_form->addRow(engine_upnp_);
     engine_listen_ = new QLineEdit(sharing);
     engine_listen_->setObjectName(QStringLiteral("bench-settings-engine-listen"));
     bind(engine_listen_, engine_listen_key);
@@ -458,7 +471,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     syncs_.push_back([this] {
         const bool on = engine_share_->isChecked();
         engine_listen_->setEnabled(on);
-        engine_stream_port_->setEnabled(on);
+        // UPnP speakers fetch the music from the stream port too.
+        engine_stream_port_->setEnabled(on || engine_upnp_->isChecked());
         engine_agent_command_->setText(session_->agentCommand());
     });
     engine_layout->addWidget(sharing);

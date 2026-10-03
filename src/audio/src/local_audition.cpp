@@ -1271,6 +1271,13 @@ LocalAuditionService::~LocalAuditionService() = default;
 
 core::Result<std::unique_ptr<LocalAuditionService>>
 LocalAuditionService::create(LocalAuditionConfig config) {
+#if !TRACKKNIFE_ENABLE_LOCAL_AUDIO
+    static_cast<void>(config);
+    return std::unexpected(
+        core::Error{.code = core::ErrorCode::unsupported,
+                    .message = "local audio was disabled at build time; select a network output",
+                    .context = {}});
+#else
     if (!valid_local_audition_buffer_config(config.buffer)) {
         return std::unexpected(invalid_config(
             "local audition buffer duration and threshold must be positive, ordered, and no "
@@ -1295,6 +1302,7 @@ LocalAuditionService::create(LocalAuditionConfig config) {
     }
     return std::unique_ptr<LocalAuditionService>{
         new LocalAuditionService{std::make_unique<Impl>(std::move(config))}};
+#endif
 }
 
 LocalAuditionSnapshot LocalAuditionService::snapshot() const { return implementation_->snapshot(); }
@@ -1344,7 +1352,8 @@ core::Result<void> LocalAuditionService::load_selected_and_play(
 
 core::Result<void> LocalAuditionService::load_network_stream_and_play(
     std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override,
-    const formats::AudioSourceSelection selection, const std::optional<formats::SampleRange> segment) {
+    const formats::AudioSourceSelection selection,
+    const std::optional<formats::SampleRange> segment) {
     if (!url.starts_with("http://") && !url.starts_with("https://")) {
         return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
     }
@@ -1417,8 +1426,8 @@ core::Result<void> LocalAuditionService::queue_gapless_next_selected(
 
 core::Result<void> LocalAuditionService::queue_gapless_network_stream(
     std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override,
-    const formats::AudioSourceSelection selection, const std::optional<formats::SampleRange> segment,
-    const std::uint64_t occurrence_token) {
+    const formats::AudioSourceSelection selection,
+    const std::optional<formats::SampleRange> segment, const std::uint64_t occurrence_token) {
     if (!url.starts_with("http://") && !url.starts_with("https://")) {
         return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
     }

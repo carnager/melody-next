@@ -55,6 +55,41 @@ Download the APK from the
 and open it on the phone. Android asks you to allow installs from your
 browser or file manager first.
 
+## macOS
+
+The macOS build runs the Trackknife desktop client and its engine with native
+CoreAudio outputs and optional UPnP speakers. Install the build tools and
+libraries with Homebrew:
+
+```sh
+brew install cmake ninja pkgconf qt ffmpeg libopenmpt taglib libebur128 \
+    sqlite curl openssl@3 utf8proc libupnp nlohmann-json
+```
+
+Then configure and build the macOS preset:
+
+```sh
+export CMAKE_PREFIX_PATH="$(brew --prefix qt)"
+export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$(brew --prefix)/share/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix curl)/lib/pkgconfig"
+cmake --preset macos -DPKG_CONFIG_EXECUTABLE="$(brew --prefix)/bin/pkg-config"
+cmake --build --preset macos
+./build/macos/src/bench/trackknife
+```
+
+The output menu beside the volume control lists the system default and the
+Mac's CoreAudio devices. Open **Settings → Engine** to enable **Discover UPnP
+speakers** and choose a stream port. The Mac and renderer must be on the same
+LAN, and macOS may ask for permission to find devices on the local network.
+UPnP streams play at unity gain; the output reports ReplayGain as unavailable.
+
+For a headless Mac that lends its speakers with `melodyd --agent`, use the
+`macos-server` preset. The generic `server` preset excludes local audio:
+
+```sh
+cmake --preset macos-server -DPKG_CONFIG_EXECUTABLE="$(brew --prefix)/bin/pkg-config"
+cmake --build --preset macos-server --target melodyd
+```
+
 ## From source
 
 You need a C++23 compiler, CMake ≥ 3.28, Ninja, pkg-config, and:
@@ -63,6 +98,7 @@ You need a C++23 compiler, CMake ≥ 3.28, Ninja, pkg-config, and:
 - FFmpeg ≥ 6 with swscale, TagLib ≥ 2.0, libopenmpt ≥ 0.7
 - PipeWire ≥ 0.3.50, libebur128 ≥ 1.2, SQLite ≥ 3.37, libutf8proc ≥ 2.9
 - libcurl, OpenSSL (libcrypto), nlohmann-json
+- libupnp ≥ 1.14 when UPnP renderer support is enabled
 - optional: Chromaprint's `fpcalc`, for AcoustID
 
 ```sh
@@ -70,6 +106,17 @@ cmake --preset release
 cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
+
+Relevant build switches are:
+
+| Switch | Default | Effect |
+| --- | --- | --- |
+| `TRACKKNIFE_ENABLE_UPNP` | `AUTO` | Builds SSDP discovery and UPnP playback when libupnp is installed, and leaves them out when it is not. `ON` requires libupnp; `OFF` builds no UPnP code. |
+| `TRACKKNIFE_ENABLE_LOCAL_AUDIO` | On on Linux and macOS | Builds PipeWire on Linux or CoreAudio on macOS. |
+| `TRACKKNIFE_BUILD_WATCH` | On on Linux; off elsewhere | Builds the inotify-based `melody-watch` utility. |
+
+UPnP also has a runtime switch: the desktop setting is off initially, and a
+headless engine discovers renderers only when started with `--upnp`.
 
 The Android app is in `android/`:
 

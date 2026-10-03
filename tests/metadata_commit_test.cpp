@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/core/cancellation.hpp"
+#include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/formats/artwork.hpp"
 #include "trackknife/formats/cue_sheet.hpp"
@@ -404,8 +405,8 @@ void commits_atomically_and_retains_verified_backup(
     constexpr std::string_view attribute_name{"user.trackknife.metadata-commit-test"};
     constexpr std::string_view attribute_value{"preserved-xattr"};
     const bool xattrs_supported =
-        ::setxattr(source.c_str(), attribute_name.data(), attribute_value.data(),
-                   attribute_value.size(), 0) == 0;
+        core::set_path_extended_attribute(source.c_str(), attribute_name.data(),
+                                          attribute_value.data(), attribute_value.size()) == 0;
     if (!xattrs_supported) {
         CHECK(errno == ENOTSUP || errno == EOPNOTSUPP);
     }
@@ -454,8 +455,8 @@ void commits_atomically_and_retains_verified_backup(
     CHECK((status.st_mode & 07777) == 0640);
     if (xattrs_supported) {
         std::array<char, 64> value{};
-        const auto size =
-            ::getxattr(source.c_str(), attribute_name.data(), value.data(), value.size());
+        const auto size = core::get_path_extended_attribute(source.c_str(), attribute_name.data(),
+                                                            value.data(), value.size());
         CHECK(size == static_cast<ssize_t>(attribute_value.size()));
         CHECK((size >= 0 &&
                std::string_view{value.data(), static_cast<std::size_t>(size)} == attribute_value));

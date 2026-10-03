@@ -57,6 +57,8 @@ struct SettingsKeys {
     // Whether this computer's library has a tab: someone whose music is all
     // on the remote engine may not want it.
     static constexpr auto library_show_local_key = "library/show-local";
+    // ADR-0235: this computer's engine finds UPnP renderers and plays on them.
+    static constexpr auto engine_upnp_key = "engine/upnp";
     static constexpr auto engine_share_key = "engine/share";
     static constexpr auto engine_listen_key = "engine/listen";
     static constexpr auto engine_listen_default = "0.0.0.0:6600";

@@ -83,6 +83,7 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
          QString::fromLatin1(metadata::default_rating_backup_tag));
     read(QLatin1String(SettingsKeys::engine_password_key), QString{});
     read(QLatin1String(SettingsKeys::library_show_local_key), true);
+    read(QLatin1String(SettingsKeys::engine_upnp_key), false);
     read(QLatin1String(SettingsKeys::engine_share_key), false);
     read(QLatin1String(SettingsKeys::engine_listen_key),
          QString::fromLatin1(SettingsKeys::engine_listen_default));
@@ -284,8 +285,8 @@ bool SettingsSession::bufferCustom() const {
 // fields: the one thing the sharing part of the page is for, spelled out.
 QString SettingsSession::agentCommand() const {
     if (!values_.value(QLatin1String(SettingsKeys::engine_share_key)).toBool()) {
-        return QStringLiteral(
-            "Not shared: only this computer plays, and Trackknife here controls it.");
+        return QStringLiteral("Only Trackknife on this computer controls this engine. UPnP "
+                              "speakers can play when discovery is enabled.");
     }
     const auto listen = values_.value(QLatin1String(SettingsKeys::engine_listen_key))
                             .toString()

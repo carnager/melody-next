@@ -787,9 +787,10 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
     }
 
     const auto transfer_metadata = strip_loudness_fields(request.metadata);
+    const auto artwork = request.preset.carries_artwork ? request.artwork : std::nullopt;
     auto pipeline_result = open_pipeline(
         request.preset, source_format, effective_sample_rate, effective_bit_depth,
-        request.channel_policy, request.artwork, temporary.native(), request.destination_raw_path);
+        request.channel_policy, artwork, temporary.native(), request.destination_raw_path);
     if (!pipeline_result) {
         return std::unexpected(pipeline_result.error());
     }
@@ -1009,8 +1010,8 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
         !tags_verified) {
         return std::unexpected(tags_verified.error());
     }
-    if (request.artwork) {
-        if (auto artwork_verified = verify_written_artwork(temporary.native(), *request.artwork,
+    if (artwork) {
+        if (auto artwork_verified = verify_written_artwork(temporary.native(), *artwork,
                                                            request.destination_raw_path);
             !artwork_verified) {
             return std::unexpected(artwork_verified.error());

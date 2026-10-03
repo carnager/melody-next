@@ -11,6 +11,9 @@
 #include "agent/speaker_arbiter.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
+#if TRACKKNIFE_ENABLE_UPNP
+#include "trackknife/discovery/upnp.hpp"
+#endif
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -31,6 +34,7 @@
 #include "trackknife/engine/token.hpp"
 #include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/workspace.hpp"
+#include "trackknife/formats/probe.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <fcntl.h>
@@ -70,7 +74,11 @@ void request_stop(int) { stop_requested.store(true); }
         return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
     if (const auto* home = std::getenv("HOME")) {
+#ifdef __APPLE__
+        return std::filesystem::path{home} / "Library" / "Application Support" / "trackknife";
+#else
         return std::filesystem::path{home} / ".local" / "share" / "trackknife" / "trackknife";
+#endif
     }
     return std::filesystem::current_path();
 }
@@ -90,7 +98,8 @@ void request_stop(int) { stop_requested.store(true); }
     auto minted = trackknife::core::StableId::random().to_string();
     const auto partial = state_directory / "engine-id.partial";
     std::error_code error;
-    if (std::ofstream out{partial, std::ios::trunc}; out && (out << minted << '\n') && out.flush()) {
+    if (std::ofstream out{partial, std::ios::trunc};
+        out && (out << minted << '\n') && out.flush()) {
         out.close();
         std::filesystem::rename(partial, path, error);
     } else {
@@ -179,6 +188,10 @@ void usage() {
         << "                 every agent and client. There is no TLS: on an untrusted\n"
         << "                 network use WireGuard, or put a TLS proxy in front of a\n"
         << "                 loopback --listen (ADR-0223).\n"
+#if TRACKKNIFE_ENABLE_UPNP
+        << "  --upnp [--upnp-interface NAME]\n"
+        << "      Discover UPnP renderers (requires a LAN-reachable --http listener).\n"
+#endif
         << "  --http HOST:PORT\n"
         << "                 serve the music being played to output agents that have\n"
         << "                 no copy of their own (melody-agent --stream). Only what\n"
@@ -236,6 +249,10 @@ int main(int argc, char** argv) {
     std::string http_address;
     std::uint64_t transcode_cache_mb = 2048;
     bool local_only = false;
+#if TRACKKNIFE_ENABLE_UPNP
+    bool upnp_enabled = false;
+    std::string upnp_interface;
+#endif
     std::string password;
     std::string password_file;
     std::string engine_name;
@@ -283,6 +300,13 @@ int main(int argc, char** argv) {
             password = value();
         } else if (argument == "--password-file") {
             password_file = value();
+#if TRACKKNIFE_ENABLE_UPNP
+        } else if (argument == "--upnp") {
+            upnp_enabled = true;
+        } else if (argument == "--upnp-interface") {
+            upnp_interface = value();
+            upnp_enabled = true;
+#endif
         } else if (argument == "--http") {
             http_address = value();
         } else if (argument == "--transcode-cache") {
@@ -485,11 +509,12 @@ int main(int argc, char** argv) {
     // here and over the network knows it is one engine, and one that stores
     // the id finds it again after a restart (ADR-0234).
     const auto engine_id = stable_engine_id(state_directory);
-    dispatcher.on("engine.info", [&engine_name, engine_id](const trackknife::protocol::Json&)
-                                     -> trackknife::core::Result<trackknife::protocol::Json> {
-        return trackknife::protocol::Json{
-            {"name", engine_name}, {"id", engine_id}, {"protocol", 1}};
-    });
+    dispatcher.on("engine.info",
+                  [&engine_name, engine_id](const trackknife::protocol::Json&)
+                      -> trackknife::core::Result<trackknife::protocol::Json> {
+                      return trackknife::protocol::Json{
+                          {"name", engine_name}, {"id", engine_id}, {"protocol", 1}};
+                  });
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
@@ -526,8 +551,8 @@ int main(int argc, char** argv) {
         auto listening = trackknife::engine::Server::listen_tcp(endpoint->host, endpoint->port,
                                                                 dispatcher, password);
         if (!listening && listen_by_default) {
-            std::cerr << "melodyd: " << listen_address << " is taken ("
-                      << listening.error().message << "); this machine only\n";
+            std::cerr << "melodyd: " << listen_address << " is taken (" << listening.error().message
+                      << "); this machine only\n";
             http_address.clear();
         } else if (!listening) {
             std::cerr << "melodyd: could not listen on " << listen_address << ": "
@@ -623,6 +648,33 @@ int main(int argc, char** argv) {
     // ADR-0228: the files an agent without its own copy fetches -- only
     // what the player holds, with a token that lives as long as this run and
     // reaches agents only in the URLs the engine gives them.
+#if TRACKKNIFE_ENABLE_UPNP
+    // ADR-0235: discovery starts before the streams, for its address: an
+    // engine kept to this machine serves its renderers there only, not on
+    // every network it is on. Renderers reach the outputs once it begins.
+    std::shared_ptr<trackknife::discovery::UpnpDiscovery> upnp;
+    trackknife::engine::Outputs* upnp_outputs = nullptr;
+    if (upnp_enabled) {
+        auto found = trackknife::discovery::UpnpDiscovery::start(
+            [&upnp_outputs](const auto& renderer) {
+                if (upnp_outputs != nullptr) {
+                    upnp_outputs->renderer_changed(renderer);
+                }
+            },
+            upnp_interface);
+        if (!found) {
+            std::cerr << found.error().message << "\n";
+            return EXIT_FAILURE;
+        }
+        upnp = std::move(*found);
+        if (const auto endpoint = trackknife::protocol::Endpoint::parse(http_address, {});
+            local_only && endpoint && endpoint->tcp() &&
+            (endpoint->host == "0.0.0.0" || endpoint->host == "::" || endpoint->host.empty()) &&
+            !upnp->address().empty()) {
+            http_address = upnp->address() + ":" + std::to_string(endpoint->port);
+        }
+    }
+#endif
     std::unique_ptr<trackknife::engine::TranscodeCache> transcodes;
     std::unique_ptr<trackknife::engine::MediaStreams> media;
     std::unique_ptr<trackknife::engine::StreamServer> streams;
@@ -644,8 +696,8 @@ int main(int argc, char** argv) {
             endpoint->host, endpoint->port,
             [&media](const std::string_view query) { return media->resolve(query); });
         if (!listening && listen_by_default) {
-            std::cerr << "melodyd: " << http_address << " is taken ("
-                      << listening.error().message << "); agents with no copy of the music "
+            std::cerr << "melodyd: " << http_address << " is taken (" << listening.error().message
+                      << "); agents with no copy of the music "
                       << "cannot be streamed to\n";
         } else if (!listening) {
             std::cerr << "melodyd: could not serve streams on " << http_address << ": "
@@ -678,6 +730,104 @@ int main(int argc, char** argv) {
     if (tcp_server) {
         tcp_server->on_agent(admit);
     }
+#if TRACKKNIFE_ENABLE_UPNP
+    if (upnp) {
+        if (!streams) {
+            std::cerr << "melodyd: --upnp needs --http bound to a LAN address\n";
+            return EXIT_FAILURE;
+        }
+        upnp_outputs = &outputs;
+        outputs.configure_upnp(
+            upnp,
+            [&media, &transcodes, &streams](const trackknife::output::StreamRequest& request,
+                                            const trackknife::discovery::UpnpRenderer& renderer)
+                -> trackknife::core::Result<trackknife::output::RendererTrack> {
+                using namespace trackknife;
+                if (renderer.address.empty() || renderer.address.starts_with("127.")) {
+                    return std::unexpected(
+                        core::Error{.code = core::ErrorCode::unsupported,
+                                    .message = "renderer has no reachable engine address",
+                                    .context = {}});
+                }
+                auto probe = formats::probe_local_media(request.raw_path);
+                if (!probe) {
+                    return std::unexpected(probe.error());
+                }
+                std::int64_t duration = probe->duration_ms.value_or(0);
+                auto mime = output::stream_content_type(request.raw_path);
+                int source_sample_rate = 0;
+                const auto selected_stream = request.selection.stream_index
+                                                 ? request.selection.stream_index
+                                                 : probe->best_audio_stream;
+                if (selected_stream && *selected_stream >= 0) {
+                    const auto chosen =
+                        std::ranges::find(probe->audio_streams, *selected_stream,
+                                          &formats::AudioStreamInfo::stream_index);
+                    if (chosen != probe->audio_streams.end()) {
+                        source_sample_rate = chosen->sample_rate;
+                    }
+                }
+                const auto delivery =
+                    output::renderer_compatible_request(request, renderer, source_sample_rate);
+                if (delivery.format) {
+                    auto converted =
+                        transcodes->ensure(engine::TranscodeSource{.raw_path = delivery.raw_path,
+                                                                   .selection = delivery.selection,
+                                                                   .segment = delivery.segment},
+                                           *delivery.format);
+                    if (!converted) {
+                        return std::unexpected(converted.error());
+                    }
+                    mime = output::stream_content_type(converted->native());
+                    if (auto converted_probe = formats::probe_local_media(converted->native())) {
+                        duration = converted_probe->duration_ms.value_or(duration);
+                    }
+                }
+                const auto base = "http://" + renderer.address + ":" +
+                                  std::to_string(streams->port()) + "/stream?";
+                // Long enough to play the track and pause a while; the output
+                // prepares it again before a resume or seek past this.
+                const auto lifetime = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::hours{6} + std::chrono::milliseconds{std::max<std::int64_t>(0, duration)});
+                const auto expires = std::chrono::system_clock::now() + lifetime;
+                // Distinct URLs also distinguish two consecutive occurrences of the same song.
+                const auto url = base + media->ticket(delivery, lifetime) +
+                                 "&occurrence=" + core::StableId::random().to_string();
+                std::string title = std::filesystem::path{request.raw_path}.stem().string(), artist,
+                            album, artwork;
+                for (const auto& tag : probe->tags) {
+                    auto name = tag.name;
+                    std::ranges::transform(name, name.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::tolower(c));
+                    });
+                    if (name == "title") {
+                        title = tag.value;
+                    }
+                    if (name == "artist") {
+                        artist = tag.value;
+                    }
+                    if (name == "album") {
+                        album = tag.value;
+                    }
+                }
+                if (transcodes->artwork(request.raw_path)) {
+                    output::StreamRequest cover{.raw_path = request.raw_path,
+                                                .format = {},
+                                                .selection = {},
+                                                .segment = {},
+                                                .artwork = true};
+                    artwork = base + media->ticket(cover, lifetime);
+                }
+                return output::RendererTrack{
+                    .source = request,
+                    .url = url,
+                    .metadata =
+                        output::renderer_didl(url, mime, duration, title, artist, album, artwork),
+                    .duration_ms = duration,
+                    .expires = expires};
+            });
+    }
+#endif
     outputs.restore();
 
     // Last.fm for what this engine plays, with its session handed over by a
@@ -752,14 +902,15 @@ int main(int argc, char** argv) {
     // by name without being told where it is.
     std::unique_ptr<trackknife::discovery::Announcer> announcer;
     if (tcp_server) {
-        auto announced = trackknife::discovery::Announcer::start(trackknife::discovery::Advertisement{
-            .instance = engine_name,
-            .port = tcp_server->port(),
-            .txt = {{"id", engine_id},
-                    {"proto", "1"},
-                    // Always wanted now; kept for clients that read it.
-                    {"auth", "1"},
-                    {"http", streams ? std::to_string(streams->port()) : std::string{}}}});
+        auto announced =
+            trackknife::discovery::Announcer::start(trackknife::discovery::Advertisement{
+                .instance = engine_name,
+                .port = tcp_server->port(),
+                .txt = {{"id", engine_id},
+                        {"proto", "1"},
+                        // Always wanted now; kept for clients that read it.
+                        {"auth", "1"},
+                        {"http", streams ? std::to_string(streams->port()) : std::string{}}}});
         if (announced) {
             announcer = std::move(*announced);
         } else {
@@ -780,6 +931,11 @@ int main(int argc, char** argv) {
     if (streams) {
         streams->start();
     }
+#if TRACKKNIFE_ENABLE_UPNP
+    if (upnp) {
+        upnp->begin();
+    }
+#endif
     if (guests && guests->start()) {
         std::cerr << "melodyd: playing for the engines on the network as \"" << engine_name
                   << "\"\n";
@@ -799,6 +955,11 @@ int main(int argc, char** argv) {
     }
 
     std::cerr << "melodyd: stopping\n";
+#if TRACKKNIFE_ENABLE_UPNP
+    if (upnp) {
+        upnp->stop();
+    }
+#endif
     announcer.reset();
     if (arbiter) {
         arbiter->stop();

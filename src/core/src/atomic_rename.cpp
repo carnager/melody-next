@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/core/atomic_rename.hpp"
 
@@ -34,8 +35,8 @@ Result<NoReplacePublishMethod> publish_no_replace_at(const int source_dir_fd,
                                                      const std::string& source_name,
                                                      const int target_dir_fd,
                                                      const std::string& target_name) {
-    if (::renameat2(source_dir_fd, source_name.c_str(), target_dir_fd, target_name.c_str(),
-                    RENAME_NOREPLACE) == 0) {
+    if (core::rename_with_flags(source_dir_fd, source_name.c_str(), target_dir_fd,
+                                target_name.c_str(), RENAME_NOREPLACE) == 0) {
         return NoReplacePublishMethod::atomic_rename;
     }
     auto saved = errno;

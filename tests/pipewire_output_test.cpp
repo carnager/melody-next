@@ -112,6 +112,15 @@ int main() {
     const auto invalid_monitor = trackknife::audio::PipeWireDeviceMonitor::connect(0ms);
     CHECK(!invalid_monitor);
     CHECK(invalid_monitor.error().code == trackknife::core::ErrorCode::invalid_argument);
+#ifdef __APPLE__
+    const auto exclusive =
+        trackknife::audio::PipeWireOutput::connect(*source, {.stream_name = "Trackknife test",
+                                                             .target_object = std::nullopt,
+                                                             .transition_timeout = 100ms,
+                                                             .exclusive = true});
+    CHECK(!exclusive);
+    CHECK(exclusive.error().code == trackknife::core::ErrorCode::unsupported);
+#endif
 
     auto output = trackknife::audio::PipeWireOutput::connect(
         *source, {.stream_name = "Trackknife silent integration test",
@@ -119,7 +128,7 @@ int main() {
                   .transition_timeout = 3s,
                   .exclusive = false});
     if (!output) {
-        std::cout << "SKIP: PipeWire server/output unavailable: " << output.error().message << '\n';
+        std::cout << "SKIP: platform audio output unavailable: " << output.error().message << '\n';
         std::filesystem::remove(path);
         return failures == 0 ? 77 : 1;
     }
@@ -130,13 +139,13 @@ int main() {
     CHECK(initial.callback_count == 0U);
     CHECK(initial.volume == 1.0);
 
-    // Stream volume: applied through PipeWire's mixer, clamped, and reported.
+    // Stream volume is clamped and reported by the platform adapter.
     CHECK(output->set_volume(0.25).has_value());
     CHECK(output->snapshot().volume == 0.25);
     CHECK(output->set_volume(3.0).has_value());
     CHECK(output->snapshot().volume == 1.0);
 
-    // A reachable server enumerates at least one audio sink with usable names.
+    // A reachable backend enumerates at least one audio output with usable names.
     const auto devices = trackknife::audio::list_pipewire_output_devices();
     CHECK(devices.has_value());
     CHECK(devices.has_value() && !devices->empty());

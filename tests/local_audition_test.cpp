@@ -420,7 +420,7 @@ int main() {
     std::filesystem::remove(relocated_next_path);
 
     if (active.state == LocalAuditionState::failed) {
-        std::cout << "SKIP: PipeWire server/output unavailable: "
+        std::cout << "SKIP: platform audio output unavailable: "
                   << (active.error ? active.error->message : "unknown error") << '\n';
         std::filesystem::remove(path);
         return failures == 0 ? 77 : 1;

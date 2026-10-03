@@ -146,7 +146,25 @@ class EnginePlayback final : public QObject {
         QString rule_id;
         QString name;
         QString query;
+        // ADR-0258: how the rule selects.
+        QString group_by{};
+        int groups{0};
+        int per_group{0};
+        int limit{100};
+        bool shuffle{false};
+        // Whether the engine told how it selects; one older than ADR-0258
+        // keeps only the query.
+        bool selection_told{true};
         friend bool operator==(const Continuation&, const Continuation&) = default;
+        // The rule the window has against what `kept` tells the engine
+        // keeps: the same, as far as the engine tells.
+        [[nodiscard]] bool sameAs(const Continuation& kept) const {
+            return rule_id == kept.rule_id && name == kept.name && query == kept.query &&
+                   (!kept.selection_told ||
+                    (group_by == kept.group_by && groups == kept.groups &&
+                     per_group == kept.per_group && limit == kept.limit &&
+                     shuffle == kept.shuffle));
+        }
     };
     [[nodiscard]] const QHash<QString, Continuation>& continuations() const noexcept {
         return continuations_;

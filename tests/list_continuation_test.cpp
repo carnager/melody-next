@@ -98,13 +98,23 @@ int main(const int argc, char** argv) {
         require(!continuation
                      .set(list, engine::ContinuationRule{.rule_id = "r",
                                                          .name = "Broken",
-                                                         .query = "codec ((("})
+                                                         .query = "codec (((",
+                                                        .group_by = {},
+                                                        .groups = 0U,
+                                                        .per_group = 0U,
+                                                        .limit = 100U,
+                                                        .shuffle = false})
                      .has_value(),
                 "a rule that does not compile is refused");
         require(continuation
                     .set(list, engine::ContinuationRule{.rule_id = "r",
                                                         .name = "Everything",
-                                                        .query = "codec PRESENT"})
+                                                        .query = "codec PRESENT",
+                                                        .group_by = {},
+                                                        .groups = 0U,
+                                                        .per_group = 0U,
+                                                        .limit = 100U,
+                                                        .shuffle = false})
                     .has_value(),
                 "the list continues with a rule");
 
@@ -195,6 +205,52 @@ int main(const int argc, char** argv) {
     {
         engine::ListContinuation again{*workspace, catalogue, {}};
         require(again.all().empty(), "an ended continuation stays ended");
+    }
+
+    // ADR-0258: a grouped rule appends its selection -- here the one group a
+    // constant makes of the five files, whole, less what is queued; or one
+    // track of it.
+    {
+        engine::ListContinuation continuation{*workspace, catalogue, {}};
+        const auto album = core::StableId::random().to_string();
+        const auto play_alone = [&player, &files, &album] {
+            engine::QueueEntry only;
+            only.source.raw_path = files.front();
+            player->replace_queue({only}, album);
+            require(player->play_entry(only.entry_id).has_value(), "the list plays");
+        };
+        const auto rule = [](const std::size_t per_group) {
+            return engine::ContinuationRule{.rule_id = "shipped:random-album",
+                                            .name = "Random album",
+                                            .query = "ALL",
+                                            .group_by = "one",
+                                            .groups = 1U,
+                                            .per_group = per_group,
+                                            .limit = 100U,
+                                            .shuffle = false};
+        };
+        require(continuation.set(album, rule(0U)).has_value(), "a grouped rule is taken");
+        play_alone();
+        require(continuation.continue_if_ending(*player) == files.size() - 1U,
+                "the whole group is appended, less what is queued");
+        std::vector<std::string> order;
+        for (const auto& entry : player->queue()) {
+            order.push_back(entry.source.raw_path);
+        }
+        require(std::set<std::string>(order.begin(), order.end()).size() == files.size(),
+                "nothing queued twice");
+        require(continuation.all().at(album).group_by == "one" &&
+                    continuation.all().at(album).groups == 1U,
+                "the grouping is kept");
+        {
+            engine::ListContinuation restarted{*workspace, catalogue, {}};
+            require(restarted.all().at(album).group_by == "one",
+                    "and kept across a restart");
+        }
+        require(continuation.set(album, rule(1U)).has_value(), "one track a group");
+        play_alone();
+        require(continuation.continue_if_ending(*player) == 1U, "one track of the group");
+        require(continuation.set(album, std::nullopt).has_value(), "ended");
     }
 
     std::filesystem::remove_all(directory);

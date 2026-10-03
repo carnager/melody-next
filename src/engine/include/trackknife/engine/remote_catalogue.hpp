@@ -69,6 +69,9 @@ class RemoteCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<FoundTrack>>
     find(const query::CompiledTkq& compiled, const std::string& format, std::size_t limit,
          const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<DynamicSelected>
+    select(const DynamicSelection& selection, const std::set<std::string>& exclude = {},
+           const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;

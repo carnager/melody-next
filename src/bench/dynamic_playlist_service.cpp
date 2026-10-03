@@ -3,8 +3,8 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
+#include "trackknife/query/tkq.hpp"
 #include <QCryptographicHash>
-#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,7 +15,6 @@
 #include <QSettings>
 #include <QTimer>
 #include <QUrlQuery>
-#include <QtConcurrentRun>
 #include <algorithm>
 #include <numeric>
 #include <random>
@@ -59,7 +58,97 @@ QString identityHash(const std::string& value) {
 QString normalized(const QString& value) {
     return value.normalized(QString::NormalizationForm_C).simplified().toCaseFolded();
 }
+bool validCount(const int count) { return count >= 0 && count <= 500; }
+bool validSelection(const DynamicPlaylistDefinition& d) {
+    return d.limit >= 1 && d.limit <= 500 && validCount(d.groups) && validCount(d.per_group) &&
+           (d.groups == 0 || !d.group_by.trimmed().isEmpty());
+}
 } // namespace
+
+engine::DynamicSelection DynamicPlaylistDefinition::selection() const {
+    const bool grouped = groups > 0 && !group_by.trimmed().isEmpty();
+    return engine::DynamicSelection{
+        .query = query.toStdString(),
+        .limit = static_cast<std::size_t>(std::clamp(limit, 1, 500)),
+        .shuffle = shuffle,
+        .group_by = grouped ? group_by.toStdString() : std::string{},
+        .groups = grouped ? static_cast<std::size_t>(groups) : 0U,
+        .per_group = grouped ? static_cast<std::size_t>(std::max(per_group, 0)) : 0U};
+}
+
+QVector<DynamicPlaylistDefinition> shippedDynamicPlaylists(const QString& profile) {
+    const auto rule = [&profile](const char* id, const char* name, const char* query,
+                                 const int limit, const bool shuffle, const char* group_by = "",
+                                 const int groups = 0, const int per_group = 0) {
+        return DynamicPlaylistDefinition{.id = QStringLiteral("shipped:") + QLatin1String(id),
+                                         .name = QString::fromUtf8(name),
+                                         .profile = profile,
+                                         .source = QStringLiteral("rules"),
+                                         .query = QString::fromUtf8(query),
+                                         .limit = limit,
+                                         .shuffle = shuffle,
+                                         .group_by = QString::fromUtf8(group_by),
+                                         .groups = groups,
+                                         .per_group = per_group};
+    };
+    return {
+        rule("random-tracks", "Random tracks", "ALL", 50, true),
+        rule("random-album", "Random album", "ALL", 500, false,
+             "%albumartist% \u2014 %album% %date%", 1, 0),
+        rule("random-artists", "Random artists", "ALL", 30, true, "%albumartist%", 10, 3),
+        rule("rated-8", "Rated 8 and higher", "rating GREATER 7", 100, true),
+        rule("unrated", "Unrated", "rating MISSING", 100, true),
+        rule("recently-added", "Recently added",
+             "dayssinceadded LESS 31 SORT BY $num($info(dayssinceadded),6)", 100, false),
+        rule("not-heard-in-a-year", "Not heard in a year",
+             "HISTORY(dayssinceplayed) GREATER 365 OR HISTORY(dayssinceplayed) MISSING", 100,
+             true),
+    };
+}
+
+core::Result<QVector<DynamicPlaylistDefinition>> dynamicPlaylistCatalog(const QString& profile) {
+    auto saved = loadDynamicPlaylists(profile);
+    if (!saved)
+        return std::unexpected(saved.error());
+    auto catalog = shippedDynamicPlaylists(profile);
+    catalog.append(*saved);
+    return catalog;
+}
+
+void adoptDynamicPlaylists(const QString& profile) {
+    const auto done = QStringLiteral("dynamic-playlists/adopted-v1");
+    QSettings settings;
+    if (settings.value(done).toBool())
+        return;
+    settings.beginGroup(QStringLiteral("dynamic-playlists/v1"));
+    const auto profiles = settings.allKeys();
+    settings.endGroup();
+    auto kept = loadDynamicPlaylists(profile);
+    if (!kept)
+        return;
+    QStringList moved;
+    for (const auto& other : profiles) {
+        if (other == profile)
+            continue;
+        const auto found = loadDynamicPlaylists(other);
+        if (!found)
+            continue;
+        for (auto definition : *found) {
+            if (std::ranges::any_of(*kept, [&definition](const auto& known) {
+                    return known.id == definition.id;
+                }))
+                continue;
+            definition.profile = profile;
+            kept->push_back(std::move(definition));
+        }
+        moved.push_back(other);
+    }
+    if (!moved.isEmpty() && !saveDynamicPlaylists(profile, *kept))
+        return;
+    for (const auto& other : moved)
+        settings.remove(key(other));
+    settings.setValue(done, true);
+}
 
 core::Result<QVector<DynamicPlaylistDefinition>> loadDynamicPlaylists(const QString& profile) {
     QVector<DynamicPlaylistDefinition> result;
@@ -83,9 +172,12 @@ core::Result<QVector<DynamicPlaylistDefinition>> loadDynamicPlaylists(const QStr
                                     .user = o["user"].toString(),
                                     .tag = o["tag"].toString(),
                                     .limit = o["limit"].toInt(),
-                                    .shuffle = o["shuffle"].toBool()};
-        if (d.id.isEmpty() || d.name.isEmpty() || !validSource(d.source) || d.limit < 1 ||
-            d.limit > 500 || o["dialect"].toString() != QStringLiteral("tkq") ||
+                                    .shuffle = o["shuffle"].toBool(),
+                                    .group_by = o["group_by"].toString(),
+                                    .groups = o["groups"].toInt(),
+                                    .per_group = o["per_group"].toInt()};
+        if (d.id.isEmpty() || d.name.isEmpty() || d.shipped() || !validSource(d.source) ||
+            !validSelection(d) || o["dialect"].toString() != QStringLiteral("tkq") ||
             o["dialect_version"].toInt() != 1 || o["compiler_schema"].toInt() != 1)
             return std::unexpected(
                 error(QStringLiteral("Invalid or unsupported dynamic-playlist definition")));
@@ -101,8 +193,8 @@ core::Result<void> saveDynamicPlaylists(const QString& profile,
         return std::unexpected(existing.error());
     QJsonArray entries;
     for (const auto& d : definitions) {
-        if (d.profile != profile || d.id.isEmpty() || d.name.trimmed().isEmpty() ||
-            !validSource(d.source) || d.limit < 1 || d.limit > 500)
+        if (d.profile != profile || d.id.isEmpty() || d.shipped() || d.name.trimmed().isEmpty() ||
+            !validSource(d.source) || !validSelection(d))
             return std::unexpected(error(QStringLiteral("Invalid dynamic-playlist definition")));
         entries.append(QJsonObject{{"id", d.id},
                                    {"name", d.name},
@@ -114,6 +206,9 @@ core::Result<void> saveDynamicPlaylists(const QString& profile,
                                    {"tag", d.tag},
                                    {"limit", d.limit},
                                    {"shuffle", d.shuffle},
+                                   {"group_by", d.group_by},
+                                   {"groups", d.groups},
+                                   {"per_group", d.per_group},
                                    {"dialect", "tkq"},
                                    {"dialect_version", 1},
                                    {"compiler_schema", 1}});
@@ -174,7 +269,7 @@ void DynamicPlaylistService::refresh(DynamicPlaylistDefinition definition,
     definition_ = std::move(definition);
     result_.clear();
     unmatched_ = 0;
-    if (!validSource(definition_.source) || definition_.limit < 1 || definition_.limit > 500) {
+    if (!validSource(definition_.source) || !validSelection(definition_)) {
         fail(QStringLiteral("Invalid playlist source or limit"));
         return;
     }
@@ -187,7 +282,8 @@ void DynamicPlaylistService::refresh(DynamicPlaylistDefinition definition,
             return;
         }
         emit progress(QStringLiteral("Updating from library tags and ratings…"));
-        search_(*compiled, cancellation_.token(), [self, generation](Result tracks) {
+        // ADR-0258: the engine selects; only what it chose comes back.
+        search_(definition_.selection(), cancellation_.token(), [self, generation](Result tracks) {
             if (!self || generation != self->generation_)
                 return;
             if (!tracks) {
@@ -298,7 +394,13 @@ void DynamicPlaylistService::matchNext(const quint64 generation) {
         return;
     }
     QPointer<DynamicPlaylistService> self(this);
-    search_(*compiled, cancellation_.token(), [self, generation, candidate](Result tracks) {
+    const engine::DynamicSelection selection{.query = compiled->source,
+                                             .limit = engine::dynamic_selection_limit,
+                                             .shuffle = false,
+                                             .group_by = {},
+                                             .groups = 0U,
+                                             .per_group = 0U};
+    search_(selection, cancellation_.token(), [self, generation, candidate](Result tracks) {
         if (!self || generation != self->generation_)
             return;
         if (!tracks) {
@@ -361,40 +463,17 @@ void DynamicPlaylistService::complete() {
         emit finished(result_, unmatched_, {});
         return;
     }
-    const auto prepare = [shuffle = definition_.shuffle, limit = definition_.limit](Tracks rows) {
-        if (shuffle) {
-            std::mt19937 generator(std::random_device{}());
-            std::shuffle(rows.begin(), rows.end(), generator);
-        }
-        if (rows.size() > static_cast<std::size_t>(limit))
-            rows.resize(static_cast<std::size_t>(limit));
-        return rows;
-    };
-    if (result_.size() <= 500U) {
-        result_ = prepare(std::move(result_));
-        emit finished(result_, unmatched_, {});
-        return;
-    }
-    // Large rule result sets are sampled/trimmed and released on a bounded worker.
-    auto* watcher = new QFutureWatcher<Tracks>(this);
-    const auto generation = generation_;
-    connect(watcher, &QFutureWatcher<Tracks>::finished, this, [this, watcher, generation] {
-        watcher->deleteLater();
-        if (generation != generation_)
-            return;
-        result_ = watcher->future().takeResult();
-        emit finished(result_, unmatched_, {});
-    });
-    watcher->setFuture(QtConcurrent::run(prepare, std::move(result_)));
+    // Rules: as the engine selected them.
+    emit finished(result_, unmatched_, {});
 }
 
-DynamicPlaylistService::Result queryDynamicLibrary(const engine::Catalogue& catalogue,
-                                                   const query::CompiledTkq& compiled,
-                                                   const core::CancellationToken& cancellation) {
-    auto paths = catalogue.filter_paths(compiled, cancellation);
-    if (!paths)
-        return std::unexpected(paths.error());
-    auto cached = catalogue.cached_tracks(*paths, cancellation);
+DynamicPlaylistService::Result selectDynamicLibrary(const engine::Catalogue& catalogue,
+                                                    const engine::DynamicSelection& selection,
+                                                    const core::CancellationToken& cancellation) {
+    auto selected = catalogue.select(selection, {}, cancellation);
+    if (!selected)
+        return std::unexpected(selected.error());
+    auto cached = catalogue.cached_tracks(selected->paths, cancellation);
     if (!cached)
         return std::unexpected(cached.error());
     std::vector<LocalTrackRow> rows;

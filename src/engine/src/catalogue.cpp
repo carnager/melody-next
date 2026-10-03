@@ -42,6 +42,13 @@ Catalogue::find(const query::CompiledTkq& compiled, const std::string& format,
 }
 
 
+core::Result<DynamicSelected> Catalogue::select(const DynamicSelection& selection,
+                                                const std::set<std::string>& exclude,
+                                                const core::CancellationToken& cancellation) const {
+    std::mt19937 random{std::random_device{}()};
+    return select_dynamic(*this, selection, exclude, random, cancellation);
+}
+
 core::Result<persistence::LocalLibrary> LocalCatalogue::open() const {
     return persistence::LocalLibrary::open(database_);
 }

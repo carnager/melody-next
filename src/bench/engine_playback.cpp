@@ -705,10 +705,26 @@ EnginePlayback::continuationsOf(const protocol::Json& data) {
         }
         const auto list = QString::fromStdString(value.value("list", std::string{}));
         if (!list.isEmpty()) {
-            found.insert(list,
-                         Continuation{.rule_id = QString::fromStdString(value.value("rule", std::string{})),
-                                      .name = QString::fromStdString(value.value("name", std::string{})),
-                                      .query = QString::fromStdString(value.value("query", std::string{}))});
+            const auto count = [&value](const char* key, const int fallback) {
+                const auto found_count = value.find(key);
+                return found_count != value.end() && found_count->is_number_integer() &&
+                               found_count->get<std::int64_t>() >= 0
+                           ? static_cast<int>(
+                                 std::min<std::int64_t>(found_count->get<std::int64_t>(), 500))
+                           : fallback;
+            };
+            found.insert(
+                list,
+                Continuation{
+                    .rule_id = QString::fromStdString(value.value("rule", std::string{})),
+                    .name = QString::fromStdString(value.value("name", std::string{})),
+                    .query = QString::fromStdString(value.value("query", std::string{})),
+                    .group_by = QString::fromStdString(value.value("group_by", std::string{})),
+                    .groups = count("groups", 0),
+                    .per_group = count("per_group", 0),
+                    .limit = count("limit", 100),
+                    .shuffle = value.value("shuffle", false),
+                    .selection_told = value.contains("groups")});
         }
     }
     return found;
@@ -736,7 +752,12 @@ void EnginePlayback::setContinuation(const QString& list, const std::optional<Co
     if (rule) {
         params["rule"] = protocol::Json{{"id", rule->rule_id.toStdString()},
                                         {"name", rule->name.toStdString()},
-                                        {"query", rule->query.toStdString()}};
+                                        {"query", rule->query.toStdString()},
+                                        {"group_by", rule->group_by.toStdString()},
+                                        {"groups", rule->groups},
+                                        {"per_group", rule->per_group},
+                                        {"limit", rule->limit},
+                                        {"shuffle", rule->shuffle}};
     }
     request(QStringLiteral("list.continuation.set"), std::move(params),
             [this](const core::Result<protocol::Json>& answer) {

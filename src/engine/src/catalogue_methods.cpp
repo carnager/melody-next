@@ -333,6 +333,42 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // through $info -- in the query's order.
     //
     //   catalogue.find {query, format, limit?} -> {"tracks": [{key, text}]}
+    // ADR-0258: a dynamic playlist rule's choice, made here.
+    dispatcher.on("catalogue.select", [&catalogue](const Json& params) -> core::Result<Json> {
+        auto source = required_string(params, "query");
+        if (!source) {
+            return std::unexpected(std::move(source.error()));
+        }
+        const auto count = [&params](const char* key, const std::size_t fallback) {
+            const auto found = params.find(key);
+            return found != params.end() && found->is_number_unsigned() ? found->get<std::size_t>()
+                                                                         : fallback;
+        };
+        DynamicSelection selection{.query = *source,
+                                   .limit = std::min(count("limit", 100U), dynamic_selection_limit),
+                                   .shuffle = params.value("shuffle", false),
+                                   .group_by = params.value("group_by", std::string{}),
+                                   .groups = count("groups", 0U),
+                                   .per_group = count("per_group", 0U)};
+        std::set<std::string> exclude;
+        for (const auto& encoded : params.value("exclude", Json::array())) {
+            if (encoded.is_string()) {
+                if (auto path = protocol::decode_raw_path(encoded.get<std::string>())) {
+                    exclude.insert(std::move(*path));
+                }
+            }
+        }
+        auto selected = catalogue.select(selection, exclude);
+        if (!selected) {
+            return std::unexpected(std::move(selected.error()));
+        }
+        auto paths = Json::array();
+        for (const auto& path : selected->paths) {
+            paths.push_back(protocol::encode_raw_path(path));
+        }
+        return Json{{"paths", std::move(paths)}, {"matched", selected->matched}};
+    });
+
     dispatcher.on("catalogue.find", [&catalogue](const Json& params) -> core::Result<Json> {
         auto source = required_string(params, "query");
         if (!source) {

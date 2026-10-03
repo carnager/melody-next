@@ -23,15 +23,23 @@ const QString definitions_profile = QStringLiteral("local");
 
 [[nodiscard]] QHash<QString, EnginePlayback::Continuation> continuableRules() {
     QHash<QString, EnginePlayback::Continuation> rules;
-    const auto definitions = loadDynamicPlaylists(definitions_profile);
+    const auto definitions = dynamicPlaylistCatalog(definitions_profile);
     if (!definitions) {
         return rules;
     }
     for (const auto& definition : *definitions) {
         if (continuable(definition)) {
-            rules.insert(definition.id, EnginePlayback::Continuation{.rule_id = definition.id,
-                                                                     .name = definition.name,
-                                                                     .query = definition.query});
+            const auto selection = definition.selection();
+            rules.insert(definition.id,
+                         EnginePlayback::Continuation{
+                             .rule_id = definition.id,
+                             .name = definition.name,
+                             .query = definition.query,
+                             .group_by = QString::fromStdString(selection.group_by),
+                             .groups = static_cast<int>(selection.groups),
+                             .per_group = static_cast<int>(selection.per_group),
+                             .limit = static_cast<int>(selection.limit),
+                             .shuffle = selection.shuffle});
         }
     }
     return rules;
@@ -41,13 +49,15 @@ const QString definitions_profile = QStringLiteral("local");
 
 std::vector<Workspace::ContinuationChoice> Workspace::continuationChoices() const {
     std::vector<ContinuationChoice> choices;
-    const auto definitions = loadDynamicPlaylists(definitions_profile);
+    const auto definitions = dynamicPlaylistCatalog(definitions_profile);
     if (!definitions) {
         return choices;
     }
     for (const auto& definition : *definitions) {
         if (continuable(definition)) {
-            choices.push_back({.rule_id = definition.id, .name = definition.name});
+            choices.push_back({.rule_id = definition.id,
+                               .name = definition.name,
+                               .shipped = definition.shipped()});
         }
     }
     return choices;
@@ -130,7 +140,7 @@ void Workspace::syncContinuations(EngineLink& engine) {
     for (auto entry = continuations.constBegin(); entry != continuations.constEnd(); ++entry) {
         const auto found = rules.constFind(entry->rule_id);
         if (found != rules.constEnd()) {
-            if (*found != *entry) {
+            if (!found->sameAs(*entry)) {
                 engine.playback->setContinuation(entry.key(), *found);
             }
         } else if (known_rules_->contains(entry->rule_id)) {

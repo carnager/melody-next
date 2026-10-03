@@ -171,6 +171,21 @@ void boundsFailClosed() {
 
 } // namespace
 
+void narrowingKeepsAValidQuery() {
+    using trackknife::query::narrow_tkq_source;
+    constexpr std::string_view recent = "HISTORY(playcount) EQUAL 0";
+    CHECK(narrow_tkq_source("ALL", recent) == "(HISTORY(playcount) EQUAL 0)");
+    CHECK(narrow_tkq_source("ALL SORT DESCENDING HISTORY(playcount)", recent) ==
+          "(HISTORY(playcount) EQUAL 0) SORT DESCENDING HISTORY(playcount)");
+    CHECK(narrow_tkq_source("rating GREATER 7 SORT BY %date%", recent) ==
+          "(rating GREATER 7) AND (HISTORY(playcount) EQUAL 0) SORT BY %date%");
+    const auto words = narrow_tkq_source("blue train", recent);
+    CHECK(words == "(* HAS \"blue train\") AND (HISTORY(playcount) EQUAL 0)");
+    CHECK(compile_tkq(*words)->predicates.front().words.size() == 2U);
+    CHECK(!narrow_tkq_source("codec (((", recent));
+    CHECK(!narrow_tkq_source("ALL", "codec ((("));
+}
+
 int main() {
     std::set<std::string_view> ids;
     std::set<std::string_view> topics;
@@ -240,5 +255,6 @@ int main() {
     sortClauseSplitsFromTheExpression();
     strictErrorsNeverDegradeToWordSearch();
     boundsFailClosed();
+    narrowingKeepsAValidQuery();
     return failures == 0 ? 0 : 1;
 }

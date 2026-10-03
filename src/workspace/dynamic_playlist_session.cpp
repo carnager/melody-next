@@ -15,10 +15,11 @@ DynamicPlaylistSession::DynamicPlaylistSession(QString profile, std::vector<Libr
                                                LibrarySearch search, QObject* parent)
     : QObject(parent), profile_(std::move(profile)), libraries_(std::move(libraries)),
       service_(new DynamicPlaylistService(
-          [this, search = std::move(search)](query::CompiledTkq compiled,
+          [this, search = std::move(search)](engine::DynamicSelection selection,
                                              core::CancellationToken cancellation,
                                              DynamicPlaylistService::Completion completion) {
-              search(engine(), std::move(compiled), std::move(cancellation), std::move(completion));
+              search(engine(), std::move(selection), std::move(cancellation),
+                     std::move(completion));
           },
           this)),
       results_(new LocalListModel(this)) {
@@ -43,7 +44,7 @@ DynamicPlaylistSession::DynamicPlaylistSession(QString profile, std::vector<Libr
         emit changed();
     });
     connect(service_, &DynamicPlaylistService::finished, this, &DynamicPlaylistSession::finished);
-    const auto loaded = loadDynamicPlaylists(profile_);
+    const auto loaded = dynamicPlaylistCatalog(profile_);
     if (loaded)
         definitions_ = *loaded;
     else
@@ -87,6 +88,10 @@ QStringList DynamicPlaylistSession::catalogNames() const {
         names.append(definition.name);
     }
     return names;
+}
+
+bool DynamicPlaylistSession::definitionShipped() const {
+    return catalog_index_ > 0 && definitions_[static_cast<qsizetype>(catalog_index_ - 1)].shipped();
 }
 
 QString DynamicPlaylistSession::shuffleText() const {
@@ -205,8 +210,40 @@ void DynamicPlaylistSession::setShuffle(const bool on) {
     edited();
 }
 
+void DynamicPlaylistSession::setGroupBy(const QString& expression) {
+    draft_.group_by = expression;
+    edited();
+}
+
+void DynamicPlaylistSession::setGroups(const int groups) {
+    draft_.groups = groups;
+    edited();
+}
+
+void DynamicPlaylistSession::setPerGroup(const int per_group) {
+    draft_.per_group = per_group;
+    edited();
+}
+
+namespace {
+// What is written: never the shipped definitions.
+[[nodiscard]] QVector<DynamicPlaylistDefinition>
+saved_only(QVector<DynamicPlaylistDefinition> definitions) {
+    definitions.removeIf([](const auto& definition) { return definition.shipped(); });
+    return definitions;
+}
+} // namespace
+
 void DynamicPlaylistSession::save() {
     auto saved_definition = definition();
+    if (saved_definition.shipped()) {
+        // A shipped rule is kept as it ships; what is saved is a copy.
+        saved_definition.id.clear();
+        if (saved_definition.name ==
+            definitions_[static_cast<qsizetype>(catalog_index_ - 1)].name) {
+            saved_definition.name = tr("%1 (copy)").arg(saved_definition.name);
+        }
+    }
     if (saved_definition.name.isEmpty()) {
         status_ = QStringLiteral("Give the playlist a name");
         emit changed();
@@ -228,7 +265,7 @@ void DynamicPlaylistSession::save() {
         for (auto& entry : next)
             if (entry.id == saved_definition.id)
                 entry = saved_definition;
-    const auto saved = saveDynamicPlaylists(profile_, next);
+    const auto saved = saveDynamicPlaylists(profile_, saved_only(next));
     if (!saved) {
         status_ = QString::fromStdString(saved.error().message);
         emit changed();
@@ -246,12 +283,12 @@ void DynamicPlaylistSession::save() {
 }
 
 void DynamicPlaylistSession::remove() {
-    if (catalog_index_ <= 0)
+    if (catalog_index_ <= 0 || definitionShipped())
         return;
     const auto id = definitions_[static_cast<qsizetype>(catalog_index_ - 1)].id;
     auto next = definitions_;
     next.removeIf([&id](const auto& entry) { return entry.id == id; });
-    const auto saved = saveDynamicPlaylists(profile_, next);
+    const auto saved = saveDynamicPlaylists(profile_, saved_only(next));
     if (!saved) {
         status_ = QString::fromStdString(saved.error().message);
         emit changed();

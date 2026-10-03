@@ -416,6 +416,8 @@ class Workspace final : public QObject {
     struct ContinuationChoice {
         QString rule_id;
         QString name;
+        // ADR-0258: one of the rules that ship.
+        bool shipped{false};
     };
     [[nodiscard]] std::vector<ContinuationChoice> continuationChoices() const;
     // The rule `tab` continues with, as its engine keeps it; none, nothing.

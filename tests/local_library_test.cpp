@@ -1343,12 +1343,12 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     QVERIFY(library->scan({}, progress));
     DynamicPlaylistDialog dialog{QStringLiteral("local"),
                                  {},
-                                 [database](const EngineKey&, query::CompiledTkq compiled,
+                                 [database](const EngineKey&, engine::DynamicSelection selection,
                                             core::CancellationToken cancellation,
                                             DynamicPlaylistService::Completion completion) {
                                      const engine::LocalCatalogue catalogue{database};
                                      completion(
-                                         queryDynamicLibrary(catalogue, compiled, cancellation));
+                                         selectDynamicLibrary(catalogue, selection, cancellation));
                                  }};
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     // ADR-0226: the catalogue is an engine's, here one on this database.
@@ -1394,10 +1394,10 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     QVERIFY(snapshot.front().probed);
     auto cancelled = core::CancellationSource{};
     cancelled.request_cancellation();
-    const auto compiled = query::compile_tkq("ALL");
-    QVERIFY(compiled);
     const engine::LocalCatalogue catalogue{database};
-    QVERIFY(!queryDynamicLibrary(catalogue, *compiled, cancelled.token()));
+    engine::DynamicSelection everything;
+    everything.query = "ALL";
+    QVERIFY(!selectDynamicLibrary(catalogue, everything, cancelled.token()));
 }
 
 void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {

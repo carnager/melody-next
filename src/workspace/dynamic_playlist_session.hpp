@@ -25,8 +25,8 @@ class DynamicPlaylistSession final : public QObject {
   public:
     // Which library a refresh searches: that of the engine chosen.
     using LibrarySearch =
-        std::function<void(const EngineKey& engine, query::CompiledTkq, core::CancellationToken,
-                           DynamicPlaylistService::Completion)>;
+        std::function<void(const EngineKey& engine, engine::DynamicSelection,
+                           core::CancellationToken, DynamicPlaylistService::Completion)>;
     // A library to choose, by its engine and the name it is shown by.
     struct Library {
         EngineKey engine;
@@ -53,6 +53,9 @@ class DynamicPlaylistSession final : public QObject {
     [[nodiscard]] QStringList catalogNames() const;
     [[nodiscard]] int catalogIndex() const { return catalog_index_; }
     [[nodiscard]] bool catalogWritable() const { return catalog_writable_; }
+    // ADR-0258: the definition shown ships with Trackknife: saving it saves
+    // a copy, and it cannot be removed.
+    [[nodiscard]] bool definitionShipped() const;
 
     // The definition shown.
     [[nodiscard]] QString name() const { return draft_.name; }
@@ -64,6 +67,9 @@ class DynamicPlaylistSession final : public QObject {
     [[nodiscard]] QString tag() const { return draft_.tag; }
     [[nodiscard]] int limit() const { return draft_.limit; }
     [[nodiscard]] bool shuffle() const { return draft_.shuffle; }
+    [[nodiscard]] QString groupBy() const { return draft_.group_by; }
+    [[nodiscard]] int groups() const { return draft_.groups; }
+    [[nodiscard]] int perGroup() const { return draft_.per_group; }
     [[nodiscard]] QString shuffleText() const;
     [[nodiscard]] QString shuffleTip() const;
 
@@ -88,6 +94,9 @@ class DynamicPlaylistSession final : public QObject {
     void setTag(const QString& tag);
     void setLimit(int limit);
     void setShuffle(bool on);
+    void setGroupBy(const QString& expression);
+    void setGroups(int groups);
+    void setPerGroup(int per_group);
     void save();
     void remove();
     void refresh();

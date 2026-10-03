@@ -1326,6 +1326,27 @@ void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
 
     QTRY_VERIFY_WITH_TIMEOUT(continuation.all().contains(list), 5'000);
     QCOMPARE(continuation.all().at(list).query, std::string{"codec PRESENT"});
+    QCOMPARE(continuation.all().at(list).groups, 0U);
+
+    // ADR-0258: the rules that ship are offered too, and a grouped one
+    // reaches the engine with its grouping.
+    const auto choose = [&window, &tabs](const QString& name) {
+        emit tabs->tabBar()->customContextMenuRequested(tabs->tabBar()->tabRect(0).center());
+        auto* continue_menu = window.findChild<QMenu*>(QStringLiteral("bench-tab-continue-menu"));
+        QVERIFY(continue_menu != nullptr);
+        auto* action = continue_menu->findChild<QAction*>(QStringLiteral("continue-rule-") + name);
+        QVERIFY(action != nullptr);
+        action->trigger();
+        window.findChild<QMenu*>(QStringLiteral("bench-tab-context-menu"))->hide();
+    };
+    choose(QStringLiteral("shipped:random-album"));
+    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().at(list).rule_id == "shipped:random-album",
+                             5'000);
+    QCOMPARE(continuation.all().at(list).groups, 1U);
+    QCOMPARE(continuation.all().at(list).per_group, 0U);
+    QVERIFY(!continuation.all().at(list).group_by.empty());
+    choose(QStringLiteral("rule-everything"));
+    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().at(list).rule_id == "rule-everything", 5'000);
     QTRY_VERIFY_WITH_TIMEOUT(tabs->tabText(0).endsWith(QStringLiteral(" ∞")), 5'000);
     QVERIFY(tabs->tabToolTip(0).contains(QStringLiteral("Continues with Everything")));
 

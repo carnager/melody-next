@@ -41,7 +41,7 @@ void BenchMainWindow::showDynamicPlaylists() {
     // configured, dynamic playlists quietly queried this process's library
     // instead of the engine's.
     DynamicPlaylistDialog::LibrarySearch search =
-        [this](const EngineKey& engine, query::CompiledTkq compiled,
+        [this](const EngineKey& engine, engine::DynamicSelection selection,
                core::CancellationToken cancellation,
                DynamicPlaylistService::Completion completion) {
             auto* catalogues = catalogueOf(engine);
@@ -58,10 +58,10 @@ void BenchMainWindow::showDynamicPlaylists() {
                         watcher->deleteLater();
                     });
             watcher->setFuture(
-                QtConcurrent::run([catalogues, compiled = std::move(compiled),
+                QtConcurrent::run([catalogues, selection = std::move(selection),
                                    cancellation]() -> DynamicPlaylistService::Result {
                     const auto catalogue = catalogues->open();
-                    return queryDynamicLibrary(*catalogue, compiled, cancellation);
+                    return selectDynamicLibrary(*catalogue, selection, cancellation);
                 }));
         };
     std::vector<DynamicPlaylistDialog::Library> libraries;

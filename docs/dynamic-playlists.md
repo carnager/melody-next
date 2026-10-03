@@ -14,11 +14,42 @@ Choose **Library rules**, enter a name and a `tkq-1` rule, then **Refresh**:
 
 Ratings use 0–10, so 8 means four stars. Rules use the complete
 [query language](query-language.md) on either library, because the engine
-evaluates them the same way. A rule matching more than 20,000 tracks asks you
-to narrow it; results are never a silent sample of a cut-off answer.
+evaluates them the same way.
 
-Set a maximum of 1–500 tracks and optionally shuffle. **Save definition** keeps
-the rule/source. Saved rules refresh when selected and remain current while the
+Set a maximum of 1–500 tracks and optionally shuffle. With shuffle, the
+tracks are a random sample of every match, however many there are, so `ALL`
+gives random tracks from the whole library. Without it, the first ones in
+library order (artist, year, album, disc, track) or the rule's `SORT`.
+
+To pick by album or artist rather than by track, enter **Pick groups by** — a
+[formatting expression](title-formatting.md); tracks giving the same text form
+a group — and how many **Groups** to pick. Every group is as likely as any
+other, whatever its size, so an artist with 400 tracks comes up no more often
+than one with 10. **Tracks per group** takes that many at random from each,
+kept in album order, or all of them. For example, `%albumartist%`, 10 groups
+and 3 tracks per group gives three songs each by ten random artists.
+
+The engine selects: only the chosen tracks reach the window.
+
+### Rules that ship
+
+These are always in the list and can be continued with like any other:
+
+| Rule | Picks |
+| --- | --- |
+| Random tracks | 50 tracks from the whole library, shuffled |
+| Random album | One album, whole, in order |
+| Random artists | Ten artists, three tracks each, shuffled |
+| Rated 8 and higher | 100 tracks rated four stars or more, shuffled |
+| Unrated | 100 unrated tracks, shuffled |
+| Recently added | Up to 100 tracks added in the last 30 days, newest first |
+| Not heard in a year | 100 tracks not played for a year or never, shuffled |
+
+They cannot be changed or removed. Edit one and choose **Save as copy** to
+keep your own version. Definitions saved by Trackknife's earlier MPD backend
+are moved into the one list on start.
+
+**Save definition** keeps the rule/source. Saved rules refresh when selected and remain current while the
 window is open. Local rules update after library scans, rating edits, and
 committed tag/path changes. Changes arriving during a query trigger a fresh
 evaluation. **Stop** cancels the current work and automatic refresh.
@@ -47,7 +78,9 @@ remain future work.
 Any list can carry on past its end with a saved library rule. Right-click its
 tab and choose **Continue with**, then a rule. The tab shows ∞, and its
 tooltip names the rule. When the last track of the list starts and nothing
-would follow it, the engine adds 10 tracks the rule finds. It skips tracks
+would follow it, the engine adds 10 tracks the rule finds — or, for a rule
+that picks groups, its whole selection: the next album, or the next ten
+artists. It skips tracks
 already in the list and tracks played in the last 7 days. If the rule finds
 only those, it uses them anyway, still skipping what is in the list.
 
@@ -59,7 +92,7 @@ stay.
 
 Editing a rule updates every list that continues with it, and removing the
 rule ends their continuation. Last.fm sources are not offered, because the
-engine cannot query Last.fm on its own. See ADR-0253.
+engine cannot query Last.fm on its own. See ADR-0253 and ADR-0258.
 
 History rules may also order results, for example
 `ALL SORT DESCENDING HISTORY(playcount)`. Turn off **Shuffle results on refresh**

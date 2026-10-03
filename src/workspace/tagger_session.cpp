@@ -453,6 +453,7 @@ void TaggerSession::captureSources() {
                 snapshot->audio.selection.stream_index || snapshot->audio.selection.subsong_index;
             sources_.push_back(std::move(snapshot->source));
             audio_sources_->push_back(snapshot->audio);
+            durations_.push_back(snapshot->duration_ms);
             track_labels_.push_back(std::move(snapshot->track_label));
         }
         ++capture_index_;
@@ -1484,17 +1485,21 @@ void TaggerSession::finishProposals() {
                                     : QStringLiteral("The suggestion task returned no result");
         setStatus(QStringLiteral("No suggestions · %1").arg(message));
         emit changed();
+        emit proposalsSettled(false);
         return;
     }
     const auto& preview = **result;
     if (preview.cells.empty()) {
         setStatus(QStringLiteral("No suggestions · the selected files already agree"));
         emit changed();
+        // Nothing to change is as good as staged.
+        emit proposalsSettled(true);
         return;
     }
     if (grid_model_ == nullptr ||
         !stageTransformation(preview, QStringList{display_utf8(preview.chain.name)})) {
         emit changed();
+        emit proposalsSettled(false);
         return;
     }
     auto staged_status =
@@ -1510,6 +1515,35 @@ void TaggerSession::finishProposals() {
     staged_status += replayGainStatusLinks();
     showStickyStatus(staged_status);
     stageAutomaticTransformations();
+    emit proposalsSettled(true);
+}
+
+std::size_t TaggerSession::itemCount() const {
+    return grid_model_ != nullptr ? grid_model_->selection().item_count() : 0U;
+}
+
+const metadata::StagedMetadataSource* TaggerSession::itemSource(const std::size_t item) const {
+    if (grid_model_ == nullptr || item >= grid_model_->selection().item_count()) {
+        return nullptr;
+    }
+    return &grid_model_->selection().source(item);
+}
+
+std::optional<std::int64_t> TaggerSession::durationOf(const std::size_t item) const {
+    if (item < durations_.size() && durations_[item]) {
+        return durations_[item];
+    }
+    if (const auto* source = itemSource(item)) {
+        if (const auto known = technical_cache_.find(source->raw_path);
+            known != technical_cache_.end() && known->second && known->second->duration_ms >= 0) {
+            return known->second->duration_ms;
+        }
+    }
+    return std::nullopt;
+}
+
+bool TaggerSession::canStageProposals() const {
+    return grid_model_ != nullptr && !proposal_running_ && !provisional_;
 }
 
 std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
@@ -1538,12 +1572,7 @@ std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
             .disc_number = {},
             .duration_ms = {},
         };
-        // ADR-0261: a length, where the technical probe has one, so the
-        // match can tell how close it is.
-        if (const auto known = technical_cache_.find(source.raw_path);
-            known != technical_cache_.end() && known->second && known->second->duration_ms >= 0) {
-            descriptor.duration_ms = known->second->duration_ms;
-        }
+        descriptor.duration_ms = durationOf(item_index);
         if (const auto number = baseline.first_effective_value("tracknumber")) {
             descriptor.track_number = parse_position_number(*number);
         }

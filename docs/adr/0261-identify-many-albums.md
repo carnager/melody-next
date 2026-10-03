@@ -115,6 +115,15 @@ presets…** opens them.
   MusicBrainz again when it is told to slow down, twice at most, waiting
   as long as it is asked up to 30 s. Untagged albums ask nothing yet:
   AcoustID for them comes with the window.
+- The window, steps 1 and 2 (2026-10-03): **Identify albums…** in the
+  tagger, beside Identify, opens `IdentifyAlbumsDialog` over every file
+  open there: the albums with how each was grouped, split by folder, merge
+  and leave out; then the lookup with progress, the time left and Stop,
+  each album's state, filters, and why it matched or not. Each clear match
+  is staged into the tagger's draft by itself, one after another, once the
+  tagger has read the files (`AlbumBatchSession`, `proposalsSettled`). The
+  tagger now carries each file's length from its list, so lengths count
+  in single Identify too. Untagged albums are still not looked up.
 
 ## Verification
 

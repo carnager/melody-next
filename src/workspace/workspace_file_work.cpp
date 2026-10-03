@@ -400,6 +400,7 @@ Workspace::selectionSourceReader(LocalListModel* source_model,
                 },
             .track_label = std::move(label),
             .audio = {.selection = row.selection, .range = row.segment},
+            .duration_ms = row.duration_ms,
         };
     };
 }

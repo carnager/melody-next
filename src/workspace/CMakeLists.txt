@@ -35,6 +35,7 @@ qt_add_library(
     convert_job.cpp
     convert_job.hpp
     field_filter.cpp
+    album_batch_session.cpp
     album_lookup_queue.cpp
     identify_session.cpp
     identify_session.hpp

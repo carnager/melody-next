@@ -8,6 +8,7 @@
 
 namespace trackknife::engine {
 
+class LocalCatalogue;
 class Player;
 class Workspace;
 
@@ -19,12 +20,17 @@ class Workspace;
 //   list.edit {id, revision, edits, name?, kind?} -> summary
 //   list.rename {id, name, revision?}          -> summary
 //   list.delete {id, revision?}                -> {"deleted": bool}
+//   list.draft {of}                            -> summary (ADR-0259)
+//   list.commit {id, force?}                   -> summary of the saved list
+//   list.from_query {query, name, words?}      -> summary of a new working list
 //   list.play {id, entry?}                     -> {"playing": entry}
 //   list.relocate {moves: [{from, to}]}        -> {"changed": [id]}
 //   event list.changed {id, revision?, deleted}
 //
 // A summary is {id, name, kind: "working"|"saved", revision, tracks,
-// modified_ms}. An item is a queue entry's fields -- entry, path, segment,
+// modified_ms, draft_of, draft_base}: a draft is a working list holding the
+// unsaved edits of the saved list `draft_of`, begun at its revision
+// `draft_base`; one to a saved list, deleted with it. An item is a queue entry's fields -- entry, path, segment,
 // selection, duration_ms -- plus logical, title, artist and album. A write
 // with `revision` is refused as a conflict when the list has moved on since;
 // for a new list, `revision` 0 refuses if the id is taken.
@@ -34,8 +40,12 @@ class Workspace;
 // "after": entry|null}, {"move": [entry], "after": entry|null},
 // {"update": [item]}. An item also carries album_artist, date and an optional
 // replay_gain {track_gain_db, track_peak, album_gain_db, album_peak}.
+//
+// ADR-0259: `list.get {id, describe: true}` gives each item the library
+// indexes a "library" description (track_description.hpp), from `catalogue`;
+// its own title, artist and album are only for a file it does not.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
-                           Player& player);
+                           Player& player, const LocalCatalogue* catalogue = nullptr);
 
 // list.changed, as every change to a list is announced: `summary` null when
 // it was deleted.

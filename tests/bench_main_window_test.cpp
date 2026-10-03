@@ -265,6 +265,7 @@ class BenchMainWindowTest final : public QObject {
     void anotherClientsListChangesReachTheWindow();
     void aListChangedWhileClosedIsTakenUpOnOpening();
     void aListFromElsewhereOpensAsATab();
+    void aListFromTheEngineCarriesItsLibraryTags();
     void aMoveIsFollowedInListsNotOpenHere();
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
@@ -2039,6 +2040,58 @@ void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
     QTest::qWait(300);
     QTRY_VERIFY(!window.list_sync_->busy());
     QCOMPARE((*other)->call("list.get", protocol::Json{{"id", id}})->value("revision", 0), 1);
+    (*other)->close();
+}
+
+// ADR-0259: a list opened from its engine shows what the engine's library
+// knows of each file -- every tag and the revision -- not only the few names
+// the list was saved with.
+void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    const auto file = music + QStringLiteral("/rich.flac");
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto raw = QFile::encodeName(file).toStdString();
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+    auto catalogue = window.localCatalogue()->open();
+    QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue->scan({}, progress).has_value());
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    auto items = listItems({raw, "/music/not-indexed/outside.flac"});
+    items[0]["title"] = "Saved title";
+    items[1]["title"] = "Outside";
+    auto made = (*other)->call("list.save", protocol::Json{{"name", "Described"},
+                                                           {"kind", "saved"},
+                                                           {"items", std::move(items)}});
+    QVERIFY(made.has_value());
+    window.openEngineList(EngineKey::local(), QString::fromStdString(made->value("id", std::string{})));
+    auto* tab = static_cast<BenchMainWindow::ListTab*>(nullptr);
+    QTRY_VERIFY((tab = window.tabForDocument(QString::fromStdString(made->value("id", std::string{})))) !=
+                nullptr);
+    QTRY_COMPARE(tab->model->rowCount(), 2);
+    const auto& rows = tab->model->rows();
+    QCOMPARE(rows[0].title, std::string{"Metadata Fixture"});
+    QCOMPARE(rows[0].album, std::string{"Rich Metadata"});
+    QStringList names;
+    for (const auto& field : rows[0].metadata.fields) {
+        names.append(QString::fromStdString(field.canonical_name));
+    }
+    // Named as the library folds them, as a search's rows are.
+    QVERIFY2(names.contains(QStringLiteral("musicbrainztrackid")), qPrintable(names.join(u',')));
+    QVERIFY(rows[0].source_revision.has_value());
+    QCOMPARE(rows[0].source_revision->size,
+             static_cast<std::uint64_t>(QFileInfo{file}.size()));
+    QCOMPARE(rows[1].title, std::string{"Outside"});
+    QVERIFY(!rows[1].source_revision.has_value());
     (*other)->close();
 }
 

@@ -233,6 +233,12 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;
+    // ADR-0259: each path's indexed tags and revision, nothing for one the
+    // library does not index. The engine's own; no client asks it of a
+    // catalogue.
+    [[nodiscard]] core::Result<std::vector<std::optional<persistence::LibraryTrackSnapshot>>>
+    described_tracks(const std::vector<std::string>& raw_paths,
+                     const core::CancellationToken& cancellation = {}) const;
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const override;

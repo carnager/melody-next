@@ -221,6 +221,117 @@ check(renamed["name"] == "Kept" and renamed["kind"] == "saved" and
       renamed["revision"] == edited["revision"] + 3, "a name and a kind are edits too")
 check(a.call("list.edit", {"id": edited["id"], "edits": []})["error"]["code"] == "invalid_argument",
       "an edit names the revision it was worked out from")
+
+# ADR-0259: a saved list's unsaved edits are a draft on the engine, which
+# every client sees, and saving it writes the list.
+kept = a.call("list.save", {"name": "Kept", "kind": "saved", "items": [
+    {"path": encode(f"{work}/one.wav")}, {"path": encode(f"{work}/two.wav")}]})["result"]
+draft = a.call("list.draft", {"of": kept["id"]})["result"]
+check(draft["kind"] == "working" and draft["draft_of"] == kept["id"] and
+      draft["draft_base"] == kept["revision"] and draft["tracks"] == 2,
+      "a draft is a working list naming the saved list and its revision")
+check(a.call("list.draft", {"of": kept["id"]})["result"]["id"] == draft["id"],
+      "a saved list has one draft")
+def heard_of(client, ids, seconds=5):
+    """What `client` hears of the lists `ids`: each id's deleted flag."""
+    found = {}
+    deadline = time.time() + seconds
+    while set(found) != set(ids) and time.time() < deadline:
+        event = client.wait_event("list.changed", 1)
+        if event and event["data"]["id"] in ids:
+            found[event["data"]["id"]] = event["data"]["deleted"]
+    return found
+
+def drain(client):
+    """Reads what `client` has been told so far, so what follows is news."""
+    client.s.settimeout(0.3)
+    try:
+        while client.wait_event("list.changed", 0.3):
+            pass
+    finally:
+        client.s.settimeout(10)
+    client.events.clear()
+
+check(heard_of(b, [draft["id"]]) == {draft["id"]: False}, "another client hears of the draft")
+check(a.call("list.draft", {"of": draft["id"]})["error"]["code"] == "invalid_argument",
+      "a draft has no draft")
+d_entries = [i["entry"] for i in a.call("list.get", {"id": draft["id"]})["result"]["items"]]
+check(d_entries == [i["entry"] for i in a.call("list.get", {"id": kept["id"]})["result"]["items"]],
+      "with the saved list's entries")
+check("result" in a.call("list.play", {"id": draft["id"], "entry": d_entries[0]}),
+      "the draft plays")
+edited_draft = a.call("list.edit", {"id": draft["id"], "revision": draft["revision"],
+                                    "edits": [{"move": [d_entries[1]], "after": None}],
+                                    "name": "Kept, reordered"})
+check("result" in edited_draft, "the draft is edited")
+drain(b)
+committed = a.call("list.commit", {"id": draft["id"]})["result"]
+check(committed["id"] == kept["id"] and committed["revision"] == kept["revision"] + 1 and
+      committed["name"] == "Kept, reordered" and committed["draft_of"] is None,
+      "saving the draft writes the list it drafts")
+check([i["entry"] for i in a.call("list.get", {"id": kept["id"]})["result"]["items"]] ==
+      [d_entries[1], d_entries[0]], "with the draft's entries")
+check(a.call("list.get", {"id": draft["id"]})["error"]["code"] == "not_found", "and the draft goes")
+check(heard_of(b, [draft["id"], kept["id"]]) == {draft["id"]: True, kept["id"]: False},
+      "another client hears both")
+moved_back = a.call("list.edit", {"id": kept["id"], "revision": committed["revision"],
+                                  "edits": [{"move": [d_entries[0]], "after": None}]})
+check("result" in moved_back and
+      [e["entry"] for e in a.call("playback.queue")["result"]["entries"]] == d_entries,
+      "the queue played from the draft follows the saved list now")
+stale = a.call("list.draft", {"of": kept["id"]})["result"]
+check("result" in a.call("list.save", {"id": kept["id"], "name": "Kept", "kind": "saved",
+                                       "items": [{"path": encode(f"{work}/one.wav")}]}),
+      "someone saves the list itself")
+check(a.call("list.commit", {"id": stale["id"]})["error"]["code"] == "conflict",
+      "saving a draft of an older revision is a conflict")
+check("result" in a.call("list.commit", {"id": stale["id"], "force": True}),
+      "unless it is kept regardless")
+last = a.call("list.draft", {"of": kept["id"]})["result"]
+drain(b)
+check(a.call("list.delete", {"id": kept["id"]})["result"]["deleted"] is True, "the list is deleted")
+check(a.call("list.get", {"id": last["id"]})["error"]["code"] == "not_found", "and its draft")
+check(heard_of(b, [kept["id"], last["id"]]) == {kept["id"]: True, last["id"]: True},
+      "and both are told as gone")
+
+# ADR-0259: asked to, the engine describes each item from its library -- a
+# file it indexes with its tags and revision, one it does not as saved.
+music = f"{work}/music"
+import os, shutil
+os.makedirs(music)
+shutil.copy(f"{work}/one.wav", f"{music}/one.wav")
+check("result" in a.call("catalogue.add_root", {"path": encode(music)}), "a folder is added")
+check("result" in a.call("job.submit", {"job": "catalogue.scan"}), "and scanned")
+check(a.wait_event("job.finished", 20) is not None, "the scan finishes")
+described = a.call("list.save", {"name": "Described", "items": [
+    {"path": encode(f"{music}/one.wav"), "title": "Snapshot"},
+    {"path": encode(f"{work}/two.wav"), "title": "Outside"}]})["result"]
+plain = a.call("list.get", {"id": described["id"]})["result"]["items"]
+check(all("library" not in i for i in plain), "unasked, nothing is described")
+items = a.call("list.get", {"id": described["id"], "describe": True})["result"]["items"]
+indexed, outside = items
+library = indexed.get("library")
+check(library is not None and library["duration_ms"] == 30000 and library["codec"] != "",
+      "an indexed file is described from the library")
+check(library["revision"] is not None and library["revision"]["size"] == os.path.getsize(f"{music}/one.wav"),
+      "with the revision it was indexed at")
+check(isinstance(library["fields"], dict), "and its tags")
+check("library" not in outside and outside["title"] == "Outside",
+      "a file the library does not index keeps what it was saved with")
+
+# ADR-0259: a kept search made on the engine, from its library.
+everything = a.call("list.from_query", {"query": "ALL", "name": "Everything"})["result"]
+check(everything["kind"] == "working" and everything["tracks"] == 1 and
+      everything["name"] == "Everything", "a query's matches become a working list")
+made = a.call("list.get", {"id": everything["id"]})["result"]["items"]
+check([i["path"] for i in made] == [encode(f"{music}/one.wav")] and made[0]["duration_ms"] == 30000,
+      "of the files the library indexes, named from it")
+nothing = a.call("list.from_query", {"query": "title IS nothing-here", "name": "None"})["result"]
+check(nothing["tracks"] == 0, "a query matching nothing makes an empty list")
+check(a.call("list.from_query", {"query": "codec (((", "name": "Bad"})["error"]["code"] ==
+      "invalid_argument", "a query that does not compile is refused")
+check("result" in a.call("list.from_query", {"query": "codec (((", "name": "Words", "words": True}),
+      "unless it is a word search, which any text is")
 PY
 
 echo "engine lists: ok"

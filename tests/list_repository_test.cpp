@@ -333,7 +333,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 50U, "state repository schema must be explicit");
+        require(repository.schema_version() == 51U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -720,7 +720,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 50U,
+        require(repository.schema_version() == 51U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1456,7 +1456,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 50U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 51U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -2185,6 +2185,9 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3* db = nullptr;
     require(sqlite3_open(path.c_str(), &db) == SQLITE_OK, "the database opens directly");
     require(sqlite3_exec(db,
+                         "DROP INDEX engine_lists_draft;"
+                         "ALTER TABLE engine_lists DROP COLUMN draft_base;"
+                         "ALTER TABLE engine_lists DROP COLUMN draft_of;"
                          "ALTER TABLE engine_list_items DROP COLUMN album_peak;"
                          "ALTER TABLE engine_list_items DROP COLUMN album_gain_db;"
                          "ALTER TABLE engine_list_items DROP COLUMN track_peak;"
@@ -2203,7 +2206,7 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3_close(db);
 
     auto reopened = persistence::ListRepository::open(path);
-    require(reopened.has_value() && reopened->schema_version() == 50U, "and is upgraded");
+    require(reopened.has_value() && reopened->schema_version() == 51U, "and is upgraded");
     const auto loaded = reopened->load_all();
     require(loaded.has_value() && loaded->size() == 2U, "with both lists");
     for (const auto& list : *loaded) {
@@ -2299,6 +2302,110 @@ void a_workspace_save_writes_only_what_changed() {
     cleanup();
 }
 
+// ADR-0259: a saved list's unsaved edits are a draft on the engine.
+void a_saved_lists_draft_is_saved_into_it() {
+    namespace persistence = trackknife::persistence;
+    using persistence::ListEdit;
+    using trackknife::core::ErrorCode;
+    using trackknife::core::StableId;
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("trackknife-engine-list-drafts-" + std::to_string(::getpid()) + ".sqlite3");
+    std::filesystem::remove(path);
+    auto opened = persistence::ListRepository::open(path);
+    require(opened.has_value(), "the repository opens");
+    auto& repository = *opened;
+    const auto item = [](const char* raw_path) {
+        return persistence::EngineListItem{.entry_id = StableId::random(),
+                                           .raw_path = raw_path,
+                                           .logical_reference = std::nullopt,
+                                           .segment = std::nullopt,
+                                           .source_selection = std::nullopt,
+                                           .duration_ms = std::nullopt,
+                                           .title = raw_path,
+                                           .artist = {},
+                                           .album = {},
+                                           .album_artist = {},
+                                           .date = {},
+                                           .replay_gain = std::nullopt};
+    };
+    const std::vector items{item("/a.flac"), item("/b.flac")};
+    const auto saved_id = StableId::random();
+    auto saved = repository.save_engine_list(saved_id, "Kept", persistence::EngineListKind::saved,
+                                             items, 0U, 1'000);
+    require(saved && saved->revision == 1U, "a saved list");
+    const auto working_id = StableId::random();
+    require(repository
+                .save_engine_list(working_id, "Untitled", persistence::EngineListKind::working,
+                                  items, 0U, 1'000)
+                .has_value(),
+            "and a working one");
+    require(repository.draft_engine_list(working_id, StableId::random(), 1'100).error().code ==
+                ErrorCode::invalid_argument,
+            "a working list has no draft");
+    require(repository.draft_engine_list(StableId::random(), StableId::random(), 1'100)
+                    .error()
+                    .code == ErrorCode::not_found,
+            "nor does a list that is not there");
+
+    const auto draft_id = StableId::random();
+    auto draft = repository.draft_engine_list(saved_id, draft_id, 1'100);
+    require(draft && draft->id == draft_id && draft->draft_of == saved_id &&
+                draft->draft_base == 1U && draft->kind == persistence::EngineListKind::working &&
+                draft->name == "Kept" && draft->tracks == 2U,
+            "a draft is a working list naming the list it drafts and its revision");
+    require((*repository.load_engine_list(draft_id))->items == items,
+            "holding its entries, identities and all");
+    auto again = repository.draft_engine_list(saved_id, StableId::random(), 1'200);
+    require(again && again->id == draft_id, "a saved list has one draft, whoever asks");
+    require(repository.draft_engine_list(draft_id, StableId::random(), 1'200).error().code ==
+                ErrorCode::invalid_argument,
+            "and a draft has none");
+
+    // Edited, then saved into the list it drafts.
+    require(repository.edit_engine_list(
+                draft_id, 1U,
+                {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[0].entry_id},
+                          .items = {}, .after = {}}},
+                1'300, std::string_view{"Kept, shorter"})
+                .has_value(),
+            "the draft is edited");
+    require((*repository.load_engine_list(saved_id))->items == items,
+            "the saved list is untouched meanwhile");
+    auto committed = repository.commit_engine_list_draft(draft_id, false, 1'400);
+    require(committed && committed->id == saved_id && committed->revision == 2U &&
+                committed->name == "Kept, shorter" && committed->modified_ms == 1'400 &&
+                committed->kind == persistence::EngineListKind::saved && !committed->draft_of,
+            "saving a draft writes it to the list it drafts");
+    require((*repository.load_engine_list(saved_id))->items == std::vector{items[1]},
+            "entries, identities and all");
+    require(!*repository.load_engine_list(draft_id), "and the draft is gone");
+
+    // The list moved on meanwhile: a conflict, unless forced.
+    auto second = repository.draft_engine_list(saved_id, StableId::random(), 1'500);
+    require(second && second->draft_base == 2U, "a new draft begins at the new revision");
+    require(repository
+                .save_engine_list(saved_id, "Kept", persistence::EngineListKind::saved, items, 2U,
+                                  1'600)
+                .has_value(),
+            "someone saves the list itself");
+    require(repository.commit_engine_list_draft(second->id, false, 1'700).error().code ==
+                ErrorCode::conflict,
+            "saving the draft then is a conflict");
+    require(repository.load_engine_list(second->id)->has_value(), "which keeps the draft");
+    require(repository.commit_engine_list_draft(second->id, true, 1'800).has_value(),
+            "kept regardless, when asked");
+    require(repository.commit_engine_list_draft(saved_id, false, 1'900).error().code ==
+                ErrorCode::invalid_argument,
+            "a list that is no draft cannot be saved as one");
+
+    // Deleting a saved list deletes its draft.
+    auto third = repository.draft_engine_list(saved_id, StableId::random(), 2'000);
+    require(third.has_value(), "a third draft");
+    require(repository.delete_engine_list(saved_id, std::nullopt) == true, "the list is deleted");
+    require(!*repository.load_engine_list(third->id), "and its draft with it");
+    std::filesystem::remove(path);
+}
+
 int main() {
     a_workspace_save_writes_only_what_changed();
     saved_searches_are_persistent_and_conflict_checked();
@@ -2318,5 +2425,6 @@ int main() {
     an_up_to_date_database_is_opened_without_rechecking_it();
     engine_lists_round_trip_and_refuse_stale_writes();
     engine_lists_are_edited_in_place();
+    a_saved_lists_draft_is_saved_into_it();
     return EXIT_SUCCESS;
 }

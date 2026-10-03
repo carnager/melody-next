@@ -951,6 +951,33 @@ std::pair<std::uint64_t, std::int64_t> revision_size_and_time(const std::string&
     return {size, seconds};
 }
 
+// A revision key read back whole; nothing for one of an older form.
+std::optional<core::LocalSourceRevision> revision_from_key(const std::string& key) {
+    std::array<std::string_view, 6> parts{};
+    std::string_view rest{key};
+    for (std::size_t index = 0; index < parts.size(); ++index) {
+        const auto colon = rest.find(':');
+        if ((colon == std::string_view::npos) != (index + 1U == parts.size())) {
+            return std::nullopt;
+        }
+        parts[index] = rest.substr(0, colon);
+        rest.remove_prefix(colon == std::string_view::npos ? rest.size() : colon + 1U);
+    }
+    if (parts[0] != "2") {
+        return std::nullopt;
+    }
+    core::LocalSourceRevision revision;
+    const auto number = [](const std::string_view text, auto& value) {
+        return std::from_chars(text.data(), text.data() + text.size(), value).ec == std::errc{};
+    };
+    if (!number(parts[1], revision.device) || !number(parts[2], revision.inode) ||
+        !number(parts[3], revision.size) || !number(parts[4], revision.modification_time_seconds) ||
+        !number(parts[5], revision.modification_time_nanoseconds)) {
+        return std::nullopt;
+    }
+    return revision;
+}
+
 } // namespace
 
 struct LocalLibrary::Impl {
@@ -1376,6 +1403,9 @@ struct FilterRow {
 
 // One row of filter_columns. Every reader of those columns goes through
 // here, so a path that shows results cannot hold less of a row than another.
+// The columns of filter_columns, which read_filter_row reads.
+constexpr int filter_column_count = 20;
+
 void read_filter_row(Statement& select, FilterRow& row) {
     row.raw_path = select.bytes(0);
     row.facts.title = select.bytes(1);
@@ -1911,6 +1941,27 @@ core::Result<std::string> LocalLibrary::view_stamp(const bool history) const {
 core::Result<std::vector<LibraryTrackSnapshot>>
 LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
                             const core::CancellationToken& cancellation) const {
+    auto described = described_tracks(raw_paths, cancellation);
+    if (!described) {
+        return std::unexpected(std::move(described.error()));
+    }
+    std::vector<LibraryTrackSnapshot> result;
+    result.reserve(described->size());
+    for (auto& track : *described) {
+        if (!track) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::conflict,
+                .message = "A search result is no longer indexed; run the search again",
+                .context = {}});
+        }
+        result.push_back(std::move(*track));
+    }
+    return result;
+}
+
+core::Result<std::vector<std::optional<LibraryTrackSnapshot>>>
+LocalLibrary::described_tracks(const std::vector<std::string>& raw_paths,
+                               const core::CancellationToken& cancellation) const {
     return checked([&] {
         if (raw_paths.size() > filter_match_cap) {
             fail("Selection exceeds 100000 files", core::ErrorCode::limit_exceeded);
@@ -1919,10 +1970,10 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
         QueryCancellation guard{db, cancellation};
         Transaction snapshot{db, true};
         Statement select{db, std::string{"SELECT "} + filter_columns +
-                                 " FROM local_library_tracks t WHERE t.raw_path=?"};
+                                 ",t.revision FROM local_library_tracks t WHERE t.raw_path=?"};
         Statement fields{db, "SELECT canonical_name,value,value_lower FROM local_library_fields "
                              "WHERE raw_path=? ORDER BY canonical_name,position"};
-        std::vector<LibraryTrackSnapshot> result;
+        std::vector<std::optional<LibraryTrackSnapshot>> result;
         result.reserve(raw_paths.size());
         for (const auto& path : raw_paths) {
             if (cancellation.is_cancellation_requested()) {
@@ -1931,13 +1982,15 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
             select.reset();
             select.blob(1, path);
             if (!select.next()) {
-                fail("A search result is no longer indexed; run the search again",
-                     core::ErrorCode::conflict);
+                result.emplace_back();
+                continue;
             }
             FilterRow row;
             read_filter_row(select, row);
+            auto revision = revision_from_key(select.bytes(filter_column_count));
             load_field_rows(fields, path, row);
-            result.push_back({path, std::move(row.facts)});
+            result.push_back(LibraryTrackSnapshot{
+                .raw_path = path, .facts = std::move(row.facts), .revision = revision});
         }
         snapshot.commit();
         return result;

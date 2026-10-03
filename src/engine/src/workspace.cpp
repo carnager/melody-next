@@ -219,6 +219,20 @@ core::Result<bool> Workspace::delete_engine_list(const core::StableId& id,
     return repository_.delete_engine_list(id, expected_revision);
 }
 
+core::Result<persistence::EngineListSummary>
+Workspace::draft_engine_list(const core::StableId& of, const core::StableId& id,
+                             const std::int64_t now_ms) {
+    const std::lock_guard guard{*mutex_};
+    return repository_.draft_engine_list(of, id, now_ms);
+}
+
+core::Result<persistence::EngineListSummary>
+Workspace::commit_engine_list_draft(const core::StableId& id, const bool force,
+                                    const std::int64_t now_ms) {
+    const std::lock_guard guard{*mutex_};
+    return repository_.commit_engine_list_draft(id, force, now_ms);
+}
+
 core::Result<std::vector<persistence::EngineListSummary>>
 Workspace::relocate_engine_list_paths(const std::vector<std::pair<std::string, std::string>>& moves,
                                       const std::int64_t now_ms) {

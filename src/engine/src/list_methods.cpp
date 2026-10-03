@@ -8,6 +8,7 @@
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <utility>
@@ -67,7 +68,9 @@ using protocol::Json;
                 {"kind", summary.kind == persistence::EngineListKind::saved ? "saved" : "working"},
                 {"revision", summary.revision},
                 {"tracks", summary.tracks},
-                {"modified_ms", summary.modified_ms}};
+                {"modified_ms", summary.modified_ms},
+                {"draft_of", summary.draft_of ? Json(summary.draft_of->to_string()) : Json(nullptr)},
+                {"draft_base", summary.draft_base}};
 }
 
 [[nodiscard]] Json item_json(const persistence::EngineListItem& item) {
@@ -527,14 +530,62 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         if (!revision) {
             return std::unexpected(std::move(revision.error()));
         }
+        // A saved list's draft goes with it, and is told as gone too.
+        std::optional<core::StableId> draft;
+        if (auto lists = workspace.load_engine_lists()) {
+            const auto found =
+                std::ranges::find(*lists, std::optional{*id}, &persistence::EngineListSummary::draft_of);
+            if (found != lists->end()) {
+                draft = found->id;
+            }
+        }
         auto deleted = workspace.delete_engine_list(*id, *revision);
         if (!deleted) {
             return std::unexpected(std::move(deleted.error()));
         }
         if (*deleted) {
             changed(nullptr, *id);
+            if (draft) {
+                changed(nullptr, *draft);
+            }
         }
         return Json{{"deleted", *deleted}};
+    });
+
+    // ADR-0259: the draft of a saved list -- the one there is, or a new one.
+    dispatcher.on("list.draft", [&workspace, changed](const Json& params) -> core::Result<Json> {
+        const auto of = params.find("of");
+        auto saved = of != params.end() && of->is_string()
+                         ? core::StableId::parse(of->get<std::string>())
+                         : core::Result<core::StableId>{std::unexpected(core::Error{})};
+        if (!saved) {
+            return std::unexpected(bad_params("of names the saved list to draft", "of"));
+        }
+        auto draft = workspace.draft_engine_list(*saved, core::StableId::random(), now_ms());
+        if (!draft) {
+            return std::unexpected(std::move(draft.error()));
+        }
+        changed(&*draft, draft->id);
+        return summary_json(*draft);
+    });
+
+    // ADR-0259: a draft saved into the list it drafts, and gone. A queue
+    // played from the draft is played from the list from then on.
+    dispatcher.on("list.commit",
+                  [&workspace, &player, changed](const Json& params) -> core::Result<Json> {
+        auto id = required_id(params);
+        if (!id) {
+            return std::unexpected(std::move(id.error()));
+        }
+        auto saved = workspace.commit_engine_list_draft(*id, params.value("force", false),
+                                                        now_ms());
+        if (!saved) {
+            return std::unexpected(std::move(saved.error()));
+        }
+        static_cast<void>(player.adopt_queue_list(id->to_string(), saved->id.to_string()));
+        changed(nullptr, *id);
+        changed(&*saved, saved->id);
+        return summary_json(*saved);
     });
 
     // Files moved or renamed -- by Trackknife, which does the file work --

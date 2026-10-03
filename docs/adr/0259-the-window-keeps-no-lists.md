@@ -79,6 +79,11 @@ unreadable -- and a tab whose engine is away shows its cached rows.
 ## Progress
 
 - Step 1, the engine describes its items: done (2026-10-03).
+- Step 2, drafts on the engine: done (2026-10-03). `list.draft {of}` answers
+  the saved list's draft, made if there is none; `list.commit {id, force?}`
+  writes it into the saved list and deletes it, and a queue played from the
+  draft is played from the list from then on. Summaries carry `draft_of` and
+  `draft_base`. Schema 51. The window does not use them yet.
 
 ## Not decided here
 

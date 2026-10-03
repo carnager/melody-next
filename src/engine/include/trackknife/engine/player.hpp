@@ -83,6 +83,10 @@ class Player final {
     [[nodiscard]] std::vector<QueueEntry> queue() const;
     // The list the queue came from; empty when not known.
     [[nodiscard]] std::string queue_list() const;
+    // ADR-0259: the list `from` is now `to` -- a draft saved into the list it
+    // drafted, with the same entries -- so a queue played from it is played
+    // from `to`. Says whether it was.
+    bool adopt_queue_list(const std::string& from, const std::string& to);
     // ADR-0256: the list `list` changed, and these are its entries now. When
     // the queue was played from it, the queue follows: in the list's order,
     // without what the list dropped, with what it gained -- `fresh` -- and

@@ -162,6 +162,10 @@ struct EngineListSummary {
     std::uint64_t revision{0};
     std::size_t tracks{0};
     std::int64_t modified_ms{0};
+    // ADR-0259: a draft -- a working list holding the unsaved edits of the
+    // saved list `draft_of`, begun when that was at revision `draft_base`.
+    std::optional<core::StableId> draft_of;
+    std::uint64_t draft_base{0};
 
     friend bool operator==(const EngineListSummary&, const EngineListSummary&) = default;
 };
@@ -407,9 +411,22 @@ class ListRepository final {
     [[nodiscard]] core::Result<EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
-    // False when there was no such list.
+    // False when there was no such list. A saved list's draft goes with it.
     [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
                                                      std::optional<std::uint64_t> expected_revision);
+    // ADR-0259: the draft of the saved list `of` -- the one there is, or a
+    // new working list `id` with its name and entries, entry identities
+    // kept, begun at its revision. Refused as not_found without the list and
+    // as invalid_argument for one that is not saved.
+    [[nodiscard]] core::Result<EngineListSummary>
+    draft_engine_list(const core::StableId& of, const core::StableId& id, std::int64_t now_ms);
+    // Writes the draft `id` -- its name and entries -- to the saved list it
+    // drafts, and deletes the draft, answering the saved list. Refused as a
+    // conflict when the saved list moved on since the draft began, unless
+    // `force`; as not_found when it is gone; as invalid_argument for a list
+    // that is no draft.
+    [[nodiscard]] core::Result<EngineListSummary>
+    commit_engine_list_draft(const core::StableId& id, bool force, std::int64_t now_ms);
     // ADR-0233: files moved or renamed. Every entry of every list naming a
     // `from` names its `to` instead, in one transaction; each list changed
     // gets a new revision, and is returned.

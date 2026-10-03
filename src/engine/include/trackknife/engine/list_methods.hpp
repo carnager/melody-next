@@ -20,12 +20,16 @@ class Workspace;
 //   list.edit {id, revision, edits, name?, kind?} -> summary
 //   list.rename {id, name, revision?}          -> summary
 //   list.delete {id, revision?}                -> {"deleted": bool}
+//   list.draft {of}                            -> summary (ADR-0259)
+//   list.commit {id, force?}                   -> summary of the saved list
 //   list.play {id, entry?}                     -> {"playing": entry}
 //   list.relocate {moves: [{from, to}]}        -> {"changed": [id]}
 //   event list.changed {id, revision?, deleted}
 //
 // A summary is {id, name, kind: "working"|"saved", revision, tracks,
-// modified_ms}. An item is a queue entry's fields -- entry, path, segment,
+// modified_ms, draft_of, draft_base}: a draft is a working list holding the
+// unsaved edits of the saved list `draft_of`, begun at its revision
+// `draft_base`; one to a saved list, deleted with it. An item is a queue entry's fields -- entry, path, segment,
 // selection, duration_ms -- plus logical, title, artist and album. A write
 // with `revision` is refused as a conflict when the list has moved on since;
 // for a new list, `revision` 0 refuses if the id is taken.

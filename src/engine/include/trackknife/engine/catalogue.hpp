@@ -125,6 +125,19 @@ class Catalogue {
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const = 0;
 
+    // A query's matches, each as its file and one line in `format` (tkfmt-1,
+    // formatted with the track's whole row), at most `limit` (0: every one),
+    // in the query's order. For a list that shows lines: a search of 66,841
+    // tracks needs their lines, not every tag of every one. Made from the
+    // calls above; an engine elsewhere formats them where the tags are.
+    struct FoundTrack {
+        std::string raw_path;
+        std::string text;
+    };
+    [[nodiscard]] virtual core::Result<std::vector<FoundTrack>>
+    find(const query::CompiledTkq& compiled, const std::string& format, std::size_t limit,
+         const core::CancellationToken& cancellation = {}) const;
+
     // Play counts and timestamps for the given sources, in input order.
     [[nodiscard]] virtual core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,

@@ -2,9 +2,45 @@
 
 #include "trackknife/engine/catalogue.hpp"
 
+#include "track_format.hpp"
+
 #include "trackknife/formats/artwork.hpp"
 
 namespace trackknife::engine {
+
+core::Result<std::vector<Catalogue::FoundTrack>>
+Catalogue::find(const query::CompiledTkq& compiled, const std::string& format,
+                const std::size_t limit, const core::CancellationToken& cancellation) const {
+    auto program = compile_client_format(format, titleformat::FormatContextKind::track_display);
+    if (!program) {
+        return std::unexpected(std::move(program.error()));
+    }
+    auto paths = filter_paths(compiled, cancellation);
+    if (!paths) {
+        return std::unexpected(std::move(paths.error()));
+    }
+    if (limit > 0U && paths->size() > limit) {
+        paths->resize(limit);
+    }
+    auto snapshots = cached_tracks(*paths, cancellation);
+    if (!snapshots) {
+        return std::unexpected(std::move(snapshots.error()));
+    }
+    std::vector<FoundTrack> found;
+    found.reserve(snapshots->size());
+    for (auto& snapshot : *snapshots) {
+        name_by_file(snapshot.facts, snapshot.raw_path);
+        auto text = persistence::tkq_format(*program, snapshot.facts,
+                                            track_fields(snapshot.facts, snapshot.raw_path),
+                                            cancellation);
+        if (!text) {
+            return std::unexpected(std::move(text.error()));
+        }
+        found.push_back({.raw_path = std::move(snapshot.raw_path), .text = std::move(*text)});
+    }
+    return found;
+}
+
 
 core::Result<persistence::LocalLibrary> LocalCatalogue::open() const {
     return persistence::LocalLibrary::open(database_);

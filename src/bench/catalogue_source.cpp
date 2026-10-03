@@ -163,6 +163,12 @@ class DeferredCatalogue final : public engine::Catalogue {
                   const core::CancellationToken& cancellation) const override {
         return get().cached_tracks(raw_paths, cancellation);
     }
+    // Forwarded, so an engine elsewhere formats the lines where the tags are.
+    [[nodiscard]] core::Result<std::vector<FoundTrack>>
+    find(const query::CompiledTkq& compiled, const std::string& format, const std::size_t limit,
+         const core::CancellationToken& cancellation) const override {
+        return get().find(compiled, format, limit, cancellation);
+    }
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation) const override {

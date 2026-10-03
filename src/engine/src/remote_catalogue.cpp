@@ -293,6 +293,8 @@ namespace {
     if (request.newest_first) {
         params["newest_first"] = true;
     }
+    // Rows rather than objects; an engine older than that sends objects.
+    params["compact"] = true;
     if (!request.view.empty()) {
         auto levels = Json::array();
         for (const auto& level : request.view) {
@@ -319,54 +321,133 @@ namespace {
     return params;
 }
 
+// One entry, its fields found by name -- in an object, or by column in a row
+// of a compact page. A field an older engine does not send is its default.
+template <typename Field>
+[[nodiscard]] core::Result<persistence::LibraryEntry> entry_from(const Field& field) {
+    const auto text = [&field](const char* name) {
+        const auto* value = field(name);
+        return value != nullptr && value->is_string() ? value->template get<std::string>()
+                                                      : std::string{};
+    };
+    const auto number = [&field]<typename Number>(const char* name, const Number fallback) {
+        const auto* value = field(name);
+        return value != nullptr && value->is_number() ? value->template get<Number>() : fallback;
+    };
+    persistence::LibraryEntry entry;
+    entry.kind = static_cast<persistence::LibraryEntryKind>(number("kind", 0));
+    auto key = protocol::decode_raw_path(text("key"));
+    if (!key) {
+        return std::unexpected(malformed("key"));
+    }
+    entry.key = std::move(*key);
+    entry.label = text("label");
+    entry.artist = text("artist");
+    entry.album = text("album");
+    entry.tracks = number("tracks", std::size_t{0});
+    entry.available = number("available", std::size_t{0});
+    entry.track_number = number("track_number", 0);
+    entry.albums = number("albums", std::size_t{0});
+    entry.rating_hash = text("rating_hash");
+    entry.rating = number("rating", 0U);
+    // Absent from an engine older than album keys on track entries.
+    entry.album_rating_hash = text("album_rating_hash");
+    entry.album_rating = number("album_rating", 0U);
+    entry.duration_ms = number("duration_ms", std::int64_t{-1});
+    // Absent from an engine older than dates on entries.
+    entry.date = text("date");
+    entry.title = text("title");
+    entry.added = number("added", std::int64_t{0});
+    if (const auto encoded = text("view_value"); !encoded.empty()) {
+        auto decoded = protocol::decode_raw_path(encoded);
+        if (!decoded) {
+            return std::unexpected(malformed("view_value"));
+        }
+        entry.view_value = std::move(*decoded);
+    }
+    return entry;
+}
+
 [[nodiscard]] core::Result<persistence::LibraryPage> decode_page(const Json& answer) {
+    persistence::LibraryPage page;
+    page.more = answer.value("more", false);
+    // Compact: the names once, then rows of values in their order.
+    if (const auto rows = answer.find("rows"); rows != answer.end()) {
+        const auto columns = answer.find("columns");
+        if (columns == answer.end() || !columns->is_array() || !rows->is_array()) {
+            return std::unexpected(malformed("rows"));
+        }
+        std::vector<std::string> names;
+        names.reserve(columns->size());
+        for (const auto& name : *columns) {
+            names.push_back(name.is_string() ? name.get<std::string>() : std::string{});
+        }
+        page.entries.reserve(rows->size());
+        for (const auto& row : *rows) {
+            if (!row.is_array() || row.size() != names.size()) {
+                return std::unexpected(malformed("rows"));
+            }
+            auto entry = entry_from([&names, &row](const std::string_view name) -> const Json* {
+                const auto found = std::ranges::find(names, name);
+                return found == names.end()
+                           ? nullptr
+                           : &row[static_cast<std::size_t>(found - names.begin())];
+            });
+            if (!entry) {
+                return std::unexpected(std::move(entry.error()));
+            }
+            page.entries.push_back(std::move(*entry));
+        }
+        return page;
+    }
     const auto entries = answer.find("entries");
     if (entries == answer.end() || !entries->is_array()) {
         return std::unexpected(malformed("entries"));
     }
-    persistence::LibraryPage page;
-    page.more = answer.value("more", false);
+    page.entries.reserve(entries->size());
     for (const auto& value : *entries) {
         if (!value.is_object()) {
             return std::unexpected(malformed("entries"));
         }
-        persistence::LibraryEntry entry;
-        entry.kind = static_cast<persistence::LibraryEntryKind>(value.value("kind", 0));
-        auto key = protocol::decode_raw_path(value.value("key", std::string{}));
-        if (!key) {
-            return std::unexpected(malformed("key"));
+        auto entry = entry_from([&value](const std::string_view name) -> const Json* {
+            const auto found = value.find(name);
+            return found == value.end() ? nullptr : &*found;
+        });
+        if (!entry) {
+            return std::unexpected(std::move(entry.error()));
         }
-        entry.key = std::move(*key);
-        entry.label = value.value("label", std::string{});
-        entry.artist = value.value("artist", std::string{});
-        entry.album = value.value("album", std::string{});
-        entry.tracks = value.value("tracks", std::size_t{0});
-        entry.available = value.value("available", std::size_t{0});
-        entry.track_number = value.value("track_number", 0);
-        entry.albums = value.value("albums", std::size_t{0});
-        entry.rating_hash = value.value("rating_hash", std::string{});
-        entry.rating = value.value("rating", 0U);
-        // Absent from an engine older than album keys on track entries.
-        entry.album_rating_hash = value.value("album_rating_hash", std::string{});
-        entry.album_rating = value.value("album_rating", 0U);
-        entry.duration_ms = value.value("duration_ms", std::int64_t{-1});
-        // Absent from an engine older than dates on entries.
-        entry.date = value.value("date", std::string{});
-        entry.title = value.value("title", std::string{});
-        entry.added = value.value("added", std::int64_t{0});
-        if (const auto view_value = value.find("view_value"); view_value != value.end()) {
-            auto decoded = protocol::decode_raw_path(view_value->get<std::string>());
-            if (!decoded) {
-                return std::unexpected(malformed("view_value"));
-            }
-            entry.view_value = std::move(*decoded);
-        }
-        page.entries.push_back(std::move(entry));
+        page.entries.push_back(std::move(*entry));
     }
     return page;
 }
 
 } // namespace
+
+core::Result<std::vector<Catalogue::FoundTrack>>
+RemoteCatalogue::find(const query::CompiledTkq& compiled, const std::string& format,
+                      const std::size_t limit, const core::CancellationToken&) const {
+    // Formatted there, where the tags are: only the lines cross.
+    auto answer = client_->call("catalogue.find", Json{{"query", compiled.source},
+                                                       {"format", format},
+                                                       {"limit", limit}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto tracks = answer->find("tracks");
+    if (tracks == answer->end() || !tracks->is_array()) {
+        return std::unexpected(malformed("tracks"));
+    }
+    std::vector<FoundTrack> found;
+    found.reserve(tracks->size());
+    for (const auto& track : *tracks) {
+        auto path = protocol::decode_raw_path(track.value("key", std::string{}));
+        if (!path) {
+            return std::unexpected(malformed("tracks"));
+        }
+        found.push_back({.raw_path = std::move(*path), .text = track.value("text", std::string{})});
+    }
+    return found;
+}
 
 core::Result<persistence::LibraryPage>
 RemoteCatalogue::query(const persistence::LibraryQuery& request,
@@ -411,7 +492,8 @@ RemoteCatalogue::filter(const query::CompiledTkq& compiled, const std::size_t of
     // compiles for itself; agreeing on a compiled form would be a second wire
     // contract for no gain.
     auto answer = client_->call(
-        "catalogue.filter", Json{{"query", compiled.source}, {"offset", offset}, {"limit", limit}});
+        "catalogue.filter",
+        Json{{"query", compiled.source}, {"offset", offset}, {"limit", limit}, {"compact", true}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }

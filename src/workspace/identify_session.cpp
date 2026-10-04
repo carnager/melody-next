@@ -71,9 +71,12 @@ namespace {
 TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
                                      std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                                      std::vector<QString> local_paths,
-                                     std::vector<std::size_t> item_indexes, QObject* parent)
+                                     std::vector<std::size_t> item_indexes, QObject* parent,
+                                     std::vector<QString> other_albums)
     : QObject(parent), release_(std::move(release)), local_tracks_(std::move(local_tracks)),
       local_paths_(std::move(local_paths)), item_indexes_(std::move(item_indexes)),
+      other_albums_(std::move(other_albums)),
+      own_count_(local_tracks_.size() - std::min(other_albums_.size(), local_tracks_.size())),
       status_(tr("Preparing suggested matches…")) {
     std::size_t release_track_count = 0;
     for (const auto& medium : release_.media) {
@@ -90,9 +93,16 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
         alignment_ = watcher->result();
         watcher->deleteLater();
+        // Those offered were not aligned: unplaced, until the person
+        // places one.
+        for (auto local = own_count_; local < local_tracks_.size(); ++local) {
+            alignment_.tracks.push_back(musicbrainz::TrackAlignment{
+                .local_index = local, .release_track_index = {}, .confidence = 0.0,
+                .user_confirmed = false});
+        }
         slots_.resize(alignment_.release_tracks.size());
         std::vector<bool> placed(local_tracks_.size(), false);
-        for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
+        for (std::size_t local = 0; local < own_count_; ++local) {
             const auto& match = alignment_.tracks[local];
             if (match.confidence >= 0.5 && match.release_track_index &&
                 *match.release_track_index < slots_.size() && !slots_[*match.release_track_index]) {
@@ -103,7 +113,7 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
         // Fill remaining gaps in file order as reviewable proposals, not
         // confidence claims.
         std::size_t gap = 0;
-        for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
+        for (std::size_t local = 0; local < own_count_; ++local) {
             if (placed[local]) {
                 continue;
             }
@@ -116,11 +126,18 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
                 slots_[gap] = local;
             }
         }
+        for (auto local = own_count_; local < local_tracks_.size(); ++local) {
+            slots_.push_back(local);
+        }
         ready_ = true;
         refresh();
     });
+    // Only the album's own files are aligned: one offered never takes a
+    // track from them.
+    std::vector own(local_tracks_.begin(),
+                    local_tracks_.begin() + static_cast<std::ptrdiff_t>(own_count_));
     watcher->setFuture(QtConcurrent::run(
-        [release = release_, tracks = local_tracks_, token = cancellation_.token()] {
+        [release = release_, tracks = std::move(own), token = cancellation_.token()] {
             return musicbrainz::align_release_tracks(tracks, release, token);
         }));
 }
@@ -134,7 +151,9 @@ QString TrackMatchSession::heading() const {
 
 QString TrackMatchSession::help() {
     return tr("Each row pairs a local file with the MusicBrainz track beside it. "
-              "Drag files in the left pane or use Move file up/down to change pairings. "
+              "Drag a file onto a MusicBrainz track to put it there, drag files in the "
+              "left pane, or use Move file up/down to change pairings. Files of other "
+              "albums are listed last; one put on a track joins this album. "
               "MusicBrainz tracks stay in album order. Review before staging.");
 }
 
@@ -181,6 +200,37 @@ void TrackMatchSession::moveFile(const std::size_t from, const std::size_t to) {
     refresh(to);
 }
 
+bool TrackMatchSession::isGap(const std::size_t row) const {
+    return ready_ && row < alignment_.release_tracks.size() && row < slots_.size() &&
+           !slots_[row].has_value();
+}
+
+void TrackMatchSession::fillGap(const std::size_t from, const std::size_t gap) {
+    if (!isGap(gap) || from >= slots_.size() || !slots_[from]) {
+        return;
+    }
+    slots_[gap] = slots_[from];
+    if (from < alignment_.release_tracks.size()) {
+        slots_[from].reset();
+    } else {
+        slots_.erase(slots_.begin() + static_cast<std::ptrdiff_t>(from));
+    }
+    refresh(gap);
+}
+
+void TrackMatchSession::placeOn(const std::size_t from, const std::size_t track) {
+    if (!ready_ || from >= slots_.size() || !slots_[from] || from == track ||
+        track >= alignment_.release_tracks.size()) {
+        return;
+    }
+    if (isGap(track)) {
+        fillGap(from, track);
+        return;
+    }
+    std::swap(slots_[from], slots_[track]);
+    refresh(track);
+}
+
 void TrackMatchSession::move(const int row, const int direction) {
     if (!ready_ || row < 0 || (direction < 0 && row == 0) ||
         (direction > 0 && static_cast<std::size_t>(row) + 1 >= slots_.size())) {
@@ -208,7 +258,7 @@ void TrackMatchSession::resetOrder(const bool by_filename) {
         return;
     }
     std::vector<std::size_t> files;
-    for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
+    for (std::size_t local = 0; local < own_count_; ++local) {
         files.push_back(local);
     }
     if (by_filename) {
@@ -227,6 +277,9 @@ void TrackMatchSession::resetOrder(const bool by_filename) {
     for (std::size_t row = 0; row < files.size(); ++row) {
         slots_[row] = files[row];
     }
+    for (auto local = own_count_; local < local_tracks_.size(); ++local) {
+        slots_.push_back(local);
+    }
     refresh(0);
 }
 
@@ -238,6 +291,7 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
     rows_.clear();
     rows_.reserve(slots_.size());
     std::size_t count = 0;
+    std::size_t taken = 0;
     for (std::size_t row = 0; row < slots_.size(); ++row) {
         Row entry;
         if (const auto local = slots_[row]) {
@@ -251,27 +305,44 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
                 entry.pairing_tool_tip =
                     tr("Paired with %1. Review before staging.").arg(trackLabel(row));
                 entry.paired = true;
-                ++count;
+                if (*local >= own_count_) {
+                    ++taken;
+                    entry.pairing_tool_tip +=
+                        tr(" Taken from %1.").arg(other_albums_[*local - own_count_]);
+                } else {
+                    ++count;
+                }
             }
         } else {
             entry.file = tr("No local file");
             entry.pairing = tr("— Gap");
+            entry.gap = true;
         }
         if (row < alignment_.release_tracks.size()) {
             entry.track = trackLabel(row);
             entry.track_length = duration(alignment_.release_tracks[row].track.length_ms);
+        } else if (const auto local = slots_[row]; local && *local >= own_count_) {
+            const auto& album = other_albums_[*local - own_count_];
+            entry.other = true;
+            entry.pairing = tr("Other album");
+            entry.pairing_tool_tip =
+                tr("In %1. Drop it on a track to move it to this album.").arg(album);
+            entry.track = tr("— Stays in %1").arg(album);
         } else {
             entry.pairing = tr("Unmatched");
             entry.track = tr("— No tags will be staged");
         }
         rows_.push_back(std::move(entry));
     }
-    paired_count_ = count;
+    paired_count_ = count + taken;
     status_ = tr("%1 files paired · %2 files unmatched · %3 album tracks without a file. "
                  "Pairings are suggestions until you Stage matches.")
-                  .arg(count)
-                  .arg(local_tracks_.size() - count)
-                  .arg(alignment_.release_tracks.size() - count);
+                  .arg(count + taken)
+                  .arg(own_count_ - count)
+                  .arg(alignment_.release_tracks.size() - count - taken);
+    if (taken > 0U) {
+        status_ += tr(" %n taken from other albums.", nullptr, static_cast<int>(taken));
+    }
     emit changed(selected && !slots_.empty()
                      ? static_cast<int>(std::min(*selected, slots_.size() - 1))
                      : -1);

@@ -25,6 +25,7 @@
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/identify_albums_dialog.hpp"
+#include "workspace/identify_session.hpp"
 #include "workspace/album_batch_session.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
@@ -314,6 +315,7 @@ class BenchMainWindowTest final : public QObject {
     void musicBrainzIdentifyStagesChosenVersion();
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
+    void identifyAlbumsTakesAFileGroupedApart();
     void identifyAlbumsWritesWhatIsChosen();
     void identifyAlbumsOpensFromTools();
     void identifyAlbumsStagesAlongsideAutomaticScripts();
@@ -7152,6 +7154,165 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     QTRY_VERIFY(!heading->isVisible());
     // Back in the list, nothing left to review: not offered.
     QVERIFY(!review_next->isVisibleTo(dialog));
+    delete properties;
+}
+
+// ADR-0265: a file grouped into another album -- here by a release id of
+// its own, one folder with its album -- is offered in the matcher, put on
+// its track, and leaves the album it was grouped into.
+void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
+    const auto field = [](std::string name, std::vector<std::string> values) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = std::move(values),
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    const auto first = "11111111-0000-0000-0000-000000000001";
+    const auto stray = "22222222-0000-0000-0000-000000000002";
+    const auto make_source = [&field](std::string path, std::string release, std::string title,
+                                      std::string number, std::int64_t length) {
+        return MetadataPropertiesSource{
+            .source =
+                metadata::StagedMetadataSource{
+                    .raw_path = std::move(path),
+                    .source_revision = std::nullopt,
+                    .baseline =
+                        metadata::MetadataDocument{
+                            .fields = {field("ALBUM", {"Suffer"}), field("ARTIST", {"Band"}),
+                                       field("TITLE", {title}), field("TRACKNUMBER", {number}),
+                                       field("MUSICBRAINZ_ALBUMID", {release})},
+                            .unsupported_native_objects = {}},
+                },
+            .track_label = {},
+            .duration_ms = length,
+        };
+    };
+    const std::vector sources{
+        make_source("/music/Band/Suffer/01.flac", first, "One", "1", 61'000),
+        make_source("/music/Band/Suffer/02.flac", first, "Two", "2", 59'000),
+        make_source("/music/Band/Suffer/03.flac", stray, "Three", "3", 75'000),
+    };
+    const auto release = [](const char* id) {
+        return QStringLiteral(R"json({"id": "%1", "score": 100, "title": "Suffer",
+          "status": "Official", "date": "1988", "country": "US", "track-count": 3,
+          "artist-credit": [{"name": "Band",
+            "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+          "release-group": {"id": "99999999-8888-7777-6666-555555555555"},
+          "media": [{"position": 1, "format": "CD", "track-count": 3, "tracks": [
+            {"id": "aaaa1111-0000-0000-0000-000000000001", "position": 1, "number": "1",
+             "title": "One", "length": 61000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000001", "title": "One"}},
+            {"id": "aaaa1111-0000-0000-0000-000000000002", "position": 2, "number": "2",
+             "title": "Two", "length": 59000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000002", "title": "Two"}},
+            {"id": "aaaa1111-0000-0000-0000-000000000003", "position": 3, "number": "3",
+             "title": "Three", "length": 75000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000003", "title": "Three"}}
+          ]}]})json")
+            .arg(QString::fromLatin1(id));
+    };
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
+                QByteArray body;
+                if (url.contains(QStringLiteral("?query="))) {
+                    body = QStringLiteral(R"({"count": 1, "releases": [%1]})")
+                               .arg(release(first))
+                               .toUtf8();
+                } else {
+                    body = release(url.contains(QString::fromLatin1(stray)) ? stray : first)
+                               .toUtf8();
+                }
+                QTimer::singleShot(1, [body, completion = std::move(completion)] {
+                    completion(body);
+                });
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, service);
+    properties->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = properties->fileListView()) != nullptr);
+    auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
+    auto* open = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    QTRY_VERIFY(open->isEnabled());
+    open->click();
+    auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* session = dialog->session();
+    // Grouped apart by its release id.
+    QCOMPARE(session->albums().size(), 2U);
+    QCOMPARE(session->albums()[0].items.size(), 2U);
+    QCOMPARE(session->albums()[1].items.size(), 1U);
+    // Two files for three tracks: the review opens on the first album.
+    auto* heading = dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
+    QTRY_VERIFY_WITH_TIMEOUT(heading->isVisible(), 5'000);
+    TrackMatchSession* match = nullptr;
+    QTRY_VERIFY((match = dialog->findChild<TrackMatchSession*>()) != nullptr && match->ready());
+    // Its own files on their tracks, a gap for the third, and the other
+    // album's file offered below -- not placed, not counted.
+    auto* rows = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
+    auto* tracks = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
+    QTRY_COMPARE(rows->topLevelItemCount(), 4);
+    QCOMPARE(match->fileCount(), 2U);
+    QCOMPARE(match->pairedCount(), 2U);
+    QVERIFY(match->rows()[2].gap);
+    QVERIFY(match->isGap(2U));
+    QVERIFY(match->rows()[3].other);
+    QCOMPARE(rows->topLevelItem(3)->text(0), QStringLiteral("03.flac"));
+    QVERIFY(tracks->topLevelItem(3)->text(0).contains(QStringLiteral("Stays in")));
+    QVERIFY(rows->topLevelItem(3)->font(0).italic());
+    // Dragged onto track 3: the gap filled, nothing else moved.
+    {
+        std::unique_ptr<QMimeData> mime{
+            rows->model()->mimeData({rows->model()->index(3, 0)})};
+        QVERIFY(mime != nullptr);
+        const auto at = tracks->visualItemRect(tracks->topLevelItem(2)).center();
+        QDragEnterEvent enter{at, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QCoreApplication::sendEvent(tracks->viewport(), &enter);
+        QVERIFY(enter.isAccepted());
+        QDropEvent drop{QPointF{at}, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QCoreApplication::sendEvent(tracks->viewport(), &drop);
+        QVERIFY(drop.isAccepted());
+    }
+    QCOMPARE(rows->topLevelItemCount(), 3);
+    QCOMPARE(rows->topLevelItem(0)->text(0), QStringLiteral("01.flac"));
+    QCOMPARE(rows->topLevelItem(1)->text(0), QStringLiteral("02.flac"));
+    QCOMPARE(rows->topLevelItem(2)->text(0), QStringLiteral("03.flac"));
+    QCOMPARE(match->pairedCount(), 3U);
+    QVERIFY(match->status().contains(QStringLiteral("1 taken from other albums")));
+    // Onto a track with a file: the two change places.
+    match->placeOn(0U, 1U);
+    QCOMPARE(rows->topLevelItem(0)->text(0), QStringLiteral("02.flac"));
+    QCOMPARE(rows->topLevelItem(1)->text(0), QStringLiteral("01.flac"));
+    match->placeOn(0U, 1U);
+    QCOMPARE(rows->topLevelItem(0)->text(0), QStringLiteral("01.flac"));
+    // Accepted: the album has all three; the one it came from is gone.
+    auto* accept =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-accept"));
+    QTRY_VERIFY(accept->isEnabled());
+    accept->click();
+    QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::staged), std::size_t{1U},
+                              5'000);
+    QCOMPARE(session->albums()[0].items, (std::vector<std::size_t>{0U, 1U, 2U}));
+    QCOMPARE(session->albums()[1].state, AlbumBatchSession::State::merged);
+    QCOMPARE(session->order(), (std::vector<std::size_t>{0U}));
+    // The stray's release id is the album's now, staged in the draft.
+    bool stray_staged = false;
+    for (const auto& patch : grid_model->patches().patches()) {
+        if (patch.item_index == 2U) {
+            stray_staged = true;
+        }
+    }
+    QVERIFY(stray_staged);
     delete properties;
 }
 

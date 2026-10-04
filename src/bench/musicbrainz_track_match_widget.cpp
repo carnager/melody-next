@@ -44,6 +44,9 @@ class LocalFileOrderView final : public QTreeWidget {
         setAutoScroll(true);
     }
     std::function<void(std::size_t, std::size_t)> moveFile;
+    // ADR-0265: dropped on a gap, a file fills it, nothing else moving.
+    std::function<bool(std::size_t)> isGap;
+    std::function<void(std::size_t, std::size_t)> fillGap;
     void invalidateDrag() { identity_ = QUuid::createUuid().toString(); }
 
   protected:
@@ -94,6 +97,15 @@ class LocalFileOrderView final : public QTreeWidget {
             return;
         }
         auto* target = itemAt(event->position().toPoint());
+        if (target && isGap && fillGap) {
+            const auto row = static_cast<std::size_t>(indexOfTopLevelItem(target));
+            if (isGap(row)) {
+                fillGap(*source, row);
+                event->setDropAction(Qt::MoveAction);
+                event->accept();
+                return;
+            }
+        }
         std::size_t boundary = static_cast<std::size_t>(topLevelItemCount());
         if (target) {
             boundary = static_cast<std::size_t>(indexOfTopLevelItem(target));
@@ -109,7 +121,8 @@ class LocalFileOrderView final : public QTreeWidget {
         event->accept();
     }
 
-  private:
+  public:
+    // The row a drag from this view started at, if it is one of its own.
     std::optional<std::size_t> sourceRow(const QMimeData* mime) const {
         const auto payload = mime->data(mimeTypes().front());
         const auto prefix = identity_.toUtf8() + ':';
@@ -124,6 +137,52 @@ class LocalFileOrderView final : public QTreeWidget {
         return static_cast<std::size_t>(row);
     }
     QString identity_{QUuid::createUuid().toString()};
+};
+
+// ADR-0265: a file dragged from the files pane onto a MusicBrainz track is
+// put on that track: in its gap, or in place of the file there, which takes
+// the dragged file's place.
+class ReleaseTrackDropView final : public QTreeWidget {
+  public:
+    ReleaseTrackDropView(QWidget* parent, LocalFileOrderView* files)
+        : QTreeWidget(parent), files_(files) {
+        setAcceptDrops(true);
+        setDragDropMode(QAbstractItemView::DropOnly);
+        setDropIndicatorShown(true);
+    }
+    std::function<void(std::size_t, std::size_t)> placeOn;
+
+  protected:
+    void dragEnterEvent(QDragEnterEvent* event) override {
+        if (files_->sourceRow(event->mimeData())) {
+            event->acceptProposedAction();
+        } else {
+            event->ignore();
+        }
+    }
+    void dragMoveEvent(QDragMoveEvent* event) override {
+        auto* target = itemAt(event->position().toPoint());
+        if (!files_->sourceRow(event->mimeData()) || target == nullptr) {
+            event->ignore();
+            return;
+        }
+        setCurrentItem(target);
+        event->acceptProposedAction();
+    }
+    void dropEvent(QDropEvent* event) override {
+        const auto source = files_->sourceRow(event->mimeData());
+        auto* target = itemAt(event->position().toPoint());
+        if (!source || target == nullptr || !placeOn) {
+            event->ignore();
+            return;
+        }
+        placeOn(*source, static_cast<std::size_t>(indexOfTopLevelItem(target)));
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
+    }
+
+  private:
+    LocalFileOrderView* files_;
 };
 
 // A view over a TrackMatchSession: the files and the album's tracks side by
@@ -151,7 +210,11 @@ class TrackMatchWidget final : public QWidget {
         rows_ = new LocalFileOrderView(splitter);
         rows_->setObjectName(QStringLiteral("bench-musicbrainz-match-files"));
         rows_->setHeaderLabels({tr("Local filename"), tr("Length"), tr("Pairing")});
-        tracks_ = new QTreeWidget(splitter);
+        auto* tracks = new ReleaseTrackDropView(splitter, rows_);
+        tracks->placeOn = [this](std::size_t from, std::size_t to) {
+            session_->placeOn(from, to);
+        };
+        tracks_ = tracks;
         tracks_->setObjectName(QStringLiteral("bench-musicbrainz-match-tracks"));
         tracks_->setHeaderLabels({tr("MusicBrainz track"), tr("Length")});
         for (auto* view : {static_cast<QTreeWidget*>(rows_), tracks_}) {
@@ -181,6 +244,10 @@ class TrackMatchWidget final : public QWidget {
         });
         rows_->moveFile = [this](std::size_t from, std::size_t to) {
             session_->moveFile(from, to);
+        };
+        rows_->isGap = [this](std::size_t row) { return session_->isGap(row); };
+        rows_->fillGap = [this](std::size_t from, std::size_t gap) {
+            session_->fillGap(from, gap);
         };
         if (embedded) {
             rows_->setToolTip(TrackMatchSession::help());
@@ -323,6 +390,16 @@ class TrackMatchWidget final : public QWidget {
             track_item->setText(0, row.track);
             track_item->setToolTip(0, row.track);
             track_item->setText(1, row.track_length);
+            // Another album's file, offered: quieter than the album's own.
+            if (row.other) {
+                for (int column = 0; column < 3; ++column) {
+                    auto font = item->font(column);
+                    font.setItalic(true);
+                    item->setFont(column, font);
+                    item->setForeground(column, palette().brush(QPalette::PlaceholderText));
+                }
+                track_item->setForeground(0, palette().brush(QPalette::PlaceholderText));
+            }
         }
         if (selected >= 0 && selected < rows_->topLevelItemCount()) {
             auto* item = rows_->topLevelItem(selected);

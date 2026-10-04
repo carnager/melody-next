@@ -674,7 +674,8 @@ void IdentifyAlbumsDialog::showVersion(const int version) {
     auto files = session_->filesOf(*reviewing_);
     match_ = new TrackMatchSession(
         album.result->candidates[static_cast<std::size_t>(version)].release,
-        std::move(files.descriptors), std::move(files.paths), std::move(files.items), this);
+        std::move(files.descriptors), std::move(files.paths), std::move(files.items), this,
+        std::move(files.other_albums));
     connect(match_, &TrackMatchSession::accepted, this,
             [this](metadata::MetadataProposalSet proposals) {
                 if (reviewing_) {

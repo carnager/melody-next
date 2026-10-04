@@ -100,14 +100,19 @@ class AlbumBatchSession final : public QObject {
     // a person, wrapping round; none when none does.
     [[nodiscard]] std::optional<std::size_t> nextNeedingYou(std::optional<std::size_t> after) const;
     // What the matcher pairs for an album: its files, as descriptors and
-    // paths, and the tagger's items they are.
+    // paths, and the tagger's items they are -- then, ADR-0265, those of
+    // the other albums whose grouping can still change, offered, each with
+    // the album it is in (`other_albums`, one per offered file, last).
     struct Files {
         std::vector<musicbrainz::LocalTrackDescriptor> descriptors;
         std::vector<QString> paths;
         std::vector<std::size_t> items;
+        std::vector<QString> other_albums;
     };
     [[nodiscard]] Files filesOf(std::size_t album) const;
     // The pairing the person confirmed, staged as a clear match would be.
+    // A file of another album in it joins this one; the album it leaves is
+    // looked up again, or goes when it is left with none.
     void choose(std::size_t album, std::size_t version, metadata::MetadataProposalSet proposals);
     void skip(std::size_t album);
 
@@ -141,6 +146,9 @@ class AlbumBatchSession final : public QObject {
   private:
     void group();
     void describe(Album& album) const;
+    // Its folders, from its files.
+    void refolder(Album& album) const;
+    void take(std::size_t album, std::size_t item);
     [[nodiscard]] musicbrainz::AlbumQuery queryOf(const Album& album) const;
     void lookedUp(std::size_t album, const musicbrainz::AlbumLookupResult& result);
     void stageNext();

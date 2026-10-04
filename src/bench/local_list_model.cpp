@@ -166,6 +166,35 @@ void LocalListModel::applyTechnicals(const std::string& raw_path,
     }
 }
 
+void LocalListModel::setMissing(const std::vector<std::string>& checked,
+                                const std::vector<std::string>& missing) {
+    const std::unordered_set<std::string> gone{missing.begin(), missing.end()};
+    std::unordered_set<std::string> changed;
+    for (const auto& path : checked) {
+        const bool was = missing_.contains(path);
+        const bool is = gone.contains(path);
+        if (was != is) {
+            if (is) {
+                missing_.insert(path);
+            } else {
+                missing_.erase(path);
+            }
+            changed.insert(path);
+        }
+    }
+    if (changed.empty()) {
+        return;
+    }
+    for (std::size_t row = 0; row < rows_.size(); ++row) {
+        // How it looks, not what it is: no list edit, no search gone stale.
+        if (changed.contains(rows_[row].raw_path)) {
+            emit dataChanged(index(static_cast<int>(row), 0),
+                             index(static_cast<int>(row), local_column_count - 1),
+                             {ui::track_missing_role, Qt::ToolTipRole});
+        }
+    }
+}
+
 void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
     bool changed = false;
     for (auto& row : rows_) {
@@ -1007,6 +1036,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return groupKey(index.row());
     case ui::track_disc_start_role:
         return discStart(index.row());
+    case ui::track_missing_role:
+        return missing_.contains(row.raw_path);
     case ui::track_album_group_start_role: {
         const auto row_index = static_cast<std::size_t>(index.row());
         // A lone track is an album of its own (ADR-0250).
@@ -1042,7 +1073,9 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return QBrush{ui::ratingStarColor()};
     }
     if (role == Qt::ToolTipRole) {
-        return escaped(row.raw_path);
+        return missing_.contains(row.raw_path)
+                   ? tr("%1\nThe file is not there.").arg(escaped(row.raw_path))
+                   : escaped(row.raw_path);
     }
     return {};
 }

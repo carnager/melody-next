@@ -146,6 +146,13 @@ Workspace::ListTab* Workspace::addList(PreparedList prepared, const bool select)
     tab->model = model;
     auto* raw_tab = tab.get();
     list_tabs_.push_back(std::move(tab));
+    // ADR-0268: whenever it gains rows, which of their files are gone.
+    const auto document_id = QString::fromStdString(raw_tab->document.id.to_string());
+    connect(model, &QAbstractItemModel::rowsInserted, this,
+            [this, document_id] { scheduleMissingCheck(document_id); });
+    connect(model, &QAbstractItemModel::modelReset, this,
+            [this, document_id] { scheduleMissingCheck(document_id); });
+    scheduleMissingCheck(document_id);
     view_->listAdded(*raw_tab, select);
     enqueueUnprobedRows(*raw_tab);
     syncArtwork(*raw_tab);

@@ -675,6 +675,12 @@ class Workspace final : public QObject {
     // What changed in an engine's library, followed by what shows it.
     void adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                             const std::vector<std::string>& albums, bool everything);
+    // ADR-0268: a list's rows whose files are not there, asked of its engine
+    // -- every row, soon (rows came), or those at `paths` now.
+    void scheduleMissingCheck(const QString& document_id);
+    void checkMissing(const QString& document_id, std::vector<std::string> paths);
+    QSet<QString> missing_pending_;
+    bool missing_scheduled_{false};
     // ADR-0237: whether an engine does the file tools' work, asked each time
     // it connects; one that does is handed this workspace's naming layouts.
     void watchFileWork(EngineLink& link);

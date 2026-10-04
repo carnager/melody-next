@@ -1076,6 +1076,34 @@ core::Result<void> RemoteFileWork::remove_destination(const core::StableId& id) 
     return {};
 }
 
+core::Result<std::vector<std::string>>
+RemoteFileWork::missing(const std::vector<std::string>& paths) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    std::vector<std::string> gone;
+    constexpr std::size_t part = 2'000U;
+    for (std::size_t from = 0; from < paths.size(); from += part) {
+        auto encoded = Json::array();
+        for (std::size_t at = from; at < std::min(paths.size(), from + part); ++at) {
+            encoded.push_back(protocol::encode_raw_path(paths[at]));
+        }
+        auto answer = (*connection)->call("files.missing", Json{{"paths", std::move(encoded)}});
+        if (!answer) {
+            return std::unexpected(std::move(answer.error()));
+        }
+        for (const auto& value : answer->value("missing", Json::array())) {
+            if (value.is_string()) {
+                if (auto raw = protocol::decode_raw_path(value.get<std::string>())) {
+                    gone.push_back(std::move(*raw));
+                }
+            }
+        }
+    }
+    return gone;
+}
+
 core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::string& path) {
     auto connection = client();
     if (!connection) {

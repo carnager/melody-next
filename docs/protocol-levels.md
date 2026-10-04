@@ -14,6 +14,8 @@ engine's level with its own and says once when the engine is older.
   touched (a cover written names the albums of its folder), or after a scan
   or a change of folders, everything (ADR-0268). An older engine says
   nothing; its clients see changes when they ask again.
+- `files.missing {paths}` answering `{missing}`: which of these files are
+  not there, looked for on the engine's machine (ADR-0268).
 
 ### Level 3 (2026-10-04)
 

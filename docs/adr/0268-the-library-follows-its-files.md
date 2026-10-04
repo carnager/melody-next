@@ -31,6 +31,13 @@ so no row changed.
   row and the scroll stay. A query's results are asked again as a search.
 - **Covers by album.** The covers of the albums named are let go and asked
   again when shown; after a scan, all of them.
+- **Lists say what is gone.** A list's rows whose files are not there show
+  greyed and in italics, their tooltip saying so. Its engine is asked
+  (`files.missing`, on the machine where the files are) when the list gains
+  rows -- opened, filled, adopted -- and, for the rows at the paths a
+  `catalogue.changed` names or under them, again: a row whose file came back
+  is shown as any other. The rows stay; what to do with them is the
+  person's.
 
 ## Consequences
 

@@ -405,6 +405,36 @@ void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::
 
 void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
                                 FileWorkRecovery recovery) {
+    // ADR-0268: which of these files are not there, looked for on this
+    // machine -- a list's rows greyed for what is gone.
+    //   files.missing {paths: [raw path]} -> {missing: [raw path]}
+    dispatcher.on("files.missing", [](const Json& params) -> core::Result<Json> {
+        constexpr std::size_t limit = 5'000U;
+        const auto paths = params.find("paths");
+        if (paths == params.end() || !paths->is_array() || paths->size() > limit) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = "up to " + std::to_string(limit) + " paths are required",
+                .context = {{.key = "param", .value = "paths"}}});
+        }
+        auto missing = Json::array();
+        for (const auto& encoded : *paths) {
+            if (!encoded.is_string()) {
+                continue;
+            }
+            auto raw = protocol::decode_raw_path(encoded.get<std::string>());
+            if (!raw) {
+                continue;
+            }
+            std::error_code error;
+            const auto status = std::filesystem::status(std::filesystem::path{*raw}, error);
+            // Not there; a path that cannot be looked at is not said to be.
+            if (status.type() == std::filesystem::file_type::not_found) {
+                missing.push_back(encoded);
+            }
+        }
+        return Json{{"missing", std::move(missing)}};
+    });
     dispatcher.on("media.probe", [](const Json& params) -> core::Result<Json> {
         const auto paths = params.find("paths");
         if (paths == params.end() || !paths->is_array() || paths->size() > metadata_read_limit) {

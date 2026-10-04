@@ -141,6 +141,10 @@ class RemoteFileWork final {
     // ADR-0266: where the engine keeps undo copies (backups.location):
     // "engine", "folder" or "beside", the folder when one was chosen, and
     // the folder they are kept in (empty: beside each file).
+    // ADR-0268: which of these files are not there, on the engine's machine
+    // (files.missing), asked in parts.
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    missing(const std::vector<std::string>& paths);
     struct BackupLocation {
         std::string place;
         std::string folder;

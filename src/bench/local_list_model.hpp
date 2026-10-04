@@ -26,6 +26,7 @@ class ListPersistenceService;
 #include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 namespace trackknife::bench {
@@ -155,6 +156,13 @@ class LocalListModel final : public QAbstractTableModel {
     // ADR-0179: applies stored ratings by content-identity hash to every row
     // whose track hash appears in the map.
     void applyRatings(const QHash<QString, unsigned>& ratings);
+    // ADR-0268: of the files `checked`, those in `missing` are not there and
+    // their rows show greyed; the rest are there again.
+    void setMissing(const std::vector<std::string>& checked,
+                    const std::vector<std::string>& missing);
+    [[nodiscard]] bool isMissing(const std::string& raw_path) const {
+        return missing_.contains(raw_path);
+    }
     // Distinct track rating hashes across all rows, for a bulk store lookup.
     [[nodiscard]] QStringList ratingHashes() const;
     void removeRowIndexes(std::vector<int> rows, bool remember = true, QString label = {});
@@ -260,6 +268,7 @@ class LocalListModel final : public QAbstractTableModel {
 
   private:
     friend class BenchMainWindowTest;
+    std::unordered_set<std::string> missing_;
     struct ListeningCell {
         bool loaded{false};
         std::optional<persistence::LocalListeningHistory> history;

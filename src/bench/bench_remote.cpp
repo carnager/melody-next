@@ -15,6 +15,7 @@
 #include "bench/search_dialog.hpp"
 #include "uicommon/queue_table_view.hpp"
 
+#include <QComboBox>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -113,6 +114,17 @@ void BenchMainWindow::engineAttached(EngineLink& engine) {
 void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
     auto* link = &engine;
     link->library = new LocalLibraryPanel(*link->catalogue, link->key, source_stack_);
+    // Its Folders…: Settings › Library, open at this engine, as this
+    // computer's opens it at its own.
+    connect(link->library, &LocalLibraryPanel::manageFoldersRequested, this,
+            [this, key = link->key.text()] {
+                if (auto* settings = showSettingsDialog(SettingsDialog::Page::library)) {
+                    if (auto* picker = settings->findChild<QComboBox*>(
+                            QStringLiteral("bench-settings-library-engine"))) {
+                        picker->setCurrentIndex(std::max(0, picker->findData(key)));
+                    }
+                }
+            });
     link->library->setObjectName(
         first ? QStringLiteral("bench-remote-library")
               : QStringLiteral("bench-remote-library-%1").arg(engines_.size() - 1));

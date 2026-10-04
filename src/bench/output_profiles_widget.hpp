@@ -14,20 +14,23 @@ class QLineEdit;
 class QComboBox;
 class QPushButton;
 class QTabWidget;
+class QTreeWidget;
 
 namespace trackknife::bench {
 
-// ADR-0185: the naming-layout and move-destination managers, hosted by the
-// Settings screen's Naming page. Compact preset selection, store-backed CRUD;
-// emits profilesChanged so open tag editors can refresh their selectors.
-class OutputProfilesManagerWidget final : public QWidget {
+// ADR-0185/0264: the naming-layout and move-destination managers, two tabs
+// of the Settings screen's File operations page, added to `tabs`. Every
+// engine's destinations in one list, under each engine's name;
+// store-backed CRUD; emits profilesChanged so open tag editors can refresh
+// their selectors.
+class OutputProfilesManager final : public QObject {
     Q_OBJECT
 
   signals:
     void profilesChanged();
 
   public:
-    explicit OutputProfilesManagerWidget(OutputProfileStore store, QWidget* parent = nullptr);
+    OutputProfilesManager(OutputProfileStore store, QTabWidget* tabs);
 
     // The move destinations of the engine `key` names, shown.
     void showDestinationsOf(const QString& key);
@@ -42,7 +45,7 @@ class OutputProfilesManagerWidget final : public QWidget {
     ProfilesSession* session_{nullptr};
     bool syncing_{false};
 
-    QComboBox* layout_list_{nullptr};
+    QTreeWidget* layout_list_{nullptr};
     QLineEdit* layout_name_{nullptr};
     QLineEdit* directory_expression_{nullptr};
     QLineEdit* basename_expression_{nullptr};
@@ -51,16 +54,18 @@ class OutputProfilesManagerWidget final : public QWidget {
     QPushButton* layout_save_{nullptr};
     QPushButton* layout_remove_{nullptr};
     QTabWidget* sections_{nullptr};
-    QComboBox* place_list_{nullptr};
+    QWidget* layouts_page_{nullptr};
+    QWidget* destinations_page_{nullptr};
     QPushButton* destination_copy_{nullptr};
-    QComboBox* destination_list_{nullptr};
+    QTreeWidget* destination_list_{nullptr};
     QLineEdit* destination_name_{nullptr};
     QLineEdit* destination_root_{nullptr};
     QPushButton* destination_browse_{nullptr};
     QPushButton* destination_new_{nullptr};
     QPushButton* destination_save_{nullptr};
     QPushButton* destination_remove_{nullptr};
-    QLabel* status_{nullptr};
+    QLabel* layouts_status_{nullptr};
+    QLabel* destinations_status_{nullptr};
 };
 
 } // namespace trackknife::bench

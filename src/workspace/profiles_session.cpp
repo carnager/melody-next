@@ -61,6 +61,7 @@ ProfilesSession::ProfilesSession(OutputProfileStore store, QObject* parent)
             .copyable = {},
         });
     }
+    held_.resize(places_.size());
     reload();
 }
 
@@ -79,12 +80,56 @@ QStringList ProfilesSession::layoutNames() const {
     return names;
 }
 
-QStringList ProfilesSession::destinationNames() const {
+QString ProfilesSession::layoutPatternOn(const int row) const {
+    if (row < 0 || row >= static_cast<int>(layouts_.size())) {
+        return {};
+    }
+    const auto& profile = layouts_[static_cast<std::size_t>(row)].profile;
+    const auto folders = displayText(profile.relative_directory_expression);
+    const auto filename = displayText(profile.basename_expression);
+    return folders.isEmpty() ? filename : folders + QLatin1Char('/') + filename;
+}
+
+QStringList ProfilesSession::destinationNames() const { return destinationNamesOn(place_); }
+
+QStringList ProfilesSession::destinationNamesOn(const int place) const {
     QStringList names;
-    for (const auto& saved : destinations_) {
+    if (place < 0 || place >= placeCount()) {
+        return names;
+    }
+    for (const auto& saved : held_[static_cast<std::size_t>(place)].destinations) {
         names.append(displayText(saved.profile.name));
     }
     return names;
+}
+
+QString ProfilesSession::destinationRootOn(const int place, const int row) const {
+    if (place < 0 || place >= placeCount()) {
+        return {};
+    }
+    const auto& destinations = held_[static_cast<std::size_t>(place)].destinations;
+    return row >= 0 && row < static_cast<int>(destinations.size())
+               ? QString::fromStdString(core::display_raw_path(
+                     destinations[static_cast<std::size_t>(row)].profile.root_raw_path))
+               : QString{};
+}
+
+QString ProfilesSession::placeNote(const int place) const {
+    if (place < 0 || place >= placeCount()) {
+        return {};
+    }
+    const auto& held = held_[static_cast<std::size_t>(place)];
+    if (held.loading) {
+        return QStringLiteral("Loading…");
+    }
+    if (!held.error.isEmpty()) {
+        return QStringLiteral("Could not load · %1").arg(held.error);
+    }
+    return held.destinations.empty() ? QStringLiteral("None yet") : QString{};
+}
+
+bool ProfilesSession::destinationsAvailable() const {
+    return available() && !held_[static_cast<std::size_t>(place_)].loading;
 }
 
 QStringList ProfilesSession::placeNames() const {
@@ -106,7 +151,7 @@ int ProfilesSession::layoutRow() const {
 }
 
 int ProfilesSession::destinationRow() const {
-    return editing_destination_id_ ? rowOf(destinations_, editing_destination_id_) : -1;
+    return editing_destination_id_ ? rowOf(shown(), editing_destination_id_) : -1;
 }
 
 const DestinationPlace& ProfilesSession::shownPlace() const {
@@ -132,7 +177,7 @@ bool ProfilesSession::canRemoveLayout() const {
 }
 
 bool ProfilesSession::canEditDestinations() const {
-    return available() && bool{shownPlace().save};
+    return destinationsAvailable() && bool{shownPlace().save};
 }
 
 bool ProfilesSession::canSaveDestination() const {
@@ -140,7 +185,8 @@ bool ProfilesSession::canSaveDestination() const {
 }
 
 bool ProfilesSession::canRemoveDestination() const {
-    return available() && bool{shownPlace().remove} && editing_destination_id_.has_value();
+    return destinationsAvailable() && bool{shownPlace().remove} &&
+           editing_destination_id_.has_value();
 }
 
 int ProfilesSession::placeOf(const QString& key) const {
@@ -170,61 +216,79 @@ void ProfilesSession::reload() {
         }
         self->layouts_ = std::move(layouts);
         self->rebuildLists(self->editing_layout_id_, self->editing_destination_id_);
-        self->reloadDestinations();
+        for (int place = 0; place < self->placeCount(); ++place) {
+            self->reloadDestinations(place);
+        }
     });
 }
 
-void ProfilesSession::reloadDestinations() {
-    const auto& place = shownPlace();
-    if (!place.load) {
+void ProfilesSession::reloadDestinations(const int place) {
+    const auto& loaded = places_[static_cast<std::size_t>(place)];
+    if (!loaded.load) {
         return;
     }
-    loading_ = true;
+    held_[static_cast<std::size_t>(place)].loading = true;
     emit changed();
     const QPointer self{this};
-    const auto asked = place_;
-    place.load([self, asked](std::vector<persistence::SavedDestinationProfile> destinations,
-                             QString error) {
-        if (!self || asked != self->place_) {
+    loaded.load([self, place](std::vector<persistence::SavedDestinationProfile> destinations,
+                              QString error) {
+        if (!self) {
             return;
         }
-        self->loading_ = false;
-        const auto& shown = self->shownPlace();
-        if (!error.isEmpty()) {
-            self->destinations_.clear();
-            self->rebuildLists(self->editing_layout_id_, {});
-            self->status_ = QStringLiteral("Could not load the move destinations on %1 · %2")
-                                .arg(shown.name, error);
-            emit self->changed();
-            return;
+        auto& held = self->held_[static_cast<std::size_t>(place)];
+        held.loading = false;
+        held.error = error;
+        if (error.isEmpty()) {
+            std::ranges::sort(destinations, {},
+                              [](const auto& profile) { return profile.profile.name; });
+            held.destinations = std::move(destinations);
+        } else {
+            held.destinations.clear();
         }
-        std::ranges::sort(destinations, {},
-                          [](const auto& profile) { return profile.profile.name; });
-        self->destinations_ = std::move(destinations);
-        self->rebuildLists(self->editing_layout_id_, self->editing_destination_id_);
-        const auto copyable = shown.copyable ? shown.copyable() : decltype(shown.copyable()){};
-        self->copyable_ = static_cast<int>(std::ranges::count_if(copyable, [&self](const auto& candidate) {
-            return std::ranges::none_of(self->destinations_, [&candidate](const auto& held) {
-                return held.profile.root_raw_path == candidate.profile.root_raw_path;
-            });
-        }));
-        self->status_ = QStringLiteral("%1 naming %2 · %3 move %4 on %5")
-                            .arg(self->layouts_.size())
-                            .arg(self->layouts_.size() == 1U ? QStringLiteral("layout")
-                                                             : QStringLiteral("layouts"))
-                            .arg(self->destinations_.size())
-                            .arg(self->destinations_.size() == 1U
-                                     ? QStringLiteral("destination")
-                                     : QStringLiteral("destinations"))
-                            .arg(shown.name);
+        if (place == self->place_) {
+            self->rebuildLists(self->editing_layout_id_, self->editing_destination_id_);
+        } else {
+            emit self->listsChanged();
+        }
+        self->countCopyable();
+        self->status_ = self->summary();
         emit self->changed();
     });
+}
+
+void ProfilesSession::countCopyable() {
+    const auto& place = shownPlace();
+    const auto copyable = place.copyable ? place.copyable() : decltype(place.copyable()){};
+    copyable_ = static_cast<int>(std::ranges::count_if(copyable, [this](const auto& candidate) {
+        return std::ranges::none_of(shown(), [&candidate](const auto& held) {
+            return held.profile.root_raw_path == candidate.profile.root_raw_path;
+        });
+    }));
+}
+
+QString ProfilesSession::summary() const {
+    std::size_t destinations = 0;
+    for (const auto& held : held_) {
+        destinations += held.destinations.size();
+    }
+    auto text = QStringLiteral("%1 naming %2 · %3 move %4")
+                    .arg(layouts_.size())
+                    .arg(layouts_.size() == 1U ? QStringLiteral("layout")
+                                               : QStringLiteral("layouts"))
+                    .arg(destinations)
+                    .arg(destinations == 1U ? QStringLiteral("destination")
+                                            : QStringLiteral("destinations"));
+    // One place: which one; more: each lists its own.
+    if (places_.size() == 1U) {
+        text += QStringLiteral(" on %1").arg(places_.front().name);
+    }
+    return text;
 }
 
 void ProfilesSession::rebuildLists(const std::optional<core::StableId> layout_id,
                                    const std::optional<core::StableId> destination_id) {
     const auto layout_row = rowOf(layouts_, layout_id);
-    const auto destination_row = rowOf(destinations_, destination_id);
+    const auto destination_row = rowOf(shown(), destination_id);
     emit listsChanged();
     selectLayout(layout_row);
     selectDestination(destination_row);
@@ -282,21 +346,33 @@ void ProfilesSession::selectPlace(const int index) {
     }
     place_ = index;
     editing_destination_id_.reset();
-    destinations_.clear();
-    copyable_ = 0;
+    countCopyable();
     rebuildLists(editing_layout_id_, {});
-    reloadDestinations();
+    if (!held_[static_cast<std::size_t>(index)].error.isEmpty()) {
+        reloadDestinations(index);
+    }
+}
+
+void ProfilesSession::selectDestinationOn(const int place, const int row) {
+    if (place < 0 || place >= placeCount()) {
+        return;
+    }
+    if (place != place_) {
+        place_ = place;
+        countCopyable();
+    }
+    selectDestination(row);
 }
 
 void ProfilesSession::selectDestination(const int row) {
-    if (row < 0 || row >= static_cast<int>(destinations_.size())) {
+    if (row < 0 || row >= static_cast<int>(shown().size())) {
         editing_destination_id_.reset();
         root_raw_path_.clear();
         destination_name_.clear();
         emit changed();
         return;
     }
-    const auto& saved = destinations_[static_cast<std::size_t>(row)];
+    const auto& saved = shown()[static_cast<std::size_t>(row)];
     editing_destination_id_ = saved.id;
     root_raw_path_ = saved.profile.root_raw_path;
     destination_name_ = displayText(saved.profile.name);
@@ -320,7 +396,7 @@ void ProfilesSession::copyDestinations() {
     }
     std::vector<persistence::SavedDestinationProfile> missing;
     for (auto candidate : place.copyable()) {
-        if (std::ranges::none_of(destinations_, [&candidate](const auto& held) {
+        if (std::ranges::none_of(shown(), [&candidate](const auto& held) {
                 return held.profile.root_raw_path == candidate.profile.root_raw_path;
             })) {
             candidate.id = core::StableId::random();
@@ -342,12 +418,12 @@ void ProfilesSession::copyDestinations() {
         if (!self) {
             return;
         }
-        if (!error.isEmpty() || remaining->empty() || asked != self->place_) {
+        if (!error.isEmpty() || remaining->empty()) {
             self->mutation_running_ = false;
+            self->reloadDestinations(asked);
             if (!error.isEmpty()) {
                 self->status_ = QStringLiteral("Could not copy a move destination · %1").arg(error);
             }
-            self->reloadDestinations();
             emit self->profilesChanged();
             *next = {};
             return;
@@ -436,7 +512,8 @@ void ProfilesSession::saveDestination() {
     emit changed();
     const QPointer self{this};
     auto retained = saved;
-    shownPlace().save(std::move(saved), [self, saved = std::move(retained)](QString error) {
+    const auto asked = place_;
+    shownPlace().save(std::move(saved), [self, asked, saved = std::move(retained)](QString error) {
         if (!self) {
             return;
         }
@@ -446,17 +523,22 @@ void ProfilesSession::saveDestination() {
             emit self->changed();
             return;
         }
-        const auto found = std::ranges::find(self->destinations_, saved.id,
-                                             &persistence::SavedDestinationProfile::id);
-        if (found == self->destinations_.end()) {
-            self->destinations_.push_back(saved);
+        auto& destinations = self->held_[static_cast<std::size_t>(asked)].destinations;
+        const auto found =
+            std::ranges::find(destinations, saved.id, &persistence::SavedDestinationProfile::id);
+        if (found == destinations.end()) {
+            destinations.push_back(saved);
         } else {
             *found = saved;
         }
-        std::ranges::sort(self->destinations_, {},
+        std::ranges::sort(destinations, {},
                           [](const auto& profile) { return profile.profile.name; });
-        self->editing_destination_id_ = saved.id;
-        self->rebuildLists(self->editing_layout_id_, saved.id);
+        if (asked == self->place_) {
+            self->editing_destination_id_ = saved.id;
+            self->rebuildLists(self->editing_layout_id_, saved.id);
+        } else {
+            emit self->listsChanged();
+        }
         self->status_ = QStringLiteral("Move destination saved");
         emit self->changed();
         emit self->profilesChanged();
@@ -498,7 +580,8 @@ void ProfilesSession::removeDestination() {
     mutation_running_ = true;
     emit changed();
     const QPointer self{this};
-    shownPlace().remove(id, [self, id](QString error) {
+    const auto asked = place_;
+    shownPlace().remove(id, [self, asked, id](QString error) {
         if (!self) {
             return;
         }
@@ -508,9 +591,14 @@ void ProfilesSession::removeDestination() {
             emit self->changed();
             return;
         }
-        std::erase_if(self->destinations_, [id](const auto& saved) { return saved.id == id; });
-        self->editing_destination_id_.reset();
-        self->rebuildLists(self->editing_layout_id_, {});
+        std::erase_if(self->held_[static_cast<std::size_t>(asked)].destinations,
+                      [id](const auto& saved) { return saved.id == id; });
+        if (asked == self->place_) {
+            self->editing_destination_id_.reset();
+            self->rebuildLists(self->editing_layout_id_, {});
+        } else {
+            emit self->listsChanged();
+        }
         self->status_ = QStringLiteral("Move destination removed");
         emit self->changed();
         emit self->profilesChanged();

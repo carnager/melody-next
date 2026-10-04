@@ -33,6 +33,7 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
+#include <QTabWidget>
 #include <QSysInfo>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -307,105 +308,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     }
     library_layout->addWidget(folders, 1);
 
-    // Ratings in the files: written, their backup copy (ADR-0245), and read
-    // from other players' tags.
-    auto* ratings = new QGroupBox(QStringLiteral("Ratings"), library);
-    auto* ratings_form = new QFormLayout(ratings);
-    ratings_in_tags_ = new QCheckBox(QStringLiteral("Write track ratings into the files"), ratings);
-    ratings_in_tags_->setObjectName(QStringLiteral("bench-settings-ratings-in-tags"));
-    ratings_in_tags_->setToolTip(
-        QStringLiteral("Ratings stay in each engine's library either way. With this on, each "
-                       "engine also writes a track's rating into its files as FMPS_RATING, "
-                       "which other players read. Album ratings are not written."));
-    bind(ratings_in_tags_, ratings_in_tags_key);
-    ratings_form->addRow(QStringLiteral("In the files:"), ratings_in_tags_);
-
-    auto* backup_row = new QHBoxLayout;
-    rating_backup_ = new QCheckBox(QStringLiteral("Also write to the tag"), ratings);
-    rating_backup_->setObjectName(QStringLiteral("bench-settings-rating-backup"));
-    rating_backup_->setToolTip(
-        QStringLiteral("A second copy of each rating, as its plain 0-10 number, in a tag other "
-                       "players leave alone -- so a player that rewrites FMPS_RATING or POPM "
-                       "cannot lose it. A tagging script's Convert rating step (scale 0-10) "
-                       "brings it back."));
-    bind(rating_backup_, rating_backup_key);
-    rating_backup_tag_ = new QLineEdit(ratings);
-    rating_backup_tag_->setObjectName(QStringLiteral("bench-settings-rating-backup-tag"));
-    rating_backup_tag_->setMaximumWidth(260);
-    bind(rating_backup_tag_, rating_backup_tag_key);
-    backup_row->addWidget(rating_backup_);
-    backup_row->addWidget(rating_backup_tag_, 1);
-    backup_row->addStretch(1);
-    auto* backup_label = new QLabel(QStringLiteral("Backup copy:"), ratings);
-    ratings_form->addRow(backup_label, backup_row);
-    // Under the field: why the name will not do, or what an official tag
-    // loses.
-    rating_backup_note_ = new QLabel(ratings);
-    rating_backup_note_->setObjectName(QStringLiteral("bench-settings-rating-backup-note"));
-    rating_backup_note_->setWordWrap(true);
-    rating_backup_note_->setForegroundRole(QPalette::PlaceholderText);
-    ratings_form->addRow(QString{}, rating_backup_note_);
-
-    rating_tag_scale_ = new QComboBox(ratings);
-    rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));
-    rating_tag_scale_->setToolTip(
-        QStringLiteral("Ratings other players left in your files are taken into the library. "
-                       "FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed "
-                       "scale, so it is read only on the one chosen here."));
-    bind(rating_tag_scale_, SettingsSession::ratingScales(), rating_tag_scale_key);
-    ratings_form->addRow(QStringLiteral("Other players' RATING tags:"), rating_tag_scale_);
-    library_layout->addWidget(ratings);
-
-    // ADR-0263: what each engine keeps of what its writes replaced, so the
-    // writes can be undone.
-    auto* undo = new QGroupBox(QStringLiteral("Undo"), library);
-    undo->setObjectName(QStringLiteral("bench-settings-undo"));
-    auto* undo_form = new QFormLayout(undo);
-    const auto keep_box = [&](const char* key, const int most, const QString& suffix,
-                              const QString& name) {
-        auto* box = new QSpinBox(undo);
-        box->setObjectName(name);
-        box->setRange(0, most);
-        box->setSuffix(suffix);
-        box->setSpecialValueText(QStringLiteral("Keep none"));
-        bind(box, key);
-        return box;
-    };
-    undo_form->addRow(QStringLiteral("Keep for:"),
-                      keep_box(SettingsKeys::undo_keep_days_key, 3'650, QStringLiteral(" days"),
-                               QStringLiteral("bench-settings-undo-days")));
-    undo_form->addRow(QStringLiteral("At most:"),
-                      keep_box(SettingsKeys::undo_keep_writes_key, 100'000,
-                               QStringLiteral(" writes"),
-                               QStringLiteral("bench-settings-undo-writes")));
-    undo_form->addRow(QStringLiteral("Using at most:"),
-                      keep_box(SettingsKeys::undo_keep_gigabytes_key, 100'000,
-                               QStringLiteral(" GB"),
-                               QStringLiteral("bench-settings-undo-gigabytes")));
-    auto* undo_note = new QLabel(
-        QStringLiteral("Each engine keeps the files its writes replace -- tags rewritten, files "
-                       "moved -- so a write can be undone. The newest are kept within these "
-                       "limits; older ones are let go."),
-        undo);
-    undo_note->setWordWrap(true);
-    undo_note->setForegroundRole(QPalette::PlaceholderText);
-    undo_form->addRow(undo_note);
-    library_layout->addWidget(undo);
-
-    const auto refresh_backup = [this, backup_label] {
-        const auto writing = ratings_in_tags_->isChecked();
-        rating_backup_->setEnabled(writing);
-        backup_label->setEnabled(writing);
-        rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
-        const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
-        rating_backup_note_->setText(note);
-        rating_backup_note_->setVisible(writing && rating_backup_->isChecked() &&
-                                        !note.isEmpty());
-    };
-    connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
-    connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);
-    connect(rating_backup_tag_, &QLineEdit::textChanged, this, refresh_backup);
-    refresh_backup();
     add_page(QStringLiteral("Library"), library);
 
     // --- Engine ------------------------------------------------------------
@@ -657,28 +559,32 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_layout->addStretch(1);
     add_page(QStringLiteral("Engine"), engine);
 
-    // --- Naming ------------------------------------------------------------
-    auto* naming = new QWidget(this);
-    auto* naming_layout = new QVBoxLayout(naming);
+    // --- File operations ---------------------------------------------------
+    // ADR-0264: what writing files does -- renamed and moved by naming
+    // layout, ReplayGain written, and what a write keeps to be undone -- as
+    // tabs of one page.
+    file_operations_ = new QTabWidget(this);
+    file_operations_->setObjectName(QStringLiteral("bench-settings-file-operations"));
+    file_operations_->setDocumentMode(true);
     if (profile_store.load) {
-        auto* manager = new OutputProfilesManagerWidget(std::move(profile_store), naming);
+        // Naming layouts and Move destinations, as tabs of their own.
+        auto* manager = new OutputProfilesManager(std::move(profile_store), file_operations_);
         output_profiles_ = manager;
-        connect(manager, &OutputProfilesManagerWidget::profilesChanged, this,
+        connect(manager, &OutputProfilesManager::profilesChanged, this,
                 &SettingsDialog::outputProfilesChanged);
-        naming_layout->addWidget(manager, 1);
     } else {
         auto* placeholder =
             new QLabel(QStringLiteral("Naming layouts and move destinations are managed from the "
                                       "running application."),
-                       naming);
+                       file_operations_);
         placeholder->setWordWrap(true);
-        naming_layout->addWidget(placeholder);
-        naming_layout->addStretch(1);
+        placeholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+        file_operations_->addTab(placeholder, QStringLiteral("Rename && move"));
     }
-    add_page(QStringLiteral("Naming"), naming);
-
-    // --- ReplayGain --------------------------------------------------------
-    auto* replaygain = new QWidget(this);
+    // ReplayGain: written into tags, or kept in sidecars -- not tagging alone,
+    // so a tab of its own beside the tagger's writing.
+    auto* replaygain = new QWidget(file_operations_);
+    replaygain_tab_ = replaygain;
     auto* replaygain_layout = new QVBoxLayout(replaygain);
     replaygain_sidecar_only_ =
         new QCheckBox(QStringLiteral("Store scan results in sidecar only"), replaygain);
@@ -696,7 +602,119 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     bind(replaygain_true_peak_, replaygain_true_peak_key);
     replaygain_layout->addWidget(replaygain_true_peak_);
     replaygain_layout->addStretch(1);
-    add_page(QStringLiteral("ReplayGain"), replaygain);
+    file_operations_->addTab(replaygain, QStringLiteral("ReplayGain"));
+
+    // ADR-0263: what each engine keeps of what its writes replaced, so the
+    // writes can be undone.
+    auto* undo = new QWidget(file_operations_);
+    undo_tab_ = undo;
+    undo->setObjectName(QStringLiteral("bench-settings-undo"));
+    auto* undo_layout = new QVBoxLayout(undo);
+    auto* undo_form = new QFormLayout;
+    undo_layout->addLayout(undo_form);
+    const auto keep_box = [&](const char* key, const int most, const QString& suffix,
+                              const QString& name) {
+        auto* box = new QSpinBox(undo);
+        box->setObjectName(name);
+        box->setRange(0, most);
+        box->setSuffix(suffix);
+        box->setSpecialValueText(QStringLiteral("Keep none"));
+        bind(box, key);
+        return box;
+    };
+    undo_form->addRow(QStringLiteral("Keep for:"),
+                      keep_box(SettingsKeys::undo_keep_days_key, 3'650, QStringLiteral(" days"),
+                               QStringLiteral("bench-settings-undo-days")));
+    undo_form->addRow(QStringLiteral("At most:"),
+                      keep_box(SettingsKeys::undo_keep_writes_key, 100'000,
+                               QStringLiteral(" writes"),
+                               QStringLiteral("bench-settings-undo-writes")));
+    undo_form->addRow(QStringLiteral("Using at most:"),
+                      keep_box(SettingsKeys::undo_keep_gigabytes_key, 100'000,
+                               QStringLiteral(" GB"),
+                               QStringLiteral("bench-settings-undo-gigabytes")));
+    auto* undo_note = new QLabel(
+        QStringLiteral("Each engine keeps the files its writes replace -- tags rewritten, files "
+                       "moved -- so a write can be undone. The newest are kept within these "
+                       "limits; older ones are let go."),
+        undo);
+    undo_note->setWordWrap(true);
+    undo_note->setForegroundRole(QPalette::PlaceholderText);
+    undo_form->addRow(undo_note);
+    undo_layout->addStretch(1);
+    file_operations_->addTab(undo, QStringLiteral("Undo"));
+    add_page(QStringLiteral("File operations"), file_operations_);
+
+    // --- Ratings -----------------------------------------------------------
+    // Handed to every engine: what it writes into files, and reads from them.
+    auto* ratings_page = new QWidget(this);
+    auto* ratings_layout = new QVBoxLayout(ratings_page);
+    // Ratings in the files: written, their backup copy (ADR-0245), and read
+    // from other players' tags.
+    auto* ratings = new QGroupBox(QStringLiteral("Ratings in the files"), ratings_page);
+    auto* ratings_form = new QFormLayout(ratings);
+    ratings_in_tags_ = new QCheckBox(QStringLiteral("Write track ratings into the files"), ratings);
+    ratings_in_tags_->setObjectName(QStringLiteral("bench-settings-ratings-in-tags"));
+    ratings_in_tags_->setToolTip(
+        QStringLiteral("Ratings stay in each engine's library either way. With this on, each "
+                       "engine also writes a track's rating into its files as FMPS_RATING, "
+                       "which other players read. Album ratings are not written."));
+    bind(ratings_in_tags_, ratings_in_tags_key);
+    ratings_form->addRow(QStringLiteral("In the files:"), ratings_in_tags_);
+
+    auto* backup_row = new QHBoxLayout;
+    rating_backup_ = new QCheckBox(QStringLiteral("Also write to the tag"), ratings);
+    rating_backup_->setObjectName(QStringLiteral("bench-settings-rating-backup"));
+    rating_backup_->setToolTip(
+        QStringLiteral("A second copy of each rating, as its plain 0-10 number, in a tag other "
+                       "players leave alone -- so a player that rewrites FMPS_RATING or POPM "
+                       "cannot lose it. A tagging script's Convert rating step (scale 0-10) "
+                       "brings it back."));
+    bind(rating_backup_, rating_backup_key);
+    rating_backup_tag_ = new QLineEdit(ratings);
+    rating_backup_tag_->setObjectName(QStringLiteral("bench-settings-rating-backup-tag"));
+    rating_backup_tag_->setMaximumWidth(260);
+    bind(rating_backup_tag_, rating_backup_tag_key);
+    backup_row->addWidget(rating_backup_);
+    backup_row->addWidget(rating_backup_tag_, 1);
+    backup_row->addStretch(1);
+    auto* backup_label = new QLabel(QStringLiteral("Backup copy:"), ratings);
+    ratings_form->addRow(backup_label, backup_row);
+    // Under the field: why the name will not do, or what an official tag
+    // loses.
+    rating_backup_note_ = new QLabel(ratings);
+    rating_backup_note_->setObjectName(QStringLiteral("bench-settings-rating-backup-note"));
+    rating_backup_note_->setWordWrap(true);
+    rating_backup_note_->setForegroundRole(QPalette::PlaceholderText);
+    ratings_form->addRow(QString{}, rating_backup_note_);
+
+    rating_tag_scale_ = new QComboBox(ratings);
+    rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));
+    rating_tag_scale_->setToolTip(
+        QStringLiteral("Ratings other players left in your files are taken into the library. "
+                       "FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed "
+                       "scale, so it is read only on the one chosen here."));
+    bind(rating_tag_scale_, SettingsSession::ratingScales(), rating_tag_scale_key);
+    ratings_form->addRow(QStringLiteral("Other players' RATING tags:"), rating_tag_scale_);
+    ratings_layout->addWidget(ratings);
+
+
+    const auto refresh_backup = [this, backup_label] {
+        const auto writing = ratings_in_tags_->isChecked();
+        rating_backup_->setEnabled(writing);
+        backup_label->setEnabled(writing);
+        rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
+        const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
+        rating_backup_note_->setText(note);
+        rating_backup_note_->setVisible(writing && rating_backup_->isChecked() &&
+                                        !note.isEmpty());
+    };
+    connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_tag_, &QLineEdit::textChanged, this, refresh_backup);
+    refresh_backup();
+    ratings_layout->addStretch(1);
+    add_page(QStringLiteral("Ratings"), ratings_page);
 
     // --- Covers ------------------------------------------------------------
     auto* covers = new QWidget(this);
@@ -958,7 +976,29 @@ void SettingsDialog::showDestinationsOf(const QString& key) {
     }
 }
 
-void SettingsDialog::showPage(const Page page) { pages_->setCurrentRow(static_cast<int>(page)); }
+void SettingsDialog::showPage(const Page page) {
+    // The tabs of File operations open that page at the tab.
+    QWidget* tab = nullptr;
+    switch (page) {
+    case Page::naming:
+        tab = file_operations_->widget(0);
+        break;
+    case Page::replaygain:
+        tab = replaygain_tab_;
+        break;
+    case Page::undo:
+        tab = undo_tab_;
+        break;
+    default:
+        break;
+    }
+    if (tab != nullptr) {
+        file_operations_->setCurrentWidget(tab);
+        pages_->setCurrentRow(static_cast<int>(Page::file_operations));
+        return;
+    }
+    pages_->setCurrentRow(static_cast<int>(page));
+}
 
 void SettingsDialog::refreshEngines() {
     syncing_ = true;

@@ -16,6 +16,7 @@
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "workspace/lastfm_settings_session.hpp"
+#include "workspace/settings_session.hpp"
 #include "workspace/tab_store.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
@@ -317,6 +318,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsOpensFromTools();
     void identifyAlbumsStagesAlongsideAutomaticScripts();
     void cachedRowsAreReadEvenWithARevision();
+    void settingsGroupWhatTheyAreAbout();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -979,6 +981,62 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
     QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
+}
+
+// Settings by what they are about: writing files (rename and move,
+// ReplayGain, undo) as tabs of one page, ratings on their own, and the music
+// folders of each engine on Library.
+void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::replaygain);
+    QVERIFY(dialog != nullptr);
+    auto* pages = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-pages"));
+    QStringList titles;
+    for (int row = 0; row < pages->count(); ++row) {
+        titles << pages->item(row)->text();
+    }
+    QCOMPARE(titles.mid(0, 7),
+             (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
+                          QStringLiteral("Library"), QStringLiteral("Engine"),
+                          QStringLiteral("File operations"), QStringLiteral("Ratings"),
+                          QStringLiteral("Covers")}));
+    QCOMPARE(titles, SettingsSession::pageTitles().mid(0, titles.size()));
+    // A tab of File operations opens that page at the tab.
+    auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
+    QVERIFY(tabs != nullptr);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("File operations"));
+    QCOMPARE(tabs->tabText(tabs->currentIndex()), QStringLiteral("ReplayGain"));
+    QVERIFY(tabs->currentWidget()->isAncestorOf(
+        dialog->findChild<QWidget*>(QStringLiteral("bench-replaygain-sidecar-only"))));
+    dialog->showPage(SettingsDialog::Page::undo);
+    QCOMPARE(tabs->currentWidget()->objectName(), QStringLiteral("bench-settings-undo"));
+    dialog->showPage(SettingsDialog::Page::ratings);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("Ratings"));
+    dialog->showPage(SettingsDialog::Page::naming);
+    QCOMPARE(tabs->currentIndex(), 0);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("File operations"));
+    auto* stack = dialog->findChild<QStackedWidget*>();
+    QVERIFY(stack != nullptr);
+    const auto page_of = [stack](const char* name) {
+        auto* widget = stack->findChild<QWidget*>(QLatin1String(name));
+        for (int index = 0; widget != nullptr && index < stack->count(); ++index) {
+            if (stack->widget(index)->isAncestorOf(widget)) {
+                return index;
+            }
+        }
+        return -1;
+    };
+    QCOMPARE(page_of("bench-settings-ratings-in-tags"),
+             static_cast<int>(SettingsDialog::Page::ratings));
+    // Library: the engine picker, not needed with this computer alone.
+    auto* picker = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-library-engine"));
+    QVERIFY(picker != nullptr);
+    QCOMPARE(page_of("bench-settings-library-engine"), static_cast<int>(SettingsDialog::Page::library));
+    QCOMPARE(picker->count(), 1);
+    QVERIFY(!picker->isVisibleTo(dialog));
+    dialog->close();
 }
 
 void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {
@@ -4290,7 +4348,11 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     SettingsDialog settings{nullptr, output_store};
     settings.showPage(SettingsDialog::Page::naming);
     settings.show();
-    auto* layout_list = settings.findChild<QComboBox*>(QStringLiteral("bench-output-layout-list"));
+    auto* layout_list =
+        settings.findChild<QTreeWidget*>(QStringLiteral("bench-output-layout-list"));
+    auto* layout_remove =
+        settings.findChild<QPushButton*>(QStringLiteral("bench-output-layout-remove"));
+    QVERIFY(layout_remove != nullptr);
     auto* layout_name = settings.findChild<QLineEdit*>(QStringLiteral("bench-output-layout-name"));
     auto* layout_directory =
         settings.findChild<QLineEdit*>(QStringLiteral("bench-output-layout-directory-expression"));
@@ -4302,7 +4364,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     auto* layout_save =
         settings.findChild<QPushButton*>(QStringLiteral("bench-output-layout-save"));
     auto* destination_list =
-        settings.findChild<QComboBox*>(QStringLiteral("bench-destination-list"));
+        settings.findChild<QTreeWidget*>(QStringLiteral("bench-destination-list"));
     auto* destination_name =
         settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
     auto* destination_root =
@@ -4316,16 +4378,27 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
             layout_save != nullptr && destination_list != nullptr && destination_name != nullptr &&
             destination_root != nullptr && destination_new != nullptr &&
             destination_save != nullptr);
-    QTRY_COMPARE(layout_list->count(), 1);
+    // ADR-0264: the layouts as a list, name and whole pattern, the selected
+    // one edited below.
+    QTRY_COMPARE(layout_list->topLevelItemCount(), 1);
+    QCOMPARE(layout_list->topLevelItem(0)->text(0), QStringLiteral("Albums"));
+    QVERIFY(layout_list->topLevelItem(0)->text(1).endsWith(
+        QStringLiteral("%tracknumber% - %title%")));
+    QCOMPARE(layout_list->currentItem(), layout_list->topLevelItem(0));
+    QVERIFY(layout_remove->isEnabled());
     QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
     QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
     QCOMPARE(layout_sanitization->currentData().toString(), QStringLiteral("linux"));
-    QTRY_COMPARE(destination_list->count(), 1);
+    // Only this computer's: listed without a heading.
+    QTRY_COMPARE(destination_list->topLevelItemCount(), 1);
+    QCOMPARE(destination_list->topLevelItem(0)->text(0), QStringLiteral("Library"));
 
+    // ADR-0264: Naming layouts, Move destinations, ReplayGain, Undo -- one
+    // row of tabs.
     auto* profile_sections =
-        settings.findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"));
+        settings.findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
     QVERIFY(profile_sections);
-    QCOMPARE(profile_sections->count(), 2);
+    QCOMPARE(profile_sections->count(), 4);
     QVERIFY(layout_directory->width() > 450);
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
@@ -4333,6 +4406,9 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     }
     QSignalSpy profile_changes{&settings, &SettingsDialog::outputProfilesChanged};
     QTest::mouseClick(layout_new, Qt::LeftButton);
+    // A new one: nothing selected, nothing to remove.
+    QVERIFY(layout_list->currentItem() == nullptr);
+    QVERIFY(!layout_remove->isEnabled());
     layout_name->setText(QStringLiteral("Artist folders"));
     layout_directory->setText(QStringLiteral("%artist%"));
     layout_basename->setText(QStringLiteral("%title%"));
@@ -4344,12 +4420,25 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QCOMPARE(layouts.back().profile.sanitization_policy,
              (operations::PolicyVersion{"portable", 1U}));
 
-    layout_list->setCurrentIndex(0);
-    QCOMPARE(layout_name->text(), layout_list->currentText());
+    QTRY_COMPARE(layout_list->topLevelItemCount(), 2);
+    // Saved: listed, and still the one selected.
+    QCOMPARE(layout_list->currentItem()->text(0), QStringLiteral("Artist folders"));
+    QCOMPARE(layout_list->currentItem()->text(1), QStringLiteral("%artist%/%title%"));
+    QVERIFY(layout_remove->isEnabled());
+    layout_list->setCurrentItem(layout_list->topLevelItem(0));
+    QCOMPARE(layout_name->text(), layout_list->currentItem()->text(0));
     QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
-    layout_list->setCurrentIndex(1);
+    layout_list->setCurrentItem(layout_list->topLevelItem(1));
     QCOMPARE(layout_name->text(), QStringLiteral("Artist folders"));
     QCOMPARE(layout_basename->text(), QStringLiteral("%title%"));
+    // Remove removes the one selected.
+    QTest::mouseClick(layout_remove, Qt::LeftButton);
+    QTRY_COMPARE(layouts.size(), 1U);
+    QCOMPARE(layout_list->topLevelItemCount(), 1);
+    QCOMPARE(layout_list->topLevelItem(0)->text(0), QStringLiteral("Albums"));
+    // The first left is selected in its place.
+    QCOMPARE(layout_list->currentItem(), layout_list->topLevelItem(0));
+    QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
     profile_sections->setCurrentIndex(1);
     QCOMPARE(destination_name->text(), QStringLiteral("Library"));
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
@@ -4365,7 +4454,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
 
     // The editor's selectors refresh from the shared store on request.
     properties->reloadOutputProfiles();
-    QTRY_COMPARE(layout_combo->count(), 2);
+    QTRY_COMPARE(layout_combo->count(), 1);
 
     delete properties;
 }
@@ -4617,22 +4706,33 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
     SettingsDialog settings{nullptr, store};
     settings.showDestinationsOf(QStringLiteral("gemenon-id"));
     settings.show();
-    auto* engine = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-engine"));
-    auto* list = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-list"));
+    auto* list = settings.findChild<QTreeWidget*>(QStringLiteral("bench-destination-list"));
     auto* copy = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-copy"));
     auto* browse = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-browse"));
     auto* name = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
     auto* root = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-root"));
     auto* create = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-new"));
     auto* save = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-save"));
+    auto* remove = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-remove"));
     auto* sections =
-        settings.findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"));
-    QVERIFY(engine && list && copy && browse && name && root && create && save && sections);
-    // Opened for an engine: its destinations, and its name in sight.
+        settings.findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
+    QVERIFY(list && copy && browse && name && root && create && save && remove && sections);
+    // ADR-0264: every engine's destinations in one list, under its name.
     QCOMPARE(sections->currentIndex(), 1);
-    QCOMPARE(engine->currentText(), QStringLiteral("gemenon"));
-    QTRY_COMPARE(list->count(), 1);
-    QCOMPARE(list->currentText(), QStringLiteral("Library there"));
+    QTRY_COMPARE(list->topLevelItemCount(), 2);
+    QCOMPARE(list->topLevelItem(0)->text(0), QStringLiteral("This computer"));
+    QCOMPARE(list->topLevelItem(1)->text(0), QStringLiteral("Gemenon"));
+    QTRY_COMPARE(list->topLevelItem(0)->childCount(), 1);
+    QTRY_COMPARE(list->topLevelItem(1)->childCount(), 1);
+    QCOMPARE(list->topLevelItem(1)->child(0)->text(1), QStringLiteral("/srv/music/library"));
+    // Opened for an engine: its first destination selected.
+    QVERIFY(list->currentItem() != nullptr);
+    QCOMPARE(list->currentItem()->text(0), QStringLiteral("Library there"));
+    QCOMPARE(list->currentItem()->parent(), list->topLevelItem(1));
+    QCOMPARE(name->text(), QStringLiteral("Library there"));
+    QVERIFY(remove->isEnabled());
+    // A heading is not a destination.
+    QVERIFY(!(list->topLevelItem(1)->flags() & Qt::ItemIsSelectable));
 
     // This computer's that lie under the engine's mount are offered.
     QTRY_VERIFY(copy->isVisible());
@@ -4645,8 +4745,13 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
     QTRY_VERIFY(!copy->isVisible());
     QCOMPARE(here.size(), 1U);
 
-    // A new one, its folder chosen on that machine.
-    QTest::mouseClick(create, Qt::LeftButton);
+    // A new one, on the engine asked for, its folder chosen on that machine.
+    QVERIFY(create->menu() != nullptr);
+    QCOMPARE(create->menu()->actions().size(), 2);
+    QCOMPARE(create->menu()->actions().at(1)->text(), QStringLiteral("On gemenon"));
+    create->menu()->actions().at(1)->trigger();
+    QVERIFY(list->currentItem() == nullptr);
+    QVERIFY(!remove->isEnabled());
     name->setText(QStringLiteral("Incoming there"));
     QTest::mouseClick(browse, Qt::LeftButton);
     EngineFolderDialog* chooser = nullptr;
@@ -4663,10 +4768,19 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
     QTRY_COMPARE(there.size(), 3U);
     QCOMPARE(here.size(), 1U);
 
-    // This computer's are its own.
-    engine->setCurrentIndex(0);
-    QTRY_COMPARE(list->count(), 1);
-    QCOMPARE(list->currentText(), QStringLiteral("Library here"));
+    QTRY_COMPARE(list->topLevelItem(1)->childCount(), 3);
+
+    // This computer's are its own: chosen in the list, edited and removed
+    // on this computer.
+    QCOMPARE(list->topLevelItem(0)->childCount(), 1);
+    list->setCurrentItem(list->topLevelItem(0)->child(0));
+    QCOMPARE(name->text(), QStringLiteral("Library here"));
+    QTRY_VERIFY(remove->isEnabled());
+    QTest::mouseClick(remove, Qt::LeftButton);
+    QTRY_COMPARE(here.size(), 0U);
+    QCOMPARE(there.size(), 3U);
+    QTRY_COMPARE(list->topLevelItem(0)->childCount(), 1); // "None yet"
+    QVERIFY(!list->topLevelItem(0)->child(0)->data(0, Qt::UserRole).isValid());
 
     // Properties for tracks on that engine says whose destinations it offers.
     auto* properties = new MetadataPropertiesDialog(
@@ -4861,16 +4975,14 @@ void BenchMainWindowTest::actionsLinksOpenTheirOwnSettings() {
         auto* settings = window.findChild<SettingsDialog*>();
         auto* sections =
             settings
-                ? settings->findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"))
+                ? settings->findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"))
                 : nullptr;
         return sections != nullptr && settings->isVisible() ? sections->currentIndex() : -1;
     };
     follow("bench-actions-manage-destinations");
     QTRY_COMPARE(shown_tab(), 1);
-    QCOMPARE(window.findChild<SettingsDialog*>()
-                 ->findChild<QComboBox*>(QStringLiteral("bench-destination-engine"))
-                 ->currentText(),
-             QStringLiteral("this computer"));
+    QVERIFY(window.findChild<SettingsDialog*>()->findChild<QTreeWidget*>(
+                QStringLiteral("bench-destination-list")) != nullptr);
     // Settings still open: the other link switches it to the layouts.
     follow("bench-actions-manage-layouts");
     QTRY_COMPARE(shown_tab(), 0);

@@ -60,3 +60,24 @@ And undo restored by exchanging the file and its backup atomically
   makes it a link again.
 - Each file's undo briefly has two files beside it -- the original being
   put back and the one set aside -- as a write has its prepared copy.
+
+## Progress
+
+- Tag writes and covers (2026-10-04): the backup is made in the undo copy
+  folder (`set_undo_copy_folder`, `undo_copy_path`) -- linked where it can
+  be, else copied and verified -- and undo and a failed write's rollback put
+  the original back by renames in the file's folder (`put_original_back`):
+  moved back when kept on the same filesystem, copied otherwise; a start
+  after a crash finishes or takes back each step. Tests on real files: the
+  album folder holds only its files before, after and once undone, on one
+  filesystem and across two; the whole commit suite passes on an NFS 4.2
+  mount, where undo had been refused (no exchange) and rollback too (a
+  replaced file kept open has a second, hidden `.nfs` name).
+- Moves and the setting (2026-10-04): a move's retained source is moved to
+  the folder once the move is done (`keep_undo_copies_in_place`, schema 53:
+  `kept_path` and its identity), undo copies it back across filesystems,
+  retention releases it there. Each engine keeps `backups.location` --
+  `engine` (`undo` beside its database, the default), `folder`, `beside` --
+  and moves every undo copy there at start and when it changes, those kept
+  beside files before included.
+- To do: the choice in Settings › File operations › Undo, per engine.

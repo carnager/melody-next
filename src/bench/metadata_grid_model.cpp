@@ -457,6 +457,33 @@ bool MetadataGridModel::revertFields(const std::span<const std::size_t> item_ind
     return applyFieldRequests(item_indexes, std::move(requests));
 }
 
+bool MetadataGridModel::previewStillApplies(
+    const metadata::MetadataTransformationPreview& preview) const {
+    for (const auto& cell : preview.cells) {
+        if (cell.item_index >= selection_->item_count()) {
+            return false;
+        }
+        const auto field = cell.match_mode == metadata::MetadataFieldMatchMode::exact_native
+                               ? selection_->exact_native_field_index(cell.display_field)
+                               : selection_->field_index(cell.canonical_field);
+        // A field none of the files has yet: absent, as the preview saw it?
+        if (!field) {
+            if (cell.before) {
+                return false;
+            }
+            continue;
+        }
+        const auto current = project_cell(*selection_, patches_, cell.item_index, *field);
+        const auto values = current.present
+                                ? std::optional<std::vector<std::string>>{*current.values}
+                                : std::nullopt;
+        if (values != cell.before) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool MetadataGridModel::stageTransformation(const metadata::MetadataTransformationPreview& preview,
                                             const QStringList& step_sources) {
     if (preview.cells.empty() || preview.cells.size() > maximum_field_transaction_cells) {

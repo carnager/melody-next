@@ -868,6 +868,15 @@ void MetadataPropertiesDialog::buildGrid() {
     connect(grid_model, &QAbstractItemModel::rowsRemoved, this,
             &MetadataPropertiesDialog::refreshFileListScope);
     refreshFileListScope();
+    // Read again -- cached tags replaced by the files' own, files written
+    // elsewhere -- the model is rebuilt, and its fields with it: still only
+    // the file names here.
+    connect(grid_model, &QAbstractItemModel::modelReset, file_list_, [this, grid_model] {
+        file_list_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        for (auto column = 1; column < grid_model->columnCount(); ++column) {
+            file_list_->hideColumn(column);
+        }
+    });
     connect(grid_model, &QAbstractItemModel::columnsInserted, file_list_,
             [this](const QModelIndex& parent, const int first, const int last) {
                 if (parent.isValid()) {

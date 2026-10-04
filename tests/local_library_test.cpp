@@ -920,7 +920,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 52U);
+        QCOMPARE(*repository->schema_version(), 53U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
@@ -993,7 +993,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 52U);
+    QCOMPARE(*repository->schema_version(), 53U);
     QVERIFY(repository->save_local_resume(std::string(64U, 'a'), 500, 1'000));
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile history_downgrade{
@@ -1084,7 +1084,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
     // Schema 38 runs again: the rebuild that emptied the child tables.
     auto repository = persistence::ListRepository::open(database);
     QVERIFY(repository.has_value());
-    QCOMPARE(*repository->schema_version(), 52U);
+    QCOMPARE(*repository->schema_version(), 53U);
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     const auto count = [&db](const char* table) {
         sqlite3_stmt* statement = nullptr;

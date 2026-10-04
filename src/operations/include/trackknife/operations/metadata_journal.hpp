@@ -175,6 +175,18 @@ class MetadataOperationJournal {
     [[nodiscard]] virtual core::Result<void>
     transition_backup(const core::StableId& id,
                       const MetadataOperationBackupTransition& transition) = 0;
+    // ADR-0266: a retained backup moved where undo copies are kept -- its
+    // path, and its identity there (a copy's own, or the original's).
+    [[nodiscard]] virtual core::Result<void>
+    relocate_backup(const core::StableId& id, const std::string& raw_path,
+                    const core::LocalSourceRevision& revision) {
+        static_cast<void>(id);
+        static_cast<void>(raw_path);
+        static_cast<void>(revision);
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "This journal cannot move backups",
+                                           .context = {}});
+    }
 };
 
 } // namespace trackknife::operations

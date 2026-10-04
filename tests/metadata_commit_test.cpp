@@ -20,6 +20,7 @@
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
@@ -489,6 +490,9 @@ void rolls_back_dependent_and_journal_failures(const std::filesystem::path& fixt
                 .context = {},
             });
         });
+    if (failed || failed.error().code != core::ErrorCode::database) {
+        std::cerr << "rollback: " << (failed ? std::string{"succeeded"} : failed.error().message) << '\n';
+    }
     CHECK(!failed && failed.error().code == core::ErrorCode::database);
     CHECK(read_bytes(dependent_source) == dependent_original);
     CHECK(capturing.created_id.has_value());
@@ -789,7 +793,7 @@ void commits_with_copied_backup_where_links_are_refused(
             CHECK(result.published_revision == *backup);
             return {};
         });
-    if (undone || undone.error().code != core::ErrorCode::unsupported) {
+    {  // ADR-0266: undo works without an exchange
         if (!undone) {
             std::cerr << undone.error().message << '\n';
         }
@@ -1555,10 +1559,6 @@ void undoes_text_edits_in_every_writable_container(const std::filesystem::path& 
             committed->journal_id, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
         // Undo needs RENAME_EXCHANGE; NFS says so instead (ADR-0111).
-        if (!undone && undone.error().code == trackknife::core::ErrorCode::unsupported) {
-            std::cerr << "undo unavailable on this filesystem: " << undone.error().message << '\n';
-            return;
-        }
         CHECK(undone.has_value());
         if (!undone) {
             std::cerr << name << ": " << undone.error().message << '\n';
@@ -1603,12 +1603,6 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
                   plan->changes.front().original_values);
             return {};
         });
-    // Undo needs RENAME_EXCHANGE; filesystems without it (NFS) report the
-    // deliberate typed unavailability instead of succeeding (ADR-0111).
-    if (!undone && undone.error().code == trackknife::core::ErrorCode::unsupported) {
-        std::cerr << "undo unavailable on this filesystem: " << undone.error().message << '\n';
-        return;
-    }
     if (!undone) {
         std::cerr << undone.error().message << '\n';
     }
@@ -1654,12 +1648,16 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
                       .failure = std::nullopt,
                   })
               .has_value());
-    CHECK(::rename((**recovery_record).source_raw_path.c_str(),
-                   (**recovery_record).prepared_raw_path.c_str()) == 0);
-    CHECK(::rename((**recovery_record).backup_raw_path.c_str(),
-                   (**recovery_record).source_raw_path.c_str()) == 0);
-    CHECK(::rename((**recovery_record).prepared_raw_path.c_str(),
-                   (**recovery_record).backup_raw_path.c_str()) == 0);
+    // ADR-0266: stopped half way -- the kept original moved beside the
+    // file, the written file set aside, the original not yet in place.
+    const auto& interrupted = **recovery_record;
+    const auto beside = [&interrupted](const char* what) {
+        return (std::filesystem::path{interrupted.source_raw_path}.parent_path() /
+                (".trackknife-" + interrupted.id.to_string() + ".metadata-" + what))
+            .native();
+    };
+    CHECK(::rename(interrupted.backup_raw_path.c_str(), beside("restore").c_str()) == 0);
+    CHECK(::rename(interrupted.source_raw_path.c_str(), beside("aside").c_str()) == 0);
 
     std::size_t recovery_callback_count = 0U;
     const auto recovered = operations::recover_metadata_operations(
@@ -1680,6 +1678,183 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
     CHECK(recovery_callback_count == 1U);
     CHECK(read_bytes(recovery_source) == recovery_original);
     CHECK(!std::filesystem::exists(recovery_commit->backup_raw_path));
+    CHECK(!std::filesystem::exists(beside("restore")) && !std::filesystem::exists(beside("aside")));
+}
+
+// ADR-0266: undo copies kept where the engine is told -- the album's folder
+// holds only its files before, after and once undone; on the same
+// filesystem and on another (a copy, as for a library on a NAS); and a
+// failed write rolls back from there too.
+void keeps_undo_copies_where_asked(const std::filesystem::path& fixture_directory) {
+    const auto only_music = [](const std::filesystem::path& folder) {
+        for (const auto& entry : std::filesystem::directory_iterator{folder}) {
+            if (entry.path().filename().string().starts_with(".trackknife-")) {
+                std::cerr << "left beside the files: " << entry.path() << '\n';
+                return false;
+            }
+        }
+        return true;
+    };
+    struct Place {
+        const char* name;
+        std::filesystem::path root;
+    };
+    std::vector<Place> places{{"same filesystem", std::filesystem::temp_directory_path()}};
+    // Another filesystem, where there is one to try.
+    struct stat temporary{};
+    struct stat shared{};
+    if (::stat(std::filesystem::temp_directory_path().c_str(), &temporary) == 0 &&
+        ::stat("/dev/shm", &shared) == 0 && temporary.st_dev != shared.st_dev &&
+        ::access("/dev/shm", W_OK) == 0) {
+        places.push_back({"another filesystem", "/dev/shm"});
+    }
+    for (const auto& place : places) {
+        TemporaryDirectory directory;
+        const auto album = directory.path() / "Album";
+        std::filesystem::create_directory(album);
+        const auto undo_folder =
+            place.root / ("trackknife-undo-" + core::StableId::random().to_string());
+        operations::set_undo_copy_folder(undo_folder);
+        const auto source = materialize(fixture_directory, album / "01.flac");
+        const auto original_bytes = read_bytes(source);
+        auto plan = title_plan(source, "Kept elsewhere");
+        auto journal = open_journal(directory, "kept.sqlite3");
+        CHECK(plan.has_value() && journal.has_value());
+        if (plan && journal) {
+            auto committed =
+                operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+            if (!committed) {
+                std::cerr << place.name << ": " << committed.error().message << '\n';
+            }
+            CHECK(committed.has_value());
+            if (committed) {
+                CHECK(only_music(album));
+                CHECK(std::filesystem::path{committed->backup_raw_path}.parent_path() ==
+                      undo_folder);
+                CHECK(read_bytes(committed->backup_raw_path) == original_bytes);
+                const auto undone = operations::undo_metadata_operation(
+                    committed->journal_id, *journal, successful_dependent_commit);
+                if (!undone) {
+                    std::cerr << place.name << ": " << undone.error().message << '\n';
+                }
+                CHECK(undone.has_value());
+                CHECK(read_bytes(source) == original_bytes);
+                CHECK(only_music(album));
+                CHECK(std::filesystem::is_empty(undo_folder));
+            }
+
+            // A write whose library update fails is rolled back from there.
+            auto failing = title_plan(source, "Rolled back from elsewhere");
+            CHECK(failing.has_value());
+            if (failing) {
+                const auto refused = operations::commit_metadata_source(
+                    *failing, *journal,
+                    [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                        return std::unexpected(core::Error{.code = core::ErrorCode::database,
+                                                           .message = "refused for the test",
+                                                           .context = {}});
+                    });
+                CHECK(!refused);
+                CHECK(read_bytes(source) == original_bytes);
+                CHECK(only_music(album));
+                CHECK(std::filesystem::is_empty(undo_folder));
+            }
+
+            // An undo stopped with the original moved beside the file and
+            // nothing set aside: finished at the next start.
+            auto again = title_plan(source, "Undo stopped early");
+            CHECK(again.has_value());
+            if (again) {
+                auto committed_again =
+                    operations::commit_metadata_source(*again, *journal, successful_dependent_commit);
+                CHECK(committed_again.has_value());
+                if (committed_again) {
+                    CHECK(journal
+                              ->transition_backup(
+                                  committed_again->journal_id,
+                                  operations::MetadataOperationBackupTransition{
+                                      .expected_state =
+                                          operations::MetadataOperationBackupState::retained,
+                                      .state = operations::MetadataOperationBackupState::undoing,
+                                      .undo_id = core::StableId::random(),
+                                      .failure = std::nullopt,
+                                  })
+                              .has_value());
+                    const auto restore =
+                        album / (".trackknife-" + committed_again->journal_id.to_string() +
+                                 ".metadata-restore");
+                    std::filesystem::copy_file(committed_again->backup_raw_path, restore);
+                    const auto recovered = operations::recover_metadata_operations(
+                        *journal, successful_dependent_commit);
+                    CHECK(recovered && std::ranges::any_of(*recovered, [&](const auto& result) {
+                              return result.journal_id == committed_again->journal_id &&
+                                     result.outcome == operations::MetadataRecoveryOutcome::undone;
+                          }));
+                    CHECK(read_bytes(source) == original_bytes);
+                    CHECK(only_music(album));
+                    CHECK(std::filesystem::is_empty(undo_folder));
+                }
+            }
+        }
+        operations::set_undo_copy_folder({});
+        std::error_code ignored;
+        std::filesystem::remove_all(undo_folder, ignored);
+    }
+}
+
+// ADR-0266: a backup kept beside its file, moved where undo copies are kept
+// -- renamed, or copied to another filesystem -- and undone from there.
+void moves_backups_kept_beside_files(const std::filesystem::path& fixture_directory) {
+    std::vector<std::filesystem::path> roots{std::filesystem::temp_directory_path()};
+    if (::access("/dev/shm", W_OK) == 0) {
+        roots.emplace_back("/dev/shm");
+    }
+    for (const auto& root : roots) {
+        TemporaryDirectory directory;
+        const auto album = directory.path() / "Album";
+        std::filesystem::create_directory(album);
+        const auto folder = root / ("trackknife-undo-" + core::StableId::random().to_string());
+        const auto source = materialize(fixture_directory, album / "01.flac");
+        const auto original_bytes = read_bytes(source);
+        auto plan = title_plan(source, "Kept beside, then moved");
+        auto journal = open_journal(directory, "moved.sqlite3");
+        auto files = persistence::SqliteFilePublicationJournal::open(directory.path() /
+                                                                     "moved.sqlite3");
+        CHECK(plan && journal && files);
+        if (!plan || !journal || !files) {
+            continue;
+        }
+        auto committed =
+            operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+        CHECK(committed.has_value());
+        if (!committed) {
+            continue;
+        }
+        CHECK(std::filesystem::path{committed->backup_raw_path}.parent_path() == album);
+        operations::set_undo_copy_folder(folder);
+        const auto moved = operations::keep_undo_copies_in_place(*journal, *files);
+        if (!moved) {
+            std::cerr << moved.error().message << '\n';
+        }
+        CHECK(moved && *moved == 1U);
+        const auto record = journal->load(committed->journal_id);
+        CHECK(record && *record &&
+              std::filesystem::path{(**record).backup_raw_path}.parent_path() == folder);
+        for (const auto& entry : std::filesystem::directory_iterator{album}) {
+            CHECK(!entry.path().filename().string().starts_with(".trackknife-"));
+        }
+        const auto undone = operations::undo_metadata_operation(committed->journal_id, *journal,
+                                                                successful_dependent_commit);
+        if (!undone) {
+            std::cerr << undone.error().message << '\n';
+        }
+        CHECK(undone.has_value());
+        CHECK(read_bytes(source) == original_bytes);
+        CHECK(std::filesystem::is_empty(folder));
+        operations::set_undo_copy_folder({});
+        std::error_code ignored;
+        std::filesystem::remove_all(folder, ignored);
+    }
 }
 
 void retention_releases_only_verified_backups(const std::filesystem::path& fixture_directory) {
@@ -2792,9 +2967,6 @@ void commits_cue_replay_gain_sheets_atomically() {
         auto undone = operations::undo_metadata_operation(
             backup.operation.id, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
-        if (!undone && undone.error().code == core::ErrorCode::unsupported) {
-            return;
-        }
         CHECK(undone.has_value());
         std::ifstream restored_input{cue, std::ios::binary};
         const std::string restored{std::istreambuf_iterator<char>{restored_input},
@@ -3566,7 +3738,7 @@ void folder_cover_without_hard_links(const std::filesystem::path& fixtures) {
         CHECK(read_bytes(replaced->backup_raw_path) == read_bytes(donor));
         const auto undone = operations::undo_metadata_operation(replaced->journal_id, *journal,
                                                                      successful_dependent_commit);
-        if (undone || undone.error().code != core::ErrorCode::unsupported) {
+        {  // ADR-0266: undo works without an exchange
             CHECK(undone.has_value());
             CHECK(read_bytes(cover) == read_bytes(donor));
         }
@@ -3755,6 +3927,17 @@ int main(const int argc, char** argv) {
         damaged_unrelated_journal_does_not_block_cover_save(fixture_directory);
         folder_cover_policy_publication_and_recovery(fixture_directory);
         folder_cover_without_hard_links(fixture_directory);
+        {
+            // ADR-0266: the same, with undo copies kept in a folder of their own.
+            const auto undo_folder = std::filesystem::temp_directory_path() /
+                                     ("trackknife-undo-" + core::StableId::random().to_string());
+            operations::set_undo_copy_folder(undo_folder);
+            folder_cover_policy_publication_and_recovery(fixture_directory);
+            folder_cover_without_hard_links(fixture_directory);
+            operations::set_undo_copy_folder({});
+            std::error_code ignored;
+            std::filesystem::remove_all(undo_folder, ignored);
+        }
         cover_size_limits_convert_each_destination(fixture_directory);
         commits_atomically_and_retains_verified_backup(fixture_directory);
         rolls_back_dependent_and_journal_failures(fixture_directory);
@@ -3771,6 +3954,8 @@ int main(const int argc, char** argv) {
         recovers_safe_prepublication_debris_but_retains_ambiguous_paths(fixture_directory);
         undoes_completed_metadata_and_recovers_interrupted_undo(fixture_directory);
         undoes_text_edits_in_every_writable_container(fixture_directory);
+        keeps_undo_copies_where_asked(fixture_directory);
+        moves_backups_kept_beside_files(fixture_directory);
         retention_releases_only_verified_backups(fixture_directory);
         undo_conflicts_become_visible_reconciliation_evidence(fixture_directory);
         retention_releases_older_verified_backup_for_the_same_source(fixture_directory);

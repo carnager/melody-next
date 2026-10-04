@@ -5,6 +5,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/operations/undo.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/loudness/replaygain.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
@@ -389,6 +390,13 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                         report(wire::encode(progress));
                     },
                     token, operations::FilePublicationApplyOptions{.maximum_parallelism = 2U});
+                // ADR-0266: the sources moves retain, where undo copies are kept.
+                if (auto kept =
+                        operations::keep_undo_copies_in_place(metadata_journal, file_journal);
+                    !kept) {
+                    std::cerr << "melodyd: undo copies not all moved: " << kept.error().message
+                              << "\n";
+                }
                 if (!applied) {
                     return Json{{"error", wire::encode(applied.error())}};
                 }

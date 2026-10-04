@@ -14,6 +14,7 @@
 #if TRACKKNIFE_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
 #endif
+#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -599,6 +600,10 @@ int main(int argc, char** argv) {
     trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
     // File work a crash interrupted is finished or rolled back before anyone
     // connects (ADR-0237), and what could not be is kept for Trackknife to show.
+    // ADR-0266: where the files writes replace are kept, before anything is
+    // written or recovered.
+    trackknife::operations::set_undo_copy_folder(
+        trackknife::engine::undo_copy_folder(*workspace, database));
     auto file_work_recovery = trackknife::engine::recover_file_work(
         database, catalogue, follow_moves, trackknife::engine::backup_retention(*workspace));
     // ADR-0263: how long the files writes replaced are kept, as clients set it.

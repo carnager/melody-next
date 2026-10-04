@@ -4,6 +4,7 @@
 #include "trackknife/operations/file_publication.hpp"
 
 #include "trackknife/core/atomic_rename.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <span>
@@ -2906,6 +2908,42 @@ mark_backup(FilePublicationJournal& journal, const core::StableId& id, const Bac
                                    record, description);
 }
 
+// ADR-0266: where a retained source is kept -- moved where undo copies are,
+// or beside the source it was -- and its identity there.
+[[nodiscard]] std::filesystem::path kept_path_of(const FilePublicationBackupRecord& backup) {
+    return backup.kept_raw_path.empty()
+               ? file_publication_retained_path(backup.publication.source_raw_path,
+                                                backup.publication.id)
+               : std::filesystem::path{backup.kept_raw_path};
+}
+
+[[nodiscard]] core::LocalSourceRevision kept_identity_of(const FilePublicationBackupRecord& backup) {
+    return backup.kept_revision.value_or(backup.publication.expected_source_revision);
+}
+
+// Whether two files hold the same bytes: a source put back by copy, found
+// after a crash beside the copy it was made from.
+[[nodiscard]] bool same_bytes(const std::string& first, const std::string& second) {
+    std::ifstream a{first, std::ios::binary};
+    std::ifstream b{second, std::ios::binary};
+    if (!a || !b) {
+        return false;
+    }
+    std::array<char, 1U << 16U> left{};
+    std::array<char, 1U << 16U> right{};
+    while (true) {
+        a.read(left.data(), left.size());
+        b.read(right.data(), right.size());
+        if (a.gcount() != b.gcount() ||
+            !std::equal(left.begin(), left.begin() + a.gcount(), right.begin())) {
+            return false;
+        }
+        if (a.gcount() == 0) {
+            return a.eof() && b.eof();
+        }
+    }
+}
+
 // The undo of a retained publication from wherever it stands: the source
 // back in place, then the target gone, then the state that follows files.
 [[nodiscard]] core::Result<FilePublicationCommitResult>
@@ -2913,7 +2951,8 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
                         const FilePublicationDependentStateCommitter& dependent_state_committer,
                         const core::CancellationToken& cancellation) {
     const auto& record = backup.publication;
-    const auto retained = file_publication_retained_path(record.source_raw_path, record.id);
+    const auto retained = kept_path_of(backup);
+    const auto kept_identity = kept_identity_of(backup);
     const auto reconcile = [&](core::Error issue) -> core::Result<FilePublicationCommitResult> {
         auto marked = mark_backup(journal, record.id, BackupState::undoing,
                                   BackupState::needs_reconciliation, backup.undo_id, issue);
@@ -2926,8 +2965,11 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
     if (!source || !kept) {
         return std::unexpected(!source ? std::move(source.error()) : std::move(kept.error()));
     }
+    // Put back by a copy, where the source is kept on another filesystem:
+    // the kept one stays until the undo is done.
+    bool copied_back = false;
     if (!*source) {
-        if (!*kept || **kept != record.expected_source_revision) {
+        if (!*kept || !core::same_file_after_rename(retained.native(), kept_identity, **kept)) {
             return reconcile(publication_error(
                 core::ErrorCode::conflict, "The retained source is gone or changed",
                 record.source_raw_path, record.target_raw_path, record.id));
@@ -2935,22 +2977,61 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
         if (cancellation.is_cancellation_requested()) {
             return std::unexpected(cancelled(record.source_raw_path, record.target_raw_path));
         }
-        auto parent = walk_directory(retained.parent_path().native(), false,
-                                     record.source_raw_path, record.target_raw_path, record.id);
-        if (!parent) {
-            return std::unexpected(std::move(parent.error()));
+        const std::filesystem::path source_path{record.source_raw_path};
+        auto source_parent = walk_directory(source_path.parent_path().native(), false,
+                                            record.source_raw_path, record.target_raw_path,
+                                            record.id);
+        if (!source_parent) {
+            return std::unexpected(std::move(source_parent.error()));
         }
-        if (auto restored = rename_no_replace(
-                parent->descriptor, retained.filename().native(), parent->descriptor,
-                std::filesystem::path{record.source_raw_path}.filename().native(), record);
+        struct stat kept_status{};
+        struct stat parent_status{};
+        if (::stat(retained.c_str(), &kept_status) != 0 ||
+            ::fstat(source_parent->descriptor.get(), &parent_status) != 0) {
+            return std::unexpected(system_error("Observing the retained source failed", errno,
+                                                record.source_raw_path, record.target_raw_path,
+                                                record.id));
+        }
+        std::string from_name = retained.filename().native();
+        std::optional<Descriptor> from_parent;
+        if (kept_status.st_dev == parent_status.st_dev) {
+            auto parent = walk_directory(retained.parent_path().native(), false,
+                                         record.source_raw_path, record.target_raw_path, record.id);
+            if (!parent) {
+                return std::unexpected(std::move(parent.error()));
+            }
+            from_parent.emplace(std::move(parent->descriptor));
+        } else {
+            // ADR-0266: copied beside the source, then renamed into place.
+            from_name = ".trackknife-" + record.id.to_string() + ".restore";
+            const auto staged = (source_path.parent_path() / from_name).native();
+            struct stat existing{};
+            if (::lstat(staged.c_str(), &existing) == 0 && S_ISREG(existing.st_mode)) {
+                static_cast<void>(::unlink(staged.c_str()));
+            }
+            if (auto made = copy_file_verified(retained.native(), staged); !made) {
+                return std::unexpected(std::move(made.error()));
+            }
+            copied_back = true;
+        }
+        const auto& from = from_parent ? *from_parent : source_parent->descriptor;
+        if (auto restored = rename_no_replace(from, from_name, source_parent->descriptor,
+                                              source_path.filename().native(), record);
             !restored) {
+            if (copied_back) {
+                static_cast<void>(::unlink((source_path.parent_path() / from_name).c_str()));
+            }
             return std::unexpected(std::move(restored.error()));
         }
-        if (::fsync(parent->descriptor.get()) != 0) {
+        if (::fsync(source_parent->descriptor.get()) != 0 ||
+            (from_parent && ::fsync(from_parent->get()) != 0)) {
             return std::unexpected(system_error("Syncing the restored source failed", errno,
                                                 record.source_raw_path, record.target_raw_path,
                                                 record.id));
         }
+    } else if (*kept && same_bytes(record.source_raw_path, retained.native())) {
+        // Copied back before a crash; the kept one goes once the undo is done.
+        copied_back = true;
     } else if (**source != record.expected_source_revision || *kept) {
         return reconcile(publication_error(
             core::ErrorCode::conflict, "The source path holds another file than the original",
@@ -2992,6 +3073,14 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
     if (auto dependent = dependent_state_committer(result); !dependent) {
         // Still undoing: recovery follows the files again.
         return std::unexpected(std::move(dependent.error()));
+    }
+    if (copied_back) {
+        if (auto removed =
+                remove_verified(retained.native(), kept_identity, record, cancellation,
+                                "retained source");
+            !removed) {
+            return reconcile(removed.error());
+        }
     }
     if (auto undone = mark_backup(journal, record.id, BackupState::undoing, BackupState::undone,
                                   backup.undo_id);
@@ -3037,9 +3126,8 @@ core::Result<FilePublicationCommitResult> undo_retained_publication(
     // All as it was left, or nothing is touched.
     auto source = observe_direct_revision(record.source_raw_path, record.source_raw_path,
                                           record.target_raw_path, record.id);
-    auto kept = observe_direct_revision(
-        file_publication_retained_path(record.source_raw_path, record.id).native(),
-        record.source_raw_path, record.target_raw_path, record.id);
+    auto kept = observe_direct_revision(kept_path_of(backup).native(), record.source_raw_path,
+                                        record.target_raw_path, record.id);
     auto target = observe_direct_revision(record.target_raw_path, record.source_raw_path,
                                           record.target_raw_path, record.id);
     if (!source || !kept || !target) {
@@ -3047,8 +3135,10 @@ core::Result<FilePublicationCommitResult> undo_retained_publication(
                                : !kept ? std::move(kept.error())
                                        : std::move(target.error()));
     }
-    if (*source || !*kept || **kept != record.expected_source_revision || !*target ||
-        **target != *record.target_revision) {
+    if (*source || !*kept ||
+        !core::same_file_after_rename(kept_path_of(backup).native(), kept_identity_of(backup),
+                                      **kept) ||
+        !*target || **target != *record.target_revision) {
         auto issue = publication_error(
             core::ErrorCode::conflict,
             "The files changed after the publication, so it cannot be undone safely",
@@ -3098,13 +3188,14 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
         });
     }
     const auto& record = (**loaded).publication;
-    const auto retained = file_publication_retained_path(record.source_raw_path, record.id);
+    const auto retained = kept_path_of(**loaded);
+    const auto kept_identity = kept_identity_of(**loaded);
     auto kept = observe_direct_revision(retained.native(), record.source_raw_path,
                                         record.target_raw_path, record.id);
     if (!kept) {
         return std::unexpected(std::move(kept.error()));
     }
-    if (*kept && **kept != record.expected_source_revision) {
+    if (*kept && !core::same_file_after_rename(retained.native(), kept_identity, **kept)) {
         auto issue = publication_error(core::ErrorCode::conflict,
                                        "The retained source has an unexpected identity",
                                        record.source_raw_path, record.target_raw_path, record.id);
@@ -3113,8 +3204,8 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
         return std::unexpected(marked ? std::move(issue) : std::move(marked.error()));
     }
     if (*kept) {
-        if (auto removed = remove_verified(retained.native(), record.expected_source_revision,
-                                           record, cancellation, "retained source");
+        if (auto removed = remove_verified(retained.native(), **kept, record, cancellation,
+                                           "retained source");
             !removed) {
             return std::unexpected(std::move(removed.error()));
         }

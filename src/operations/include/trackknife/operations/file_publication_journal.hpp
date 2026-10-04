@@ -77,6 +77,10 @@ struct FilePublicationBackupRecord {
     std::int64_t completed_at_unix_seconds{0};
     std::int64_t updated_at_unix_seconds{0};
     std::optional<core::Error> failure;
+    // ADR-0266: where the retained source is kept, when not beside the
+    // source it was (empty), and its identity there when it is a copy.
+    std::string kept_raw_path;
+    std::optional<core::LocalSourceRevision> kept_revision;
 
     friend bool operator==(const FilePublicationBackupRecord&,
                            const FilePublicationBackupRecord&) = default;
@@ -133,6 +137,17 @@ class FilePublicationJournal {
     load_backups() const = 0;
     [[nodiscard]] virtual core::Result<void>
     transition_backup(const core::StableId& id, const FilePublicationBackupTransition& transition) = 0;
+    // ADR-0266: a retained source moved where undo copies are kept.
+    [[nodiscard]] virtual core::Result<void>
+    relocate_kept(const core::StableId& id, const std::string& raw_path,
+                  const core::LocalSourceRevision& revision) {
+        static_cast<void>(id);
+        static_cast<void>(raw_path);
+        static_cast<void>(revision);
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "This journal cannot move retained sources",
+                                           .context = {}});
+    }
 };
 
 } // namespace trackknife::operations

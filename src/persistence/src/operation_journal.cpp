@@ -1485,6 +1485,40 @@ SqliteMetadataOperationJournal::load_backups() const {
     return backups;
 }
 
+core::Result<void>
+SqliteMetadataOperationJournal::relocate_backup(const core::StableId& id,
+                                                const std::string& raw_path,
+                                                const core::LocalSourceRevision& revision) {
+    if (id.is_nil() || raw_path.empty()) {
+        return std::unexpected(invalid_record("A moved backup needs its operation and path"));
+    }
+    std::scoped_lock lock{implementation_->mutex};
+    auto* database = implementation_->database;
+    auto statement = prepare(database,
+                             "UPDATE operation_journal SET backup_path = ?, backup_device = ?, "
+                             "backup_inode = ?, backup_size = ?, backup_mtime_seconds = ?, "
+                             "backup_mtime_nanoseconds = ? WHERE id = ? AND EXISTS ("
+                             "SELECT 1 FROM metadata_operation_backups WHERE journal_id = ? "
+                             "AND state = 0)");
+    if (!statement) {
+        return std::unexpected(std::move(statement.error()));
+    }
+    if (!bind_blob(statement->get(), 1, raw_path) || !bind_revision(statement->get(), 2, revision) ||
+        !bind_blob(statement->get(), 7, id.to_string()) ||
+        !bind_blob(statement->get(), 8, id.to_string())) {
+        return std::unexpected(database_error(database, "Could not bind moved backup"));
+    }
+    if (sqlite3_step(statement->get()) != SQLITE_DONE) {
+        return std::unexpected(database_error(database, "Could not record moved backup"));
+    }
+    if (sqlite3_changes(database) != 1) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                           .message = "Only a retained backup can be moved",
+                                           .context = {}});
+    }
+    return {};
+}
+
 core::Result<void> SqliteMetadataOperationJournal::transition_backup(
     const core::StableId& id, const operations::MetadataOperationBackupTransition& transition) {
     if (id.is_nil()) {

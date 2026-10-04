@@ -7,6 +7,7 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/operations/file_publication_journal.hpp"
+#include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 
 #include <cstdint>
@@ -118,5 +119,42 @@ recover_cross_filesystem_publications(
     FilePublicationJournal& journal,
     const FilePublicationDependentStateCommitter& dependent_state_committer,
     const core::CancellationToken& cancellation = {});
+
+// ADR-0263: undoes one completed publication that retained its source --
+// the source renamed back where it was, the target removed, the directories
+// the publication made removed when empty -- through the retained source's
+// lifecycle: undoing, then undone, resumed by recover_publication_undos after
+// a crash. The result is the reverse publication: from the target back to
+// the source.
+[[nodiscard]] core::Result<FilePublicationCommitResult> undo_retained_publication(
+    const core::StableId& journal_id, FilePublicationJournal& journal,
+    const FilePublicationDependentStateCommitter& dependent_state_committer,
+    const core::CancellationToken& cancellation = {});
+
+// Any completed publication undone as its kind is: a same-filesystem rename
+// renamed back, a retained source restored.
+[[nodiscard]] core::Result<FilePublicationCommitResult> undo_file_publication(
+    const core::StableId& journal_id, FilePublicationJournal& journal,
+    const FilePublicationDependentStateCommitter& dependent_state_committer,
+    const core::CancellationToken& cancellation = {});
+
+// Removes one verified retained source; one already gone is released.
+[[nodiscard]] core::Result<void>
+release_publication_backup(const core::StableId& journal_id, FilePublicationJournal& journal,
+                           const core::CancellationToken& cancellation = {});
+
+// Keeps the newest retained sources within the policy's age, count and
+// bytes and releases the rest, as maintain_metadata_backups does.
+[[nodiscard]] core::Result<std::vector<MetadataBackupMaintenanceResult>>
+maintain_publication_backups(FilePublicationJournal& journal,
+                             const MetadataBackupRetentionPolicy& policy,
+                             std::int64_t now_unix_seconds,
+                             const core::CancellationToken& cancellation = {});
+
+// Finishes every undo a crash interrupted, or leaves it for reconciliation.
+[[nodiscard]] core::Result<std::vector<FilePublicationRecoveryResult>>
+recover_publication_undos(FilePublicationJournal& journal,
+                          const FilePublicationDependentStateCommitter& dependent_state_committer,
+                          const core::CancellationToken& cancellation = {});
 
 } // namespace trackknife::operations

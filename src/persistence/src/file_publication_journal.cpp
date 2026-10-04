@@ -878,6 +878,29 @@ core::Result<void> SqliteFilePublicationJournal::transition(
             .context = {{.key = "journal_id", .value = id.to_string()}},
         });
     }
+    // ADR-0263: completed, a publication that wrote a new file keeps the
+    // source it replaced, retained for undo.
+    if (transition.state == operations::FilePublicationJournalState::complete &&
+        (static_cast<Kind>(kind_value) == Kind::cross_filesystem_copy ||
+         static_cast<Content>(content_value) == Content::prepared_destination_artifact)) {
+        auto backup =
+            prepare(database, "INSERT INTO file_publication_backups(journal_id, state, undo_id, "
+                              "completed_at_unix_seconds, updated_at_unix_seconds, error_code, "
+                              "error_message) VALUES(?, 0, NULL, "
+                              "CAST(strftime('%s', 'now') AS INTEGER), "
+                              "CAST(strftime('%s', 'now') AS INTEGER), NULL, NULL)");
+        if (!backup || !bind_blob(backup->get(), 1, id.to_string())) {
+            auto error = backup ? database_error(database, "Could not bind retained source")
+                                : std::move(backup.error());
+            rollback();
+            return std::unexpected(std::move(error));
+        }
+        if (auto stored = step_done(database, backup->get(), "Could not retain the source");
+            !stored) {
+            rollback();
+            return stored;
+        }
+    }
     if (auto committed = execute(database, "COMMIT"); !committed) {
         rollback();
         return committed;
@@ -942,6 +965,176 @@ SqliteFilePublicationJournal::load_reversals(const core::StableId& journal_id) c
             database_error(implementation_->database, "Too many file-publication reversals"));
     }
     return records;
+}
+
+namespace {
+
+using BackupState = operations::MetadataOperationBackupState;
+
+// The backup rows asked for, each with its publication.
+[[nodiscard]] core::Result<std::vector<operations::FilePublicationBackupRecord>>
+load_publication_backups(sqlite3* database, const char* sql, const std::string& id = {}) {
+    auto statement = prepare(database, sql);
+    if (!statement || (!id.empty() && !bind_blob(statement->get(), 1, id))) {
+        return std::unexpected(statement ? database_error(database, "Could not bind backup")
+                                         : std::move(statement.error()));
+    }
+    struct Row {
+        std::string id;
+        int state{0};
+        std::optional<std::string> undo_id;
+        std::int64_t completed{0};
+        std::int64_t updated{0};
+        std::optional<core::Error> failure;
+    };
+    std::vector<Row> rows;
+    while (true) {
+        const auto stepped = sqlite3_step(statement->get());
+        if (stepped == SQLITE_DONE) {
+            break;
+        }
+        if (stepped != SQLITE_ROW) {
+            return std::unexpected(database_error(database, "Could not load retained sources"));
+        }
+        const auto text = [&statement](const int column) {
+            const auto* bytes =
+                static_cast<const char*>(sqlite3_column_blob(statement->get(), column));
+            return std::string{bytes == nullptr ? "" : bytes,
+                               static_cast<std::size_t>(sqlite3_column_bytes(statement->get(),
+                                                                             column))};
+        };
+        Row row{.id = text(0),
+                .state = sqlite3_column_int(statement->get(), 1),
+                .undo_id = sqlite3_column_type(statement->get(), 2) == SQLITE_NULL
+                               ? std::nullopt
+                               : std::optional{text(2)},
+                .completed = sqlite3_column_int64(statement->get(), 3),
+                .updated = sqlite3_column_int64(statement->get(), 4),
+                .failure = std::nullopt};
+        if (sqlite3_column_type(statement->get(), 5) != SQLITE_NULL) {
+            row.failure = core::Error{
+                .code = static_cast<core::ErrorCode>(sqlite3_column_int(statement->get(), 5)),
+                .message = text(6),
+                .context = {}};
+        }
+        if (row.state < static_cast<int>(BackupState::retained) ||
+            row.state > static_cast<int>(BackupState::needs_reconciliation)) {
+            return std::unexpected(database_error(database, "Invalid retained-source state"));
+        }
+        rows.push_back(std::move(row));
+    }
+    statement->reset();
+    std::vector<operations::FilePublicationBackupRecord> backups;
+    backups.reserve(rows.size());
+    const auto record_sql =
+        "SELECT " + std::string{record_columns} + "FROM file_publication_journal WHERE id = ?";
+    for (auto& row : rows) {
+        auto records = load_records(database, record_sql.c_str(), row.id);
+        if (!records) {
+            return std::unexpected(std::move(records.error()));
+        }
+        if (records->size() != 1U) {
+            return std::unexpected(database_error(database, "Retained source has no publication"));
+        }
+        std::optional<core::StableId> undo_id;
+        if (row.undo_id) {
+            auto parsed = core::StableId::parse(*row.undo_id);
+            if (!parsed) {
+                return std::unexpected(database_error(database, "Invalid undo ID"));
+            }
+            undo_id = *parsed;
+        }
+        backups.push_back(operations::FilePublicationBackupRecord{
+            .publication = std::move(records->front()),
+            .state = static_cast<BackupState>(row.state),
+            .undo_id = undo_id,
+            .completed_at_unix_seconds = row.completed,
+            .updated_at_unix_seconds = row.updated,
+            .failure = std::move(row.failure),
+        });
+    }
+    return backups;
+}
+
+} // namespace
+
+core::Result<std::optional<operations::FilePublicationBackupRecord>>
+SqliteFilePublicationJournal::load_backup(const core::StableId& id) const {
+    if (id.is_nil()) {
+        return std::unexpected(invalid_record("Retained-source ID cannot be nil"));
+    }
+    std::scoped_lock lock{implementation_->mutex};
+    auto backups = load_publication_backups(
+        implementation_->database,
+        "SELECT journal_id, state, undo_id, completed_at_unix_seconds, updated_at_unix_seconds, "
+        "error_code, error_message FROM file_publication_backups WHERE journal_id = ?",
+        id.to_string());
+    if (!backups) {
+        return std::unexpected(std::move(backups.error()));
+    }
+    if (backups->empty()) {
+        return std::optional<operations::FilePublicationBackupRecord>{};
+    }
+    return std::optional{std::move(backups->front())};
+}
+
+core::Result<std::vector<operations::FilePublicationBackupRecord>>
+SqliteFilePublicationJournal::load_backups() const {
+    std::scoped_lock lock{implementation_->mutex};
+    auto backups = load_publication_backups(
+        implementation_->database,
+        "SELECT journal_id, state, undo_id, completed_at_unix_seconds, updated_at_unix_seconds, "
+        "error_code, error_message FROM file_publication_backups "
+        "ORDER BY completed_at_unix_seconds DESC, rowid DESC LIMIT 10001");
+    if (backups && backups->size() > 10'000U) {
+        return std::unexpected(
+            database_error(implementation_->database, "Too many retained sources"));
+    }
+    return backups;
+}
+
+core::Result<void> SqliteFilePublicationJournal::transition_backup(
+    const core::StableId& id, const operations::FilePublicationBackupTransition& transition) {
+    if (id.is_nil()) {
+        return std::unexpected(invalid_record("Retained-source ID cannot be nil"));
+    }
+    std::scoped_lock lock{implementation_->mutex};
+    auto* database = implementation_->database;
+    auto statement =
+        prepare(database, "UPDATE file_publication_backups SET state = ?, undo_id = ?, "
+                          "updated_at_unix_seconds = CAST(strftime('%s', 'now') AS INTEGER), "
+                          "error_code = ?, error_message = ? WHERE journal_id = ? AND state = ?");
+    if (!statement) {
+        return std::unexpected(std::move(statement.error()));
+    }
+    const auto undo_bound = transition.undo_id
+                                ? bind_blob(statement->get(), 2, transition.undo_id->to_string())
+                                : sqlite3_bind_null(statement->get(), 2) == SQLITE_OK;
+    const auto failure_bound =
+        transition.failure
+            ? sqlite3_bind_int(statement->get(), 3, static_cast<int>(transition.failure->code)) ==
+                      SQLITE_OK &&
+                  bind_blob(statement->get(), 4, transition.failure->message)
+            : sqlite3_bind_null(statement->get(), 3) == SQLITE_OK &&
+                  sqlite3_bind_null(statement->get(), 4) == SQLITE_OK;
+    if (sqlite3_bind_int(statement->get(), 1, static_cast<int>(transition.state)) != SQLITE_OK ||
+        !undo_bound || !failure_bound || !bind_blob(statement->get(), 5, id.to_string()) ||
+        sqlite3_bind_int(statement->get(), 6, static_cast<int>(transition.expected_state)) !=
+            SQLITE_OK) {
+        return std::unexpected(database_error(database, "Could not bind retained-source state"));
+    }
+    if (auto updated = step_done(database, statement->get(), "Could not update retained source");
+        !updated) {
+        return updated;
+    }
+    if (sqlite3_changes(database) != 1) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::conflict,
+            .message = "Retained source changed before the requested transition",
+            .context = {{.key = "journal_id", .value = id.to_string()}},
+        });
+    }
+    return {};
 }
 
 core::Result<std::vector<operations::FilePublicationJournalRecord>>

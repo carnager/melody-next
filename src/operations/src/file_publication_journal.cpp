@@ -11,6 +11,16 @@ std::filesystem::path file_publication_prepared_path(const std::filesystem::path
     return target.parent_path() / (".trackknife-" + journal_id.to_string() + ".prepared");
 }
 
+bool publication_retains_source(const FilePublicationJournalRecord& record) noexcept {
+    return record.publication == OutputPathPublicationKind::cross_filesystem_copy ||
+           record.content == FilePublicationContentKind::prepared_destination_artifact;
+}
+
+std::filesystem::path file_publication_retained_path(const std::filesystem::path& source,
+                                                     const core::StableId& journal_id) {
+    return source.parent_path() / (".trackknife-" + journal_id.to_string() + ".retained");
+}
+
 core::Result<FilePublicationJournalRecord>
 make_file_publication_journal_record(const OutputPathPreflight& preflight,
                                      const std::size_t source_index,

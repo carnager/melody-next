@@ -123,12 +123,12 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
                 ++recovery.recovered;
             }
         }
-        // No undo is offered, so a finished write keeps no backup (as in
-        // Trackknife, whose policy this is).
-        constexpr operations::MetadataBackupRetentionPolicy release_all{
-            .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U};
+        // A finished write keeps the file it replaced, for undo (ADR-0263),
+        // within the retention policy: the newest first, by age, count and
+        // size.
+        constexpr operations::MetadataBackupRetentionPolicy retention{};
         if (auto maintained = operations::maintain_metadata_backups(
-                journal, release_all, static_cast<std::int64_t>(std::time(nullptr)));
+                journal, retention, static_cast<std::int64_t>(std::time(nullptr)));
             !maintained) {
             remember(std::move(maintained.error()));
         }
@@ -163,6 +163,15 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
         };
     count(operations::recover_same_filesystem_publications(file_journal, moved));
     count(operations::recover_cross_filesystem_publications(file_journal, moved));
+    // ADR-0263: an undo a crash interrupted is finished; the sources
+    // publications kept, retained as metadata backups are.
+    count(operations::recover_publication_undos(file_journal, moved));
+    if (auto maintained = operations::maintain_publication_backups(
+            file_journal, operations::MetadataBackupRetentionPolicy{},
+            static_cast<std::int64_t>(std::time(nullptr)));
+        !maintained) {
+        remember(std::move(maintained.error()));
+    }
     return recovery;
 }
 

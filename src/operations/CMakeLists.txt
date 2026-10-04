@@ -15,6 +15,7 @@ add_library(
     src/output_path_plan.cpp
     src/output_path_preflight.cpp
     src/preparation_plan.cpp
+    src/undo.cpp
 )
 add_library(Trackknife::Operations ALIAS trackknife_operations)
 

@@ -25,6 +25,7 @@
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
@@ -137,6 +138,30 @@ void require_same(const loudness::LoudnessScanResult& left,
 }
 
 void encodings_are_exact() {
+    // ADR-0263: undo requests and outcomes as they travel.
+    {
+        namespace operations = trackknife::operations;
+        const std::array requests{
+            operations::UndoRequest{.kind = operations::UndoKind::publication,
+                                    .journal_id = core::StableId::random()},
+            operations::UndoRequest{.kind = operations::UndoKind::metadata,
+                                    .journal_id = core::StableId::random()}};
+        const auto decoded = wire::decode_undo_requests(wire::encode(requests));
+        require(decoded && *decoded == std::vector(requests.begin(), requests.end()),
+                "undo requests travel exactly");
+        const std::array outcomes{
+            operations::UndoOutcome{.request = requests[0], .issue = std::nullopt,
+                                    .from_raw_path = std::string{"/a/\xff.flac"},
+                                    .to_raw_path = "/b/c.flac"},
+            operations::UndoOutcome{.request = requests[1],
+                                    .issue = core::Error{.code = core::ErrorCode::conflict,
+                                                         .message = "changed",
+                                                         .context = {}},
+                                    .from_raw_path = {}, .to_raw_path = {}}};
+        const auto answered = wire::decode_undo_outcomes(wire::encode(outcomes));
+        require(answered && *answered == std::vector(outcomes.begin(), outcomes.end()),
+                "undo outcomes travel exactly");
+    }
     const core::Error error{.code = core::ErrorCode::conflict,
                             .message = "changed since it was read",
                             .context = {{"path", "/music/a.flac"}, {"path", "/music/b.flac"}}};
@@ -1319,12 +1344,43 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
             "a title is staged");
     const auto plan = metadata::build_metadata_write_plan(*selection, patches, access);
     require(plan && plan->ready(), "the plan is built through the engine");
+    const auto bytes_of = [](const std::string& path) {
+        std::ifstream input{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    };
+    const auto original_bytes = bytes_of(flac);
     const auto applied = remote.apply(*plan, {}, {});
     require(applied && applied->committed_source_count() == 1U, "and written by it");
     const auto after = metadata::read_local_metadata(flac);
     require(after && after->document.first_effective_value("title") ==
                          std::optional<std::string>{"Through the engine"},
             "the file has it");
+
+    // ADR-0263: undone through the engine, the file as it was.
+    {
+        const std::array undo{trackknife::operations::UndoRequest{
+            .kind = trackknife::operations::UndoKind::metadata,
+            .journal_id = applied->sources.front().commit->journal_id}};
+        const auto undone = remote.undo(undo, {}, {});
+        require(undone && undone->size() == 1U && !undone->front().issue &&
+                    undone->front().to_raw_path == flac,
+                "a write is undone through the engine");
+        require(bytes_of(flac) == original_bytes, "the file is the original, byte for byte");
+        const auto again = remote.undo(undo, {}, {});
+        require(again && again->size() == 1U && again->front().issue.has_value(),
+                "a write undone is not undone twice");
+        // Written once more, for what follows.
+        const auto rewritten = metadata::build_metadata_write_plan(
+            *metadata::StagedMetadataSelection::create(
+                {metadata::StagedMetadataSource{
+                    .raw_path = flac,
+                    .source_revision = metadata::read_local_metadata(flac)->source_revision,
+                    .baseline = metadata::read_local_metadata(flac)->document}},
+                preferred),
+            patches, access);
+        require(rewritten && rewritten->ready() && remote.apply(*rewritten, {}, {}),
+                "and written again");
+    }
 
     // A plan bigger than one job goes in parts, each file written once and
     // the results in the plan's order.

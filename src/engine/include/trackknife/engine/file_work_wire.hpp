@@ -18,8 +18,12 @@
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/message.hpp"
+
+#include <span>
+#include <vector>
 
 namespace trackknife::engine::wire {
 
@@ -134,6 +138,15 @@ decode_publication_apply_result(const Json& value);
 [[nodiscard]] Json encode(const operations::FilePublicationApplyProgress& progress);
 [[nodiscard]] core::Result<operations::FilePublicationApplyProgress>
 decode_publication_apply_progress(const Json& value);
+
+// ADR-0263: writes to undo, {kind: "metadata"|"publication", id}, and how
+// each went, {kind, id, from, to} or {kind, id, issue}.
+[[nodiscard]] Json encode(std::span<const operations::UndoRequest> requests);
+[[nodiscard]] core::Result<std::vector<operations::UndoRequest>>
+decode_undo_requests(const Json& value);
+[[nodiscard]] Json encode(std::span<const operations::UndoOutcome> outcomes);
+[[nodiscard]] core::Result<std::vector<operations::UndoOutcome>>
+decode_undo_outcomes(const Json& value);
 
 // Naming layouts and move destinations as saved: {id, profile}.
 [[nodiscard]] Json encode(const persistence::SavedOutputLayoutProfile& saved);

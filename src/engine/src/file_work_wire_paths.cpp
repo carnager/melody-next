@@ -618,4 +618,111 @@ core::Result<persistence::SavedDestinationProfile> decode_saved_destination(cons
     return saved;
 }
 
+namespace {
+
+[[nodiscard]] core::Error malformed_undo(std::string what) {
+    return core::Error{.code = core::ErrorCode::invalid_argument,
+                       .message = "a malformed undo " + std::move(what),
+                       .context = {}};
+}
+
+[[nodiscard]] Json encode_request(const operations::UndoRequest& request) {
+    return Json{{"kind", request.kind == operations::UndoKind::metadata ? "metadata"
+                                                                        : "publication"},
+                {"id", request.journal_id.to_string()}};
+}
+
+[[nodiscard]] core::Result<operations::UndoRequest> decode_request(const Json& value) {
+    if (!value.is_object() || !value.contains("kind") || !value.at("kind").is_string() ||
+        !value.contains("id") || !value.at("id").is_string()) {
+        return std::unexpected(malformed_undo("request"));
+    }
+    const auto kind = value.at("kind").get<std::string>();
+    auto id = core::StableId::parse(value.at("id").get<std::string>());
+    if ((kind != "metadata" && kind != "publication") || !id || id->is_nil()) {
+        return std::unexpected(malformed_undo("request"));
+    }
+    return operations::UndoRequest{.kind = kind == "metadata" ? operations::UndoKind::metadata
+                                                              : operations::UndoKind::publication,
+                                   .journal_id = *id};
+}
+
+} // namespace
+
+Json encode(const std::span<const operations::UndoRequest> requests) {
+    auto list = Json::array();
+    for (const auto& request : requests) {
+        list.push_back(encode_request(request));
+    }
+    return list;
+}
+
+core::Result<std::vector<operations::UndoRequest>> decode_undo_requests(const Json& value) {
+    if (!value.is_array() || value.size() > 100'000U) {
+        return std::unexpected(malformed_undo("list"));
+    }
+    std::vector<operations::UndoRequest> requests;
+    requests.reserve(value.size());
+    for (const auto& entry : value) {
+        auto request = decode_request(entry);
+        if (!request) {
+            return std::unexpected(std::move(request.error()));
+        }
+        requests.push_back(*request);
+    }
+    return requests;
+}
+
+Json encode(const std::span<const operations::UndoOutcome> outcomes) {
+    auto list = Json::array();
+    for (const auto& outcome : outcomes) {
+        auto entry = encode_request(outcome.request);
+        if (outcome.issue) {
+            entry["issue"] = encode(*outcome.issue);
+        } else {
+            entry["from"] = protocol::encode_raw_path(outcome.from_raw_path);
+            entry["to"] = protocol::encode_raw_path(outcome.to_raw_path);
+        }
+        list.push_back(std::move(entry));
+    }
+    return list;
+}
+
+core::Result<std::vector<operations::UndoOutcome>> decode_undo_outcomes(const Json& value) {
+    if (!value.is_array() || value.size() > 100'000U) {
+        return std::unexpected(malformed_undo("answer"));
+    }
+    std::vector<operations::UndoOutcome> outcomes;
+    outcomes.reserve(value.size());
+    for (const auto& entry : value) {
+        auto request = decode_request(entry);
+        if (!request) {
+            return std::unexpected(std::move(request.error()));
+        }
+        operations::UndoOutcome outcome{.request = *request, .issue = std::nullopt,
+                                        .from_raw_path = {}, .to_raw_path = {}};
+        if (const auto issue = entry.find("issue"); issue != entry.end()) {
+            auto decoded = decode_error(*issue);
+            if (!decoded) {
+                return std::unexpected(std::move(decoded.error()));
+            }
+            outcome.issue = std::move(*decoded);
+        } else {
+            if (!entry.contains("from") || !entry.at("from").is_string() || !entry.contains("to") ||
+                !entry.at("to").is_string()) {
+                return std::unexpected(malformed_undo("answer"));
+            }
+            auto from = protocol::decode_raw_path(entry.at("from").get<std::string>());
+            auto to = protocol::decode_raw_path(entry.at("to").get<std::string>());
+            if (!from || !to) {
+                return std::unexpected(malformed_undo("path"));
+            }
+            outcome.from_raw_path = std::move(*from);
+            outcome.to_raw_path = std::move(*to);
+        }
+        outcomes.push_back(std::move(outcome));
+    }
+    return outcomes;
+}
+
 } // namespace trackknife::engine::wire

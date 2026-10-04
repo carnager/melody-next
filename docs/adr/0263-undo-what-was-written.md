@@ -63,3 +63,8 @@ bytes were gone: nothing could be undone.
   interrupted undos. Tests on real files: kept byte for byte, undone with
   target and folders gone, refused when the target changed, an interrupted
   undo finished, retention releasing, across filesystems the same.
+- The engine undoes (2026-10-04): the `operations.undo` job takes writes by
+  kind and journal id and undoes them in the order given
+  (`operations::undo_operations`), the library following each file back,
+  its own tags re-read where the write had changed them; one refused does
+  not stop the rest. `RemoteFileWork::undo` asks for it. Protocol level 2.

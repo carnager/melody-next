@@ -6,6 +6,8 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
+#include "trackknife/operations/undo_copies.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 
@@ -1094,6 +1096,78 @@ void publicationsKeepTheirSourceForUndo() {
             "undo across filesystems must restore the source and remove what it made");
 }
 
+// ADR-0266: a kept source moved where undo copies are kept -- on the same
+// filesystem, renamed; on another, copied and verified -- leaves nothing at
+// its old place, and undo and retention work from there.
+void keptSourcesMoveWhereUndoCopiesAreKept() {
+    using Backup = operations::MetadataOperationBackupState;
+    std::vector<std::filesystem::path> roots{std::filesystem::temp_directory_path()};
+    std::error_code shared_memory_error;
+    if (std::filesystem::is_directory("/dev/shm", shared_memory_error) && !shared_memory_error) {
+        roots.emplace_back("/dev/shm");
+    }
+    for (const auto& root : roots) {
+        TemporaryDirectory directory;
+        TemporaryDirectory folder_home{root};
+        const auto folder = folder_home.path() / "undo";
+        auto journal = open_journal(directory, "kept.sqlite3");
+        auto metadata = persistence::SqliteMetadataOperationJournal::open(
+            directory.path() / "kept.sqlite3");
+        require(metadata.has_value(), "the metadata journal must open");
+        const auto artifact = [&](const std::string& name) {
+            const auto source = directory.path() / (name + ".flac");
+            const auto target = directory.path() / ("Artist " + name) / "changed.flac";
+            write_file(source, "original " + name);
+            const auto committed = operations::commit_destination_artifact_publication(
+                preflight(source, target), 0U, journal,
+                [&](const std::string& prepared, const core::CancellationToken&)
+                    -> core::Result<core::LocalSourceRevision> {
+                    write_file(prepared, "changed " + name);
+                    return core::observe_local_source_revision(prepared);
+                },
+                successful_dependent_commit);
+            require(committed.has_value(), "a changed-content publication must commit");
+            return std::tuple{source, target, committed->journal_id};
+        };
+        const auto [source, target, id] = artifact("a");
+        const auto [old_source, old_target, old_id] = artifact("b");
+        const auto beside = operations::file_publication_retained_path(source, id);
+        require(std::filesystem::exists(beside), "kept beside before an undo folder is set");
+
+        operations::set_undo_copy_folder(folder);
+        const auto moved = operations::keep_undo_copies_in_place(*metadata, journal);
+        require(moved && *moved == 2U, "both kept sources must move");
+        require(!std::filesystem::exists(beside) &&
+                    read_file(folder / beside.filename()) == "original a",
+                "the kept source must be in the undo folder only");
+        const auto backup = journal.load_backup(id);
+        require(backup && *backup && (**backup).kept_raw_path == (folder / beside.filename()).native(),
+                "where it is kept must be recorded");
+        const auto again = operations::keep_undo_copies_in_place(*metadata, journal);
+        require(again && *again == 0U, "kept in place, nothing moves again");
+
+        const auto undone =
+            operations::undo_file_publication(id, journal, successful_dependent_commit);
+        if (!undone) {
+            std::cerr << undone.error().message << '\n';
+        }
+        require(undone && read_file(source) == "original a" && !std::filesystem::exists(target) &&
+                    !std::filesystem::exists(folder / beside.filename()),
+                "undo must restore the source from the undo folder");
+
+        const auto maintained = operations::maintain_publication_backups(
+            journal,
+            operations::MetadataBackupRetentionPolicy{
+                .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
+            0);
+        const auto released = journal.load_backup(old_id);
+        require(maintained && released && *released && (**released).state == Backup::released &&
+                    std::filesystem::is_empty(folder) && read_file(old_target) == "changed b",
+                "retention must release a kept source from the undo folder");
+        operations::set_undo_copy_folder({});
+    }
+}
+
 void destinationArtifactPublishesChangedContentAndRecoversItsJournalBoundary() {
     TemporaryDirectory directory;
     const auto source = directory.path() / "source.flac";
@@ -1216,6 +1290,7 @@ int main() {
     }
     destinationArtifactPublishesChangedContentAndRecoversItsJournalBoundary();
     publicationsKeepTheirSourceForUndo();
+    keptSourcesMoveWhereUndoCopiesAreKept();
     cancellationBeforeCommitCreatesNoJournal();
     std::cout << "file publication executor tests passed\n";
     return 0;

@@ -39,6 +39,9 @@ class SqliteMetadataOperationJournal final : public operations::MetadataOperatio
     [[nodiscard]] core::Result<void>
     transition_backup(const core::StableId& id,
                       const operations::MetadataOperationBackupTransition& transition) override;
+    [[nodiscard]] core::Result<void>
+    relocate_backup(const core::StableId& id, const std::string& raw_path,
+                    const core::LocalSourceRevision& revision) override;
 
   private:
     struct Impl;

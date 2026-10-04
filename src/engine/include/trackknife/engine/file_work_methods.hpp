@@ -70,9 +70,18 @@ recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalog
 // engine_state document "backups.retention", else the policy's defaults.
 [[nodiscard]] operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& workspace);
 
+// ADR-0266: where this engine keeps the files writes replace -- the
+// engine_state document "backups.location": its own folder (`undo` beside
+// its database, the default), a folder given, or beside each file (empty).
+[[nodiscard]] std::filesystem::path undo_copy_folder(const Workspace& workspace,
+                                                     const std::filesystem::path& database);
+
 // backups.retention -> {max_age_days, max_writes, max_gigabytes};
 // backups.set_retention {any of them} -> the same, kept and applied at once
 // to the backups there are. 0 keeps none.
+// backups.location -> {place: "engine" | "folder" | "beside", folder?, kept_in};
+// backups.set_location {place, folder?} -> the same: kept, and every undo
+// copy there is moved there at once. Paths are encoded raw paths.
 void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
                              Workspace& workspace);
 

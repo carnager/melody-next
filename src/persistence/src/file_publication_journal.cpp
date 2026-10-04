@@ -986,6 +986,8 @@ load_publication_backups(sqlite3* database, const char* sql, const std::string& 
         std::int64_t completed{0};
         std::int64_t updated{0};
         std::optional<core::Error> failure;
+        std::string kept_path;
+        std::optional<core::LocalSourceRevision> kept_revision;
     };
     std::vector<Row> rows;
     while (true) {
@@ -1010,7 +1012,9 @@ load_publication_backups(sqlite3* database, const char* sql, const std::string& 
                                : std::optional{text(2)},
                 .completed = sqlite3_column_int64(statement->get(), 3),
                 .updated = sqlite3_column_int64(statement->get(), 4),
-                .failure = std::nullopt};
+                .failure = std::nullopt,
+                .kept_path = {},
+                .kept_revision = std::nullopt};
         if (sqlite3_column_type(statement->get(), 5) != SQLITE_NULL) {
             row.failure = core::Error{
                 .code = static_cast<core::ErrorCode>(sqlite3_column_int(statement->get(), 5)),
@@ -1021,6 +1025,14 @@ load_publication_backups(sqlite3* database, const char* sql, const std::string& 
             row.state > static_cast<int>(BackupState::needs_reconciliation)) {
             return std::unexpected(database_error(database, "Invalid retained-source state"));
         }
+        if (sqlite3_column_type(statement->get(), 7) != SQLITE_NULL) {
+            row.kept_path = text(7);
+        }
+        auto kept_revision = read_optional_revision(statement->get(), 8);
+        if (!kept_revision) {
+            return std::unexpected(std::move(kept_revision.error()));
+        }
+        row.kept_revision = *kept_revision;
         rows.push_back(std::move(row));
     }
     statement->reset();
@@ -1051,6 +1063,8 @@ load_publication_backups(sqlite3* database, const char* sql, const std::string& 
             .completed_at_unix_seconds = row.completed,
             .updated_at_unix_seconds = row.updated,
             .failure = std::move(row.failure),
+            .kept_raw_path = std::move(row.kept_path),
+            .kept_revision = row.kept_revision,
         });
     }
     return backups;
@@ -1067,7 +1081,8 @@ SqliteFilePublicationJournal::load_backup(const core::StableId& id) const {
     auto backups = load_publication_backups(
         implementation_->database,
         "SELECT journal_id, state, undo_id, completed_at_unix_seconds, updated_at_unix_seconds, "
-        "error_code, error_message FROM file_publication_backups WHERE journal_id = ?",
+        "error_code, error_message, kept_path, kept_device, kept_inode, kept_size, "
+        "kept_mtime_seconds, kept_mtime_nanoseconds FROM file_publication_backups WHERE journal_id = ?",
         id.to_string());
     if (!backups) {
         return std::unexpected(std::move(backups.error()));
@@ -1084,13 +1099,45 @@ SqliteFilePublicationJournal::load_backups() const {
     auto backups = load_publication_backups(
         implementation_->database,
         "SELECT journal_id, state, undo_id, completed_at_unix_seconds, updated_at_unix_seconds, "
-        "error_code, error_message FROM file_publication_backups "
+        "error_code, error_message, kept_path, kept_device, kept_inode, kept_size, "
+        "kept_mtime_seconds, kept_mtime_nanoseconds FROM file_publication_backups "
         "ORDER BY completed_at_unix_seconds DESC, rowid DESC LIMIT 10001");
     if (backups && backups->size() > 10'000U) {
         return std::unexpected(
             database_error(implementation_->database, "Too many retained sources"));
     }
     return backups;
+}
+
+core::Result<void>
+SqliteFilePublicationJournal::relocate_kept(const core::StableId& id, const std::string& raw_path,
+                                            const core::LocalSourceRevision& revision) {
+    if (id.is_nil() || raw_path.empty()) {
+        return std::unexpected(invalid_record("A moved retained source needs its path"));
+    }
+    std::scoped_lock lock{implementation_->mutex};
+    auto* database = implementation_->database;
+    auto statement = prepare(database,
+                             "UPDATE file_publication_backups SET kept_path = ?, kept_device = ?, "
+                             "kept_inode = ?, kept_size = ?, kept_mtime_seconds = ?, "
+                             "kept_mtime_nanoseconds = ? WHERE journal_id = ? AND state = 0");
+    if (!statement) {
+        return std::unexpected(std::move(statement.error()));
+    }
+    if (!bind_blob(statement->get(), 1, raw_path) || !bind_revision(statement->get(), 2, revision) ||
+        !bind_blob(statement->get(), 7, id.to_string())) {
+        return std::unexpected(database_error(database, "Could not bind moved retained source"));
+    }
+    if (auto updated = step_done(database, statement->get(), "Could not record moved source");
+        !updated) {
+        return updated;
+    }
+    if (sqlite3_changes(database) != 1) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                           .message = "Only a retained source can be moved",
+                                           .context = {}});
+    }
+    return {};
 }
 
 core::Result<void> SqliteFilePublicationJournal::transition_backup(

@@ -2,6 +2,7 @@
 #include "trackknife/core/posix.hpp"
 
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 
 #include "backup_links.hpp"
 #include "trackknife/core/atomic_rename.hpp"
@@ -144,7 +145,7 @@ bool read_all(int fd, std::vector<char>& bytes) {
 // ADR-0248: the backup as a verified copy where the filesystem refuses the
 // hard link, with the original's permissions and time.
 core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& name,
-                                                    const std::string& backup) {
+                                                    int backup_fd, const std::string& backup) {
     constexpr off_t limit = 256 * 1024 * 1024;
     Descriptor source{::openat(fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
     struct stat status{};
@@ -156,11 +157,11 @@ core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& n
     if (!read_all(source.fd, original))
         return std::unexpected(error("Folder image changed while backed up"));
     Descriptor copy{
-        ::openat(fd, backup.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
+        ::openat(backup_fd, backup.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
     if (copy.fd < 0)
         return std::unexpected(io_error());
     const auto discard = [&](core::Error issue) -> core::Result<core::LocalSourceRevision> {
-        static_cast<void>(::unlinkat(fd, backup.c_str(), 0));
+        static_cast<void>(::unlinkat(backup_fd, backup.c_str(), 0));
         return std::unexpected(std::move(issue));
     };
     for (std::size_t offset = 0; offset < original.size();) {
@@ -179,8 +180,8 @@ core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& n
     // By path, after the close: the time an SMB mount then keeps. sshfs
     // refuses it, and the copy keeps its own.
     const std::array times{status.st_atim, status.st_mtim};
-    static_cast<void>(::utimensat(fd, backup.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
-    Descriptor reread{::openat(fd, backup.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+    static_cast<void>(::utimensat(backup_fd, backup.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
+    Descriptor reread{::openat(backup_fd, backup.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
     std::vector<char> copied(original.size());
     struct stat after{};
     if (reread.fd < 0 || !read_all(reread.fd, copied) || copied != original ||
@@ -188,7 +189,7 @@ core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& n
         after.st_mtim.tv_sec != status.st_mtim.tv_sec ||
         after.st_mtim.tv_nsec != status.st_mtim.tv_nsec)
         return discard(error("Folder image backup copy failed verification"));
-    auto identity = revision(fd, backup);
+    auto identity = revision(backup_fd, backup);
     if (!identity || !*identity)
         return discard(!identity ? identity.error() : error("Folder image backup vanished"));
     return **identity;
@@ -206,8 +207,15 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     const auto original = existed ? std::optional{record.expected_revision} : std::nullopt;
     // The backup: the original's own inode, or a copy of it (ADR-0248).
     const auto kept = existed ? std::optional{backup_identity(record)} : std::nullopt;
+    // ADR-0266: kept where the engine keeps undo copies -- this folder, or
+    // its own.
+    auto backup_opened = open_parent(record.backup_raw_path);
+    if (!backup_opened)
+        return std::unexpected(backup_opened.error());
+    Descriptor backup_directory{*backup_opened};
+    const int backup_fd = backup_directory.fd;
     auto current = revision(fd, target);
-    auto old = revision(fd, backup);
+    auto old = revision(backup_fd, backup);
     const auto reconcile = [&](core::Error issue) -> core::Result<MetadataRecoveryResult> {
         auto changed =
             journal.transition(record.id, {.expected_state = record.state,
@@ -234,7 +242,8 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
         if (*old != kept)
             return reconcile(error("Folder image recovery backup is missing or changed"));
         if (existed) {
-            auto original_image = metadata::read_artwork_image_file(descriptor_path(fd, backup));
+            auto original_image =
+                metadata::read_artwork_image_file(descriptor_path(backup_fd, backup));
             if (!original_image || record.changes.front().original_values !=
                                        std::vector<std::string>{metadata::artwork_fingerprint_hex(
                                            original_image->content_fingerprint)})
@@ -270,14 +279,14 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     if (record.state == State::prepared && existed && !record.backup_revision) {
         // A copy made but not yet journaled (ADR-0248): the image is
         // untouched, and the copy at this operation's own path is its debris.
-        if (::unlinkat(fd, backup.c_str(), 0) != 0 && errno != ENOENT)
+        if (::unlinkat(backup_fd, backup.c_str(), 0) != 0 && errno != ENOENT)
             return reconcile(io_error());
     } else {
-        cleaned = remove_matching(fd, backup, kept);
+        cleaned = remove_matching(backup_fd, backup, kept);
         if (!cleaned)
             return reconcile(cleaned.error());
     }
-    if (::fsync(fd) != 0)
+    if (::fsync(fd) != 0 || ::fsync(backup_fd) != 0)
         return reconcile(io_error());
     auto rolled_back = step(journal, record, State::rolled_back);
     if (!rolled_back)
@@ -300,7 +309,7 @@ recover_folder_image(const MetadataOperationJournalRecord& record,
     if (record.content_kind != MetadataOperationContentKind::folder_image ||
         record.changes.size() != 1 || record.changes.front().planned_values.size() != 1 ||
         record.prepared_raw_path != (parent / (stem + "prepared")).native() ||
-        record.backup_raw_path != (parent / (stem + "backup")).native())
+        std::filesystem::path{record.backup_raw_path}.filename() != stem + "backup")
         return std::unexpected(error("Invalid folder image recovery evidence"));
     auto opened = open_parent(record.source_raw_path);
     if (!opened)
@@ -372,7 +381,7 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
     const auto parent = std::filesystem::path{plan.raw_path}.parent_path();
     const auto stem = ".trackknife-" + record.id.to_string() + ".metadata-";
     record.prepared_raw_path = (parent / (stem + "prepared")).native();
-    record.backup_raw_path = (parent / (stem + "backup")).native();
+    record.backup_raw_path = undo_copy_path(plan.raw_path, stem + "backup");
     record.expected_revision = current->value_or(core::LocalSourceRevision{});
     record.occurrence_indexes = {0};
     record.content_kind = MetadataOperationContentKind::folder_image;
@@ -394,6 +403,10 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
         return std::unexpected(created.error());
     const auto prepared = basename(record.prepared_raw_path);
     const auto backup = basename(record.backup_raw_path);
+    auto backup_opened = open_parent(record.backup_raw_path);
+    if (!backup_opened)
+        return std::unexpected(backup_opened.error());
+    Descriptor backup_directory{*backup_opened};
     Descriptor output{::openat(directory.fd, prepared.c_str(),
                                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644)};
     const auto fail = [&](core::Error issue) -> core::Result<MetadataCommitResult> {
@@ -440,10 +453,10 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
     const bool without_links = detail::filesystem_without_links_simulated();
     if (*current) {
         if (without_links ||
-            ::linkat(directory.fd, name.c_str(), directory.fd, backup.c_str(), 0) != 0) {
+            ::linkat(directory.fd, name.c_str(), backup_directory.fd, backup.c_str(), 0) != 0) {
             if (!without_links && !detail::hard_link_refused(errno))
                 return fail(io_error());
-            auto copied = copy_backup(directory.fd, name, backup);
+            auto copied = copy_backup(directory.fd, name, backup_directory.fd, backup);
             if (!copied)
                 return fail(copied.error());
             auto recorded =
@@ -454,12 +467,12 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
                                                .failure = std::nullopt,
                                                .backup_revision = *copied});
             if (!recorded) {
-                static_cast<void>(::unlinkat(directory.fd, backup.c_str(), 0));
+                static_cast<void>(::unlinkat(backup_directory.fd, backup.c_str(), 0));
                 return fail(recorded.error());
             }
             record.backup_revision = *copied;
         }
-        if (::fsync(directory.fd) != 0)
+        if (::fsync(directory.fd) != 0 || ::fsync(backup_directory.fd) != 0)
             return fail(io_error());
         const bool exchanged =
             !without_links && core::rename_with_flags(directory.fd, prepared.c_str(), directory.fd,

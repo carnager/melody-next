@@ -11,6 +11,8 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/operations/undo_copies.hpp"
+#include "trackknife/protocol/message.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 
@@ -172,12 +174,86 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
         !maintained) {
         remember(std::move(maintained.error()));
     }
+    // ADR-0266: every undo copy where the engine keeps them -- those kept
+    // beside files before, and any a crash left half moved.
+    if (auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
+        metadata_journal) {
+        if (auto kept = operations::keep_undo_copies_in_place(*metadata_journal, file_journal);
+            !kept) {
+            remember(std::move(kept.error()));
+        }
+    }
     return recovery;
 }
 
 namespace {
 
 constexpr std::string_view retention_key = "backups.retention";
+constexpr std::string_view location_key = "backups.location";
+
+// The place a document names, checked: {place, folder?}.
+[[nodiscard]] core::Result<Json> location_of(const Json& document) {
+    const auto place = document.value("place", std::string{"engine"});
+    if (place == "engine" || place == "beside") {
+        return Json{{"place", place}};
+    }
+    if (place != "folder") {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "place is engine, folder or beside",
+                                           .context = {{.key = "param", .value = "place"}}});
+    }
+    const auto folder = document.find("folder");
+    auto raw = folder != document.end() && folder->is_string()
+                   ? protocol::decode_raw_path(folder->get<std::string>())
+                   : core::Result<std::string>{std::unexpected(core::Error{
+                         .code = core::ErrorCode::invalid_argument, .message = {}, .context = {}})};
+    if (!raw || !std::filesystem::path{*raw}.is_absolute()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "a folder is an absolute path",
+                                           .context = {{.key = "param", .value = "folder"}}});
+    }
+    return Json{{"place", "folder"}, {"folder", protocol::encode_raw_path(*raw)}};
+}
+
+[[nodiscard]] Json stored_location(const Workspace& workspace) {
+    auto stored = workspace.load_engine_state(location_key);
+    if (stored && *stored) {
+        auto document = Json::parse(**stored, nullptr, false);
+        if (!document.is_discarded() && document.is_object()) {
+            if (auto checked = location_of(document)) {
+                return *checked;
+            }
+        }
+    }
+    return Json{{"place", "engine"}};
+}
+
+[[nodiscard]] std::filesystem::path folder_of(const Json& location,
+                                              const std::filesystem::path& database) {
+    const auto place = location.value("place", std::string{"engine"});
+    if (place == "beside") {
+        return {};
+    }
+    if (place == "folder") {
+        if (auto raw = protocol::decode_raw_path(location.value("folder", std::string{}))) {
+            return std::filesystem::path{*raw};
+        }
+    }
+    return database.parent_path() / "undo";
+}
+
+// Every undo copy the journals know moved where they are kept now.
+[[nodiscard]] core::Result<std::size_t> relocate_undo_copies(const std::filesystem::path& database) {
+    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
+    if (!metadata_journal) {
+        return std::unexpected(std::move(metadata_journal.error()));
+    }
+    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
+    if (!file_journal) {
+        return std::unexpected(std::move(file_journal.error()));
+    }
+    return operations::keep_undo_copies_in_place(*metadata_journal, *file_journal);
+}
 constexpr std::int64_t seconds_a_day = 24 * 60 * 60;
 constexpr std::uint64_t bytes_a_gigabyte = 1024ULL * 1024ULL * 1024ULL;
 
@@ -264,8 +340,42 @@ operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& work
     return policy ? *policy : defaults;
 }
 
+std::filesystem::path undo_copy_folder(const Workspace& workspace,
+                                       const std::filesystem::path& database) {
+    return folder_of(stored_location(workspace), database);
+}
+
 void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
                              Workspace& workspace) {
+    const auto described = [database](Json location) {
+        location["kept_in"] = protocol::encode_raw_path(folder_of(location, database).native());
+        return location;
+    };
+    dispatcher.on("backups.location", [&workspace, described](const Json&) -> core::Result<Json> {
+        return described(stored_location(workspace));
+    });
+    dispatcher.on("backups.set_location",
+                  [&workspace, database, described](const Json& params) -> core::Result<Json> {
+                      auto location = location_of(params);
+                      if (!location) {
+                          return std::unexpected(std::move(location.error()));
+                      }
+                      const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                              .count();
+                      if (auto saved =
+                              workspace.save_engine_state(location_key, location->dump(), now_ms);
+                          !saved) {
+                          return std::unexpected(std::move(saved.error()));
+                      }
+                      operations::set_undo_copy_folder(folder_of(*location, database));
+                      // Moved at once: what the person chose holds for the copies there are.
+                      if (auto moved = relocate_undo_copies(database); !moved) {
+                          std::cerr << "melodyd: undo copies not all moved: "
+                                    << moved.error().message << "\n";
+                      }
+                      return described(*location);
+                  });
     dispatcher.on("backups.retention", [&workspace](const Json&) -> core::Result<Json> {
         return retention_document(backup_retention(workspace));
     });

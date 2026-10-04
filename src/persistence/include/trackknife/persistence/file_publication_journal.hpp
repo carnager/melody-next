@@ -39,6 +39,9 @@ class SqliteFilePublicationJournal final : public operations::FilePublicationJou
     [[nodiscard]] core::Result<void>
     transition_backup(const core::StableId& id,
                       const operations::FilePublicationBackupTransition& transition) override;
+    [[nodiscard]] core::Result<void>
+    relocate_kept(const core::StableId& id, const std::string& raw_path,
+                  const core::LocalSourceRevision& revision) override;
     // UI/history query over terminal and non-terminal evidence. This is not
     // part of the executor interface because recovery only needs incomplete
     // records and reversal lookups.

@@ -28,7 +28,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 52U;
+constexpr unsigned current_schema_version = 53U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1541,6 +1541,23 @@ CREATE TABLE file_publication_backups (
 CREATE INDEX file_publication_backups_state_time
     ON file_publication_backups(state, completed_at_unix_seconds DESC);
 UPDATE schema_version SET version = 52;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 52) {
+        // ADR-0266: where a publication's retained source is kept, when it
+        // was moved where undo copies are, and its identity there.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE file_publication_backups ADD COLUMN kept_path BLOB;
+ALTER TABLE file_publication_backups ADD COLUMN kept_device BLOB;
+ALTER TABLE file_publication_backups ADD COLUMN kept_inode BLOB;
+ALTER TABLE file_publication_backups ADD COLUMN kept_size BLOB;
+ALTER TABLE file_publication_backups ADD COLUMN kept_mtime_seconds BLOB;
+ALTER TABLE file_publication_backups ADD COLUMN kept_mtime_nanoseconds BLOB;
+UPDATE schema_version SET version = 53;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

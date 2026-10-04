@@ -1802,6 +1802,61 @@ void keeps_undo_copies_where_asked(const std::filesystem::path& fixture_director
     }
 }
 
+// ADR-0266: a backup kept beside its file, moved where undo copies are kept
+// -- renamed, or copied to another filesystem -- and undone from there.
+void moves_backups_kept_beside_files(const std::filesystem::path& fixture_directory) {
+    std::vector<std::filesystem::path> roots{std::filesystem::temp_directory_path()};
+    if (::access("/dev/shm", W_OK) == 0) {
+        roots.emplace_back("/dev/shm");
+    }
+    for (const auto& root : roots) {
+        TemporaryDirectory directory;
+        const auto album = directory.path() / "Album";
+        std::filesystem::create_directory(album);
+        const auto folder = root / ("trackknife-undo-" + core::StableId::random().to_string());
+        const auto source = materialize(fixture_directory, album / "01.flac");
+        const auto original_bytes = read_bytes(source);
+        auto plan = title_plan(source, "Kept beside, then moved");
+        auto journal = open_journal(directory, "moved.sqlite3");
+        auto files = persistence::SqliteFilePublicationJournal::open(directory.path() /
+                                                                     "moved.sqlite3");
+        CHECK(plan && journal && files);
+        if (!plan || !journal || !files) {
+            continue;
+        }
+        auto committed =
+            operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+        CHECK(committed.has_value());
+        if (!committed) {
+            continue;
+        }
+        CHECK(std::filesystem::path{committed->backup_raw_path}.parent_path() == album);
+        operations::set_undo_copy_folder(folder);
+        const auto moved = operations::keep_undo_copies_in_place(*journal, *files);
+        if (!moved) {
+            std::cerr << moved.error().message << '\n';
+        }
+        CHECK(moved && *moved == 1U);
+        const auto record = journal->load(committed->journal_id);
+        CHECK(record && *record &&
+              std::filesystem::path{(**record).backup_raw_path}.parent_path() == folder);
+        for (const auto& entry : std::filesystem::directory_iterator{album}) {
+            CHECK(!entry.path().filename().string().starts_with(".trackknife-"));
+        }
+        const auto undone = operations::undo_metadata_operation(committed->journal_id, *journal,
+                                                                successful_dependent_commit);
+        if (!undone) {
+            std::cerr << undone.error().message << '\n';
+        }
+        CHECK(undone.has_value());
+        CHECK(read_bytes(source) == original_bytes);
+        CHECK(std::filesystem::is_empty(folder));
+        operations::set_undo_copy_folder({});
+        std::error_code ignored;
+        std::filesystem::remove_all(folder, ignored);
+    }
+}
+
 void retention_releases_only_verified_backups(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source = materialize(fixture_directory, directory.path() / "retention.flac");
@@ -3872,6 +3927,17 @@ int main(const int argc, char** argv) {
         damaged_unrelated_journal_does_not_block_cover_save(fixture_directory);
         folder_cover_policy_publication_and_recovery(fixture_directory);
         folder_cover_without_hard_links(fixture_directory);
+        {
+            // ADR-0266: the same, with undo copies kept in a folder of their own.
+            const auto undo_folder = std::filesystem::temp_directory_path() /
+                                     ("trackknife-undo-" + core::StableId::random().to_string());
+            operations::set_undo_copy_folder(undo_folder);
+            folder_cover_policy_publication_and_recovery(fixture_directory);
+            folder_cover_without_hard_links(fixture_directory);
+            operations::set_undo_copy_folder({});
+            std::error_code ignored;
+            std::filesystem::remove_all(undo_folder, ignored);
+        }
         cover_size_limits_convert_each_destination(fixture_directory);
         commits_atomically_and_retains_verified_backup(fixture_directory);
         rolls_back_dependent_and_journal_failures(fixture_directory);
@@ -3889,6 +3955,7 @@ int main(const int argc, char** argv) {
         undoes_completed_metadata_and_recovers_interrupted_undo(fixture_directory);
         undoes_text_edits_in_every_writable_container(fixture_directory);
         keeps_undo_copies_where_asked(fixture_directory);
+        moves_backups_kept_beside_files(fixture_directory);
         retention_releases_only_verified_backups(fixture_directory);
         undo_conflicts_become_visible_reconciliation_evidence(fixture_directory);
         retention_releases_older_verified_backup_for_the_same_source(fixture_directory);

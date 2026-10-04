@@ -64,6 +64,8 @@ qt_add_library(
     engine_folder_dialog.cpp
     output_profiles_widget.cpp
     output_profiles_widget.hpp
+    single_instance.cpp
+    single_instance.hpp
     undo_location_widget.cpp
     undo_location_widget.hpp
     shortcut_settings.cpp

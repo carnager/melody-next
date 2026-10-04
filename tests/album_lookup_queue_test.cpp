@@ -115,6 +115,7 @@ class AlbumLookupQueueTest : public QObject {
     void anUnknownIdAndNoIdAreSearched();
     void oneThingAtATimeInTurn();
     void untaggedAlbumsAskNothing();
+    void untaggedAlbumsAreHeard();
     void aFailureIsSaidAndTheNextGoesOn();
     void stoppingDropsWhatIsOnItsWay();
 };
@@ -184,6 +185,60 @@ void AlbumLookupQueueTest::untaggedAlbumsAskNothing() {
     QVERIFY(found.front().at(1).value<musicbrainz::AlbumLookupResult>().outcome ==
             musicbrainz::AlbumLookupOutcome::no_match);
     QVERIFY(musicbrainz.asked.empty());
+}
+
+// ADR-0261: with AcoustID set up, an album with nothing to search by is
+// heard -- each file fingerprinted and looked up -- and the release its files
+// are on examined; a release heard on no file is not.
+void AlbumLookupQueueTest::untaggedAlbumsAreHeard() {
+    FakeMusicBrainz musicbrainz;
+    auto service = musicbrainz.service();
+    std::vector<QString> fingerprinted;
+    int acoustid_asked = 0;
+    service.fingerprint = [&fingerprinted](const QString& path,
+                                           std::function<void(core::Result<AcoustIdFingerprint>)>
+                                               then) {
+        fingerprinted.push_back(path);
+        QTimer::singleShot(1, [path, then = std::move(then)] {
+            // One file cannot be heard: the others still count.
+            if (path.endsWith(QStringLiteral("broken.flac"))) {
+                then(std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                                 .message = "unreadable",
+                                                 .context = {}}));
+                return;
+            }
+            then(AcoustIdFingerprint{.duration_seconds = 60U, .fingerprint = path});
+        });
+    };
+    service.acoustid_lookup = [&acoustid_asked](const AcoustIdFingerprint&,
+                                                std::function<void(core::Result<QByteArray>)> then) {
+        ++acoustid_asked;
+        QTimer::singleShot(1, [then = std::move(then)] {
+            then(QByteArray{R"json({"status": "ok", "results": [
+                {"id": "x", "score": 0.95, "recordings": [
+                  {"id": "bbbb1111-0000-0000-0000-000000000001",
+                   "releases": [{"id": "11111111-2222-3333-4444-555555555555"}]}]},
+                {"id": "y", "score": 0.2, "recordings": [
+                  {"id": "bbbb1111-0000-0000-0000-000000000009",
+                   "releases": [{"id": "22222222-2222-3333-4444-555555555555"}]}]}]})json"});
+        });
+    };
+    AlbumLookupQueue queue{service};
+    QSignalSpy found{&queue, &AlbumLookupQueue::lookedUp};
+    auto untagged = album({}, {}, {});
+    untagged.paths = {"/music/rip/01.flac", "/music/rip/broken.flac", "/music/rip/02.flac"};
+    untagged.tracks.push_back(untagged.tracks.back());
+    queue.add(4U, untagged);
+    QTRY_COMPARE(found.count(), 1);
+    QCOMPARE(fingerprinted.size(), 3U);
+    QCOMPARE(acoustid_asked, 2);
+    QCOMPARE(musicbrainz.searches(), 0);
+    // The release heard, looked up; the one below the score, not.
+    QCOMPARE(musicbrainz.asked.size(), 1U);
+    QVERIFY(musicbrainz.asked.front().contains(QString::fromLatin1(known_id)));
+    const auto result = found.front().at(1).value<musicbrainz::AlbumLookupResult>();
+    QVERIFY(result.outcome != musicbrainz::AlbumLookupOutcome::no_match);
+    QCOMPARE(result.candidates.front().release.id, std::string{known_id});
 }
 
 void AlbumLookupQueueTest::aFailureIsSaidAndTheNextGoesOn() {

@@ -20,6 +20,9 @@ struct AlbumQuery {
     std::string artist;
     std::string album;
     std::vector<LocalTrackDescriptor> tracks;
+    // The files, as raw paths, by track: fingerprinted when there is
+    // nothing to search by (ADR-0261, AcoustID).
+    std::vector<std::string> paths{};
 
     friend bool operator==(const AlbumQuery&, const AlbumQuery&) = default;
 };

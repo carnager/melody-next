@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "workspace/album_lookup_queue.hpp"
 
+#include "trackknife/musicbrainz/acoustid.hpp"
+
+#include <QFile>
 #include <QPointer>
 
+#include <algorithm>
 #include <string_view>
 #include <utility>
 
@@ -48,7 +52,14 @@ void AlbumLookupQueue::forget(const std::size_t id) {
 
 std::size_t AlbumLookupQueue::requestsLeft() const {
     const auto of = [](const Album& album) {
-        return album.query.release_id.empty() ? 1U + releases_per_search : 1U;
+        if (!album.query.release_id.empty()) {
+            return std::size_t{1U};
+        }
+        // Nothing to search by: a fingerprint lookup a file, then releases.
+        if (album.query.artist.empty() && album.query.album.empty()) {
+            return album.query.paths.size() + releases_per_search;
+        }
+        return 1U + releases_per_search;
     };
     std::size_t left = 0U;
     for (const auto& album : waiting_) {
@@ -124,7 +135,11 @@ void AlbumLookupQueue::search() {
     const auto url = musicbrainz::build_release_search_url(musicbrainz::ReleaseSearchQuery{
         .artist = query.artist, .release = query.album, .track_count = std::nullopt, .limit = 25U});
     if (!url) {
-        // Nothing to search by: no tags, and no fingerprints asked for.
+        // Nothing to search by: heard instead, where AcoustID is set up.
+        if (canHear()) {
+            hear(0U);
+            return;
+        }
         finish();
         return;
     }
@@ -142,6 +157,74 @@ void AlbumLookupQueue::search() {
             musicbrainz::releases_to_examine(current_->query, *found, releases_per_search);
         examineNext();
     });
+}
+
+bool AlbumLookupQueue::canHear() const {
+    return current_ && !current_->query.paths.empty() && static_cast<bool>(service_.fingerprint) &&
+           static_cast<bool>(service_.acoustid_lookup);
+}
+
+void AlbumLookupQueue::hear(const std::size_t file) {
+    if (file >= current_->query.paths.size()) {
+        heard();
+        return;
+    }
+    const QPointer self{this};
+    const auto generation = generation_;
+    const auto fresh = [self, generation] {
+        return !self.isNull() && generation == self->generation_ && self->current_;
+    };
+    // A file that cannot be heard is passed over; the others still count.
+    service_.fingerprint(
+        QFile::decodeName(QByteArray::fromStdString(current_->query.paths[file])),
+        [self, fresh, file](core::Result<AcoustIdFingerprint> printed) {
+            if (!fresh()) {
+                return;
+            }
+            if (!printed) {
+                self->hear(file + 1U);
+                return;
+            }
+            self->service_.acoustid_lookup(*printed, [self, fresh,
+                                                      file](core::Result<QByteArray> body) {
+                if (!fresh()) {
+                    return;
+                }
+                if (body) {
+                    const auto found = musicbrainz::parse_acoustid_lookup(view(*body));
+                    if (found) {
+                        for (const auto& result : found->results) {
+                            if (result.score < minimum_acoustid_score) {
+                                continue;
+                            }
+                            for (const auto& recording : result.recordings) {
+                                for (const auto& release : recording.release_ids) {
+                                    self->current_->heard_on[release].insert(file);
+                                }
+                            }
+                        }
+                    }
+                }
+                self->hear(file + 1U);
+            });
+        });
+}
+
+void AlbumLookupQueue::heard() {
+    // The releases most of its files are on, first; ties as found.
+    std::vector<std::pair<std::string, std::size_t>> ranked;
+    for (const auto& [release, files] : current_->heard_on) {
+        ranked.emplace_back(release, files.size());
+    }
+    std::ranges::stable_sort(ranked, std::ranges::greater{},
+                             &std::pair<std::string, std::size_t>::second);
+    for (const auto& [release, files] : ranked) {
+        if (current_->to_examine.size() == releases_per_search) {
+            break;
+        }
+        current_->to_examine.push_back(release);
+    }
+    examineNext();
 }
 
 void AlbumLookupQueue::examineNext() {

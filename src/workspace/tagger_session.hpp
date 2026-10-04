@@ -633,6 +633,11 @@ class TaggerSession final : public QObject {
     // suggestions and Save wait for the files' own.
     bool provisional_{false};
     bool writing_elsewhere_{false};
+    // Proposals waiting for the automatic scripts to finish staging, and
+    // the set being staged, previewed again when the draft moved under it.
+    std::optional<metadata::MetadataProposalSet> waiting_proposals_;
+    std::optional<metadata::MetadataProposalSet> staging_proposals_;
+    int proposal_attempts_{0};
     bool replaygain_on_apply_{false};
     bool skip_existing_gain_{true};
     // A scan for a write is under way; Apply waits for it; it has been made.

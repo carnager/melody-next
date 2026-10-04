@@ -389,8 +389,11 @@ void AlbumBatchSession::settled(const bool staged) {
         album.state = State::staged;
         album.note.clear();
     } else {
+        // Back to the person, saying why -- not round again unexplained.
         album.state = State::needs_choice;
-        album.note = QStringLiteral("Could not be staged by itself");
+        const auto why = tagger_.isNull() ? QString{} : tagger_->status();
+        album.note = why.isEmpty() ? QStringLiteral("Could not be staged")
+                                   : QStringLiteral("Could not be staged: %1").arg(why);
     }
     emit changed();
     stageNext();

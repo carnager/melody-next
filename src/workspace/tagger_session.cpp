@@ -1436,6 +1436,18 @@ void TaggerSession::stageAutomaticTransformations() {
 
 void TaggerSession::finishAutomaticStage() {
     automatic_stage_running_ = false;
+    // Proposals that waited for the scripts: staged now, whatever they did.
+    struct Then {
+        TaggerSession* session;
+        ~Then() {
+            if (session->waiting_proposals_ && !session->proposal_running_) {
+                auto waiting = std::move(*session->waiting_proposals_);
+                session->waiting_proposals_.reset();
+                session->applyMusicBrainzProposals(std::move(waiting));
+            }
+            emit session->changed();
+        }
+    } then{this};
     const auto result = automatic_watcher_.result();
     if (!result || !*result) {
         const auto message = result ? display_utf8(result->error().message)
@@ -1556,8 +1568,22 @@ void TaggerSession::finishProposals() {
         emit proposalsSettled(true);
         return;
     }
-    if (grid_model_ == nullptr ||
-        !stageTransformation(preview, QStringList{display_utf8(preview.chain.name)})) {
+    if (grid_model_ == nullptr) {
+        emit proposalsSettled(false);
+        return;
+    }
+    // A draft that moved under the preview -- an edit, a script -- is no
+    // reason to give up: previewed again against it, twice at most.
+    if (!grid_model_->previewStillApplies(preview) && staging_proposals_ &&
+        proposal_attempts_ < 3) {
+        auto again = std::move(*staging_proposals_);
+        staging_proposals_.reset();
+        applyMusicBrainzProposals(std::move(again));
+        return;
+    }
+    staging_proposals_.reset();
+    proposal_attempts_ = 0;
+    if (!stageTransformation(preview, QStringList{display_utf8(preview.chain.name)})) {
         emit changed();
         emit proposalsSettled(false);
         return;
@@ -1603,7 +1629,8 @@ std::optional<std::int64_t> TaggerSession::durationOf(const std::size_t item) co
 }
 
 bool TaggerSession::canStageProposals() const {
-    return grid_model_ != nullptr && !proposal_running_ && !provisional_ && !writing_elsewhere_;
+    return grid_model_ != nullptr && !proposal_running_ && !provisional_ && !writing_elsewhere_ &&
+           !automatic_stage_running_ && !waiting_proposals_;
 }
 
 bool TaggerSession::canWriteElsewhere() const {
@@ -1729,6 +1756,17 @@ void TaggerSession::applyMusicBrainzProposals(metadata::MetadataProposalSet prop
     if (grid_model_ == nullptr || proposal_running_) {
         return;
     }
+    // The automatic scripts are staging: a preview now would be of a draft
+    // about to change. Staged once they are done.
+    if (automatic_stage_running_) {
+        waiting_proposals_ = std::move(proposals);
+        return;
+    }
+    if (!staging_proposals_ || proposal_attempts_ == 0) {
+        proposal_attempts_ = 0;
+    }
+    staging_proposals_ = proposals;
+    ++proposal_attempts_;
     proposal_running_ = true;
     setStatus(QStringLiteral("Matching the MusicBrainz release to the draft…"));
     emit changed();

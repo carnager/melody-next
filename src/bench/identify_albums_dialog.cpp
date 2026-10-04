@@ -582,8 +582,12 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
     for (std::size_t index = 0; index < album; ++index) {
         place += albums[index].state == State::needs_choice ? 1U : 0U;
     }
-    review_heading_->setText(QStringLiteral("<b>%1</b> · %2")
-                                 .arg(escaped(name_of(entry)), escaped(detail_of(entry))));
+    // Why it is back, when it was accepted before and could not be staged.
+    review_heading_->setText(
+        QStringLiteral("<b>%1</b> · %2%3")
+            .arg(escaped(name_of(entry)), escaped(detail_of(entry)),
+                 entry.note.isEmpty() ? QString{}
+                                      : QStringLiteral("<br>%1").arg(escaped(entry.note))));
     review_place_->setText(QStringLiteral("%1 of %2 needing you")
                                .arg(place)
                                .arg(session_->count(State::needs_choice)));

@@ -135,6 +135,9 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<void> set_rating_scale(const std::string& scale);
     // ADR-0245: the tag ratings are copied into; empty for none.
     [[nodiscard]] core::Result<void> set_rating_backup_tag(const std::string& tag);
+    // ADR-0263: how long the files writes replace are kept there for undo
+    // (backups.set_retention); 0 keeps none.
+    [[nodiscard]] core::Result<void> set_backup_retention(int days, int writes, int gigabytes);
 
     // Naming layouts handed over (layouts.put): each added or updated, and
     // only `removed` taken away. This engine's own move destinations, and

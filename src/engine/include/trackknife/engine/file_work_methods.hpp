@@ -7,6 +7,7 @@
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/operations/file_publication.hpp"
+#include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <cstddef>
@@ -57,12 +58,23 @@ using MoveFollower =
 
 // Recovers the engine's journals, as Trackknife recovers its own: tag writes
 // and moves finished or rolled back where that is safe, left for the user
-// otherwise. A move finished here is followed by `follow`. Backups are
-// released, as there is no undo to keep them for. Run once, at startup,
-// before clients connect.
-[[nodiscard]] FileWorkRecovery recover_file_work(const std::filesystem::path& database,
-                                                 LocalCatalogue& catalogue,
-                                                 const MoveFollower& follow);
+// otherwise. A move finished here is followed by `follow`; an undo a crash
+// interrupted is finished. The files writes replaced are kept for undo within
+// `retention` (ADR-0263). Run once, at startup, before clients connect.
+[[nodiscard]] FileWorkRecovery
+recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalogue,
+                  const MoveFollower& follow,
+                  const operations::MetadataBackupRetentionPolicy& retention = {});
+
+// ADR-0263: how long the files a write replaced are kept for undo -- the
+// engine_state document "backups.retention", else the policy's defaults.
+[[nodiscard]] operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& workspace);
+
+// backups.retention -> {max_age_days, max_writes, max_gigabytes};
+// backups.set_retention {any of them} -> the same, kept and applied at once
+// to the backups there are. 0 keeps none.
+void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
+                             Workspace& workspace);
 
 // metadata.interrupted answers {recovered, error, interrupted: [{id, path,
 // message, target?}]}: what startup recovery did, and each operation it could

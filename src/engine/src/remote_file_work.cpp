@@ -926,6 +926,22 @@ core::Result<void> RemoteFileWork::set_rating_backup_tag(const std::string& tag)
     return {};
 }
 
+core::Result<void> RemoteFileWork::set_backup_retention(const int days, const int writes,
+                                                        const int gigabytes) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)
+                      ->call("backups.set_retention", Json{{"max_age_days", days},
+                                                           {"max_writes", writes},
+                                                           {"max_gigabytes", gigabytes}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
 core::Result<void>
 RemoteFileWork::put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
                             const std::vector<core::StableId>& removed) {

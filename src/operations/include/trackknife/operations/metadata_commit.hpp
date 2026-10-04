@@ -115,7 +115,7 @@ struct MetadataBackupRetentionPolicy {
     // startup), so a commit remains undoable for the rest of its first session.
     std::int64_t maximum_age_seconds{7 * 24 * 60 * 60};
     std::size_t maximum_entries{256U};
-    std::uint64_t maximum_total_bytes{10U * 1024U * 1024U * 1024U};
+    std::uint64_t maximum_total_bytes{10ULL * 1024ULL * 1024ULL * 1024ULL};
 };
 
 enum class MetadataBackupMaintenanceOutcome : std::uint8_t {

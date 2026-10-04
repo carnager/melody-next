@@ -26,6 +26,7 @@
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/undo.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
@@ -1740,6 +1741,58 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
 
 } // namespace
 
+// ADR-0263: how long backups are kept is the engine's, as clients set it;
+// a lower limit lets go of what it no longer keeps at once.
+void backups_are_kept_as_long_as_asked(const std::filesystem::path& directory,
+                                       const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    namespace operations = trackknife::operations;
+    const auto database = directory / "retention.sqlite3";
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "a workspace");
+    protocol::Dispatcher dispatcher;
+    engine::register_backup_methods(dispatcher, database, *workspace);
+    const auto ask = [&dispatcher](std::string method, protocol::Json params) {
+        return dispatcher.dispatch(protocol::Request{
+            .id = 1, .method = std::move(method), .params = over_the_wire(std::move(params))});
+    };
+    const auto first = ask("backups.retention", protocol::Json::object());
+    require(first.result && first.result->at("max_age_days") == 7 &&
+                first.result->at("max_writes") == 256 && first.result->at("max_gigabytes") == 10,
+            "the defaults to begin with");
+    require(ask("backups.set_retention", {{"max_writes", -1}}).error.has_value(),
+            "a limit below 0 is refused");
+
+    // A write keeps the file it replaced...
+    const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "retention.flac").string();
+    const auto read = metadata::read_local_metadata(flac);
+    require(read.has_value(), "the file is read");
+    auto selection = metadata::StagedMetadataSelection::create({metadata::StagedMetadataSource{
+        .raw_path = flac, .source_revision = read->source_revision, .baseline = read->document}});
+    require(selection.has_value(), "a selection");
+    const auto title = selection->field_index("title");
+    require(title.has_value(), "with a title");
+    metadata::StagedMetadataPatchSet patches;
+    require(patches.replace_values(*selection, 0U, *title, {"Kept"}).has_value(), "staged");
+    const auto plan = metadata::build_metadata_write_plan(*selection, patches,
+                                                          metadata::local_metadata_file_access());
+    require(plan && plan->ready(), "planned");
+    auto journal = trackknife::persistence::SqliteMetadataOperationJournal::open(database);
+    require(journal.has_value(), "the journal");
+    const auto committed = operations::commit_metadata_source(
+        plan->sources.front(), *journal,
+        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+    require(committed && std::filesystem::exists(committed->backup_raw_path),
+            "a write keeps the file it replaced");
+
+    // ...until none are to be kept: let go at once, and remembered.
+    const auto set = ask("backups.set_retention", {{"max_writes", 0}});
+    require(set.result && set.result->at("max_writes") == 0 && set.result->at("max_age_days") == 7,
+            "the limit is set, the others kept");
+    require(!std::filesystem::exists(committed->backup_raw_path), "and the backup let go");
+    require(engine::backup_retention(*workspace).maximum_entries == 0U, "and remembered");
+}
+
 int main(int argc, char** argv) {
     require(argc == 2, "usage: engine_file_work_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
@@ -1749,6 +1802,7 @@ int main(int argc, char** argv) {
     documents_are_exact();
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
+    backups_are_kept_as_long_as_asked(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);

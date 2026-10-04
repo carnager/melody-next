@@ -81,6 +81,11 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     read(QLatin1String(SettingsKeys::rating_backup_key), false);
     read(QLatin1String(SettingsKeys::rating_backup_tag_key),
          QString::fromLatin1(metadata::default_rating_backup_tag));
+    read(QLatin1String(SettingsKeys::undo_keep_days_key), SettingsKeys::undo_keep_days_default);
+    read(QLatin1String(SettingsKeys::undo_keep_writes_key),
+         SettingsKeys::undo_keep_writes_default);
+    read(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
+         SettingsKeys::undo_keep_gigabytes_default);
     read(QLatin1String(SettingsKeys::engine_password_key), QString{});
     read(QLatin1String(SettingsKeys::library_show_local_key), true);
     read(QLatin1String(SettingsKeys::engine_upnp_key), false);

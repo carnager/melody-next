@@ -81,8 +81,9 @@ and compatibility policy are ADR-0260 (`docs/protocol-levels.md`).
 - **The quiet period has not begun.** Use of 2026-10-04 found that undo
   copies sat in album folders and that undo and rollback did not work on NFS
   (ADR-0266), and the library panel learned to follow changes (ADR-0268);
-  with them the protocol reached level 4 and the schema 53. The period counts
-  from that last change.
+  with them the schema reached 53. Use of 2026-10-05 found Up Next asked for
+  by other clients missing from the window (ADR-0269), which brought the
+  protocol to level 5. The period counts from that last change.
 - **Measured on 2026-10-03,** the 66,841-track library on gemenon end to end,
   engine and window, with no step stalling the window
   (`docs/release-measurements.md`). What changed since is measured again: a
@@ -92,7 +93,7 @@ and compatibility policy are ADR-0260 (`docs/protocol-levels.md`).
   makepkg's flags (`-O3`, LTO, `_FORTIFY_SOURCE=3`, `_GLIBCXX_ASSERTIONS`),
   GCC 16.2.1, 101 of 101 -- and are run again before the release.
 - **The documentation** -- this file, `docs/roadmap.md`,
-  `docs/feature-matrix.md` -- was reconciled on 2026-10-05 through ADR-0268.
+  `docs/feature-matrix.md` -- was reconciled on 2026-10-05 through ADR-0269.
 - **Not yet among the conditions, but before the release:** the release
   checklist walked in its engine-era form, and the Arch packaging's names
   settled (`docs/roadmap.md`, Toward 1.0).

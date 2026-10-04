@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated on 2026-10-05, through ADR-0268.
+Updated on 2026-10-05, through ADR-0269.
 
 This page lists the work still to do. The [feature matrix](feature-matrix.md)
 records what is implemented; [the unified-engine plan](unified-engine.md) says
@@ -27,8 +27,8 @@ on its machine (ADR-0237); what a write replaced can be undone (ADRs 0263,
 hold. What remains of them:
 
 - [ ] **The quiet period:** a few weeks of everyday use with no protocol or
-  schema change, counted from the last level bump (level 4, schema 53, on
-  2026-10-04).
+  schema change, counted from the last level bump (level 5 on 2026-10-05;
+  schema 53 on 2026-10-04).
 - [ ] **Measure again on the real setup** what changed since the measurements
   of 2026-10-03 (`docs/release-measurements.md`): a tag write on the NAS with
   its undo copy, the library panel following changes on a 66,000-track

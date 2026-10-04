@@ -21,8 +21,8 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-10-05, through ADR-0268: database schema 53, protocol 1 at
-level 4 ([protocol levels](protocol-levels.md)).
+Updated on 2026-10-05, through ADR-0269: database schema 53, protocol 1 at
+level 5 ([protocol levels](protocol-levels.md)).
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
@@ -34,6 +34,7 @@ older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
+- [ADR-0269: Up Next is the engine's, and the window shows it](adr/0269-up-next-is-the-engines.md).
 - [ADR-0268: What shows a library follows its changes](adr/0268-the-library-follows-its-files.md).
 - [ADR-0267: One Trackknife per workspace](adr/0267-one-trackknife-per-workspace.md).
 - [ADR-0266: Undo copies where the person says, restored without an exchange](adr/0266-undo-copies-where-the-person-says.md).
@@ -154,7 +155,7 @@ also available in [CMakePresets.json](../CMakePresets.json).
 - [M10 validation](m10-validation.md): hardening evidence and the per-artifact
   release boundary.
 - [Roadmap](roadmap.md): remaining prioritized work and what 1.0 still needs,
-  updated through ADR-0268.
+  updated through ADR-0269.
 - [Sources](sources.md): references used when designing and checking behavior.
 
 The dated milestone notes, [M3 validation](m3-validation.md), and older ADRs

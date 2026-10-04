@@ -27,6 +27,10 @@ namespace trackknife::bench {
 // by similarity off the UI thread, then changed by moving files up and
 // down, leaving one unmatched, or ordering them by filename; the pairs are
 // staged as ADR-0086 proposals. MusicBrainz tracks stay in album order.
+//
+// ADR-0265: the files of the selection's other albums may be offered too,
+// listed after the album's own and never placed by the suggestion; one put
+// on a track is staged with the album, and leaves the album it was in.
 class TrackMatchSession final : public QObject {
     Q_OBJECT
 
@@ -39,14 +43,20 @@ class TrackMatchSession final : public QObject {
         QString pairing;
         QString pairing_tool_tip;
         bool paired{false};
+        // A file of another album, offered and not placed.
+        bool other{false};
+        // A gap: a track without a file, which a file dropped on fills.
+        bool gap{false};
         QString track;
         QString track_length;
     };
 
+    // `other_albums`: for the last files, one each, the album each is in --
+    // offered, not the album's own.
     TrackMatchSession(musicbrainz::Release release,
                       std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                       std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-                      QObject* parent = nullptr);
+                      QObject* parent = nullptr, std::vector<QString> other_albums = {});
     ~TrackMatchSession() override;
 
     [[nodiscard]] QString heading() const;
@@ -54,7 +64,7 @@ class TrackMatchSession final : public QObject {
     [[nodiscard]] QString status() const { return status_; }
     // How the pairing stands: files paired, files, the album's tracks.
     [[nodiscard]] std::size_t pairedCount() const { return paired_count_; }
-    [[nodiscard]] std::size_t fileCount() const { return local_tracks_.size(); }
+    [[nodiscard]] std::size_t fileCount() const { return own_count_; }
     [[nodiscard]] std::size_t trackCount() const { return alignment_.release_tracks.size(); }
     [[nodiscard]] bool ready() const { return ready_; }
     [[nodiscard]] const std::vector<Row>& rows() const { return rows_; }
@@ -65,6 +75,13 @@ class TrackMatchSession final : public QObject {
 
     // A file moved from one row to another (a drag), or up or down by one.
     void moveFile(std::size_t from, std::size_t to);
+    // A file dropped on a gap: put in it, the rows around keeping their
+    // places; where it was is left a gap, or goes when below the tracks.
+    void fillGap(std::size_t from, std::size_t gap);
+    [[nodiscard]] bool isGap(std::size_t row) const;
+    // A file put on the album track at `track`: in its gap, or swapped with
+    // the file there.
+    void placeOn(std::size_t from, std::size_t track);
     void move(int row, int direction);
     // Below the album's tracks, leaving a gap; it gets no tags.
     void unmatch(int row);
@@ -86,6 +103,9 @@ class TrackMatchSession final : public QObject {
     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks_;
     std::vector<QString> local_paths_;
     std::vector<std::size_t> item_indexes_;
+    std::vector<QString> other_albums_;
+    // The album's own files come first, then those offered.
+    std::size_t own_count_{0U};
     musicbrainz::ReleaseAlignment alignment_;
     std::vector<std::optional<std::size_t>> assignments_;
     std::vector<std::optional<std::size_t>> slots_;

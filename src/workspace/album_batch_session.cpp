@@ -426,20 +426,96 @@ AlbumBatchSession::Files AlbumBatchSession::filesOf(const std::size_t index) con
         return files;
     }
     const auto& album = albums_[index];
-    files.descriptors = queryOf(album).tracks;
-    files.items = album.items;
-    for (const auto item : album.items) {
-        const auto& path = tagger_->itemSource(item)->raw_path;
-        files.paths.push_back(QString::fromLocal8Bit(QByteArray{
-            path.data(), static_cast<qsizetype>(path.size())}));
+    const auto add = [this, &files](const Album& from) {
+        auto descriptors = queryOf(from).tracks;
+        files.descriptors.insert(files.descriptors.end(), descriptors.begin(), descriptors.end());
+        files.items.insert(files.items.end(), from.items.begin(), from.items.end());
+        for (const auto item : from.items) {
+            const auto& path = tagger_->itemSource(item)->raw_path;
+            files.paths.push_back(QString::fromLocal8Bit(QByteArray{
+                path.data(), static_cast<qsizetype>(path.size())}));
+        }
+    };
+    add(album);
+    // ADR-0265: the other albums' files, those sharing a folder with this
+    // one first -- where a file grouped apart most likely belongs.
+    std::vector<std::size_t> others;
+    for (const auto other : order_) {
+        if (other != index && editable(other)) {
+            others.push_back(other);
+        }
+    }
+    std::ranges::stable_partition(others, [this, &album](const std::size_t other) {
+        return std::ranges::any_of(albums_[other].folders, [&album](const auto& folder) {
+            return std::ranges::find(album.folders, folder) != album.folders.end();
+        });
+    });
+    for (const auto other : others) {
+        const auto& from = albums_[other];
+        add(from);
+        const auto label = from.artist.isEmpty() ? from.title
+                                                 : QStringLiteral("%1 — %2").arg(from.artist,
+                                                                                 from.title);
+        files.other_albums.insert(files.other_albums.end(), from.items.size(), label);
     }
     return files;
+}
+
+void AlbumBatchSession::refolder(Album& album) const {
+    album.folders.clear();
+    for (const auto item : album.items) {
+        const auto& path = tagger_->itemSource(item)->raw_path;
+        const auto slash = path.find_last_of('/');
+        auto folder = slash == std::string::npos ? std::string{} : path.substr(0, slash);
+        if (std::ranges::find(album.folders, folder) == album.folders.end()) {
+            album.folders.push_back(std::move(folder));
+        }
+    }
+}
+
+void AlbumBatchSession::take(const std::size_t index, const std::size_t item) {
+    for (std::size_t other = 0; other < albums_.size(); ++other) {
+        auto& from = albums_[other];
+        if (other == index || !editable(other) || std::ranges::find(from.items, item) == from.items.end()) {
+            continue;
+        }
+        std::erase(from.items, item);
+        queue_->forget(other);
+        if (from.items.empty()) {
+            from.state = State::merged;
+            std::erase(order_, other);
+        } else {
+            refolder(from);
+            from.title.clear();
+            from.artist.clear();
+            from.year.clear();
+            describe(from);
+            if (from.state != State::left_out) {
+                queueLookUp(other);
+            }
+        }
+        albums_[index].items.push_back(item);
+        return;
+    }
 }
 
 void AlbumBatchSession::choose(const std::size_t index, const std::size_t version,
                                metadata::MetadataProposalSet proposals) {
     if (index >= albums_.size()) {
         return;
+    }
+    // Files taken from other albums join this one.
+    bool took = false;
+    for (const auto& proposal : proposals.items) {
+        if (std::ranges::find(albums_[index].items, proposal.item_index) ==
+            albums_[index].items.end()) {
+            take(index, proposal.item_index);
+            took = true;
+        }
+    }
+    if (took && !tagger_.isNull()) {
+        refolder(albums_[index]);
+        describe(albums_[index]);
     }
     albums_[index].version = version;
     albums_[index].chosen = proposals;

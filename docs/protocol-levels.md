@@ -7,6 +7,15 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 3 (2026-10-04)
+
+- `backups.location` and `backups.set_location {place: "engine"|"folder"|
+  "beside", folder?}`, answering `{place, folder?, kept_in}`: where the
+  engine keeps the files writes replace, moving every undo copy there when
+  it changes (ADR-0266). An older engine keeps them beside each file.
+- Undo and a failed write's rollback no longer need an atomic exchange, so
+  both work on NFS and SMB (ADR-0266).
+
 ### Level 2 (2026-10-04)
 
 - The `operations.undo` job: `{operations: [{kind: "metadata"|"publication",

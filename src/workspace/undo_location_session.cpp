@@ -66,7 +66,11 @@ void UndoLocationSession::load() {
         auto answer = work->backup_location();
         postBack(self, [self, answer = std::move(answer)]() mutable {
             self->busy_ = false;
-            if (!answer) {
+            if (!answer && answer.error().code == core::ErrorCode::unsupported) {
+                // ADR-0260: older than level 3, it cannot be asked or told.
+                self->status_ = tr("This engine is too old to choose this: it keeps undo copies "
+                                   "beside each file until it is updated.");
+            } else if (!answer) {
                 self->status_ = tr("Could not ask the engine · %1")
                                     .arg(QString::fromStdString(answer.error().message));
             } else {

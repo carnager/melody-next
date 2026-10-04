@@ -34,7 +34,7 @@ class Browser;
 
 namespace trackknife::bench {
 
-class OutputProfilesManagerWidget;
+class OutputProfilesManager;
 
 // The application settings screen (ADR-0112, ADR-0185): a paged dialog —
 // General (notifications, appearance), Playback (local
@@ -67,8 +67,8 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
         metadata_services,
         lastfm,
         shortcuts,
-        // Not pages: File operations, opened at its tab -- naming layouts
-        // and move destinations, ReplayGain, Undo.
+        // Not pages: File operations, opened at its tab -- naming layouts,
+        // ReplayGain, Undo. (Move destinations: showDestinationsOf.)
         naming,
         replaygain,
         undo
@@ -108,6 +108,8 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
     QTabWidget* file_operations_{nullptr};
+    QWidget* replaygain_tab_{nullptr};
+    QWidget* undo_tab_{nullptr};
     QCheckBox* panel_animations_{nullptr};
     QComboBox* lists_display_{nullptr};
     QComboBox* color_scheme_{nullptr};
@@ -141,7 +143,7 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QCheckBox* rating_backup_{nullptr};
     QLineEdit* rating_backup_tag_{nullptr};
     QLabel* rating_backup_note_{nullptr};
-    OutputProfilesManagerWidget* output_profiles_{nullptr};
+    OutputProfilesManager* output_profiles_{nullptr};
     QComboBox* rating_tag_scale_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};
     QCheckBox* replaygain_true_peak_{nullptr};

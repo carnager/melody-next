@@ -12,12 +12,16 @@
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QSignalBlocker>
 #include <QPushButton>
 #include <QTabWidget>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -26,18 +30,29 @@
 
 namespace trackknife::bench {
 
-OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore store, QWidget* parent)
-    : QWidget(parent), session_(new ProfilesSession(std::move(store), this)) {
-    setObjectName(QStringLiteral("bench-output-profiles-manager"));
-    auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(0, 0, 0, 0);
-    const auto expression_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+namespace {
 
-    auto* sections = new QTabWidget(this);
-    sections_ = sections;
-    sections->setObjectName(QStringLiteral("bench-output-profile-sections"));
-    root->addWidget(sections, 1);
+// A destination's place and row, on its item.
+constexpr int place_role = Qt::UserRole;
+constexpr int row_role = Qt::UserRole + 1;
+
+[[nodiscard]] QLabel* statusLabel(QWidget* parent) {
+    auto* status = new QLabel(parent);
+    status->setObjectName(QStringLiteral("bench-output-profiles-status"));
+    status->setWordWrap(true);
+    status->setForegroundRole(QPalette::PlaceholderText);
+    return status;
+}
+
+} // namespace
+
+OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidget* tabs)
+    : QObject(tabs), session_(new ProfilesSession(std::move(store), this)), sections_(tabs) {
+    setObjectName(QStringLiteral("bench-output-profiles-manager"));
+    const auto expression_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    auto* sections = tabs;
     auto* layouts_box = new QWidget(sections);
+    layouts_page_ = layouts_box;
     auto* layouts_row = new QVBoxLayout(layouts_box);
     layouts_row->setContentsMargins(16, 16, 16, 16);
     layouts_row->setSpacing(16);
@@ -93,39 +108,59 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     layout_form_holder->addLayout(layout_buttons);
     layout_form_holder->addStretch(1);
     layouts_row->addLayout(layout_form_holder, 1);
+    layouts_status_ = statusLabel(layouts_box);
+    layouts_row->addWidget(layouts_status_);
     sections->addTab(layouts_box, QStringLiteral("Naming layouts"));
 
     auto* destinations_box = new QWidget(sections);
+    destinations_page_ = destinations_box;
     auto* destinations_row = new QVBoxLayout(destinations_box);
     destinations_row->setContentsMargins(16, 16, 16, 16);
-    destinations_row->setSpacing(16);
-    // ADR-0237: a destination is a folder on one engine's machine; which one
-    // is always in sight.
-    auto* place_row = new QHBoxLayout;
-    place_row->addWidget(new QLabel(QStringLiteral("Move destinations on"), destinations_box));
-    place_list_ = new QComboBox(destinations_box);
-    place_list_->setObjectName(QStringLiteral("bench-destination-engine"));
-    place_list_->setAccessibleName(QStringLiteral("Engine the move destinations are on"));
-    const auto places = session_->placeNames();
-    for (int place = 0; place < places.size(); ++place) {
-        place_list_->addItem(places.at(place), session_->placeKey(place));
-    }
-    place_row->addWidget(place_list_, 1);
+    destinations_row->setSpacing(12);
+    // ADR-0237/0264: a destination is a folder on one engine's machine;
+    // every engine's are listed, each under its name.
+    destination_list_ = new QTreeWidget(destinations_box);
+    destination_list_->setObjectName(QStringLiteral("bench-destination-list"));
+    destination_list_->setAccessibleName(QStringLiteral("Move destinations"));
+    destination_list_->setColumnCount(2);
+    destination_list_->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("Folder")});
+    destination_list_->setRootIsDecorated(false);
+    destination_list_->setItemsExpandable(false);
+    destination_list_->setUniformRowHeights(true);
+    destination_list_->setSelectionMode(QAbstractItemView::SingleSelection);
+    destination_list_->header()->setStretchLastSection(true);
+    destination_list_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    destination_list_->setMinimumHeight(140);
+    destinations_row->addWidget(destination_list_, 1);
+    auto* list_buttons = new QHBoxLayout;
+    destination_new_ = new QPushButton(QStringLiteral("New"), destinations_box);
+    destination_new_->setObjectName(QStringLiteral("bench-destination-new"));
+    destination_remove_ = new QPushButton(QStringLiteral("Remove"), destinations_box);
+    destination_remove_->setObjectName(QStringLiteral("bench-destination-remove"));
+    destination_remove_->setToolTip(QStringLiteral("Remove the move destination selected"));
     destination_copy_ = new QPushButton(destinations_box);
     destination_copy_->setObjectName(QStringLiteral("bench-destination-copy"));
     destination_copy_->setToolTip(
         QStringLiteral("Save this computer's destinations that lie under this engine's music "
                        "folder here too, as the engine names them"));
     destination_copy_->hide();
-    place_row->addWidget(destination_copy_);
-    destinations_row->addLayout(place_row);
-    destination_list_ = new QComboBox(destinations_box);
-    destination_list_->setObjectName(QStringLiteral("bench-destination-list"));
-    destination_list_->setAccessibleName(QStringLiteral("Move destination"));
-    destination_list_->setPlaceholderText(QStringLiteral("New move destination"));
-    destination_list_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    destinations_row->addWidget(destination_list_);
-    auto* destination_form_holder = new QVBoxLayout;
+    list_buttons->addWidget(destination_new_);
+    list_buttons->addWidget(destination_remove_);
+    list_buttons->addStretch(1);
+    list_buttons->addWidget(destination_copy_);
+    destinations_row->addLayout(list_buttons);
+    // A new one on which engine: asked when there is more than one.
+    if (session_->placeCount() > 1) {
+        auto* on = new QMenu(destination_new_);
+        for (int place = 0; place < session_->placeCount(); ++place) {
+            on->addAction(QStringLiteral("On %1").arg(session_->placeNames().at(place)), this,
+                          [this, place] {
+                              session_->newDestinationOn(place);
+                              destination_name_->setFocus();
+                          });
+        }
+        destination_new_->setMenu(on);
+    }
     auto* destination_form = new QFormLayout;
     destination_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     destination_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
@@ -143,38 +178,35 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     root_row->addWidget(destination_root_, 1);
     root_row->addWidget(destination_browse_);
     destination_form->addRow(QStringLiteral("Root:"), root_row);
-    destination_form_holder->addLayout(destination_form);
-    auto* destination_buttons = new QHBoxLayout;
-    destination_new_ = new QPushButton(QStringLiteral("New"), destinations_box);
-    destination_new_->setObjectName(QStringLiteral("bench-destination-new"));
+    destinations_row->addLayout(destination_form);
+    auto* save_row = new QHBoxLayout;
     destination_save_ = new QPushButton(QStringLiteral("Save destination"), destinations_box);
     destination_save_->setObjectName(QStringLiteral("bench-destination-save"));
-    destination_remove_ = new QPushButton(QStringLiteral("Remove"), destinations_box);
-    destination_remove_->setObjectName(QStringLiteral("bench-destination-remove"));
-    destination_buttons->addWidget(destination_new_);
-    destination_buttons->addWidget(destination_save_);
-    destination_buttons->addWidget(destination_remove_);
-    destination_buttons->addStretch(1);
-    destination_form_holder->addLayout(destination_buttons);
-    destination_form_holder->addStretch(1);
-    destinations_row->addLayout(destination_form_holder, 1);
+    save_row->addWidget(destination_save_);
+    save_row->addStretch(1);
+    destinations_row->addLayout(save_row);
+    destinations_status_ = statusLabel(destinations_box);
+    destinations_row->addWidget(destinations_status_);
     sections->addTab(destinations_box, QStringLiteral("Move destinations"));
-
-    status_ = new QLabel(this);
-    status_->setObjectName(QStringLiteral("bench-output-profiles-status"));
-    status_->setWordWrap(true);
-    root->addWidget(status_);
 
     connect(layout_list_, &QComboBox::currentIndexChanged, session_,
             &ProfilesSession::selectLayout);
-    connect(destination_list_, &QComboBox::currentIndexChanged, session_,
-            &ProfilesSession::selectDestination);
+    connect(destination_list_, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* item) {
+                if (!syncing_ && item != nullptr && item->data(0, place_role).isValid()) {
+                    session_->selectDestinationOn(item->data(0, place_role).toInt(),
+                                                  item->data(0, row_role).toInt());
+                }
+            });
     connect(layout_new_, &QPushButton::clicked, this, [this] {
         session_->newLayout();
         layout_name_->setFocus();
     });
     connect(destination_new_, &QPushButton::clicked, this, [this] {
-        session_->newDestination();
+        if (destination_new_->menu() != nullptr) {
+            return;
+        }
+        session_->newDestinationOn(0);
         destination_name_->setFocus();
     });
     connect(layout_save_, &QPushButton::clicked, session_, &ProfilesSession::saveLayout);
@@ -198,14 +230,13 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
             session_->setSanitization(sanitization_policy_->currentData().toString());
         }
     });
-    connect(place_list_, &QComboBox::currentIndexChanged, session_,
-            &ProfilesSession::selectPlace);
     connect(destination_copy_, &QPushButton::clicked, session_,
             &ProfilesSession::copyDestinations);
     connect(destination_browse_, &QPushButton::clicked, this, [this] {
         const auto& start = session_->destinationRootRawPath();
         if (const auto folders = session_->folders()) {
-            auto* chooser = new EngineFolderDialog(session_->placeName(), folders, start, this);
+            auto* chooser =
+                new EngineFolderDialog(session_->placeName(), folders, start, destinations_page_);
             connect(chooser, &EngineFolderDialog::folderChosen, session_,
                     [this](const QByteArray& chosen) {
                         session_->chooseRoot(
@@ -219,7 +250,7 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
                           : QFile::decodeName(QByteArray{start.data(),
                                                          static_cast<qsizetype>(start.size())});
         const auto selected = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Choose move destination"), initial,
+            destinations_page_, QStringLiteral("Choose move destination"), initial,
             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
         if (selected.isEmpty()) {
             return;
@@ -228,35 +259,69 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
         session_->chooseRoot(
             std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
     });
-    connect(session_, &ProfilesSession::changed, this, &OutputProfilesManagerWidget::sync);
+    connect(session_, &ProfilesSession::changed, this, &OutputProfilesManager::sync);
     connect(session_, &ProfilesSession::listsChanged, this,
-            &OutputProfilesManagerWidget::rebuildLists);
+            &OutputProfilesManager::rebuildLists);
     connect(session_, &ProfilesSession::profilesChanged, this,
-            &OutputProfilesManagerWidget::profilesChanged);
+            &OutputProfilesManager::profilesChanged);
     rebuildLists();
     sync();
 }
 
-void OutputProfilesManagerWidget::showNamingLayouts() { sections_->setCurrentIndex(0); }
+void OutputProfilesManager::showNamingLayouts() { sections_->setCurrentWidget(layouts_page_); }
 
-void OutputProfilesManagerWidget::showDestinationsOf(const QString& key) {
+void OutputProfilesManager::showDestinationsOf(const QString& key) {
     if (const auto place = session_->placeOf(key); place >= 0) {
-        place_list_->setCurrentIndex(place);
+        session_->selectPlace(place);
     }
-    sections_->setCurrentIndex(1);
+    sections_->setCurrentWidget(destinations_page_);
 }
 
-void OutputProfilesManagerWidget::rebuildLists() {
+void OutputProfilesManager::rebuildLists() {
     const QSignalBlocker layout_blocker{layout_list_};
     const QSignalBlocker destination_blocker{destination_list_};
     layout_list_->clear();
     layout_list_->addItems(session_->layoutNames());
     destination_list_->clear();
-    destination_list_->addItems(session_->destinationNames());
+    // Under each engine's name -- unless there is only this computer.
+    const auto grouped = session_->placeCount() > 1;
+    const auto places = session_->placeNames();
+    for (int place = 0; place < session_->placeCount(); ++place) {
+        QTreeWidgetItem* parent = nullptr;
+        if (grouped) {
+            auto name = places.at(place);
+            if (!name.isEmpty()) {
+                name[0] = name[0].toUpper();
+            }
+            parent = new QTreeWidgetItem(destination_list_, {name});
+            parent->setFlags(Qt::ItemIsEnabled);
+            parent->setFirstColumnSpanned(true);
+            auto font = parent->font(0);
+            font.setWeight(QFont::DemiBold);
+            parent->setFont(0, font);
+        }
+        const auto add = [&](const QStringList& columns) {
+            return parent != nullptr ? new QTreeWidgetItem(parent, columns)
+                                     : new QTreeWidgetItem(destination_list_, columns);
+        };
+        const auto names = session_->destinationNamesOn(place);
+        for (int row = 0; row < names.size(); ++row) {
+            auto* item = add({names.at(row), session_->destinationRootOn(place, row)});
+            item->setData(0, place_role, place);
+            item->setData(0, row_role, row);
+            item->setToolTip(1, item->text(1));
+        }
+        if (const auto note = session_->placeNote(place); !note.isEmpty() && grouped) {
+            auto* item = add({note});
+            item->setFlags(Qt::ItemIsEnabled);
+            item->setForeground(0, destination_list_->palette().placeholderText());
+        }
+    }
+    destination_list_->expandAll();
     sync();
 }
 
-void OutputProfilesManagerWidget::sync() {
+void OutputProfilesManager::sync() {
     syncing_ = true;
     const auto show = [](QLineEdit* field, const QString& text) {
         if (field->text() != text) {
@@ -266,11 +331,22 @@ void OutputProfilesManagerWidget::sync() {
     };
     {
         const QSignalBlocker layout_blocker{layout_list_};
-        const QSignalBlocker destination_blocker{destination_list_};
-        const QSignalBlocker place_blocker{place_list_};
         layout_list_->setCurrentIndex(session_->layoutRow());
-        destination_list_->setCurrentIndex(session_->destinationRow());
-        place_list_->setCurrentIndex(session_->place());
+        QTreeWidgetItem* current = nullptr;
+        const auto row = session_->destinationRow();
+        for (QTreeWidgetItemIterator it{destination_list_}; *it != nullptr && row >= 0; ++it) {
+            if ((*it)->data(0, place_role) == QVariant{session_->place()} &&
+                (*it)->data(0, row_role) == QVariant{row}) {
+                current = *it;
+                break;
+            }
+        }
+        if (current != nullptr) {
+            destination_list_->setCurrentItem(current);
+        } else {
+            destination_list_->clearSelection();
+            destination_list_->setCurrentItem(nullptr);
+        }
     }
     show(layout_name_, session_->layoutName());
     show(directory_expression_, session_->directoryExpression());
@@ -282,25 +358,30 @@ void OutputProfilesManagerWidget::sync() {
     destination_copy_->setText(
         QStringLiteral("Copy %1 from this computer").arg(session_->copyable()));
     destination_copy_->setVisible(session_->copyable() > 0);
-    status_->setText(session_->status());
+    layouts_status_->setText(session_->status());
+    destinations_status_->setText(session_->status());
     syncing_ = false;
     updateButtons();
 }
 
-void OutputProfilesManagerWidget::updateButtons() {
+void OutputProfilesManager::updateButtons() {
     const auto available = session_->available();
     for (auto* widget : std::initializer_list<QWidget*>{
              layout_list_, layout_name_, directory_expression_, basename_expression_,
-             sanitization_policy_, destination_list_, destination_name_, destination_root_}) {
+             sanitization_policy_, destination_list_}) {
         widget->setEnabled(available);
+    }
+    for (auto* widget : std::initializer_list<QWidget*>{destination_name_, destination_root_}) {
+        widget->setEnabled(session_->destinationsAvailable());
     }
     layout_new_->setEnabled(session_->canEditLayouts());
     layout_save_->setEnabled(session_->canSaveLayout());
     layout_remove_->setEnabled(session_->canRemoveLayout());
-    place_list_->setEnabled(session_->canChoosePlace());
     destination_copy_->setEnabled(available);
     destination_browse_->setEnabled(session_->canEditDestinations());
-    destination_new_->setEnabled(session_->canEditDestinations());
+    destination_new_->setEnabled(destination_new_->menu() != nullptr
+                                     ? session_->available()
+                                     : session_->canEditDestinations());
     destination_save_->setEnabled(session_->canSaveDestination());
     destination_remove_->setEnabled(session_->canRemoveDestination());
 }

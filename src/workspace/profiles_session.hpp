@@ -21,8 +21,10 @@ namespace trackknife::bench {
 // layout or destination edited at a time, saved, removed, a destination
 // root chosen on the machine of the engine it belongs to, and this
 // computer's destinations copied to an engine that reaches them under
-// another name. Everything is saved at once, not on the Settings screen's
-// Save. The window's Naming page draws it.
+// another name. Every engine's destinations are held at once, so they can
+// be listed together (ADR-0264); the one edited is on the shown place.
+// Everything is saved at once, not on the Settings screen's Save. The
+// window's File operations page draws it.
 class ProfilesSession final : public QObject {
     Q_OBJECT
 
@@ -42,6 +44,12 @@ class ProfilesSession final : public QObject {
     [[nodiscard]] QStringList destinationNames() const;
     [[nodiscard]] QStringList placeNames() const;
     [[nodiscard]] QString placeKey(int place) const;
+    [[nodiscard]] int placeCount() const { return static_cast<int>(places_.size()); }
+    // The destinations held for `place`, and what keeps it from showing
+    // them -- loading, or an error -- if anything.
+    [[nodiscard]] QStringList destinationNamesOn(int place) const;
+    [[nodiscard]] QString destinationRootOn(int place, int row) const;
+    [[nodiscard]] QString placeNote(int place) const;
     [[nodiscard]] int layoutRow() const;
     [[nodiscard]] int destinationRow() const;
     [[nodiscard]] int place() const { return place_; }
@@ -62,6 +70,8 @@ class ProfilesSession final : public QObject {
 
     // Enablement.
     [[nodiscard]] bool available() const { return !loading_ && !mutation_running_; }
+    // The shown place's destinations are held.
+    [[nodiscard]] bool destinationsAvailable() const;
     [[nodiscard]] bool canChoosePlace() const { return available() && places_.size() > 1U; }
     [[nodiscard]] bool canEditLayouts() const;
     [[nodiscard]] bool canSaveLayout() const;
@@ -85,6 +95,10 @@ class ProfilesSession final : public QObject {
     void selectPlace(int index);
     void selectDestination(int row);
     void newDestination() { selectDestination(-1); }
+    // A destination of `place`, or a new one there (`row` -1): that place
+    // shown.
+    void selectDestinationOn(int place, int row);
+    void newDestinationOn(int place) { selectDestinationOn(place, -1); }
     void setDestinationName(const QString& text);
     void chooseRoot(std::string raw_path);
     void saveDestination();
@@ -100,7 +114,15 @@ class ProfilesSession final : public QObject {
 
   private:
     void reload();
-    void reloadDestinations();
+    void reloadDestinations(int place);
+    void countCopyable();
+    [[nodiscard]] QString summary() const;
+    [[nodiscard]] std::vector<persistence::SavedDestinationProfile>& shown() {
+        return held_[static_cast<std::size_t>(place_)].destinations;
+    }
+    [[nodiscard]] const std::vector<persistence::SavedDestinationProfile>& shown() const {
+        return held_[static_cast<std::size_t>(place_)].destinations;
+    }
     void rebuildLists(std::optional<core::StableId> layout_id,
                       std::optional<core::StableId> destination_id);
     [[nodiscard]] const DestinationPlace& shownPlace() const;
@@ -109,7 +131,13 @@ class ProfilesSession final : public QObject {
     std::vector<DestinationPlace> places_;
     int place_{0};
     std::vector<persistence::SavedOutputLayoutProfile> layouts_;
-    std::vector<persistence::SavedDestinationProfile> destinations_;
+    // Each place's destinations, as places_.
+    struct Held {
+        std::vector<persistence::SavedDestinationProfile> destinations;
+        QString error;
+        bool loading{false};
+    };
+    std::vector<Held> held_;
     std::optional<core::StableId> editing_layout_id_;
     std::optional<core::StableId> editing_destination_id_;
     QString layout_name_;

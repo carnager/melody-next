@@ -566,27 +566,25 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     file_operations_ = new QTabWidget(this);
     file_operations_->setObjectName(QStringLiteral("bench-settings-file-operations"));
     file_operations_->setDocumentMode(true);
-    auto* naming = new QWidget(file_operations_);
-    auto* naming_layout = new QVBoxLayout(naming);
     if (profile_store.load) {
-        auto* manager = new OutputProfilesManagerWidget(std::move(profile_store), naming);
+        // Naming layouts and Move destinations, as tabs of their own.
+        auto* manager = new OutputProfilesManager(std::move(profile_store), file_operations_);
         output_profiles_ = manager;
-        connect(manager, &OutputProfilesManagerWidget::profilesChanged, this,
+        connect(manager, &OutputProfilesManager::profilesChanged, this,
                 &SettingsDialog::outputProfilesChanged);
-        naming_layout->addWidget(manager, 1);
     } else {
         auto* placeholder =
             new QLabel(QStringLiteral("Naming layouts and move destinations are managed from the "
                                       "running application."),
-                       naming);
+                       file_operations_);
         placeholder->setWordWrap(true);
-        naming_layout->addWidget(placeholder);
-        naming_layout->addStretch(1);
+        placeholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+        file_operations_->addTab(placeholder, QStringLiteral("Rename && move"));
     }
-    file_operations_->addTab(naming, QStringLiteral("Rename && move"));
     // ReplayGain: written into tags, or kept in sidecars -- not tagging alone,
     // so a tab of its own beside the tagger's writing.
     auto* replaygain = new QWidget(file_operations_);
+    replaygain_tab_ = replaygain;
     auto* replaygain_layout = new QVBoxLayout(replaygain);
     replaygain_sidecar_only_ =
         new QCheckBox(QStringLiteral("Store scan results in sidecar only"), replaygain);
@@ -609,6 +607,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     // ADR-0263: what each engine keeps of what its writes replaced, so the
     // writes can be undone.
     auto* undo = new QWidget(file_operations_);
+    undo_tab_ = undo;
     undo->setObjectName(QStringLiteral("bench-settings-undo"));
     auto* undo_layout = new QVBoxLayout(undo);
     auto* undo_form = new QFormLayout;
@@ -979,20 +978,22 @@ void SettingsDialog::showDestinationsOf(const QString& key) {
 
 void SettingsDialog::showPage(const Page page) {
     // The tabs of File operations open that page at the tab.
-    const auto tab = [&]() -> int {
-        switch (page) {
-        case Page::naming:
-            return 0;
-        case Page::replaygain:
-            return 1;
-        case Page::undo:
-            return 2;
-        default:
-            return -1;
-        }
-    }();
-    if (tab >= 0) {
-        file_operations_->setCurrentIndex(tab);
+    QWidget* tab = nullptr;
+    switch (page) {
+    case Page::naming:
+        tab = file_operations_->widget(0);
+        break;
+    case Page::replaygain:
+        tab = replaygain_tab_;
+        break;
+    case Page::undo:
+        tab = undo_tab_;
+        break;
+    default:
+        break;
+    }
+    if (tab != nullptr) {
+        file_operations_->setCurrentWidget(tab);
         pages_->setCurrentRow(static_cast<int>(Page::file_operations));
         return;
     }

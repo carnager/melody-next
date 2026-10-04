@@ -18,12 +18,17 @@ were in Settings: two places for one thing.
 - **Library** shows the music folders of each engine connected, one at a
   time, chosen at the top (the chooser hidden while there is only this
   computer). Each engine's Folders… opens it there, at that engine.
-- **File operations** (once Naming) holds what writing files does, as
-  tabs: **Rename & move** (naming layouts, move destinations),
-  **ReplayGain** (sidecar only, true peak) and **Undo** (what each engine
-  keeps of what its writes replace). ReplayGain is a tab here rather than
-  under a tagger heading: it is not tagging alone -- it has its own tool and
-  can be kept in sidecar files -- but it is a write to files all the same.
+- **File operations** (once Naming) holds what writing files does, as one
+  row of tabs: **Naming layouts**, **Move destinations**, **ReplayGain**
+  (sidecar only, true peak) and **Undo** (what each engine keeps of what
+  its writes replace). ReplayGain is a tab here rather than under a tagger
+  heading: it is not tagging alone -- it has its own tool and can be kept
+  in sidecar files -- but it is a write to files all the same.
+- **Move destinations are one list**: every engine's, each under its name
+  (no heading while there is only this computer), the selected one edited
+  below it. **New** asks which engine when there is more than one;
+  **Remove** removes the one selected. No engine or destination dropdown.
+  (Naming layouts stay global, ADR-0237, so they need no engine.)
 - **Ratings** is a page of its own: ratings written into the files, their
   backup copy, other players' RATING tags -- handed to every engine.
 - Covers stays a page of its own.

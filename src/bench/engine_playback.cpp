@@ -435,6 +435,7 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.volume_percent = payload.value("volume_percent", 100);
     state_.instance = payload.value("instance", std::uint64_t{0});
     state_.queue_revision = payload.value("queue_revision", std::uint64_t{0});
+    state_.requests_revision = payload.value("requests_revision", std::uint64_t{0});
     state_.consumed = payload.contains("consumed") && payload.at("consumed").is_string()
                           ? QString::fromStdString(payload.at("consumed").get<std::string>())
                           : QString{};
@@ -649,6 +650,53 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
             },
             Qt::QueuedConnection);
     }));
+}
+
+std::optional<LocalTrackRow> EnginePlayback::rowOfEntry(const protocol::Json& entry) {
+    if (!entry.is_object()) {
+        return std::nullopt;
+    }
+    auto path = protocol::decode_raw_path(entry.value("path", std::string{}));
+    const auto identity = core::StableId::parse(entry.value("entry", std::string{}));
+    if (!path || path->empty() || !identity) {
+        return std::nullopt;
+    }
+    LocalTrackRow row;
+    row.entry_id = *identity;
+    row.raw_path = std::move(*path);
+    row.title = entry.value("title", std::string{});
+    if (const auto duration = entry.value("duration_ms", std::int64_t{-1}); duration >= 0) {
+        row.duration_ms = duration;
+    }
+    if (const auto group = entry.find("group"); group != entry.end() && group->is_object()) {
+        row.album_artist = group->value("album_artist", std::string{});
+        row.artist = group->value("artist", std::string{});
+        row.album = group->value("album", std::string{});
+        row.date = group->value("date", std::string{});
+    }
+    if (const auto selection = entry.find("selection");
+        selection != entry.end() && selection->is_object()) {
+        if (const auto stream = selection->find("stream_index");
+            stream != selection->end() && stream->is_number_integer()) {
+            row.selection.stream_index = stream->get<int>();
+        }
+        if (const auto subsong = selection->find("subsong_index");
+            subsong != selection->end() && subsong->is_number_integer()) {
+            row.selection.subsong_index = subsong->get<int>();
+        }
+    }
+    if (const auto segment = entry.find("segment"); segment != entry.end() && segment->is_object()) {
+        formats::SampleRange range;
+        range.start_sample = segment->value("start_sample", std::int64_t{0});
+        if (const auto end = segment->find("end_sample");
+            end != segment->end() && end->is_number_integer()) {
+            range.end_sample = end->get<std::int64_t>();
+        }
+        row.segment = range;
+    }
+    // Shown by what the engine was told; read no further.
+    row.probed = !row.title.empty();
+    return row;
 }
 
 protocol::Json EnginePlayback::entryJson(const LocalTrackRow& row,

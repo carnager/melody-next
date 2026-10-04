@@ -325,6 +325,7 @@ class BenchMainWindowTest final : public QObject {
     void settingsGroupWhatTheyAreAbout();
     void settingsChooseWhereUndoCopiesAreKept();
     void listRowsWhoseFilesAreGoneAreGreyed();
+    void upNextFromAnotherClientShows();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -987,6 +988,56 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
     QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
+}
+
+// ADR-0269: Up Next is the engine's. What another client -- melody-cli, a
+// rofi script, the phone -- asks for shows in the window's Up Next, and
+// what it clears goes from it.
+void BenchMainWindowTest::upNextFromAnotherClientShows() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("asked.wav"));
+    write_wave(path, wave_sample_rate / 10U);
+    const auto raw = QFile::encodeName(path).toStdString();
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    // As melody-cli queues: the entry handed over, then asked for.
+    const auto entry = core::StableId::random().to_string();
+    QVERIFY((*client)
+                ->call("playback.enqueue",
+                       protocol::Json{{"entries",
+                                       protocol::Json::array(
+                                           {protocol::Json{{"entry", entry},
+                                                           {"path", protocol::encode_raw_path(raw)},
+                                                           {"title", "Asked elsewhere"},
+                                                           {"group",
+                                                            {{"album_artist", "Someone"},
+                                                             {"artist", "Someone"},
+                                                             {"album", "Elsewhere"},
+                                                             {"date", "2026"}}}}})}})
+                .has_value());
+    QVERIFY((*client)
+                ->call("playback.set_requests",
+                       protocol::Json{{"entries", protocol::Json::array({entry})}})
+                .has_value());
+    QTRY_COMPARE_WITH_TIMEOUT(window.workspace_.playback_.requests.pending().size(), 1U, 10'000);
+    const auto& shown = window.workspace_.playback_.requests.pending().front().source;
+    QCOMPARE(shown.title, std::string{"Asked elsewhere"});
+    QCOMPARE(shown.album, std::string{"Elsewhere"});
+    QCOMPARE(shown.raw_path, raw);
+    QCOMPARE(shown.entry_id.to_string(), entry);
+    // Cleared elsewhere: gone here too, and not stated back.
+    QVERIFY((*client)->call("playback.clear_requests").has_value());
+    QTRY_VERIFY_WITH_TIMEOUT(window.workspace_.playback_.requests.pending().empty(), 10'000);
+    QTest::qWait(500);
+    const auto asked = (*client)->call("playback.requests");
+    QVERIFY(asked.has_value());
+    QVERIFY(asked->value("entries", protocol::Json::array()).empty());
 }
 
 // ADR-0268: a list's rows whose files are not there are said to be, asked

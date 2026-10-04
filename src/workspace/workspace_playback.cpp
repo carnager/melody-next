@@ -216,6 +216,11 @@ void Workspace::syncEngineRequests() {
     if (!playingOnEngine() || playing == nullptr) {
         return;
     }
+    // ADR-0269: not before the engine's own Up Next is known -- what another
+    // client asked for while this window was away is not overwritten.
+    if (!engine_requests_known_) {
+        return;
+    }
     if (playing->key != up_next_engine_ && !playback_.requests.pending().empty()) {
         return;
     }
@@ -489,6 +494,8 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     engine_replay_gain_.reset();
     engine_consumed_.clear();
     engine_queue_revision_ = 0;
+    engine_requests_revision_.reset();
+    engine_requests_known_ = false;
     view_->refreshTransport();
 }
 

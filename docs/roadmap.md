@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated on 2026-09-27, through ADR-0236.
+Updated on 2026-10-05, through ADR-0269.
 
 This page lists the work still to do. The [feature matrix](feature-matrix.md)
 records what is implemented; [the unified-engine plan](unified-engine.md) says
@@ -15,10 +15,30 @@ come before adding more features to it.
 The engine is in place (ADR-0220). `melodyd` owns the library, the lists and
 playback; Trackknife, the Android app and `melody-cli` are its clients; sound
 comes out of output agents. Trackknife holds a connection to every engine you
-list, each with its own library and lists (ADR-0234). The MPD client is gone
-(ADR-0224). File work -- tagging, ReplayGain, conversion, moves -- is still
-done by Trackknife, on files it can reach, including an engine's files over a
-mount.
+list, each with its own library and lists (ADR-0234), and keeps no lists of
+its own (ADR-0259). The MPD client is gone (ADR-0224). File work -- tagging,
+ReplayGain, conversion, moves -- is done by the engine whose files they are,
+on its machine (ADR-0237); what a write replaced can be undone (ADRs 0263,
+0266). What shows a library follows its changes as they happen (ADR-0268).
+
+## Toward 1.0
+
+1.0 is cut when the conditions in [MILESTONES.md](../MILESTONES.md#toward-10)
+hold. What remains of them:
+
+- [ ] **The quiet period:** a few weeks of everyday use with no protocol or
+  schema change, counted from the last level bump (level 5 on 2026-10-05;
+  schema 53 on 2026-10-04).
+- [ ] **Measure again on the real setup** what changed since the measurements
+  of 2026-10-03 (`docs/release-measurements.md`): a tag write on the NAS with
+  its undo copy, the library panel following changes on a 66,000-track
+  library, and a large list checking its files.
+- [ ] **Optimised builds** pass the suite again, as they did on 2026-10-03.
+- [ ] **The release checklist** ([release-checklist.md](release-checklist.md))
+  walked and recorded, in its engine-era form.
+- [ ] **Packaging** settled: the `melody-git` recipe builds the engine
+  packages under a name of the old Go daemon, and its own package is an
+  empty metapackage.
 
 ## 1. Engine and clients
 
@@ -28,8 +48,6 @@ mount.
 - [ ] The engine watching its own music folders. `melody-watch` (ADR-0232)
   tells an engine about changes on a NAS; an engine noticing them itself is
   still open.
-- [ ] Trackknife's own copy of the lists goes (ADR-0233, step 3d), once engine
-  lists have been in use for a while.
 - [ ] A terminal client (`melody-tui`). `melody-cli` covers scripting.
 - [ ] Phase 5, the MPD bridge: the engine answering MPD clients. Low
   priority; nothing waits for it.
@@ -42,8 +60,8 @@ Lists can be found, sorted, reversed, deduplicated, and edited with undo,
 including a move between tabs. M3U8 import and export work. Searches can be
 kept in tabs, saved, and run against any engine's library.
 
-- [ ] Custom `tkfmt-1` columns and grouping in track views, and custom
-  library tree views.
+- [ ] Custom `tkfmt-1` columns and grouping in track views. Library tree
+  views are done (ADR-0254).
 - [ ] Autoplaylists that update when the library changes. Saved searches run
   when opened; a result tab keeps a snapshot.
 - [ ] CUE, chapter and subsong titles indexed as tracks of their own.
@@ -74,9 +92,6 @@ New options must keep the converter's output checks and collision checks.
 Text editing supports FLAC, WavPack, MP3, Vorbis, Opus and MP4/M4A; artwork
 editing supports FLAC, MP3 and MP4/M4A.
 
-- [ ] Identifying many albums at once: group, look up in the background,
-  review only what needs it, apply once, with renaming, moving and
-  ReplayGain as options (ADR-0261).
 - [ ] Artwork editing in more containers, Ogg first.
 - [ ] An ALAC fixture for MP4 text-writing tests.
 - [ ] Deleting external cover files through a reviewed file operation.
@@ -96,14 +111,13 @@ optional.
 
 Play counts, last played, resume, ratings on a 0–10 scale, album shuffle and
 history queries all live in the engine that plays the music, and scrobbling
-happens there too.
+happens there too. Ratings can be written into the files (ADRs 0237, 0245),
+and a list can continue by a dynamic playlist's rule when it ends (ADR-0253).
 
-- [ ] Optional, opt-in writing of ratings into file tags (POPM, `RATING`)
-  through the previewed metadata workflow.
 - [ ] Calendar-relative time operators in queries.
-- [ ] Optional autoplay when a list ends, choosing related tracks from the
-  library. Online similarity needs an explicit opt-in, caching, and marking
-  which tracks were added automatically.
+- [ ] Continuing a list with related tracks from Last.fm. Online similarity
+  needs an explicit opt-in, caching, and marking which tracks were added
+  automatically.
 
 ## 7. Collection maintenance
 
@@ -117,9 +131,8 @@ not imply that one is safe to delete.
 
 ## 8. Desktop integration
 
-MPRIS and media keys control the engine that plays.
-
-- [ ] Artwork in desktop notifications.
+MPRIS and media keys control the engine that plays; the playing album's
+cover reaches both MPRIS and notifications. Nothing is open here.
 
 ## Other recorded follow-ups
 
@@ -131,10 +144,10 @@ release.
 - **Metadata and paths:** further versioned sanitization policies, richer
   typed matching, `TOTALTRACKS` when numbering, and moving companion files with
   reviewed cleanup of empty folders.
-- **File undo:** across filesystems, for changed artifacts, and the artwork
-  undo chain where rename-exchange is missing.
-- **Infrastructure:** secure credential storage, backup and restore, larger
-  library, network and device test runs.
+- **File undo:** offered beyond Identify albums… -- from the tag editor, and
+  for a move made on its own.
+- **Infrastructure:** secure credential storage, larger library, network and
+  device test runs.
 - **Later:** release packaging, plugins, CD ripping.
 
 ## Keeping this page

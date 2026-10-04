@@ -303,10 +303,12 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
             }
         }
         refreshRatings();
-        // A remote that restarted holds the Up Next it saved; this window's
-        // is the one the user sees, so it is stated again.
-        engine_requests_.reset();
-        syncEngineRequests();
+        // ADR-0269: its Up Next is its own -- what was added while this
+        // window was away, or before it restarted, is taken, not overwritten.
+        if (link->playback == transport_) {
+            engine_requests_revision_.reset();
+            engine_requests_known_ = false;
+        }
         // Its tab, named after it -- by address if it was made while the
         // remote was away, which is renamed now that it has said its name.
         // A name someone chose is theirs, and kept.

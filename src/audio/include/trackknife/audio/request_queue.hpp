@@ -50,6 +50,15 @@ template <class Source> class RequestQueue {
         pending_.insert(pending_.begin() + static_cast<std::ptrdiff_t>(position), std::move(item));
         return true;
     }
+    // Taken from elsewhere -- the engine's Up Next (ADR-0269): one revision,
+    // and no undo to step back across what another client did.
+    void replace(std::vector<Source> sources) {
+        ++revision_;
+        undo_.reset();
+        pending_.clear();
+        for (auto& source : sources)
+            pending_.push_back({++serial_, std::move(source)});
+    }
     // Retain/reorder exact occurrences as one revision and one undo step.
     bool retain(const std::vector<std::uint64_t>& ids) {
         std::vector<Entry> next;

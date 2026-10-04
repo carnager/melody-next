@@ -164,7 +164,7 @@ class EnginePlaybackTest final : public QObject {
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
-    void anEmptyUpNextTakesBackTheEnginesSavedAsks();
+    void aNewWindowShowsTheEnginesSavedAsks();
     void editingThePlayingListReachesTheEngine();
     void aQueueChangedElsewhereReachesTheList();
     void aSameSizeReplacementElsewhereReachesTheList();
@@ -999,10 +999,11 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     (*server)->stop();
 }
 
-// The engine keeps its asks -- across its own restarts, too -- until told
-// otherwise, so a window whose Up Next is empty has to say so: once it
-// stayed quiet, and the engine played a track the panel no longer showed.
-void EnginePlaybackTest::anEmptyUpNextTakesBackTheEnginesSavedAsks() {
+// The engine keeps its asks -- across its own restarts, too. Once a window
+// stayed quiet about its empty Up Next, and the engine played a track the
+// panel did not show. ADR-0269: the panel shows what the engine holds -- an
+// ask another client made while this window was away is taken, not erased.
+void EnginePlaybackTest::aNewWindowShowsTheEnginesSavedAsks() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     std::vector<std::string> raw_paths;
@@ -1053,8 +1054,12 @@ void EnginePlaybackTest::anEmptyUpNextTakesBackTheEnginesSavedAsks() {
 
     BenchMainWindow reopened;
     reopened.show();
-    QTRY_VERIFY2_WITH_TIMEOUT((*player)->requests().empty(),
-                              "the engine kept an ask the window no longer has", 10'000);
+    // Shown: the count beside the transport says one waits.
+    auto* badge = reopened.findChild<QLabel*>(QStringLiteral("bench-up-next-count"));
+    QVERIFY(badge != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(badge->text(), QStringLiteral("1"), 10'000);
+    QTest::qWait(500);
+    QCOMPARE((*player)->requests().size(), 1U);
 
     (*server)->stop();
 }

@@ -328,7 +328,79 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
             adoptEngineQueue();
         }
     }
+    // ADR-0269: Up Next is the engine's. When it moves -- another client, or
+    // a request played -- what the engine holds is shown; this window's own
+    // changes come back the same and change nothing.
+    if ((!engine_requests_revision_ || state.requests_revision != *engine_requests_revision_) &&
+        !transport_->settling()) {
+        engine_requests_revision_ = state.requests_revision;
+        adoptEngineRequests();
+    }
 
+}
+
+void Workspace::adoptEngineRequests() {
+    auto* playing = linkOf(transport_);
+    if (transport_ == nullptr || playing == nullptr) {
+        return;
+    }
+    const QPointer self{this};
+    const QPointer asked{transport_};
+    transport_->request(
+        QStringLiteral("playback.requests"), protocol::Json{{"details", true}},
+        [self, asked, key = playing->key](core::Result<protocol::Json> answer) {
+            // An engine from before ADR-0269 answers identities only, and is
+            // left as it was: this window states its Up Next to it.
+            if (!self || !answer || asked != self->transport_) {
+                return;
+            }
+            const auto entries = answer->value("entries", protocol::Json::array());
+            if (!entries.empty() && !entries.front().is_object()) {
+                return;
+            }
+            // Rows this window has already keep what it knows of them.
+            std::vector<LocalTrackRow> rows;
+            QString stated;
+            for (const auto& entry : entries) {
+                auto row = EnginePlayback::rowOfEntry(entry);
+                if (!row) {
+                    continue;
+                }
+                const auto& pending = self->playback_.requests.pending();
+                const auto known = std::ranges::find_if(pending, [&row](const auto& held) {
+                    return held.source.entry_id == row->entry_id;
+                });
+                if (known != pending.end()) {
+                    row = known->source;
+                }
+                stated += QString::fromStdString(row->entry_id.to_string());
+                rows.push_back(std::move(*row));
+            }
+            QString shown;
+            for (const auto& held : self->playback_.requests.pending()) {
+                shown += QString::fromStdString(held.source.entry_id.to_string());
+            }
+            const bool first = !self->engine_requests_known_;
+            self->engine_requests_known_ = true;
+            self->engine_requests_ = stated;
+            // Heard for the first time and holding none, while this window
+            // has some -- asked for before the engine answered: they are its
+            // now. Later, an empty Up Next is another client's clearing.
+            if (first && stated.isEmpty() && !shown.isEmpty()) {
+                self->engine_requests_.reset();
+                self->syncEngineRequests();
+                return;
+            }
+            if (shown == stated) {
+                return;
+            }
+            self->playback_.requests.replace(std::move(rows));
+            if (!stated.isEmpty()) {
+                self->up_next_engine_ = key;
+            }
+            self->persistUpNext();
+            self->view_->refreshUpNext();
+        });
 }
 
 Workspace::NowPlaying Workspace::nowPlaying(const EnginePlayback::State& state) {

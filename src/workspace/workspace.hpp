@@ -273,6 +273,12 @@ class Workspace final : public QObject {
     // holds, and if not, who changed it".
     QString engine_queue_;
     quint64 engine_queue_revision_{0};
+    // ADR-0269: the engine's Up Next revision last taken; none, not yet --
+    // the next state is taken whatever it says.
+    std::optional<quint64> engine_requests_revision_;
+    // Whether the playing engine's Up Next has been heard since it became
+    // the one playing: until then this window states nothing to it.
+    bool engine_requests_known_{false};
     // The last ask for the engine's queue, per purpose: only its answer is
     // taken, an earlier one being out of date by the time it comes.
     quint64 engine_queue_asked_{0};
@@ -724,6 +730,9 @@ class Workspace final : public QObject {
     void syncEngineQueue();
     void syncEngineRequests();
     void adoptEngineQueue();
+    // ADR-0269: Up Next as the playing engine holds it, taken as this
+    // window's -- what another client added, reordered or cleared shows.
+    void adoptEngineRequests();
     void adoptEngineQueue(std::vector<LocalTrackRow> held);
     // The playing entry's row in `tab`, or -1.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;

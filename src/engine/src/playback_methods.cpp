@@ -270,6 +270,7 @@ Json to_json(const Player::State& state) {
     rendered["duration_ms"] = state.duration_ms;
     rendered["queue_size"] = state.queue_size;
     rendered["requests"] = state.requests;
+    rendered["requests_revision"] = state.requests_revision;
     rendered["modes"] = modes_to_json(state.modes);
     rendered["volume_percent"] = state.volume_percent;
     rendered["instance"] = state.instance;
@@ -417,8 +418,18 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
         return to_json(player.state());
     });
 
-    dispatcher.on("playback.requests", [&player](const Json&) -> core::Result<Json> {
+    // The asks as identities; with {details: true}, as the entries they
+    // name (ADR-0269) -- what a client shows as Up Next -- with the revision
+    // they are at.
+    dispatcher.on("playback.requests", [&player](const Json& params) -> core::Result<Json> {
         auto entries = Json::array();
+        if (params.value("details", false)) {
+            const auto revision = player.state().requests_revision;
+            for (const auto& entry : player.request_entries()) {
+                entries.push_back(to_json(entry));
+            }
+            return Json{{"entries", std::move(entries)}, {"revision", revision}};
+        }
         for (const auto& entry_id : player.requests()) {
             entries.push_back(entry_id.to_string());
         }

@@ -82,6 +82,9 @@ class EnginePlayback final : public QObject {
         // Changes whenever the engine's queue, modes or asks change --
         // including when this client was not the one that changed them.
         quint64 queue_revision{0};
+        // ADR-0269: moves whenever the engine's Up Next does; 0 from an
+        // engine that does not say.
+        quint64 requests_revision{0};
         // The entry the engine's consume mode last dropped, so this client
         // can drop the same row from the list it came from.
         QString consumed;
@@ -227,6 +230,9 @@ class EnginePlayback final : public QObject {
     // which the queue follows -- counted as settling() while on its way, like
     // a command, so a state from before it is not taken for the engine's
     // answer to it.
+    // ADR-0269: an entry as the engine holds it (playback.requests with
+    // details), as a row; none when it names no file.
+    [[nodiscard]] static std::optional<LocalTrackRow> rowOfEntry(const protocol::Json& entry);
     using Answer = std::function<void(core::Result<protocol::Json>)>;
     void request(const QString& method, protocol::Json params, Answer answer,
                  bool settles = false);

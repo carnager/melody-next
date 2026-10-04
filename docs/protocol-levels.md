@@ -7,6 +7,13 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 5 (2026-10-05)
+
+- Playback states carry `requests_revision`, which moves whenever Up Next
+  does -- added, reordered, played, cleared -- and `playback.requests
+  {details: true}` answers the entries themselves with that revision, not
+  only their identities (ADR-0269). Without `details` it answers as before.
+
 ### Level 4 (2026-10-04)
 
 - The `catalogue.changed` event `{paths, albums, everything}`: what changed

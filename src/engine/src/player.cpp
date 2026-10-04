@@ -283,6 +283,7 @@ std::optional<core::Result<void>> Player::start_next_request_locked() {
     while (!requests_.empty()) {
         const auto wanted = requests_.front();
         requests_.erase(requests_.begin());
+        ++requests_revision_;
         // A request whose entry has gone is dropped rather than stopping
         // playback: the user asked for something that is no longer there.
         if (const auto* entry = find_locked(wanted); entry != nullptr) {
@@ -601,6 +602,7 @@ core::Result<void> Player::request(const core::StableId& entry_id) {
                         .context = {{.key = "entry", .value = entry_id.to_string()}}});
     }
     requests_.push_back(entry_id);
+    ++requests_revision_;
     ++revision_;
     return {};
 }
@@ -608,6 +610,17 @@ core::Result<void> Player::request(const core::StableId& entry_id) {
 std::vector<core::StableId> Player::requests() const {
     const std::lock_guard guard{mutex_};
     return requests_;
+}
+
+std::vector<QueueEntry> Player::request_entries() const {
+    const std::lock_guard guard{mutex_};
+    std::vector<QueueEntry> entries;
+    for (const auto& wanted : requests_) {
+        if (const auto* entry = find_locked(wanted); entry != nullptr) {
+            entries.push_back(*entry);
+        }
+    }
+    return entries;
 }
 
 core::Result<void> Player::set_requests(const std::vector<core::StableId>& entries) {
@@ -621,6 +634,7 @@ core::Result<void> Player::set_requests(const std::vector<core::StableId>& entri
         }
     }
     requests_ = entries;
+    ++requests_revision_;
     ++revision_;
     prune_asks_locked();
     refresh_gapless_locked();
@@ -642,6 +656,7 @@ void Player::enqueue(std::vector<QueueEntry> entries) {
 void Player::clear_requests() {
     const std::lock_guard guard{mutex_};
     requests_.clear();
+    ++requests_revision_;
     ++revision_;
     prune_asks_locked();
     refresh_gapless_locked();
@@ -932,6 +947,7 @@ bool Player::restore(Persisted state) {
     static_cast<void>(audition_->set_replay_gain_mode(replay_gain_mode_));
     static_cast<void>(audition_->set_replay_gain_preamps(replay_gain_preamps_));
     requests_ = std::move(state.requests);
+    ++requests_revision_;
     anchors_.request_return = state.request_return;
     playing_request_ = state.playing_request;
     anchors_.current = state.entry;
@@ -1009,6 +1025,7 @@ Player::State Player::state() const {
     }
     current.queue_size = queue_.size();
     current.requests = requests_.size();
+    current.requests_revision = requests_revision_;
     current.modes = modes_;
     current.volume_percent = snapshot.volume_percent;
     // Told but not yet shown by the output: what it was told.

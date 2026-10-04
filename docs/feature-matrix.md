@@ -1,7 +1,7 @@
 # Feature matrix
 
-Last reconciled: 2026-10-05, through ADR-0268 -- database schema 53,
-protocol 1 at level 4 ([protocol levels](protocol-levels.md)). The
+Last reconciled: 2026-10-05, through ADR-0269 -- database schema 53,
+protocol 1 at level 5 ([protocol levels](protocol-levels.md)). The
 application is Trackknife (`src/bench`, installed as `trackknife`), a client
 of engines ([unified engine](unified-engine.md)): every library, list and
 file it shows belongs to an engine -- this computer's or one elsewhere -- and
@@ -80,7 +80,7 @@ ADR-0224.
 | Android client | Implemented | Remote control, library, lists of every engine listed, Up Next; the phone as a speaker for every engine listed, sharing its one player; Opus over mobile data and offline albums (ADRs 0230, 0231, 0234). Its player follows the engine that plays. |
 | `melody-cli` | Implemented | Transport, queue, search (`find` with tkq and `--format`), `current` with tkfmt formats, `--json`, meaningful exit codes. |
 | `melody-watch` | Implemented | Tells an engine about file changes on a NAS it cannot watch itself (ADR-0232). An engine watching its own folders is open. |
-| Up Next request queue | Implemented, bounded | Temporary FIFO with automatic return, held by the engine that plays; a flat panel with reorder/remove/clear/Undo/return-now and multi-selection edits (ADRs 0196, 0201). See [the guide](up-next.md). |
+| Up Next request queue | Implemented, bounded | Held by the engine that plays, and shown as it holds it: what another client -- `melody-cli`, the rofi script, the phone -- adds, reorders or clears shows in the window, and the window never overwrites it (ADR-0269, tested in `bench-main-window`). Temporary FIFO with automatic return, held by the engine that plays; a flat panel with reorder/remove/clear/Undo/return-now and multi-selection edits (ADRs 0196, 0201). See [the guide](up-next.md). |
 | Last.fm scrobbling and Love/Unlove | Implemented, bounded | Done by the engine that plays, so it works with Trackknife closed; the account is connected once in Trackknife and handed to each engine. See [guide](lastfm.md). |
 | Local folders and intake | Implemented | Bookmarks, asynchronous filesystem browsing, file/folder/drop/CLI intake, lossless raw-path handling, and bounded CUE/chapter/subsong expansion into lists. |
 | Engine libraries | Implemented | Folders are chosen per engine; **only Refresh starts a filesystem scan**. Paged artist/album/track browsing and search, offline retention, numbered tracks, covers, album counts before expansion, locate artist/album. Tag and move commits update the index without rescanning (ADRs 0115–0118, 0126, 0151). Every change -- a write, a move, a deletion a watcher reports, a cover saved, a scan -- is told to every client (`catalogue.changed`), and each engine's library panel follows it in place: the levels it has open are asked again and merged into their rows, what is open stays open, the covers of the albums named are asked again (ADR-0268, tested in `library-panel-engine`). |

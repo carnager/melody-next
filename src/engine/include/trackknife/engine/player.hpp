@@ -119,6 +119,9 @@ class Player final {
     // mistake worth reporting, not a second way to add tracks.
     [[nodiscard]] core::Result<void> request(const core::StableId& entry_id);
     [[nodiscard]] std::vector<core::StableId> requests() const;
+    // ADR-0269: the asks as the entries they name, in order -- what a client
+    // shows as Up Next.
+    [[nodiscard]] std::vector<QueueEntry> request_entries() const;
 
     // Replaces the whole request list in one go. A client that owns the
     // up-next order -- the window's panel does -- has to be able to state it,
@@ -241,6 +244,10 @@ class Player final {
         // How many explicit asks are outstanding. A client renders up-next
         // from playback.requests; this is enough to show that there are any.
         std::size_t requests{0};
+        // ADR-0269: bumped whenever the asks change -- added, reordered,
+        // played, cleared -- by any client or by playing one. A client
+        // showing Up Next asks for them again when it moves.
+        std::uint64_t requests_revision{0};
         audio::PlaybackModes modes;
         int volume_percent{100};
         // What is armed to follow the current track without a gap, if
@@ -438,6 +445,7 @@ class Player final {
     // Identities rather than sources, so a request survives the queue being
     // reordered for the same reason playback does.
     std::vector<core::StableId> requests_;
+    std::uint64_t requests_revision_{0};
     // Tracks asked for from outside the list -- up-next fed from the library.
     // Kept apart from the queue: they are not list entries, so they take no
     // part in its order, its consume or what a client shows as the list. They

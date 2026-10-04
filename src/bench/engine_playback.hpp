@@ -258,6 +258,10 @@ class EnginePlayback final : public QObject {
     // ADR-0233: a list on this engine was written or deleted, by any client
     // -- this one included. Emitted on this object's thread.
     void listChanged(const QString& id, quint64 revision, bool deleted);
+    // What changed in its library (catalogue.changed): the paths re-read or
+    // dropped, the albums they touched, or everything.
+    void catalogueChanged(const std::vector<std::string>& paths,
+                          const std::vector<std::string>& albums, bool everything);
     // The lists that continue changed, by any client (ADR-0253).
     void continuationsChanged();
 

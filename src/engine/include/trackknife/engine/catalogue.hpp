@@ -189,6 +189,18 @@ class LocalCatalogue final : public Catalogue {
   public:
     explicit LocalCatalogue(std::filesystem::path database) : database_(std::move(database)) {}
 
+    // What changed in the library: the paths re-read or dropped, the albums
+    // they touched before and after (a cover's too), or, after a scan or a
+    // change of folders, everything.
+    struct Change {
+        std::vector<std::string> paths;
+        std::vector<std::string> albums;
+        bool everything{false};
+    };
+    using ChangeObserver = std::function<void(const Change&)>;
+    // Told of every change, on the thread that made it.
+    void observe(ChangeObserver observer) { observer_ = std::move(observer); }
+
     // Opens the catalogue once, creating and migrating it. Callers do not need
     // this -- every operation opens for itself -- but a daemon does: a
     // migration failure should surface at startup rather than in the response
@@ -258,6 +270,13 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::size_t> import_indexed_tag_ratings();
 
   private:
+    void changed(Change change) const {
+        if (observer_) {
+            observer_(change);
+        }
+    }
+    ChangeObserver observer_;
+
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;
 
     std::filesystem::path database_;

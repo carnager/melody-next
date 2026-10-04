@@ -7,6 +7,16 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 4 (2026-10-04)
+
+- The `catalogue.changed` event `{paths, albums, everything}`: what changed
+  in the library -- the paths re-read or dropped, the album keys they
+  touched (a cover written names the albums of its folder), or after a scan
+  or a change of folders, everything (ADR-0268). An older engine says
+  nothing; its clients see changes when they ask again.
+- `files.missing {paths}` answering `{missing}`: which of these files are
+  not there, looked for on the engine's machine (ADR-0268).
+
 ### Level 3 (2026-10-04)
 
 - `backups.location` and `backups.set_location {place: "engine"|"folder"|

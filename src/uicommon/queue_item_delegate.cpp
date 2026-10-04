@@ -260,8 +260,15 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (cell.right_aligned) {
         item.displayAlignment = Qt::AlignRight | Qt::AlignVCenter;
     }
-    if (cell.quiet) {
+    // ADR-0268: a file that is not there, greyed in every column.
+    const bool missing = index.data(track_missing_role).toBool();
+    if (cell.quiet || missing) {
         item.palette.setColor(QPalette::Text, item.palette.color(QPalette::PlaceholderText));
+    }
+    if (missing) {
+        item.palette.setColor(QPalette::HighlightedText,
+                              item.palette.color(QPalette::PlaceholderText));
+        item.font.setItalic(true);
     }
     item.text = cell.text;
     const auto inline_artwork = cell.inline_cover;

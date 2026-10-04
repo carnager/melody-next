@@ -324,6 +324,7 @@ class BenchMainWindowTest final : public QObject {
     void cachedRowsAreReadEvenWithARevision();
     void settingsGroupWhatTheyAreAbout();
     void settingsChooseWhereUndoCopiesAreKept();
+    void listRowsWhoseFilesAreGoneAreGreyed();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -986,6 +987,50 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
     QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
+}
+
+// ADR-0268: a list's rows whose files are not there are said to be, asked
+// of its engine; a file that comes back, once the engine says so, is not.
+void BenchMainWindowTest::listRowsWhoseFilesAreGoneAreGreyed() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto here = media.filePath(QStringLiteral("here.wav"));
+    const auto gone = media.filePath(QStringLiteral("gone.wav"));
+    write_wave(here, wave_sample_rate / 10U);
+    const auto here_raw = QFile::encodeName(here).toStdString();
+    const auto gone_raw = QFile::encodeName(gone).toStdString();
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    persistence::ListDocument document{.id = core::StableId::random(),
+                                       .kind = persistence::ListKind::scratch,
+                                       .name = "Gone and here",
+                                       .pinned = false,
+                                       .dirty = false,
+                                       .items = {},
+                                       .engine = {}};
+    for (const auto& path : {here_raw, gone_raw}) {
+        persistence::ListItem item;
+        item.source = persistence::ListSource::local;
+        item.source_reference = path;
+        document.items.push_back(item);
+    }
+    auto* tab = window.addListTab(document, true);
+    QVERIFY(tab != nullptr);
+    const auto missing = [tab](const int row) {
+        return tab->model->index(row, ui::track_title_column).data(ui::track_missing_role).toBool();
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(missing(1), 10'000);
+    QVERIFY(!missing(0));
+    QVERIFY(tab->model->index(1, ui::track_title_column)
+                .data(Qt::ToolTipRole)
+                .toString()
+                .contains(QStringLiteral("not there")));
+    // Back: once its engine says the path changed, the row is as any other.
+    write_wave(gone, wave_sample_rate / 10U);
+    window.workspace_.adoptLibraryChange(EngineKey::local(), {gone_raw}, {}, false);
+    QTRY_VERIFY_WITH_TIMEOUT(!missing(1), 10'000);
 }
 
 // ADR-0266: where an engine keeps its undo copies, asked of it and changed

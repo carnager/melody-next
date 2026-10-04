@@ -278,8 +278,7 @@ LibraryBrowser::LibraryBrowser(const CatalogueSource& catalogues, EngineKey engi
     change_timer_.setSingleShot(true);
     change_timer_.setInterval(250);
     connect(&change_timer_, &QTimer::timeout, this, [this] {
-        invalidateCovers();
-        reload();
+        refreshInPlace();
         loadRoots();
         emit libraryContentChanged();
     });
@@ -633,6 +632,8 @@ void LibraryBrowser::reload() {
         persistence::LibraryQuery query;
         query.kind = kind;
         query.text = query_text;
+        // Loaded already, so not fetched again -- kept to be asked again.
+        group->setData(QVariant::fromValue(query), query_role);
         loadChildren(QPersistentModelIndex{group->index()}, query);
         emit expandRequested(group->index());
     }
@@ -665,6 +666,240 @@ void LibraryBrowser::noteCurrent(const QModelIndex& index) {
     if (index.data(entry_role).isValid()) {
         current_entry_ = entryKey(index.data(entry_role).value<persistence::LibraryEntry>());
     }
+}
+
+// ADR-0254: a view's node opens, and resolves, as the view lists it -- under
+// a genre, an album is the genre's part of it.
+void LibraryBrowser::prepareEntry(persistence::LibraryEntry& entry,
+                                  const persistence::LibraryQuery& query) {
+    if ((!query.view.empty() || query.folders) &&
+        entry.kind != persistence::LibraryEntryKind::track) {
+        auto node = query;
+        node.kind = persistence::LibraryEntryKind::group;
+        node.offset = 0U;
+        if (query.folders) {
+            node.folder = entry.view_value;
+        } else {
+            node.view_path.push_back(entry.view_value);
+        }
+        entry.view_node = std::move(node);
+    }
+}
+
+// An entry's row as it shows: its label, icon, tooltip, and what opening it
+// lists. Its children and whether they are loaded are left as they are.
+void LibraryBrowser::describeItem(QStandardItem& item, const persistence::LibraryEntry& entry) {
+    auto label = entry.label.empty() && entry.view_node ? tr("Unknown") : text(entry.label);
+    if (entry.available == 0U) {
+        label += tr(" — unavailable");
+    } else if (entry.available < entry.tracks) {
+        label += tr(" — %1 unavailable").arg(entry.tracks - entry.available);
+    }
+    item.setText(label);
+    item.setEditable(false);
+    item.setDragEnabled(entry.available > 0U);
+    item.setDropEnabled(false);
+    item.setIcon(QIcon::fromTheme(entry.kind == persistence::LibraryEntryKind::artist
+                                      ? QStringLiteral("avatar-default")
+                                  : entry.kind == persistence::LibraryEntryKind::album
+                                      ? QStringLiteral("media-optical-audio")
+                                  : entry.kind == persistence::LibraryEntryKind::group
+                                      ? QStringLiteral("folder-music")
+                                      : QStringLiteral("audio-x-generic")));
+    item.setData(QVariant::fromValue(entry), entry_role);
+    // A track by its file, an album by whose it is, an artist by name alone.
+    item.setToolTip(entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
+                    : entry.kind == persistence::LibraryEntryKind::group
+                        ? tr("%1 album%2 · %3 track%4")
+                              .arg(entry.albums)
+                              .arg(entry.albums == 1U ? "" : "s")
+                              .arg(entry.tracks)
+                              .arg(entry.tracks == 1U ? "" : "s")
+                    : entry.album.empty() ? text(entry.artist)
+                                          : text(entry.artist + " — " + entry.album));
+    if (entry.view_node) {
+        item.setData(QVariant::fromValue(*entry.view_node), query_role);
+        item.setColumnCount(1);
+    } else if (entry.kind != persistence::LibraryEntryKind::track) {
+        persistence::LibraryQuery children;
+        if (entry.kind == persistence::LibraryEntryKind::artist) {
+            children.kind = persistence::LibraryEntryKind::album;
+            children.artist = entry.key;
+        } else {
+            children.kind = persistence::LibraryEntryKind::track;
+            children.album_key = entry.key;
+        }
+        item.setData(QVariant::fromValue(children), query_role);
+        // Its column before its rows: added with the first row, it is a
+        // column insertion under a nested row, which QML's tree adapter
+        // cannot follow.
+        item.setColumnCount(1);
+    }
+}
+
+std::optional<persistence::LibraryQuery> LibraryBrowser::topQuery() const {
+    if (!search_.trimmed().isEmpty()) {
+        return std::nullopt;
+    }
+    persistence::LibraryQuery top;
+    if (folders_) {
+        top.kind = persistence::LibraryEntryKind::group;
+        top.folders = true;
+    } else if (!view_.empty()) {
+        top.kind = persistence::LibraryEntryKind::group;
+        top.view = view_;
+    } else if (newest_first_) {
+        top.kind = persistence::LibraryEntryKind::album;
+        top.newest_first = true;
+        top.limit = 500;
+    }
+    return top;
+}
+
+void LibraryBrowser::applyChanges(const std::vector<std::string>& albums, const bool everything) {
+    if (stopped_) {
+        return;
+    }
+    if (everything) {
+        invalidateCovers();
+    } else if (!albums.empty()) {
+        // Asked again when shown; the old one stays until the new arrives.
+        for (const auto& album : albums) {
+            const auto key = text(album);
+            artwork_cache_.remove(key);
+            emit coverLoaded(key);
+        }
+        pumpCovers();
+    }
+    change_timer_.start();
+}
+
+void LibraryBrowser::refreshInPlace() {
+    if (stopped_) {
+        return;
+    }
+    // A query's results, or a tree not yet shown: as a new search.
+    if ((query_mode_ && !search_.trimmed().isEmpty()) || model_->rowCount() == 0) {
+        reload();
+        return;
+    }
+    std::vector<std::pair<QPersistentModelIndex, persistence::LibraryQuery>> levels;
+    if (const auto top = topQuery()) {
+        levels.emplace_back(QPersistentModelIndex{}, *top);
+    }
+    std::vector<QStandardItem*> pending{model_->invisibleRootItem()};
+    while (!pending.empty()) {
+        auto* item = pending.back();
+        pending.pop_back();
+        for (int row = 0; row < item->rowCount(); ++row) {
+            auto* child = item->child(row);
+            if (child == nullptr) {
+                continue;
+            }
+            if (child->data(loaded_role).toBool() && child->data(query_role).isValid() &&
+                !child->data(more_role).toBool()) {
+                levels.emplace_back(QPersistentModelIndex{child->index()},
+                                    child->data(query_role).value<persistence::LibraryQuery>());
+                pending.push_back(child);
+            }
+        }
+    }
+    for (auto& [parent, query] : levels) {
+        mergeChildren(parent, std::move(query));
+    }
+}
+
+void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
+                                   persistence::LibraryQuery query) {
+    if (query.limit < 100'000U && !query.newest_first) {
+        query.limit = 100'000U;
+    }
+    query.offset = 0U;
+    const auto generation = generation_;
+    const auto root = !parent.isValid();
+    enqueue(
+        {[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
+             Outcome outcome;
+             const auto result = library.query(query, cancellation);
+             if (result) {
+                 outcome.page = *result;
+             } else {
+                 outcome.error = text(result.error().message);
+             }
+             return outcome;
+         },
+         [this, parent, root, query, generation](Outcome outcome) {
+             if (generation != generation_ || (!root && !parent.isValid()) ||
+                 !outcome.error.isEmpty()) {
+                 return;
+             }
+             auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
+             if (target == nullptr) {
+                 return;
+             }
+             // Rows that are no entry -- "Show more…", "No matches" -- go;
+             // what stays is matched by its entry.
+             for (int row = target->rowCount() - 1; row >= 0; --row) {
+                 if (!target->child(row)->data(entry_role).isValid()) {
+                     target->removeRow(row);
+                 }
+             }
+             int at = 0;
+             for (auto entry : outcome.page.entries) {
+                 prepareEntry(entry, query);
+                 const auto key = entryKey(entry);
+                 int found = -1;
+                 for (int row = at; row < target->rowCount(); ++row) {
+                     if (entryKey(target->child(row)->data(entry_role)
+                                      .value<persistence::LibraryEntry>()) == key) {
+                         found = row;
+                         break;
+                     }
+                 }
+                 QStandardItem* item = nullptr;
+                 if (found == at) {
+                     item = target->child(at);
+                 } else if (found > at) {
+                     // Moved: taken with what it holds, and opened again.
+                     auto taken = target->takeRow(found);
+                     target->insertRow(at, taken);
+                     item = target->child(at);
+                     if (expanded_entries_.contains(key)) {
+                         emit expandRequested(item->index());
+                     }
+                 } else {
+                     item = new QStandardItem;
+                     target->insertRow(at, item);
+                 }
+                 // Said again as it is now: counts, ratings, what is
+                 // available -- its rows and whether they are open kept.
+                 describeItem(*item, entry);
+                 if (found < 0 && expanded_entries_.contains(key)) {
+                     emit expandRequested(item->index());
+                 }
+                 ++at;
+             }
+             if (target->rowCount() > at) {
+                 target->removeRows(at, target->rowCount() - at);
+             }
+             if (outcome.page.more) {
+                 auto next = query;
+                 next.offset = outcome.page.entries.size();
+                 auto* more = new QStandardItem(tr("Show more…"));
+                 more->setEditable(false);
+                 more->setDragEnabled(false);
+                 more->setData(true, more_role);
+                 more->setData(QVariant::fromValue(next), query_role);
+                 target->appendRow(more);
+             } else if (target->rowCount() == 0) {
+                 const bool top = root && query.text.empty();
+                 auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
+                 empty->setEnabled(false);
+                 empty->setData(top, empty_state_role);
+                 target->appendRow(empty);
+             }
+         },
+         true});
 }
 
 void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
@@ -708,70 +943,9 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                                                        : tr("Search results"));
              }
              for (auto entry : outcome.page.entries) {
-                 // ADR-0254: a view's node opens, and resolves, as the view
-                 // lists it -- under a genre, an album is the genre's part
-                 // of it.
-                 if ((!query.view.empty() || query.folders) &&
-                     entry.kind != persistence::LibraryEntryKind::track) {
-                     auto node = query;
-                     node.kind = persistence::LibraryEntryKind::group;
-                     node.offset = 0U;
-                     if (query.folders) {
-                         node.folder = entry.view_value;
-                     } else {
-                         node.view_path.push_back(entry.view_value);
-                     }
-                     entry.view_node = std::move(node);
-                 }
-                 auto label = entry.label.empty() && entry.view_node ? tr("Unknown")
-                                                                     : text(entry.label);
-                 if (entry.available == 0U) {
-                     label += tr(" — unavailable");
-                 } else if (entry.available < entry.tracks) {
-                     label += tr(" — %1 unavailable").arg(entry.tracks - entry.available);
-                 }
-                 auto* item = new QStandardItem(label);
-                 item->setEditable(false);
-                 item->setDragEnabled(entry.available > 0U);
-                 item->setDropEnabled(false);
-                 item->setIcon(QIcon::fromTheme(entry.kind == persistence::LibraryEntryKind::artist
-                                                    ? QStringLiteral("avatar-default")
-                                                : entry.kind == persistence::LibraryEntryKind::album
-                                                    ? QStringLiteral("media-optical-audio")
-                                                : entry.kind == persistence::LibraryEntryKind::group
-                                                    ? QStringLiteral("folder-music")
-                                                    : QStringLiteral("audio-x-generic")));
-                 item->setData(QVariant::fromValue(entry), entry_role);
-                 // A track by its file, an album by whose it is, an artist
-                 // by name alone.
-                 item->setToolTip(
-                     entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
-                     : entry.kind == persistence::LibraryEntryKind::group
-                         ? tr("%1 album%2 · %3 track%4")
-                               .arg(entry.albums)
-                               .arg(entry.albums == 1U ? "" : "s")
-                               .arg(entry.tracks)
-                               .arg(entry.tracks == 1U ? "" : "s")
-                     : entry.album.empty() ? text(entry.artist)
-                                           : text(entry.artist + " — " + entry.album));
-                 if (entry.view_node) {
-                     item->setData(QVariant::fromValue(*entry.view_node), query_role);
-                     item->setColumnCount(1);
-                 } else if (entry.kind != persistence::LibraryEntryKind::track) {
-                     persistence::LibraryQuery children;
-                     if (entry.kind == persistence::LibraryEntryKind::artist) {
-                         children.kind = persistence::LibraryEntryKind::album;
-                         children.artist = entry.key;
-                     } else {
-                         children.kind = persistence::LibraryEntryKind::track;
-                         children.album_key = entry.key;
-                     }
-                     item->setData(QVariant::fromValue(children), query_role);
-                     // Its column before its rows: added with the first row,
-                     // it is a column insertion under a nested row, which
-                     // QML's tree adapter cannot follow.
-                     item->setColumnCount(1);
-                 }
+                 prepareEntry(entry, query);
+                 auto* item = new QStandardItem;
+                 describeItem(*item, entry);
                  target->appendRow(item);
                  if (locate_target_) {
                      const bool found =
@@ -1304,6 +1478,8 @@ void LibraryBrowser::loadRoots() {
 
 void LibraryBrowser::refreshLibrary() {
     if (!stopped_) {
+        // Not told which albums: every cover is asked again.
+        invalidateCovers();
         change_timer_.start();
     }
 }

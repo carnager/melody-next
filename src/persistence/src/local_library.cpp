@@ -2419,6 +2419,42 @@ class PreparationPipeline {
 
 } // namespace
 
+core::Result<std::vector<std::string>>
+LocalLibrary::albums_touching(const std::vector<std::string>& raw_paths) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        std::set<std::string> albums;
+        // How many albums it found under the folder.
+        const auto under = [&](const std::string& folder) {
+            const auto [from, to] = subtree_range(folder);
+            Statement select{db, "SELECT DISTINCT album_key FROM local_library_tracks "
+                                 "WHERE raw_path>=? AND raw_path<?"};
+            select.blob(1, from);
+            select.blob(2, to);
+            std::size_t found = 0U;
+            while (select.next()) {
+                albums.insert(select.bytes(0));
+                ++found;
+            }
+            return found;
+        };
+        for (const auto& raw_path : raw_paths) {
+            Statement exact{db, "SELECT album_key FROM local_library_tracks WHERE raw_path=?"};
+            exact.blob(1, raw_path);
+            if (exact.next()) {
+                albums.insert(exact.bytes(0));
+                continue;
+            }
+            // Not a track: a folder holding some, or else a file beside
+            // them -- a cover -- standing for the albums of its folder.
+            if (under(raw_path) == 0U && !audio_path(std::filesystem::path{raw_path})) {
+                static_cast<void>(under(std::filesystem::path{raw_path}.parent_path().native()));
+            }
+        }
+        return std::vector<std::string>{albums.begin(), albums.end()};
+    });
+}
+
 core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& raw_paths,
                                                 const core::CancellationToken& cancellation) {
     return checked([&] {

@@ -46,6 +46,8 @@ enum TrackRowRole : int {
     // Without it an album's discs ran together and its numbers restarted
     // at 1 halfway down.
     track_disc_start_role,
+    // bool: the row's file is not there (ADR-0268) -- shown greyed.
+    track_missing_role,
 };
 
 // Complete physical column layout used by both authority-bound queues:

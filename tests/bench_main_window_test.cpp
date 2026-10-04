@@ -17,6 +17,7 @@
 #include "bench/lastfm_service.hpp"
 #include "workspace/lastfm_settings_session.hpp"
 #include "workspace/settings_session.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
 #include "workspace/tab_store.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
@@ -133,6 +134,7 @@
 #include <QStyleOptionViewItem>
 #include <QStyledItemDelegate>
 #include <QTabBar>
+#include <QRadioButton>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTableWidget>
@@ -321,6 +323,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsStagesAlongsideAutomaticScripts();
     void cachedRowsAreReadEvenWithARevision();
     void settingsGroupWhatTheyAreAbout();
+    void settingsChooseWhereUndoCopiesAreKept();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -983,6 +986,41 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
     QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
+}
+
+// ADR-0266: where an engine keeps its undo copies, asked of it and changed
+// there at once.
+void BenchMainWindowTest::settingsChooseWhereUndoCopiesAreKept() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::undo);
+    QVERIFY(dialog != nullptr);
+    auto* place = dialog->findChild<QWidget*>(QStringLiteral("bench-undo-location"));
+    QVERIFY(place != nullptr);
+    auto* own = place->findChild<QRadioButton*>(QStringLiteral("bench-undo-location-engine"));
+    auto* beside = place->findChild<QRadioButton*>(QStringLiteral("bench-undo-location-beside"));
+    auto* kept_in = place->findChild<QLabel*>(QStringLiteral("bench-undo-location-engine-folder"));
+    auto* status = place->findChild<QLabel*>(QStringLiteral("bench-undo-location-status"));
+    QVERIFY(own && beside && kept_in && status);
+    // By default, the engine's own folder: said, with where it is.
+    QTRY_VERIFY_WITH_TIMEOUT(own->isChecked() && own->isEnabled(), 10'000);
+    QVERIFY(kept_in->text().endsWith(QStringLiteral("undo")));
+    // Beside each file: the engine's at once.
+    beside->click();
+    QTRY_VERIFY_WITH_TIMEOUT(beside->isChecked() && beside->isEnabled(), 10'000);
+    QCOMPARE(status->text(), QStringLiteral("Undo copies are kept there now"));
+    auto asked = window.localEngine().file_work->backup_location();
+    QVERIFY(asked.has_value());
+    QCOMPARE(asked->place, std::string{"beside"});
+    QVERIFY(asked->kept_in.empty());
+    // And back.
+    own->click();
+    QTRY_VERIFY_WITH_TIMEOUT(own->isChecked() && own->isEnabled(), 10'000);
+    asked = window.localEngine().file_work->backup_location();
+    QVERIFY(asked && asked->place == "engine" && asked->kept_in.ends_with("undo"));
+    dialog->close();
 }
 
 // Settings by what they are about: writing files (rename and move,

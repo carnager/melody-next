@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/undo_location_widget.hpp"
+#include "workspace/undo_location_session.hpp"
 #include "bench/bench_main_window.hpp"
 
 #include "workspace/panel_arrangement.hpp"
@@ -988,9 +990,49 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return widget;
         };
     }
+    // ADR-0266: where each engine keeps its undo copies, asked of it.
+    std::function<QWidget*(QWidget*)> undo_locations;
+    if (std::ranges::any_of(engines_, [](const auto& engine) { return engine->file_work != nullptr; })) {
+        undo_locations = [this](QWidget* parent) -> QWidget* {
+            auto* widget = new QWidget(parent);
+            auto* layout = new QVBoxLayout(widget);
+            layout->setContentsMargins(0, 0, 0, 0);
+            auto* row = new QHBoxLayout;
+            auto* label = new QLabel(tr("Engine:"), widget);
+            auto* picker = new QComboBox(widget);
+            picker->setObjectName(QStringLiteral("bench-settings-undo-engine"));
+            picker->setAccessibleName(tr("Engine whose undo copies are shown"));
+            row->addWidget(label);
+            row->addWidget(picker);
+            row->addStretch(1);
+            layout->addLayout(row);
+            auto* places = new QStackedWidget(widget);
+            for (const auto& engine : engines_) {
+                if (engine->file_work == nullptr) {
+                    continue;
+                }
+                const auto name =
+                    engine->key.isLocal() ? tr("This computer") : engineName(engine->key);
+                picker->addItem(name, engine->key.text());
+                auto* session = new UndoLocationSession(
+                    engine->file_work,
+                    engine->key.isLocal() ? EngineFolderLister{}
+                                          : workspace_.engineFolderLister(engine->file_work),
+                    places);
+                places->addWidget(new UndoLocationWidget(*session, name, places));
+            }
+            label->setVisible(picker->count() > 1);
+            picker->setVisible(picker->count() > 1);
+            connect(picker, &QComboBox::currentIndexChanged, places,
+                    &QStackedWidget::setCurrentIndex);
+            layout->addWidget(places);
+            return widget;
+        };
+    }
     auto* dialog = new SettingsDialog(
         this, buildOutputProfileStore(), std::move(library_folders),
-        [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_);
+        [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_,
+        std::move(undo_locations));
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {

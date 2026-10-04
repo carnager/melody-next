@@ -80,4 +80,8 @@ And undo restored by exchanging the file and its backup atomically
   `engine` (`undo` beside its database, the default), `folder`, `beside` --
   and moves every undo copy there at start and when it changes, those kept
   beside files before included.
-- To do: the choice in Settings › File operations › Undo, per engine.
+- The choice in Settings (2026-10-04): File operations › Undo › Where undo
+  copies are kept, per engine as Library's folders are -- asked of each
+  engine and changed there at once (`UndoLocationSession`,
+  `backups.location`): its own folder (shown), a folder chosen on its
+  machine, or beside each file, each said for what it costs.

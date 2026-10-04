@@ -76,7 +76,8 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     explicit SettingsDialog(QWidget* parent = nullptr, OutputProfileStore profile_store = {},
                             std::function<QWidget*(QWidget*)> library_folders = {},
                             std::function<QWidget*(QWidget*)> lastfm = {},
-                            QList<QAction*> shortcuts = {});
+                            QList<QAction*> shortcuts = {},
+                            std::function<QWidget*(QWidget*)> undo_locations = {});
     ~SettingsDialog() override;
     void showPage(Page page);
     // ADR-0237: the Naming page, with the move destinations of the engine

@@ -392,6 +392,10 @@ class Workspace final : public QObject {
     // every engine's destinations as places for the manager (ADR-0237).
     [[nodiscard]] OutputProfileStore
     buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    // ADR-0237: an engine's folders, listed by it, for choosing one on its
+    // machine.
+    [[nodiscard]] EngineFolderLister
+    engineFolderLister(const std::shared_ptr<engine::RemoteFileWork>& work);
     // What a file tool changed, followed by the lists, the library and the
     // queue.
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);

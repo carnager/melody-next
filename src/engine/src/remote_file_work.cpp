@@ -926,6 +926,57 @@ core::Result<void> RemoteFileWork::set_rating_backup_tag(const std::string& tag)
     return {};
 }
 
+namespace {
+
+[[nodiscard]] core::Result<RemoteFileWork::BackupLocation> location_from(const Json& answer) {
+    const auto decoded = [&answer](const char* key) -> std::string {
+        const auto found = answer.find(key);
+        if (found == answer.end() || !found->is_string()) {
+            return {};
+        }
+        auto raw = protocol::decode_raw_path(found->get<std::string>());
+        return raw ? std::move(*raw) : std::string{};
+    };
+    if (!answer.is_object() || !answer.contains("place")) {
+        return std::unexpected(unexpected_answer("where undo copies are kept"));
+    }
+    return RemoteFileWork::BackupLocation{.place = answer.value("place", std::string{}),
+                                          .folder = decoded("folder"),
+                                          .kept_in = decoded("kept_in")};
+}
+
+} // namespace
+
+core::Result<RemoteFileWork::BackupLocation> RemoteFileWork::backup_location() {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("backups.location");
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return location_from(*answer);
+}
+
+core::Result<RemoteFileWork::BackupLocation>
+RemoteFileWork::set_backup_location(const std::string& place, const std::string& folder) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    Json params{{"place", place}};
+    if (place == "folder") {
+        params["folder"] = protocol::encode_raw_path(folder);
+    }
+    // Every undo copy there may be moved, some copied across a network.
+    auto answer = (*connection)->call("backups.set_location", params, std::chrono::minutes{30});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return location_from(*answer);
+}
+
 core::Result<void> RemoteFileWork::set_backup_retention(const int days, const int writes,
                                                         const int gigabytes) {
     auto connection = client();

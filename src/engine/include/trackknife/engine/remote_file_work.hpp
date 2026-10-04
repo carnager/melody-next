@@ -138,6 +138,18 @@ class RemoteFileWork final {
     // ADR-0263: how long the files writes replace are kept there for undo
     // (backups.set_retention); 0 keeps none.
     [[nodiscard]] core::Result<void> set_backup_retention(int days, int writes, int gigabytes);
+    // ADR-0266: where the engine keeps undo copies (backups.location):
+    // "engine", "folder" or "beside", the folder when one was chosen, and
+    // the folder they are kept in (empty: beside each file).
+    struct BackupLocation {
+        std::string place;
+        std::string folder;
+        std::string kept_in;
+    };
+    [[nodiscard]] core::Result<BackupLocation> backup_location();
+    // Kept there from now on, and every undo copy there is moved there.
+    [[nodiscard]] core::Result<BackupLocation> set_backup_location(const std::string& place,
+                                                                   const std::string& folder);
 
     // Naming layouts handed over (layouts.put): each added or updated, and
     // only `removed` taken away. This engine's own move destinations, and

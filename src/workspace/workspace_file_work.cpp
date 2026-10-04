@@ -329,6 +329,23 @@ template <typename Work, typename Done> void offThread(QObject* context, Work wo
 
 } // namespace
 
+EngineFolderLister
+Workspace::engineFolderLister(const std::shared_ptr<engine::RemoteFileWork>& work) {
+    return [this, work](std::string path, EngineFolderListingCompletion done) {
+        offThread(
+            this, [work, path] { return work->folders(path); },
+            [done = std::move(done)](auto listed) {
+                if (!listed) {
+                    done(std::unexpected(std::move(listed.error())));
+                    return;
+                }
+                done(EngineFolderListing{.path = std::move(listed->path),
+                                         .parent = std::move(listed->parent),
+                                         .folders = std::move(listed->folders)});
+            });
+    };
+}
+
 MetadataPropertiesSourceReader
 Workspace::selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows) {
     return selectionSourceReader(tab.model, std::move(rows));
@@ -686,21 +703,7 @@ OutputProfileStore Workspace::buildOutputProfileStore(const EngineKey& destinati
                         this, [work, id] { return work->remove_destination(id); },
                         [done = std::move(done)](auto removed) { done(failure(removed)); });
                 },
-            .folders =
-                [this, work](std::string path, EngineFolderListingCompletion done) {
-                    offThread(
-                        this, [work, path] { return work->folders(path); },
-                        [done = std::move(done)](auto listed) {
-                            if (!listed) {
-                                done(std::unexpected(std::move(listed.error())));
-                                return;
-                            }
-                            done(EngineFolderListing{.path = std::move(listed->path),
-                                                             .parent = std::move(listed->parent),
-                                                             .folders =
-                                                                 std::move(listed->folders)});
-                        });
-                },
+            .folders = engineFolderLister(work),
             // Only through a mount: a folder of this computer is that
             // engine's only where the mount says it is.
             .copyable = mount.local_folder.empty() || mount.remote_folder.empty()

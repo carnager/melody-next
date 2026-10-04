@@ -87,7 +87,8 @@ SettingsDialog::~SettingsDialog() = default;
 
 SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store,
                                std::function<QWidget*(QWidget*)> library_folders,
-                               std::function<QWidget*(QWidget*)> lastfm, QList<QAction*> shortcuts)
+                               std::function<QWidget*(QWidget*)> lastfm, QList<QAction*> shortcuts,
+                               std::function<QWidget*(QWidget*)> undo_locations)
     : QDialog(parent) {
     setWindowTitle(QStringLiteral("Settings"));
     setObjectName(QStringLiteral("bench-settings-dialog"));
@@ -641,6 +642,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     undo_note->setWordWrap(true);
     undo_note->setForegroundRole(QPalette::PlaceholderText);
     undo_form->addRow(undo_note);
+    // ADR-0266: where each engine keeps them -- its own, said by it.
+    if (undo_locations) {
+        auto* where = new QGroupBox(QStringLiteral("Where undo copies are kept"), undo);
+        where->setObjectName(QStringLiteral("bench-settings-undo-location"));
+        auto* where_layout = new QVBoxLayout(where);
+        where_layout->addWidget(undo_locations(where));
+        undo_layout->addWidget(where);
+    }
     undo_layout->addStretch(1);
     file_operations_->addTab(undo, QStringLiteral("Undo"));
     add_page(QStringLiteral("File operations"), file_operations_);

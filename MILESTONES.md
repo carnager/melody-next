@@ -33,7 +33,7 @@ executable was retired once Trackbench reached parity (ADR-0071).
 | M8 | Complete | Parallel converter, resampler, and organized output |
 | M9 | Complete | Melody output endpoint for the MPD client |
 | M10 | Complete | Hardening, native packaging, and release acceptance |
-| M11 | Active | Unified engine: core becomes `melodyd`, Trackknife becomes its client (ADR-0220) |
+| M11 | Complete | Unified engine: core becomes `melodyd`, Trackknife becomes its client (ADR-0220); the MPD bridge and a TUI are optional and come later |
 
 ADR-0171 closes M5 after revalidating its exit criteria; M6's complete provider
 flow had already landed. ADR-0172 closes M7, ADR-0173 closes M8, ADR-0174
@@ -73,16 +73,29 @@ hold:
 - **Optimised builds pass** the suite the way debug builds do, on the compilers
   the packages are built with.
 
-Where they stand (2026-10-03): M11's step 3d is done as ADR-0259 has it --
+Where they stand (2026-10-05): M11's step 3d is done as ADR-0259 has it --
 the window keeps its tabs, not the lists; drafts in the window and kept
 searches made on the engine are deferred past 1.0 -- and the version check
-and compatibility policy are ADR-0260 (`docs/protocol-levels.md`). The quiet
-period starts from the last level bump. Optimised builds pass the suite: the
-release preset with makepkg's flags (`-O3`, LTO, `_FORTIFY_SOURCE=3`,
-`_GLIBCXX_ASSERTIONS`), GCC 16.2.1, 101 of 101, with no warnings once a test
-reading past a string literal and an unbounded encoder result were fixed. The
-66,841-track library on gemenon is measured end to end, engine and window,
-with no step stalling the window: `docs/release-measurements.md`.
+and compatibility policy are ADR-0260 (`docs/protocol-levels.md`).
+
+- **The quiet period has not begun.** Use of 2026-10-04 found that undo
+  copies sat in album folders and that undo and rollback did not work on NFS
+  (ADR-0266), and the library panel learned to follow changes (ADR-0268);
+  with them the protocol reached level 4 and the schema 53. The period counts
+  from that last change.
+- **Measured on 2026-10-03,** the 66,841-track library on gemenon end to end,
+  engine and window, with no step stalling the window
+  (`docs/release-measurements.md`). What changed since is measured again: a
+  tag write on the NAS with its undo copy, the panel following changes, and
+  a large list checking its files.
+- **Optimised builds passed** on 2026-10-03 -- the release preset with
+  makepkg's flags (`-O3`, LTO, `_FORTIFY_SOURCE=3`, `_GLIBCXX_ASSERTIONS`),
+  GCC 16.2.1, 101 of 101 -- and are run again before the release.
+- **The documentation** -- this file, `docs/roadmap.md`,
+  `docs/feature-matrix.md` -- was reconciled on 2026-10-05 through ADR-0268.
+- **Not yet among the conditions, but before the release:** the release
+  checklist walked in its engine-era form, and the Arch packaging's names
+  settled (`docs/roadmap.md`, Toward 1.0).
 
 Flathub and other distribution beyond the AUR come after 1.0.
 

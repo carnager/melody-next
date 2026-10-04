@@ -5,14 +5,23 @@
 From the AUR:
 
 - `trackknife-git`: the desktop app
-- `melody-git`: the engine (`melodyd-git`) and `melody-agent-git`. On a server
-  you only need `melodyd-git`.
+- `melodyd-git`: the engine, `melodyd`, with its systemd user unit. A server
+  needs only this.
+- `melody-agent-git`: `melody-agent`, the speakers of a machine for engines
+  elsewhere
 - `melody-cli-git`: `melody-cli`, for scripts, key bindings and status bars
 - `melody-watch-git`: `melody-watch`, for a NAS that can't run the engine
   ([what it does](melody.md#a-nas-that-cant-run-the-engine))
 
-The same packages are in [`packaging/arch/`](../packaging/arch/README.md), one
-directory each:
+Name the packages you want: `yay -S melodyd-git melody-agent-git`.
+`melodyd-git` and `melody-agent-git` are built from one recipe called
+`melody-git`; installing `melody-git` alone installs only an empty
+metapackage, and leaves an engine already installed as it was. `-git`
+packages are rebuilt when their repository moves on with
+`yay -Syu --devel`.
+
+The recipes are in [`packaging/arch/`](../packaging/arch/README.md), one
+directory each; the engine and the agent are both in `melody-git`:
 
 ```sh
 cd packaging/arch/melody-git

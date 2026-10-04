@@ -23,22 +23,31 @@ when only compilation succeeds.
 
 ## Packaged workflow acceptance
 
-- Install into a clean test account using the package artifact, not the build
-  tree. Confirm the desktop entry and file opening.
-- MPD: connect/reconnect, browse, search, queue mutations, scratch/stored lists,
-  transport, volume, ReplayGain, and output selection against stock MPD.
-- Melody: repeat the MPD flow, select the Trackknife endpoint, then exercise
-  daemon/application/network reconnects, streamed and mapped-file playback,
-  volume, ReplayGain, gapless preload, and natural advancement.
-- Local: open folders/files/CUE logical tracks; play/seek/gapless/device hotplug;
-  edit and identify tags; edit artwork; scan/store ReplayGain; rename/move;
-  convert every shipped preset and verify output.
-- Run keyboard-only and mouse-only passes in both authorities. Inspect names,
-  roles, focus order, shortcuts, selection state, non-color change markers,
-  scaling, and screen-reader announcements.
+- Install into a clean test account using the package artifacts, not the
+  build tree: `trackknife-git`, `melodyd-git`, `melody-agent-git`,
+  `melody-cli-git`, `melody-watch-git`. Confirm the desktop entry, file
+  opening, and that a second start hands its files to the running window.
+- This computer's engine: Trackknife starts it; it keeps playing with the
+  window closed. Library folders, Refresh, browsing, search, kept searches,
+  lists, Up Next, transport, volume, ReplayGain, gapless preload and natural
+  advance.
+- An engine elsewhere, over TCP with its password: the same flow, then the
+  connection lost and regained from both ends, an engine of an older level
+  said as such, and its library panel following changes made by another
+  client or reported by `melody-watch`.
+- Outputs: the engine's own speakers, an agent on another machine, a UPnP
+  renderer, and moving playback between them.
+- File work on each engine, on a local disk and on the NAS: open folders,
+  files and CUE logical tracks; edit and identify tags, one album and many;
+  edit artwork; scan and store ReplayGain; rename and move; Undo this batch;
+  convert every shipped preset and verify output. Album folders hold nothing
+  but music afterwards, wherever undo copies are kept.
+- Run keyboard-only and mouse-only passes. Inspect names, roles, focus order,
+  shortcuts, selection state, non-color change markers, scaling, both colour
+  schemes, and screen-reader announcements.
 - Create a workspace backup while the app is active. Restore it on restart and
-  verify profiles, tabs, layouts, local-library configuration, presets,
-  settings, and retained rollback database.
+  verify profiles, tabs, layouts, library configuration, presets, settings,
+  and the retained rollback database.
 
 ## Release evidence
 

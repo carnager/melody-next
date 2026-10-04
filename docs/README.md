@@ -21,19 +21,51 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-09-27, through ADR-0236 and database schema 47.
+Updated on 2026-10-05, through ADR-0268: database schema 53, protocol 1 at
+level 4 ([protocol levels](protocol-levels.md)).
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
 `melody-cli` are its clients, and audio comes out through outputs: the
 engine's own speakers, agents on other machines and phones, and optional UPnP
-renderers. This supersedes the
-two-authority model in older ADRs and in `architecture.md`.
+renderers. File work -- tagging, ReplayGain, conversion, moves -- is the
+engine's too, on its own machine. This supersedes the two-authority model in
+older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
+- [ADR-0268: What shows a library follows its changes](adr/0268-the-library-follows-its-files.md).
+- [ADR-0267: One Trackknife per workspace](adr/0267-one-trackknife-per-workspace.md).
+- [ADR-0266: Undo copies where the person says, restored without an exchange](adr/0266-undo-copies-where-the-person-says.md).
+- [ADR-0265: The matcher offers every selected file](adr/0265-matcher-offers-every-selected-file.md).
+- [ADR-0264: Settings by subject, every engine's folders in one place](adr/0264-settings-by-subject.md).
+- [ADR-0263: What was written can be undone](adr/0263-undo-what-was-written.md).
+- [ADR-0262: One Apply for both windows, ReplayGain an Apply action](adr/0262-one-apply-for-both-windows.md).
+- [ADR-0261: Identifying many albums at once](adr/0261-identify-many-albums.md).
+- [ADR-0260: Protocol versions, and what 1.x keeps compatible](adr/0260-protocol-version-and-compatibility.md).
+- [ADR-0259: The window keeps no lists of its own](adr/0259-the-window-keeps-no-lists.md).
+- [ADR-0258: Dynamic rules pick groups, the engine selects, and some ship](adr/0258-dynamic-rules-pick-groups-and-ship-defaults.md).
+- [ADR-0257: The tagger opens from the library, and reads the files behind it](adr/0257-tagger-opens-from-the-library.md).
+- [ADR-0256: Lists travel as edits, and play by reference](adr/0256-lists-travel-as-edits.md).
 - [ADR-0255: CoreAudio output on macOS](adr/0255-coreaudio-output-on-macos.md).
-- [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md) — the UI and workflow stay exactly as they are.
+- [ADR-0254: Library views are levels of tkfmt-1 expressions](adr/0254-library-views.md).
+- [ADR-0253: A list can continue with a dynamic playlist's rule](adr/0253-list-continuation.md).
+- [ADR-0252: The Qt Quick window is retired](adr/0252-retire-the-qt-quick-window.md).
+- [ADR-0251: Trackknife scales with the screen, and an interface size on top](adr/0251-interface-size-and-hidpi.md).
+- [ADR-0250: The widgets window is drawn as the Qt Quick window is](adr/0250-widgets-window-draws-as-quick.md).
+- [ADR-0249: A file renamed into place may come back with a new inode number](adr/0249-renames-that-renumber-files.md).
+- [ADR-0248: A tag save's backup is a copy where the filesystem refuses hard links](adr/0248-copied-backup-where-hard-links-are-refused.md).
+- [ADR-0247: Trackknife ships a light and a dark colour scheme](adr/0247-light-and-dark-color-schemes.md).
+- [ADR-0246: ReplayGain is one setting, for every engine the window reaches](adr/0246-replaygain-is-one-setting-for-every-engine.md).
+- [ADR-0245: Ratings can also be copied into a backup tag](adr/0245-rating-backup-tag.md).
+- [ADR-0244: Tagging scripts convert a player's rating into FMPS_RATING](adr/0244-rating-conversion-step.md).
+- [ADR-0243: tkfmt-1 gains `$decimal`](adr/0243-tkfmt-1-decimal.md).
+- [ADR-0242: The language references ship inside Trackknife](adr/0242-shipped-language-references.md).
+- [ADR-0241: The Raw script tab is the tagging script in Trackknife's own terms](adr/0241-native-raw-tagging-scripts.md).
+- [ADR-0240: The Qt Quick window is a second view of one workspace, in Fusion everywhere](adr/0240-qt-quick-window.md).
+- [ADR-0239: A desktop agent asks for Opus when its engine is far away](adr/0239-streams-follow-the-route.md).
+- [ADR-0238: The Actions button opens a popover, and remembers](adr/0238-actions-popover.md).
+- [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md).
 - [ADR-0236: Playback states are numbered, and say what the output was told](adr/0236-playback-states-are-numbered.md).
 - [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — implemented and optional.
 - [ADR-0234: Engines are connections, not a switch](adr/0234-engines-are-connections.md).
@@ -69,7 +101,8 @@ to its engines ([unified engine](unified-engine.md)); the MPD client it used
 to contain was retired in [ADR-0224](adr/0224-retire-the-mpd-backend.md).
 
 Milestones M5–M10 (tagging, MusicBrainz, ReplayGain, conversion, hardening)
-are complete; M11 is the unified engine. The [feature matrix](feature-matrix.md)
+are complete, and so is M11, the unified engine, as ADR-0259 has it. What 1.0
+still needs is in the [roadmap](roadmap.md#toward-10). The [feature matrix](feature-matrix.md)
 lists what works and its restrictions. The [roadmap](roadmap.md) lists the
 remaining work.
 
@@ -120,7 +153,8 @@ also available in [CMakePresets.json](../CMakePresets.json).
   stress, backup/restore, and end-to-end acceptance gates.
 - [M10 validation](m10-validation.md): hardening evidence and the per-artifact
   release boundary.
-- [Roadmap](roadmap.md): remaining prioritized work, updated through ADR-0236.
+- [Roadmap](roadmap.md): remaining prioritized work and what 1.0 still needs,
+  updated through ADR-0268.
 - [Sources](sources.md): references used when designing and checking behavior.
 
 The dated milestone notes, [M3 validation](m3-validation.md), and older ADRs

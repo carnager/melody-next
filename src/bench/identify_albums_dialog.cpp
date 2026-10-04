@@ -315,12 +315,19 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     actions_->setObjectName(QStringLiteral("bench-identify-albums-actions"));
     write_ = new QPushButton(this);
     write_->setObjectName(QStringLiteral("bench-identify-albums-write"));
+    // ADR-0263: the window stays after a Write, so it can be taken back.
+    undo_ = new QPushButton(QStringLiteral("Undo this batch"), this);
+    undo_->setObjectName(QStringLiteral("bench-identify-albums-undo"));
+    undo_->setToolTip(
+        QStringLiteral("Put every file the last Write changed back as it was, moved back where "
+                       "it was moved, and stage its albums again"));
     // Actions on the left, as in the tag editor.
     bottom->addWidget(actions_);
     bottom->addWidget(summary_, 1);
     bottom->addWidget(close);
     bottom->addWidget(look_up_);
     bottom->addWidget(review_next_);
+    bottom->addWidget(undo_);
     bottom->addWidget(write_);
     layout->addWidget(bottom_bar_);
     connect(review_next_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::reviewNext);
@@ -334,6 +341,11 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     connect(write_, &QPushButton::clicked, this, [this] {
         if (session_ != nullptr) {
             session_->write();
+        }
+    });
+    connect(undo_, &QPushButton::clicked, this, [this] {
+        if (session_ != nullptr) {
+            session_->undoLastWrite();
         }
     });
     connect(list_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
@@ -393,13 +405,6 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
 void IdentifyAlbumsDialog::begin(MusicBrainzLookupService service) {
     session_ = new AlbumBatchSession(*tagger_, std::move(service), this);
     connect(session_, &AlbumBatchSession::changed, this, &IdentifyAlbumsDialog::sync);
-    // Done, as the tag editor's Apply is: everything written and nothing
-    // left here to do, the window closes.
-    connect(session_, &AlbumBatchSession::writeFinished, this, [this] {
-        if (session_->wroteAll() && session_->nothingLeftToDo()) {
-            QTimer::singleShot(0, this, &QDialog::close);
-        }
-    });
     sync();
     if (list_->topLevelItemCount() > 0) {
         list_->setCurrentItem(list_->topLevelItem(0));
@@ -437,7 +442,8 @@ void IdentifyAlbumsDialog::sync() {
     const auto answered = included - open;
     const auto* writing = session_->writing();
     const auto measuring = session_->measuring();
-    const auto busy = writing != nullptr || measuring;
+    const auto undoing = session_->undoing();
+    const auto busy = writing != nullptr || measuring || undoing;
     // Reviewing, only what still runs is shown above the album.
     const auto reviewing = pages_->currentIndex() == 1;
     heading_->setVisible(!reviewing);
@@ -445,7 +451,8 @@ void IdentifyAlbumsDialog::sync() {
     // after.
     const auto running = session_->lookingUp() || busy;
     progress_->setVisible(running);
-    stop_->setVisible(running);
+    // An undo runs to its end: half undone is worse than either.
+    stop_->setVisible(running && !undoing);
     progress_text_->setVisible(started && (!reviewing || running));
     if (writing != nullptr) {
         progress_->setMaximum(static_cast<int>(std::max<std::size_t>(writing->filesTotal(), 1U)));
@@ -456,6 +463,9 @@ void IdentifyAlbumsDialog::sync() {
     } else if (measuring) {
         progress_->setMaximum(0);
         progress_text_->setText(QStringLiteral("Measuring ReplayGain before writing…"));
+    } else if (undoing) {
+        progress_->setMaximum(0);
+        progress_text_->setText(QStringLiteral("Undoing the last Write…"));
     } else {
         progress_->setMaximum(static_cast<int>(std::max<std::size_t>(included, 1U)));
         progress_->setValue(static_cast<int>(answered));
@@ -538,6 +548,9 @@ void IdentifyAlbumsDialog::sync() {
                         .arg(to_write)
                         .arg(to_write == 1U ? QStringLiteral("album") : QStringLiteral("albums")));
     write_->setEnabled(session_->canWrite());
+    write_->setVisible(to_write > 0U || !session_->canUndoLastWrite());
+    undo_->setVisible(session_->canUndoLastWrite() || undoing);
+    undo_->setEnabled(session_->canUndoLastWrite());
     write_->setDefault(needing == 0U && to_write > 0U);
     review_next_->setDefault(needing > 0U);
     actions_->setEnabled(!busy);
@@ -720,6 +733,10 @@ void IdentifyAlbumsDialog::backToList() {
 bool IdentifyAlbumsDialog::mayClose() {
     if (session_ == nullptr) {
         return true;
+    }
+    // An undo finishes first, as it cannot stop halfway.
+    if (session_->undoing()) {
+        return false;
     }
     // The files under way are finished first.
     if (session_->writing() != nullptr || session_->measuring()) {

@@ -28,7 +28,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 51U;
+constexpr unsigned current_schema_version = 52U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1519,6 +1519,28 @@ ALTER TABLE engine_lists ADD COLUMN draft_of TEXT;
 ALTER TABLE engine_lists ADD COLUMN draft_base INTEGER;
 CREATE UNIQUE INDEX engine_lists_draft ON engine_lists(draft_of) WHERE draft_of IS NOT NULL;
 UPDATE schema_version SET version = 51;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 51) {
+        // ADR-0263: the sources publications retain, for undo.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE file_publication_backups (
+    journal_id TEXT PRIMARY KEY NOT NULL
+        REFERENCES file_publication_journal(id) ON DELETE CASCADE,
+    state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 4),
+    undo_id TEXT,
+    completed_at_unix_seconds INTEGER NOT NULL,
+    updated_at_unix_seconds INTEGER NOT NULL,
+    error_code INTEGER,
+    error_message BLOB
+);
+CREATE INDEX file_publication_backups_state_time
+    ON file_publication_backups(state, completed_at_unix_seconds DESC);
+UPDATE schema_version SET version = 52;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

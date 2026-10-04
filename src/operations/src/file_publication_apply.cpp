@@ -73,6 +73,25 @@ class SynchronizedJournal final : public FilePublicationJournal {
         return journal_.load_reversals(journal_id);
     }
 
+    [[nodiscard]] core::Result<std::optional<FilePublicationBackupRecord>>
+    load_backup(const core::StableId& id) const override {
+        std::scoped_lock lock{mutex_};
+        return journal_.load_backup(id);
+    }
+
+    [[nodiscard]] core::Result<std::vector<FilePublicationBackupRecord>>
+    load_backups() const override {
+        std::scoped_lock lock{mutex_};
+        return journal_.load_backups();
+    }
+
+    [[nodiscard]] core::Result<void>
+    transition_backup(const core::StableId& id,
+                      const FilePublicationBackupTransition& transition) override {
+        std::scoped_lock lock{mutex_};
+        return journal_.transition_backup(id, transition);
+    }
+
   private:
     FilePublicationJournal& journal_;
     mutable std::mutex mutex_;

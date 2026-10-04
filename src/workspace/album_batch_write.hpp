@@ -62,6 +62,8 @@ class AlbumBatchWrite final : public QObject {
     [[nodiscard]] std::size_t filesDone() const;
     [[nodiscard]] std::size_t filesTotal() const { return files_total_; }
     [[nodiscard]] const std::vector<AlbumOutcome>& outcomes() const { return outcomes_; }
+    // ADR-0263: what it wrote, in the order written: undone newest first.
+    [[nodiscard]] const std::vector<operations::UndoRequest>& written() const { return written_; }
 
   signals:
     void progressed();
@@ -106,6 +108,7 @@ class AlbumBatchWrite final : public QObject {
     std::vector<TaggerSession::Rewritten> rewritten_;
     // Found changed since they were read: read again after, drafts kept.
     std::vector<std::size_t> changed_;
+    std::vector<operations::UndoRequest> written_;
     std::size_t files_total_{0U};
     std::size_t files_before_{0U};
     std::shared_ptr<Progress> progress_;

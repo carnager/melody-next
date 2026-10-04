@@ -11,6 +11,7 @@
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/client.hpp"
@@ -102,6 +103,12 @@ class RemoteFileWork final {
     publish(const operations::PreparationPlan& plan,
             const operations::FilePublicationApplyProgressCallback& progress,
             const core::CancellationToken& cancellation);
+
+    // ADR-0263: writes undone there (operations.undo), newest first as given.
+    [[nodiscard]] core::Result<std::vector<operations::UndoOutcome>>
+    undo(std::span<const operations::UndoRequest> requests,
+         const operations::UndoProgressCallback& progress,
+         const core::CancellationToken& cancellation);
 
     // Stage 6: a library file as it is, fetched into `to` on this computer
     // (streams.ticket, then the stream port) -- what the converter reads

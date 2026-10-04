@@ -6,6 +6,8 @@
 #include "workspace/album_lookup_queue.hpp"
 #include "workspace/tagger_session.hpp"
 
+#include <QtConcurrent/QtConcurrentRun>
+
 #include <algorithm>
 #include <charconv>
 #include <map>
@@ -430,6 +432,7 @@ void AlbumBatchSession::choose(const std::size_t index, const std::size_t versio
         return;
     }
     albums_[index].version = version;
+    albums_[index].chosen = proposals;
     albums_[index].state = State::staging;
     albums_[index].note.clear();
     to_stage_.push_back(ToStage{.album = index, .proposals = std::move(proposals)});
@@ -450,20 +453,130 @@ bool AlbumBatchSession::canWrite() const {
            !tagger_.isNull() && tagger_->canWriteElsewhere() && !toWrite().empty();
 }
 
-bool AlbumBatchSession::nothingLeftToDo() const {
-    return std::ranges::none_of(order_, [this](const std::size_t album) {
-        switch (albums_[album].state) {
-        case State::waiting:
-        case State::searching:
-        case State::staging:
-        case State::staged:
-        case State::needs_choice:
-        case State::failed:
-            return true;
-        default:
-            return false;
-        }
+bool AlbumBatchSession::canUndoLastWrite() const {
+    return last_write_.has_value() && writer_ == nullptr && !measuring_ && !undoing_ &&
+           !tagger_.isNull() && static_cast<bool>(tagger_->services().undo) &&
+           tagger_->canWriteElsewhere();
+}
+
+void AlbumBatchSession::undoLastWrite() {
+    if (!canUndoLastWrite() || !tagger_->beginWriteElsewhere()) {
+        return;
+    }
+    undoing_ = true;
+    write_summary_.clear();
+    emit changed();
+    const QPointer self{this};
+    (void)QtConcurrent::run([requests = last_write_->requests, undo = tagger_->services().undo,
+                             self] {
+        auto outcome = std::make_shared<core::Result<std::vector<operations::UndoOutcome>>>(
+            undo(requests, {}));
+        QMetaObject::invokeMethod(
+            self,
+            [self, outcome] {
+                if (self) {
+                    self->undone(outcome);
+                }
+            },
+            Qt::QueuedConnection);
     });
+}
+
+void AlbumBatchSession::undone(
+    std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome) {
+    undoing_ = false;
+    if (tagger_.isNull()) {
+        return;
+    }
+    if (!*outcome) {
+        write_summary_ =
+            QStringLiteral("Nothing undone · %1").arg(text(outcome->error().message));
+        tagger_->finishWriteElsewhere({});
+        emit changed();
+        emit undoFinished();
+        return;
+    }
+    // Followed as a write is: the lists, the library, Up Next.
+    operations::MetadataApplyResult restored;
+    operations::FilePublicationApplyResult moved_back;
+    std::size_t refused = 0U;
+    for (const auto& undone : **outcome) {
+        if (undone.issue) {
+            ++refused;
+            continue;
+        }
+        if (undone.restored) {
+            restored.sources.push_back(operations::MetadataApplySourceResult{
+                .source_index = restored.sources.size(),
+                .raw_path = undone.restored->source_raw_path,
+                .state = operations::MetadataApplySourceState::committed,
+                .commit = undone.restored,
+                .issue = std::nullopt});
+        }
+        if (undone.moved_back) {
+            moved_back.sources.push_back(operations::FilePublicationApplySourceResult{
+                .source_index = moved_back.sources.size(),
+                .source_raw_path = undone.from_raw_path,
+                .target_raw_path = undone.to_raw_path,
+                .publication = {},
+                .state = operations::FilePublicationApplySourceState::committed,
+                .commit = undone.moved_back,
+                .metadata_commit = std::nullopt,
+                .published_metadata = undone.published_metadata,
+                .issue = std::nullopt});
+        }
+    }
+    const auto& services = tagger_->services();
+    if (!restored.sources.empty() && services.apply_observer) {
+        services.apply_observer(restored);
+    }
+    if (!moved_back.sources.empty() && services.file_apply_observer) {
+        services.file_apply_observer(moved_back);
+    }
+    // The files read again where they are back.
+    std::vector<TaggerSession::Rewritten> rewritten;
+    if (const auto selection = tagger_->sharedSelection()) {
+        for (const auto& undone : **outcome) {
+            if (undone.issue) {
+                continue;
+            }
+            for (std::size_t item = 0U; item < selection->item_count(); ++item) {
+                if (selection->source(item).raw_path == undone.from_raw_path) {
+                    rewritten.push_back({.item = item, .raw_path = undone.to_raw_path});
+                }
+            }
+        }
+    }
+    const auto albums = last_write_->albums;
+    last_write_.reset();
+    write_summary_ =
+        refused == 0U
+            ? QStringLiteral("Undone · %1 %2 as they were, staged again")
+                  .arg(albums.size())
+                  .arg(albums.size() == 1U ? QStringLiteral("album") : QStringLiteral("albums"))
+            : QStringLiteral("Undone in part · %1 %2 could not be put back")
+                  .arg(refused)
+                  .arg(refused == 1U ? QStringLiteral("file") : QStringLiteral("files"));
+    connect(tagger_, &TaggerSession::writtenElsewhere, this,
+            [this, albums] {
+                // Staged again, as before the Write.
+                for (const auto album : albums) {
+                    if (albums_[album].state != State::written &&
+                        albums_[album].state != State::staged) {
+                        continue;
+                    }
+                    albums_[album].state = State::staging;
+                    albums_[album].note.clear();
+                    to_stage_.push_back(
+                        ToStage{.album = album, .proposals = albums_[album].chosen});
+                }
+                emit changed();
+                emit undoFinished();
+                stageNext();
+            },
+            Qt::SingleShotConnection);
+    emit changed();
+    tagger_->finishWriteElsewhere(std::move(rewritten));
 }
 
 std::vector<std::size_t> AlbumBatchSession::toWrite() const {
@@ -482,7 +595,6 @@ void AlbumBatchSession::write() {
     }
     auto albums = toWrite();
     write_summary_.clear();
-    wrote_all_ = false;
     if (tagger_->replayGainOnApply()) {
         std::vector<std::size_t> items;
         for (const auto album : albums) {
@@ -569,7 +681,19 @@ void AlbumBatchSession::startWriter(std::vector<std::size_t> albums) {
             }
         }
         const auto total = writer_->outcomes().size();
-        wrote_all_ = written == total;
+        // Undone newest first.
+        last_write_.reset();
+        if (!writer_->written().empty()) {
+            LastWrite last;
+            last.requests.assign(writer_->written().rbegin(), writer_->written().rend());
+            for (const auto& outcome : writer_->outcomes()) {
+                if (outcome.outcome == Outcome::written ||
+                    outcome.outcome == Outcome::partly_written) {
+                    last.albums.push_back(outcome.album);
+                }
+            }
+            last_write_ = std::move(last);
+        }
         write_summary_ = written == total
                              ? QStringLiteral("Wrote %1 %2")
                                    .arg(written)

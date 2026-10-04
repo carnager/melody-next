@@ -63,6 +63,8 @@ class AlbumBatchSession final : public QObject {
         std::size_t version{0U};
         // Staged, but not to be written by the next Write.
         bool excluded{false};
+        // The pairing the person confirmed, staged again after an undo.
+        std::optional<metadata::MetadataProposalSet> chosen{};
     };
 
     AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupService service,
@@ -120,12 +122,11 @@ class AlbumBatchSession final : public QObject {
     [[nodiscard]] bool measuring() const { return measuring_; }
     // How the last Write went, said once it is over.
     [[nodiscard]] QString writeSummary() const { return write_summary_; }
-    // The last Write wrote every album it was given.
-    [[nodiscard]] bool wroteAll() const { return wrote_all_; }
-    // Nothing left that the batch can still do: nothing being looked up,
-    // needing a person, or staged for a Write. Albums found nothing for,
-    // skipped or left out are left as they are.
-    [[nodiscard]] bool nothingLeftToDo() const;
+    // ADR-0263: the last Write undone -- every file it wrote put back as it
+    // was -- and the albums it wrote staged again, as before it.
+    [[nodiscard]] bool canUndoLastWrite() const;
+    void undoLastWrite();
+    [[nodiscard]] bool undoing() const { return undoing_; }
     void stopWriting();
 
     static QString stateText(const Album& album);
@@ -134,6 +135,8 @@ class AlbumBatchSession final : public QObject {
     void changed();
     // The write is over, its outcome in each album's state and note.
     void writeFinished();
+    // The undo is over, said in writeSummary().
+    void undoFinished();
 
   private:
     void group();
@@ -163,7 +166,14 @@ class AlbumBatchSession final : public QObject {
     QPointer<AlbumBatchWrite> writer_;
     bool measuring_{false};
     QString write_summary_;
-    bool wrote_all_{false};
+    // What the last Write wrote, newest first, and the albums it wrote.
+    struct LastWrite {
+        std::vector<operations::UndoRequest> requests;
+        std::vector<std::size_t> albums;
+    };
+    std::optional<LastWrite> last_write_;
+    bool undoing_{false};
+    void undone(std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome);
 };
 
 } // namespace trackknife::bench

@@ -785,6 +785,34 @@ RemoteFileWork::publish(const operations::PreparationPlan& plan,
         *outcome, [](const Json& value) { return wire::decode_publication_apply_result(value); });
 }
 
+core::Result<std::vector<operations::UndoOutcome>>
+RemoteFileWork::undo(const std::span<const operations::UndoRequest> requests,
+                     const operations::UndoProgressCallback& progress,
+                     const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto outcome = (*connection)
+                       ->run_job(
+                           "operations.undo", Json{{"operations", wire::encode(requests)}},
+                           [&progress](const Json& reported) {
+                               if (progress && reported.contains("completed") &&
+                                   reported.contains("total") &&
+                                   reported.at("completed").is_number_unsigned() &&
+                                   reported.at("total").is_number_unsigned()) {
+                                   progress(reported.at("completed").get<std::size_t>(),
+                                            reported.at("total").get<std::size_t>());
+                               }
+                           },
+                           cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    return outcome_of<std::vector<operations::UndoOutcome>>(
+        *outcome, [](const Json& value) { return wire::decode_undo_outcomes(value); });
+}
+
 core::Result<void> RemoteFileWork::download_original(const std::string& raw_path,
                                                      const std::filesystem::path& to,
                                                      const core::CancellationToken& cancellation) {

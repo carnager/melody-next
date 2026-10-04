@@ -6,6 +6,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "trackknife/operations/metadata_journal.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 
 #include <cstddef>
@@ -66,8 +67,33 @@ struct FilePublicationJournalTransition {
     std::optional<core::Error> failure;
 };
 
+// ADR-0263: the retained source of a completed publication, with the same
+// lifecycle as a metadata operation's backup -- retained, undone or
+// released, or left for reconciliation.
+struct FilePublicationBackupRecord {
+    FilePublicationJournalRecord publication;
+    MetadataOperationBackupState state{MetadataOperationBackupState::retained};
+    std::optional<core::StableId> undo_id;
+    std::int64_t completed_at_unix_seconds{0};
+    std::int64_t updated_at_unix_seconds{0};
+    std::optional<core::Error> failure;
+
+    friend bool operator==(const FilePublicationBackupRecord&,
+                           const FilePublicationBackupRecord&) = default;
+};
+using FilePublicationBackupTransition = MetadataOperationBackupTransition;
+
 [[nodiscard]] std::filesystem::path
 file_publication_prepared_path(const std::filesystem::path& target,
+                               const core::StableId& journal_id);
+
+// ADR-0263: a publication that writes a new file at the target -- copied to
+// another filesystem, or written with its tags -- keeps the source it
+// replaces, renamed beside it, for undo; same-filesystem renames keep the
+// file itself and need nothing.
+[[nodiscard]] bool publication_retains_source(const FilePublicationJournalRecord& record) noexcept;
+[[nodiscard]] std::filesystem::path
+file_publication_retained_path(const std::filesystem::path& source,
                                const core::StableId& journal_id);
 
 [[nodiscard]] core::Result<FilePublicationJournalRecord>
@@ -99,6 +125,14 @@ class FilePublicationJournal {
     load_incomplete() const = 0;
     [[nodiscard]] virtual core::Result<std::vector<FilePublicationJournalRecord>>
     load_reversals(const core::StableId& journal_id) const = 0;
+    // A publication that retains its source records it as retained when it
+    // completes; newest first.
+    [[nodiscard]] virtual core::Result<std::optional<FilePublicationBackupRecord>>
+    load_backup(const core::StableId& id) const = 0;
+    [[nodiscard]] virtual core::Result<std::vector<FilePublicationBackupRecord>>
+    load_backups() const = 0;
+    [[nodiscard]] virtual core::Result<void>
+    transition_backup(const core::StableId& id, const FilePublicationBackupTransition& transition) = 0;
 };
 
 } // namespace trackknife::operations

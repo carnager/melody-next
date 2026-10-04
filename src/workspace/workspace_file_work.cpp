@@ -276,6 +276,18 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                                                     : QPointer<LibraryBrowser>{}] {
                         return browser ? browser->rootPaths() : std::vector<std::string>{};
                     },
+                .undo =
+                    [work](std::vector<operations::UndoRequest> requests,
+                           const core::CancellationToken& cancellation)
+                    -> core::Result<std::vector<operations::UndoOutcome>> {
+                        if (!work) {
+                            return std::unexpected(core::Error{
+                                .code = core::ErrorCode::unsupported,
+                                .message = "No engine to undo the write",
+                                .context = {}});
+                        }
+                        return work->undo(requests, {}, cancellation);
+                    },
             },
         .artwork_applier = engineArtworkPlanApplierFactory(work),
         .artwork_observer =

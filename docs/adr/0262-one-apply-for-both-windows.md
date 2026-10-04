@@ -91,9 +91,9 @@ each album is in, and ReplayGain scanned after the write. In use:
   differ in it -- and the matcher's panes without their own heading and
   Stage, the file buttons there once a file is chosen. A file found changed
   since it was read is read again after the write, its album's draft kept,
-  so the next Write takes it. When a Write writes everything and nothing is
-  left to do (nothing looked up, needing a person or staged), the window
-  closes, as Apply closes the tag editor.
+  so the next Write takes it. (A window that closed itself once a Write
+  left nothing to do was tried, then given up for ADR-0263's Undo this
+  batch: the window stays, so the Write can be taken back.)
 - From Tools (2026-10-04): **Identify albums…** stands beside Edit tags…
   in the Edit menu and a track's Tools, over the tracks selected or, none
   selected, the whole list. It opens no tag editor: the window keeps a

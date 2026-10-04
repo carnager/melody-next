@@ -420,6 +420,10 @@ void AlbumBatchWrite::applied(
             tagger_->services().apply_observer(**tags);
         }
         for (const auto& source : (**tags).sources) {
+            if (source.commit && !source.commit->journal_id.is_nil()) {
+                written_.push_back({.kind = operations::UndoKind::metadata,
+                                    .journal_id = source.commit->journal_id});
+            }
             for (const auto item : itemsAt(source.raw_path)) {
                 if (source.state == operations::MetadataApplySourceState::committed) {
                     written.insert(item);
@@ -435,6 +439,14 @@ void AlbumBatchWrite::applied(
             tagger_->services().file_apply_observer(**files);
         }
         for (const auto& source : (**files).sources) {
+            if (source.metadata_commit && !source.metadata_commit->journal_id.is_nil()) {
+                written_.push_back({.kind = operations::UndoKind::metadata,
+                                    .journal_id = source.metadata_commit->journal_id});
+            }
+            if (source.commit && !source.commit->journal_id.is_nil()) {
+                written_.push_back({.kind = operations::UndoKind::publication,
+                                    .journal_id = source.commit->journal_id});
+            }
             const auto done =
                 source.state == operations::FilePublicationApplySourceState::committed ||
                 source.state == operations::FilePublicationApplySourceState::unchanged;

@@ -683,6 +683,15 @@ Json encode(const std::span<const operations::UndoOutcome> outcomes) {
             entry["from"] = protocol::encode_raw_path(outcome.from_raw_path);
             entry["to"] = protocol::encode_raw_path(outcome.to_raw_path);
         }
+        if (outcome.restored) {
+            entry["restored"] = encode_commit(*outcome.restored);
+        }
+        if (outcome.moved_back) {
+            entry["moved_back"] = encode(*outcome.moved_back);
+        }
+        if (outcome.published_metadata) {
+            entry["published_metadata"] = encode(*outcome.published_metadata);
+        }
         list.push_back(std::move(entry));
     }
     return list;
@@ -699,8 +708,30 @@ core::Result<std::vector<operations::UndoOutcome>> decode_undo_outcomes(const Js
         if (!request) {
             return std::unexpected(std::move(request.error()));
         }
-        operations::UndoOutcome outcome{.request = *request, .issue = std::nullopt,
-                                        .from_raw_path = {}, .to_raw_path = {}};
+        operations::UndoOutcome outcome{.request = *request,
+                                        .issue = std::nullopt,
+                                        .from_raw_path = {},
+                                        .to_raw_path = {},
+                                        .restored = std::nullopt,
+                                        .moved_back = std::nullopt,
+                                        .published_metadata = std::nullopt};
+        {
+            Reader in{entry};
+            outcome.restored =
+                in.optional_object<operations::MetadataCommitResult>("restored", read_commit);
+            outcome.moved_back = in.optional_object<operations::FilePublicationCommitResult>(
+                "moved_back", read_publication_commit);
+            if (const auto* published = in.find("published_metadata")) {
+                auto decoded = decode_document(*published);
+                if (!decoded) {
+                    return std::unexpected(std::move(decoded.error()));
+                }
+                outcome.published_metadata = std::move(*decoded);
+            }
+            if (!in.ok()) {
+                return std::unexpected(in.error());
+            }
+        }
         if (const auto issue = entry.find("issue"); issue != entry.end()) {
             auto decoded = decode_error(*issue);
             if (!decoded) {

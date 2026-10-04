@@ -152,12 +152,17 @@ void encodings_are_exact() {
         const std::array outcomes{
             operations::UndoOutcome{.request = requests[0], .issue = std::nullopt,
                                     .from_raw_path = std::string{"/a/\xff.flac"},
-                                    .to_raw_path = "/b/c.flac"},
+                                    .to_raw_path = "/b/c.flac",
+                                    .restored = std::nullopt,
+                                    .moved_back = std::nullopt,
+                                    .published_metadata = std::nullopt},
             operations::UndoOutcome{.request = requests[1],
                                     .issue = core::Error{.code = core::ErrorCode::conflict,
                                                          .message = "changed",
                                                          .context = {}},
-                                    .from_raw_path = {}, .to_raw_path = {}}};
+                                    .from_raw_path = {}, .to_raw_path = {},
+                                    .restored = std::nullopt, .moved_back = std::nullopt,
+                                    .published_metadata = std::nullopt}};
         const auto answered = wire::decode_undo_outcomes(wire::encode(outcomes));
         require(answered && *answered == std::vector(outcomes.begin(), outcomes.end()),
                 "undo outcomes travel exactly");
@@ -1349,6 +1354,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
     };
     const auto original_bytes = bytes_of(flac);
+    const auto original = metadata::read_local_metadata(flac);
+    require(original.has_value(), "the file is read first");
     const auto applied = remote.apply(*plan, {}, {});
     require(applied && applied->committed_source_count() == 1U, "and written by it");
     const auto after = metadata::read_local_metadata(flac);
@@ -1363,8 +1370,10 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
             .journal_id = applied->sources.front().commit->journal_id}};
         const auto undone = remote.undo(undo, {}, {});
         require(undone && undone->size() == 1U && !undone->front().issue &&
-                    undone->front().to_raw_path == flac,
-                "a write is undone through the engine");
+                    undone->front().to_raw_path == flac && undone->front().restored &&
+                    undone->front().restored->document.first_effective_value("title") ==
+                        original->document.first_effective_value("title"),
+                "a write is undone through the engine, saying what it restored");
         require(bytes_of(flac) == original_bytes, "the file is the original, byte for byte");
         const auto again = remote.undo(undo, {}, {});
         require(again && again->size() == 1U && again->front().issue.has_value(),

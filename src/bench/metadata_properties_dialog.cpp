@@ -125,6 +125,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
               .musicbrainz = std::move(musicbrainz),
               .tools = std::move(tools),
               .library_roots = {},
+              .undo = {},
           },
           parent) {}
 

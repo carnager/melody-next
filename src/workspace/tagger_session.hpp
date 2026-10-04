@@ -17,6 +17,7 @@
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 
 #include <QByteArray>
@@ -119,6 +120,11 @@ struct TaggerServices {
     FileWorkTools tools;
     // The library folders of the engine holding the files, as raw paths.
     std::function<std::vector<std::string>()> library_roots;
+    // ADR-0263: writes undone by the engine holding the files, newest first
+    // as given. Run on a worker.
+    std::function<core::Result<std::vector<operations::UndoOutcome>>(
+        std::vector<operations::UndoRequest>, const core::CancellationToken&)>
+        undo;
 };
 
 // The tagger's artwork, as the session needs it: its pending covers, whether

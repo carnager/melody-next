@@ -6109,6 +6109,7 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_roots = {},
+            .undo = {},
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
     properties->setProperty("trackknife-move-folder",
@@ -6238,6 +6239,7 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_roots = {},
+            .undo = {},
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
     properties->show();
@@ -6489,6 +6491,11 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
             .musicbrainz = service,
             .tools = engineFileWorkTools(work),
             .library_roots = [root = raw(library)] { return std::vector{root}; },
+            .undo =
+                [work](std::vector<operations::UndoRequest> requests,
+                       const core::CancellationToken& cancellation) {
+                    return work->undo(requests, {}, cancellation);
+                },
         });
     properties->show();
     QTableView* files = nullptr;
@@ -6615,19 +6622,40 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(has_patches(4U, 5U));
     QVERIFY(dialog->isVisible());
 
-    // Third's changed file was read again, its draft kept: written now, and
-    // with nothing left to do the window closes, as Apply closes the editor.
-    const QPointer<IdentifyAlbumsDialog> guard{dialog};
+    // Third's changed file was read again, its draft kept: written now. The
+    // window stays, so the Write can be taken back.
     QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
     QTRY_VERIFY(write->isEnabled());
     write->click();
-    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    QTRY_COMPARE_WITH_TIMEOUT(session->albums()[third].state, AlbumBatchSession::State::written,
+                              20'000);
     const auto third_moved = library + QStringLiteral("/Third/Alpha/One.flac");
     QVERIFY2(QFile::exists(third_moved), qPrintable(third_moved));
     const auto third_tags = metadata::read_local_metadata(raw(third_moved));
     QVERIFY(third_tags.has_value());
     QCOMPARE(value_of(third_tags->document, "MUSICBRAINZ_ALBUMID"),
              ids.at(QStringLiteral("Third")).toStdString());
+    QVERIFY(dialog->isVisible());
+
+    // ADR-0263: undone -- the files back where they were, as they were, and
+    // the album staged again.
+    auto* undo = dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-undo"));
+    QTRY_VERIFY(undo->isVisibleTo(dialog) && undo->isEnabled());
+    undo->click();
+    QTRY_VERIFY_WITH_TIMEOUT(!session->undoing() && !tagger->writingElsewhere(), 20'000);
+    const auto third_original = QString::fromStdString(sources[4].source.raw_path);
+    QVERIFY2(QFile::exists(third_original), qPrintable(third_original));
+    QVERIFY(!QFile::exists(third_moved));
+    const auto restored = metadata::read_local_metadata(sources[4].source.raw_path);
+    QVERIFY(restored.has_value());
+    QVERIFY(value_of(restored->document, "MUSICBRAINZ_ALBUMID").empty());
+    QCOMPARE(value_of(restored->document, "ARTIST"), std::string{"Third"});
+    QCOMPARE(value_of(restored->document, "COMMENT"), std::string{"changed elsewhere"});
+    QTRY_COMPARE_WITH_TIMEOUT(session->albums()[third].state, AlbumBatchSession::State::staged,
+                              10'000);
+    QCOMPARE(tagger->sharedSelection()->source(4U).raw_path, sources[4].source.raw_path);
+    QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
+    QVERIFY(!undo->isVisibleTo(dialog));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }

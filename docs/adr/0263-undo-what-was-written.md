@@ -68,3 +68,10 @@ bytes were gone: nothing could be undone.
   (`operations::undo_operations`), the library following each file back,
   its own tags re-read where the write had changed them; one refused does
   not stop the rest. `RemoteFileWork::undo` asks for it. Protocol level 2.
+- Undo this batch (2026-10-04): a Write remembers what it wrote; the
+  window stays after it and offers **Undo this batch**, which undoes it
+  newest first through the engine, the lists, library and Up Next following
+  each file back as after a write, the tagger reading the files again, and
+  the albums staged again -- with the pairing the person confirmed -- ready
+  for another Write. Opened from a track's menu there is no tag editor to
+  fall back on, so the undo belongs to the window.

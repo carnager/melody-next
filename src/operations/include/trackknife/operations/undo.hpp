@@ -38,6 +38,12 @@ struct UndoOutcome {
     std::optional<core::Error> issue;
     std::string from_raw_path;
     std::string to_raw_path;
+    // What it did, as a write says it: the tags restored in place, or the
+    // file moved back -- with its own tags again where the write changed
+    // them -- so whatever follows writes follows this too.
+    std::optional<MetadataCommitResult> restored;
+    std::optional<FilePublicationCommitResult> moved_back;
+    std::optional<metadata::MetadataDocument> published_metadata;
 
     friend bool operator==(const UndoOutcome&, const UndoOutcome&) = default;
 };

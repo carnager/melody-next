@@ -89,6 +89,7 @@ class IdentifyAlbumsDialog final : public QDialog {
     QPushButton* review_next_;
     QPushButton* actions_;
     QPushButton* write_;
+    QPushButton* undo_;
     QWidget* bottom_bar_;
     QStackedWidget* pages_;
     QLabel* review_heading_;

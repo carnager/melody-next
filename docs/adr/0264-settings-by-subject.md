@@ -28,7 +28,10 @@ were in Settings: two places for one thing.
   (no heading while there is only this computer), the selected one edited
   below it. **New** asks which engine when there is more than one;
   **Remove** removes the one selected. No engine or destination dropdown.
-  (Naming layouts stay global, ADR-0237, so they need no engine.)
+- **Naming layouts are a list too**: each layout's name and whole pattern
+  (folders and filename as one path), the selected one edited below;
+  **New** and **Remove** under the list, **Save layout** under the form.
+  They stay global (ADR-0237), so they have no engine headings.
 - **Ratings** is a page of its own: ratings written into the files, their
   backup copy, other players' RATING tags -- handed to every engine.
 - Covers stays a page of its own.

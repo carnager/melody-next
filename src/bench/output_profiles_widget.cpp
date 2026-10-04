@@ -55,13 +55,32 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
     layouts_page_ = layouts_box;
     auto* layouts_row = new QVBoxLayout(layouts_box);
     layouts_row->setContentsMargins(16, 16, 16, 16);
-    layouts_row->setSpacing(16);
-    layout_list_ = new QComboBox(layouts_box);
+    layouts_row->setSpacing(12);
+    // ADR-0264: the saved layouts listed, the selected one edited below --
+    // as the move destinations are. Global (ADR-0237): no engine.
+    layout_list_ = new QTreeWidget(layouts_box);
     layout_list_->setObjectName(QStringLiteral("bench-output-layout-list"));
-    layout_list_->setAccessibleName(QStringLiteral("Naming layout"));
-    layout_list_->setPlaceholderText(QStringLiteral("New naming layout"));
-    layout_list_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    layouts_row->addWidget(layout_list_);
+    layout_list_->setAccessibleName(QStringLiteral("Naming layouts"));
+    layout_list_->setColumnCount(2);
+    layout_list_->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("Pattern")});
+    layout_list_->setRootIsDecorated(false);
+    layout_list_->setItemsExpandable(false);
+    layout_list_->setUniformRowHeights(true);
+    layout_list_->setSelectionMode(QAbstractItemView::SingleSelection);
+    layout_list_->header()->setStretchLastSection(true);
+    layout_list_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    layout_list_->setMinimumHeight(120);
+    layouts_row->addWidget(layout_list_, 1);
+    auto* layout_list_buttons = new QHBoxLayout;
+    layout_new_ = new QPushButton(QStringLiteral("New"), layouts_box);
+    layout_new_->setObjectName(QStringLiteral("bench-output-layout-new"));
+    layout_remove_ = new QPushButton(QStringLiteral("Remove"), layouts_box);
+    layout_remove_->setObjectName(QStringLiteral("bench-output-layout-remove"));
+    layout_remove_->setToolTip(QStringLiteral("Remove the naming layout selected"));
+    layout_list_buttons->addWidget(layout_new_);
+    layout_list_buttons->addWidget(layout_remove_);
+    layout_list_buttons->addStretch(1);
+    layouts_row->addLayout(layout_list_buttons);
     auto* layout_form_holder = new QVBoxLayout;
     auto* layout_form = new QFormLayout;
     layout_form->setVerticalSpacing(12);
@@ -95,19 +114,12 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
     layout_form->addRow(QStringLiteral("Filename policy:"), sanitization_policy_);
     layout_form_holder->addLayout(layout_form);
     auto* layout_buttons = new QHBoxLayout;
-    layout_new_ = new QPushButton(QStringLiteral("New"), layouts_box);
-    layout_new_->setObjectName(QStringLiteral("bench-output-layout-new"));
     layout_save_ = new QPushButton(QStringLiteral("Save layout"), layouts_box);
     layout_save_->setObjectName(QStringLiteral("bench-output-layout-save"));
-    layout_remove_ = new QPushButton(QStringLiteral("Remove"), layouts_box);
-    layout_remove_->setObjectName(QStringLiteral("bench-output-layout-remove"));
-    layout_buttons->addWidget(layout_new_);
     layout_buttons->addWidget(layout_save_);
-    layout_buttons->addWidget(layout_remove_);
     layout_buttons->addStretch(1);
     layout_form_holder->addLayout(layout_buttons);
-    layout_form_holder->addStretch(1);
-    layouts_row->addLayout(layout_form_holder, 1);
+    layouts_row->addLayout(layout_form_holder);
     layouts_status_ = statusLabel(layouts_box);
     layouts_row->addWidget(layouts_status_);
     sections->addTab(layouts_box, QStringLiteral("Naming layouts"));
@@ -189,8 +201,12 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
     destinations_row->addWidget(destinations_status_);
     sections->addTab(destinations_box, QStringLiteral("Move destinations"));
 
-    connect(layout_list_, &QComboBox::currentIndexChanged, session_,
-            &ProfilesSession::selectLayout);
+    connect(layout_list_, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* item) {
+                if (!syncing_ && item != nullptr) {
+                    session_->selectLayout(layout_list_->indexOfTopLevelItem(item));
+                }
+            });
     connect(destination_list_, &QTreeWidget::currentItemChanged, this,
             [this](QTreeWidgetItem* item) {
                 if (!syncing_ && item != nullptr && item->data(0, place_role).isValid()) {
@@ -281,7 +297,12 @@ void OutputProfilesManager::rebuildLists() {
     const QSignalBlocker layout_blocker{layout_list_};
     const QSignalBlocker destination_blocker{destination_list_};
     layout_list_->clear();
-    layout_list_->addItems(session_->layoutNames());
+    const auto layout_names = session_->layoutNames();
+    for (int row = 0; row < layout_names.size(); ++row) {
+        auto* item =
+            new QTreeWidgetItem(layout_list_, {layout_names.at(row), session_->layoutPatternOn(row)});
+        item->setToolTip(1, item->text(1));
+    }
     destination_list_->clear();
     // Under each engine's name -- unless there is only this computer.
     const auto grouped = session_->placeCount() > 1;
@@ -331,7 +352,12 @@ void OutputProfilesManager::sync() {
     };
     {
         const QSignalBlocker layout_blocker{layout_list_};
-        layout_list_->setCurrentIndex(session_->layoutRow());
+        if (auto* layout = layout_list_->topLevelItem(session_->layoutRow())) {
+            layout_list_->setCurrentItem(layout);
+        } else {
+            layout_list_->clearSelection();
+            layout_list_->setCurrentItem(nullptr);
+        }
         QTreeWidgetItem* current = nullptr;
         const auto row = session_->destinationRow();
         for (QTreeWidgetItemIterator it{destination_list_}; *it != nullptr && row >= 0; ++it) {

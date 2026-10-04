@@ -4348,7 +4348,11 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     SettingsDialog settings{nullptr, output_store};
     settings.showPage(SettingsDialog::Page::naming);
     settings.show();
-    auto* layout_list = settings.findChild<QComboBox*>(QStringLiteral("bench-output-layout-list"));
+    auto* layout_list =
+        settings.findChild<QTreeWidget*>(QStringLiteral("bench-output-layout-list"));
+    auto* layout_remove =
+        settings.findChild<QPushButton*>(QStringLiteral("bench-output-layout-remove"));
+    QVERIFY(layout_remove != nullptr);
     auto* layout_name = settings.findChild<QLineEdit*>(QStringLiteral("bench-output-layout-name"));
     auto* layout_directory =
         settings.findChild<QLineEdit*>(QStringLiteral("bench-output-layout-directory-expression"));
@@ -4374,7 +4378,14 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
             layout_save != nullptr && destination_list != nullptr && destination_name != nullptr &&
             destination_root != nullptr && destination_new != nullptr &&
             destination_save != nullptr);
-    QTRY_COMPARE(layout_list->count(), 1);
+    // ADR-0264: the layouts as a list, name and whole pattern, the selected
+    // one edited below.
+    QTRY_COMPARE(layout_list->topLevelItemCount(), 1);
+    QCOMPARE(layout_list->topLevelItem(0)->text(0), QStringLiteral("Albums"));
+    QVERIFY(layout_list->topLevelItem(0)->text(1).endsWith(
+        QStringLiteral("%tracknumber% - %title%")));
+    QCOMPARE(layout_list->currentItem(), layout_list->topLevelItem(0));
+    QVERIFY(layout_remove->isEnabled());
     QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
     QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
     QCOMPARE(layout_sanitization->currentData().toString(), QStringLiteral("linux"));
@@ -4395,6 +4406,9 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     }
     QSignalSpy profile_changes{&settings, &SettingsDialog::outputProfilesChanged};
     QTest::mouseClick(layout_new, Qt::LeftButton);
+    // A new one: nothing selected, nothing to remove.
+    QVERIFY(layout_list->currentItem() == nullptr);
+    QVERIFY(!layout_remove->isEnabled());
     layout_name->setText(QStringLiteral("Artist folders"));
     layout_directory->setText(QStringLiteral("%artist%"));
     layout_basename->setText(QStringLiteral("%title%"));
@@ -4406,12 +4420,25 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QCOMPARE(layouts.back().profile.sanitization_policy,
              (operations::PolicyVersion{"portable", 1U}));
 
-    layout_list->setCurrentIndex(0);
-    QCOMPARE(layout_name->text(), layout_list->currentText());
+    QTRY_COMPARE(layout_list->topLevelItemCount(), 2);
+    // Saved: listed, and still the one selected.
+    QCOMPARE(layout_list->currentItem()->text(0), QStringLiteral("Artist folders"));
+    QCOMPARE(layout_list->currentItem()->text(1), QStringLiteral("%artist%/%title%"));
+    QVERIFY(layout_remove->isEnabled());
+    layout_list->setCurrentItem(layout_list->topLevelItem(0));
+    QCOMPARE(layout_name->text(), layout_list->currentItem()->text(0));
     QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
-    layout_list->setCurrentIndex(1);
+    layout_list->setCurrentItem(layout_list->topLevelItem(1));
     QCOMPARE(layout_name->text(), QStringLiteral("Artist folders"));
     QCOMPARE(layout_basename->text(), QStringLiteral("%title%"));
+    // Remove removes the one selected.
+    QTest::mouseClick(layout_remove, Qt::LeftButton);
+    QTRY_COMPARE(layouts.size(), 1U);
+    QCOMPARE(layout_list->topLevelItemCount(), 1);
+    QCOMPARE(layout_list->topLevelItem(0)->text(0), QStringLiteral("Albums"));
+    // The first left is selected in its place.
+    QCOMPARE(layout_list->currentItem(), layout_list->topLevelItem(0));
+    QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
     profile_sections->setCurrentIndex(1);
     QCOMPARE(destination_name->text(), QStringLiteral("Library"));
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
@@ -4427,7 +4454,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
 
     // The editor's selectors refresh from the shared store on request.
     properties->reloadOutputProfiles();
-    QTRY_COMPARE(layout_combo->count(), 2);
+    QTRY_COMPARE(layout_combo->count(), 1);
 
     delete properties;
 }

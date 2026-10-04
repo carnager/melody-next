@@ -80,6 +80,16 @@ QStringList ProfilesSession::layoutNames() const {
     return names;
 }
 
+QString ProfilesSession::layoutPatternOn(const int row) const {
+    if (row < 0 || row >= static_cast<int>(layouts_.size())) {
+        return {};
+    }
+    const auto& profile = layouts_[static_cast<std::size_t>(row)].profile;
+    const auto folders = displayText(profile.relative_directory_expression);
+    const auto filename = displayText(profile.basename_expression);
+    return folders.isEmpty() ? filename : folders + QLatin1Char('/') + filename;
+}
+
 QStringList ProfilesSession::destinationNames() const { return destinationNamesOn(place_); }
 
 QStringList ProfilesSession::destinationNamesOn(const int place) const {

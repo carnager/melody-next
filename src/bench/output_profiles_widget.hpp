@@ -45,7 +45,7 @@ class OutputProfilesManager final : public QObject {
     ProfilesSession* session_{nullptr};
     bool syncing_{false};
 
-    QComboBox* layout_list_{nullptr};
+    QTreeWidget* layout_list_{nullptr};
     QLineEdit* layout_name_{nullptr};
     QLineEdit* directory_expression_{nullptr};
     QLineEdit* basename_expression_{nullptr};

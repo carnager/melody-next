@@ -588,6 +588,12 @@ int main(int argc, char** argv) {
         relay->sink = sink;
     }
 
+    // What changed in the library, told to every client so that what shows
+    // it follows: the paths, the albums they touched, or everything.
+    catalogue.observe([sink](const trackknife::engine::LocalCatalogue::Change& change) {
+        sink(trackknife::engine::catalogue_change_event(change));
+    });
+
     // Jobs report through the sockets, so the registry is given its sink and
     // must be destroyed before the servers it writes to.
     trackknife::engine::JobRegistry jobs{sink};

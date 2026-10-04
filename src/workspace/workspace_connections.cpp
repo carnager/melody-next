@@ -5,6 +5,7 @@
 // come and go, and let go of. Nothing here reads the remote files: what they
 // are comes from the engine that has them.
 
+#include "workspace/library_browser.hpp"
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -62,6 +63,11 @@ void Workspace::connectLocalEngine() {
     connect(localPlayback(), &EnginePlayback::ratingChanged, this,
             [this](const QString& hash, const unsigned rating) {
                 adoptEngineRating(EngineKey::local(), hash, rating);
+            });
+    connect(localPlayback(), &EnginePlayback::catalogueChanged, this,
+            [this](const std::vector<std::string>& paths, const std::vector<std::string>& albums,
+                   const bool everything) {
+                adoptLibraryChange(EngineKey::local(), paths, albums, everything);
             });
     connect(localPlayback(), &EnginePlayback::failed, this, [this](const QString& message) {
         view_->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
@@ -270,6 +276,11 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
             [this, link](const QString& hash, const unsigned rating) {
                 adoptEngineRating(link->key, hash, rating);
             });
+    connect(link->playback, &EnginePlayback::catalogueChanged, this,
+            [this, link](const std::vector<std::string>& paths,
+                         const std::vector<std::string>& albums, const bool everything) {
+                adoptLibraryChange(link->key, paths, albums, everything);
+            });
     connect(link->playback, &EnginePlayback::failed, this, [this](const QString& message) {
         view_->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
@@ -330,6 +341,15 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
         static_cast<void>(engineTab(*link));
     }
     view_->engineConnected(*link, first);
+}
+
+void Workspace::adoptLibraryChange(const EngineKey& engine,
+                                   const std::vector<std::string>& paths,
+                                   const std::vector<std::string>& albums, const bool everything) {
+    static_cast<void>(paths);
+    if (auto* found = link(engine); found != nullptr && found->browser) {
+        found->browser->applyChanges(albums, everything);
+    }
 }
 
 void Workspace::adoptEngineRating(const EngineKey& engine, const QString& hash,

@@ -134,6 +134,10 @@ class LibraryBrowser final : public QObject {
     // Everything looked up again, a moment from now; a scan is the Refresh
     // button's.
     Q_INVOKABLE void refreshLibrary();
+    // What the engine said changed (catalogue.changed): the albums whose
+    // covers are asked again, or everything; the tree follows in place --
+    // what is open stays open, the current row and the scroll stay.
+    void applyChanges(const std::vector<std::string>& albums, bool everything);
     Q_INVOKABLE void reload();
     Q_INVOKABLE void toggleScan();
     void startScan();
@@ -240,6 +244,15 @@ class LibraryBrowser final : public QObject {
     void enqueue(Task task);
     void pump();
     void loadChildren(const QPersistentModelIndex& parent, persistence::LibraryQuery query);
+    static void prepareEntry(persistence::LibraryEntry& entry,
+                             const persistence::LibraryQuery& query);
+    void describeItem(QStandardItem& item, const persistence::LibraryEntry& entry);
+    // The tree's top level as reload() asks it; none for a search, whose
+    // groups carry their own.
+    [[nodiscard]] std::optional<persistence::LibraryQuery> topQuery() const;
+    // Every loaded level asked again and merged into the rows there are.
+    void refreshInPlace();
+    void mergeChildren(const QPersistentModelIndex& parent, persistence::LibraryQuery query);
     void loadFilterChildren(const QPersistentModelIndex& parent,
                             std::shared_ptr<const query::CompiledTkq> compiled);
     void refreshSourceLabel();

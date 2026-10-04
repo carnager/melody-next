@@ -264,6 +264,12 @@ class LocalLibrary final {
     // library that was deleted.
     core::Result<std::size_t> refresh(const std::vector<std::string>& raw_paths,
                                       const core::CancellationToken& cancellation = {});
+    // The albums a change at these paths touches, by album key: a track's
+    // own; every album under a folder; and for a path with none under it --
+    // a cover image -- every album in its folder and below. No filesystem
+    // access.
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    albums_touching(const std::vector<std::string>& raw_paths) const;
     // See LibraryFolder. A trailing slash names the same folder.
     [[nodiscard]] core::Result<LibraryFolder>
     folder(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const;

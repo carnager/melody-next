@@ -116,6 +116,33 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
             }
             return;
         }
+        if (event.name == "catalogue.changed") {
+            const auto decoded = [&event](const char* key) {
+                std::vector<std::string> values;
+                for (const auto& value : event.data.value(key, protocol::Json::array())) {
+                    if (value.is_string()) {
+                        if (auto raw = protocol::decode_raw_path(value.get<std::string>())) {
+                            values.push_back(std::move(*raw));
+                        }
+                    }
+                }
+                return values;
+            };
+            auto paths = decoded("paths");
+            auto albums = decoded("albums");
+            const bool everything = event.data.value("everything", false);
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, paths = std::move(paths), albums = std::move(albums), everything] {
+                        if (self) {
+                            emit self->catalogueChanged(paths, albums, everything);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "list.continuations") {
             auto continuations = continuationsOf(event.data);
             if (self) {

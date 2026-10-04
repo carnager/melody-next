@@ -11,6 +11,12 @@
 
 namespace trackknife::engine {
 
+// What changed in the library, as told to every client:
+//   catalogue.changed {paths: [raw path], albums: [album key], everything}
+// paths re-read or dropped, the albums they touched, or after a scan or a
+// change of folders, everything. Keys and paths encoded as raw paths.
+[[nodiscard]] protocol::Event catalogue_change_event(const LocalCatalogue::Change& change);
+
 // ADR-0222: binds the catalogue's read and rating operations onto a
 // dispatcher. Long operations are deliberately absent -- `catalogue.scan` is a
 // job, and a job is not a slow handler.

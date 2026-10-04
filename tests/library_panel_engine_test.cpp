@@ -13,6 +13,8 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/protocol/client.hpp"
+#include "workspace/library_browser.hpp"
 #include "uicommon/local_artwork.hpp"
 
 #include <sqlite3.h>
@@ -28,6 +30,9 @@
 #include <atomic>
 
 #include <filesystem>
+#include <QDir>
+#include <optional>
+#include <mutex>
 
 namespace trackknife::bench {
 
@@ -49,6 +54,8 @@ class LibraryPanelEngineTest final : public QObject {
     void theEngineReadsCoversWhereTheFilesAre();
     void aLargeSelectionTravelsInParts();
     void anEmptyLibrarySaysWhy();
+    void aChangeSaysWhichAlbumsItTouched();
+    void theTreeFollowsAChangeInPlace();
 };
 
 // Settings go to Qt's test location, never the user's own.
@@ -221,6 +228,175 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
     QCOMPARE(tracks->back().raw_path, paths->back());
     // And the connection is still there for what comes next.
     QVERIFY(remote->roots().has_value());
+    (*server)->stop();
+}
+
+namespace {
+
+// Two albums by one artist, a folder each, indexed by an engine at `music`.
+struct TwoAlbums {
+    QString music;
+    QString first;
+    QString second;
+};
+
+[[nodiscard]] std::optional<TwoAlbums> two_albums(const QTemporaryDir& directory) {
+    TwoAlbums albums{.music = directory.path() + QStringLiteral("/music"),
+                     .first = directory.path() + QStringLiteral("/music/Artist/First"),
+                     .second = directory.path() + QStringLiteral("/music/Artist/Second")};
+    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    if (!fixture.open(QIODevice::ReadOnly)) {
+        return std::nullopt;
+    }
+    const auto bytes = QByteArray::fromBase64(fixture.readAll());
+    for (const auto& folder : {albums.first, albums.second}) {
+        QFile file{folder + QStringLiteral("/01.flac")};
+        if (!QDir{}.mkpath(folder) || !file.open(QIODevice::WriteOnly) ||
+            file.write(bytes) != bytes.size()) {
+            return std::nullopt;
+        }
+    }
+    return albums;
+}
+
+} // namespace
+
+// A change says which albums it touched: a folder deleted names the album
+// that was in it, and only that one.
+void LibraryPanelEngineTest::aChangeSaysWhichAlbumsItTouched() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto albums = two_albums(directory);
+    QVERIFY(albums.has_value());
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    QVERIFY(catalogue.add_root(albums->music.toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue.scan({}, progress).has_value());
+    persistence::LibraryQuery query;
+    query.kind = persistence::LibraryEntryKind::album;
+    const auto listed = catalogue.query(query);
+    QVERIFY(listed.has_value());
+    QCOMPARE(listed->entries.size(), 2U);
+
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    catalogue.observe([sink = (*server)->sink()](const engine::LocalCatalogue::Change& change) {
+        sink(engine::catalogue_change_event(change));
+    });
+    (*server)->start();
+    auto client = protocol::Client::connect(socket);
+    QVERIFY(client.has_value());
+    std::mutex lock;
+    std::vector<protocol::Json> heard;
+    (*client)->on_event([&](const protocol::Event& event) {
+        if (event.name == "catalogue.changed") {
+            const std::scoped_lock held{lock};
+            heard.push_back(event.data);
+        }
+    });
+    // Asked once, so the connection is surely listening.
+    QVERIFY((*client)->call("catalogue.revision").has_value());
+
+    QVERIFY(QDir{albums->second}.removeRecursively());
+    const auto second = albums->second.toStdString();
+    QVERIFY(catalogue.refresh({second}).has_value());
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+                                 const std::scoped_lock held{lock};
+                                 return !heard.empty();
+                             })(),
+                             5'000);
+    std::unique_lock held{lock};
+    const auto& change = heard.front();
+    QCOMPARE(change.value("everything", true), false);
+    QCOMPARE(change["paths"].size(), 1U);
+    QCOMPARE(*protocol::decode_raw_path(change["paths"][0].get<std::string>()), second);
+    QCOMPARE(change["albums"].size(), 1U);
+    const auto touched = *protocol::decode_raw_path(change["albums"][0].get<std::string>());
+    const auto gone = std::ranges::find_if(listed->entries, [&](const auto& entry) {
+        return entry.key == touched;
+    });
+    QVERIFY(gone != listed->entries.end());
+    const auto deleted_album = touched;
+    heard.clear();
+    held.unlock();
+
+    // A cover written beside the first album's tracks names that album.
+    const auto cover = (albums->first + QStringLiteral("/cover.jpg")).toStdString();
+    {
+        QFile image{QString::fromStdString(cover)};
+        QVERIFY(image.open(QIODevice::WriteOnly) && image.write("jpeg") == 4);
+    }
+    QVERIFY(catalogue.refresh({cover}).has_value());
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+                                 const std::scoped_lock again{lock};
+                                 return !heard.empty();
+                             })(),
+                             5'000);
+    held.lock();
+    QCOMPARE(heard.front()["albums"].size(), 1U);
+    const auto covered =
+        *protocol::decode_raw_path(heard.front()["albums"][0].get<std::string>());
+    QVERIFY(covered != deleted_album);
+    QVERIFY(std::ranges::any_of(listed->entries,
+                                [&](const auto& entry) { return entry.key == covered; }));
+    (*client).reset();
+    (*server)->stop();
+}
+
+// The tree follows a change where it stands: the album deleted goes, the
+// artist stays open, the album beside it stays the same row.
+void LibraryPanelEngineTest::theTreeFollowsAChangeInPlace() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto albums = two_albums(directory);
+    QVERIFY(albums.has_value());
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    QVERIFY(catalogue.add_root(albums->music.toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue.scan({}, progress).has_value());
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+    CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
+                               CatalogueSource::Role::remote};
+    LocalLibraryPanel panel{catalogues};
+    panel.show();
+    auto& browser = panel.browser();
+    auto* model = browser.model();
+    QTRY_VERIFY_WITH_TIMEOUT(model->rowCount() == 1 &&
+                                 model->index(0, 0).data(library_entry_role).isValid(),
+                             5'000);
+    auto* artist = model->item(0);
+    browser.noteExpanded(artist->index(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(artist->rowCount(), 2, 5'000);
+    auto* kept = artist->child(0);
+    const auto kept_label = kept->text();
+    browser.noteCurrent(kept->index());
+
+    // The second album's folder deleted, and the engine re-reads it.
+    QVERIFY(QDir{albums->second}.removeRecursively());
+    QVERIFY(catalogue.refresh({albums->second.toStdString()}).has_value());
+    browser.applyChanges({}, false);
+    QTRY_COMPARE_WITH_TIMEOUT(artist->rowCount(), 1, 5'000);
+    QCOMPARE(model->item(0), artist);
+    QCOMPARE(artist->child(0), kept);
+    QCOMPARE(kept->text(), kept_label);
     (*server)->stop();
 }
 

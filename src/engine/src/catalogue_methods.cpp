@@ -45,6 +45,21 @@ using protocol::Json;
 
 } // namespace
 
+protocol::Event catalogue_change_event(const LocalCatalogue::Change& change) {
+    auto paths = Json::array();
+    for (const auto& path : change.paths) {
+        paths.push_back(protocol::encode_raw_path(path));
+    }
+    auto albums = Json::array();
+    for (const auto& album : change.albums) {
+        albums.push_back(protocol::encode_raw_path(album));
+    }
+    return protocol::Event{.name = "catalogue.changed",
+                           .data = {{"paths", std::move(paths)},
+                                    {"albums", std::move(albums)},
+                                    {"everything", change.everything}}};
+}
+
 void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
                                 EventSink events, HeldPath holds, RatingObserver rated) {
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {

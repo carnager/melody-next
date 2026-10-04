@@ -672,6 +672,9 @@ class Workspace final : public QObject {
     void rate(const EngineKey& engine, const QStringList& hashes, bool album, unsigned rating);
     // A rating an engine stored, shown in its lists.
     void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
+    // What changed in an engine's library, followed by what shows it.
+    void adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
+                            const std::vector<std::string>& albums, bool everything);
     // ADR-0237: whether an engine does the file tools' work, asked each time
     // it connects; one that does is handed this workspace's naming layouts.
     void watchFileWork(EngineLink& link);

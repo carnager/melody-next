@@ -6,6 +6,8 @@
 
 #include "trackknife/formats/artwork.hpp"
 
+#include <algorithm>
+
 namespace trackknife::engine {
 
 core::Result<std::vector<Catalogue::FoundTrack>>
@@ -106,7 +108,34 @@ core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    return library->refresh(raw_paths, cancellation);
+    // The albums before -- one a write moved to another key, or a folder
+    // deleted -- and after.
+    auto before = observer_ ? library->albums_touching(raw_paths)
+                            : core::Result<std::vector<std::string>>{};
+    auto refreshed = library->refresh(raw_paths, cancellation);
+    if (refreshed && observer_) {
+        // After, for what is there: a track that moved to another album, a
+        // cover written. What is gone said all it had to before.
+        std::vector<std::string> present;
+        for (const auto& path : raw_paths) {
+            std::error_code ignored;
+            if (std::filesystem::exists(std::filesystem::path{path}, ignored)) {
+                present.push_back(path);
+            }
+        }
+        auto after = library->albums_touching(present);
+        Change change{.paths = raw_paths, .albums = {}, .everything = false};
+        if (before) {
+            change.albums = std::move(*before);
+        }
+        if (after) {
+            change.albums.insert(change.albums.end(), after->begin(), after->end());
+        }
+        std::ranges::sort(change.albums);
+        change.albums.erase(std::ranges::unique(change.albums).begin(), change.albums.end());
+        changed(std::move(change));
+    }
+    return refreshed;
 }
 
 core::Result<std::vector<std::string>>
@@ -191,7 +220,11 @@ LocalCatalogue::scan(const core::CancellationToken& cancellation,
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    return library->scan(cancellation, progress);
+    auto scanned = library->scan(cancellation, progress);
+    if (scanned) {
+        changed({.paths = {}, .albums = {}, .everything = true});
+    }
+    return scanned;
 }
 
 } // namespace trackknife::engine
@@ -211,7 +244,11 @@ core::Result<void> LocalCatalogue::add_root(const std::string& raw_path) {
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    return library->add_root(raw_path);
+    auto added = library->add_root(raw_path);
+    if (added) {
+        changed({.paths = {raw_path}, .albums = {}, .everything = true});
+    }
+    return added;
 }
 
 core::Result<void> LocalCatalogue::remove_root(const std::string& raw_path) {
@@ -219,7 +256,11 @@ core::Result<void> LocalCatalogue::remove_root(const std::string& raw_path) {
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    return library->remove_root(raw_path);
+    auto removed = library->remove_root(raw_path);
+    if (removed) {
+        changed({.paths = {raw_path}, .albums = {}, .everything = true});
+    }
+    return removed;
 }
 
 core::Result<persistence::LibraryPage>

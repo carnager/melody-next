@@ -13,7 +13,7 @@ namespace trackknife::protocol {
 // adds to the protocol -- the additions of each are listed in
 // docs/protocol-levels.md -- and never down within a protocol.
 inline constexpr int protocol_version = 1;
-inline constexpr int protocol_level = 2;
+inline constexpr int protocol_level = 3;
 
 // What an engine says it speaks, from its engine.info answer. One too old to
 // say is protocol 1, level 0.

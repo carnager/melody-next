@@ -2,6 +2,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/engine_launcher.hpp"
+#include "bench/single_instance.hpp"
 #include "bench/widget_color_scheme.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 #include "uicommon/debug_log.hpp"
@@ -115,12 +116,6 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName(QStringLiteral("trackknife"));
     QApplication::setApplicationDisplayName(QStringLiteral("Trackknife"));
 
-    trackknife::bench::adoptInterimIdentity();
-    const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
-
-    // ADR-0247: the colours chosen, with a style that paints them.
-    trackknife::bench::followColorSchemes();
-
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
     // background probing has had a moment, and exits -- in test mode, set
     // above.
@@ -166,6 +161,21 @@ int main(int argc, char** argv) {
         const auto encoded = QFile::encodeName(arguments.at(index));
         raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
     }
+    // ADR-0267: one Trackknife over one workspace; a second start hands its
+    // files to the first and is done. Screenshot runs are apart, on test data.
+    std::optional<trackknife::bench::SingleInstance> instance;
+    if (screenshot_path.isEmpty()) {
+        instance.emplace();
+        if (!instance->claim(raw_paths)) {
+            return 0;
+        }
+    }
+    trackknife::bench::adoptInterimIdentity();
+    const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
+
+    // ADR-0247: the colours chosen, with a style that paints them.
+    trackknife::bench::followColorSchemes();
+
     // ADR-0226: only the application starts an engine, and not when it is
     // taking screenshots against test data.
     trackknife::bench::allowLocalEngine(screenshot_path.isEmpty() || grab_live);
@@ -175,6 +185,19 @@ int main(int argc, char** argv) {
     startSoakLog(&application);
     trackknife::bench::BenchMainWindow window;
     window.show();
+    if (instance) {
+        QObject::connect(&*instance, &trackknife::bench::SingleInstance::asked, &window,
+                         [&window](std::vector<std::string> paths) {
+                             if (window.isMinimized()) {
+                                 window.showNormal();
+                             }
+                             window.raise();
+                             window.activateWindow();
+                             if (!paths.empty()) {
+                                 window.openLocalPaths(std::move(paths));
+                             }
+                         });
+    }
     if (!restore_notice.isEmpty()) {
         QTimer::singleShot(0, &window, [&window, restore_notice] {
             QMessageBox::information(&window, QStringLiteral("Workspace restore"), restore_notice);

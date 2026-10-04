@@ -160,6 +160,7 @@ musicbrainz::AlbumQuery AlbumBatchSession::queryOf(const Album& album) const {
             .disc_number = position_of(tag(tags, {"discnumber"})),
             .duration_ms = tagger_->durationOf(item),
         });
+        query.paths.push_back(source->raw_path);
     }
     if (album.basis != musicbrainz::AlbumGroupBasis::folder) {
         query.artist = album.artist.toStdString();
@@ -339,6 +340,12 @@ void AlbumBatchSession::lookedUp(const std::size_t index,
         break;
     case musicbrainz::AlbumLookupOutcome::no_match:
         album.state = State::no_match;
+        // Untagged, and nothing to hear it by.
+        if (album.basis == musicbrainz::AlbumGroupBasis::folder &&
+            (!service_.fingerprint || !service_.acoustid_lookup)) {
+            album.note = QStringLiteral("No tags to search by. Set up AcoustID in Settings › "
+                                        "Metadata services to identify it by its sound.");
+        }
         break;
     }
     emit changed();

@@ -178,3 +178,10 @@ presets…** opens them.
   `undo_metadata_operation`). Still to come, after 1.0 as it changes the
   protocol: the engine keeping backups past its next start, an engine
   method to undo, undoing moves and renames, and the button.
+- Untagged albums, by sound (2026-10-04): an album with nothing to search
+  by is heard where AcoustID is set up (ADR-0096) -- each file fingerprinted
+  and looked up, a match below 0.5 no evidence, a file that cannot be heard
+  passed over -- and the three releases most of its files are on examined
+  and judged as a search's are. With no titles to compare it is seldom a
+  clear match, so it waits for a person with its versions to pick from.
+  Without AcoustID it is no match, saying how to set AcoustID up.

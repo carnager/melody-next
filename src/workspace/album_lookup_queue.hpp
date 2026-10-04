@@ -9,6 +9,8 @@
 
 #include <cstddef>
 #include <deque>
+#include <map>
+#include <set>
 #include <optional>
 #include <vector>
 
@@ -39,6 +41,8 @@ class AlbumLookupQueue final : public QObject {
 
     // At most this many releases of a search are looked up for an album.
     static constexpr std::size_t releases_per_search = 3U;
+    // An AcoustID match below this score is no evidence.
+    static constexpr double minimum_acoustid_score = 0.5;
 
   signals:
     void looking(std::size_t id);
@@ -54,10 +58,18 @@ class AlbumLookupQueue final : public QObject {
         // The releases still to look up, and those looked up.
         std::vector<std::string> to_examine;
         std::vector<musicbrainz::Release> examined;
+        // AcoustID: the files of it each release was heard on.
+        std::map<std::string, std::set<std::size_t>> heard_on{};
     };
     void next();
     void lookUpRelease(const std::string& id, bool fall_back_to_search);
     void search();
+    // ADR-0261: an album with nothing to search by, identified by sound --
+    // each file fingerprinted and looked up on AcoustID, the releases most
+    // of them are on examined.
+    [[nodiscard]] bool canHear() const;
+    void hear(std::size_t file);
+    void heard();
     void examineNext();
     void finish();
     void fail(const QString& why);

@@ -599,8 +599,10 @@ int main(int argc, char** argv) {
     trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
     // File work a crash interrupted is finished or rolled back before anyone
     // connects (ADR-0237), and what could not be is kept for Trackknife to show.
-    auto file_work_recovery =
-        trackknife::engine::recover_file_work(database, catalogue, follow_moves);
+    auto file_work_recovery = trackknife::engine::recover_file_work(
+        database, catalogue, follow_moves, trackknife::engine::backup_retention(*workspace));
+    // ADR-0263: how long the files writes replaced are kept, as clients set it.
+    trackknife::engine::register_backup_methods(dispatcher, database, *workspace);
     if (file_work_recovery.error) {
         std::cerr << "melodyd: could not recover interrupted file work: "
                   << file_work_recovery.error->message << "\n";

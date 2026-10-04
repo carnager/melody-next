@@ -30,6 +30,14 @@ struct SettingsKeys {
     // user's naming -- when they are written at all.
     static constexpr auto rating_backup_key = "library/rating-backup";
     static constexpr auto rating_backup_tag_key = "library/rating-backup-tag";
+    // ADR-0263: how long each engine keeps the files writes replace, for
+    // undo; handed to every engine as the ratings settings are. 0 keeps none.
+    static constexpr auto undo_keep_days_key = "library/undo-keep-days";
+    static constexpr auto undo_keep_writes_key = "library/undo-keep-writes";
+    static constexpr auto undo_keep_gigabytes_key = "library/undo-keep-gigabytes";
+    static constexpr int undo_keep_days_default = 7;
+    static constexpr int undo_keep_writes_default = 256;
+    static constexpr int undo_keep_gigabytes_default = 10;
     // The tag the engines copy ratings into: empty when off, or when the name
     // chosen cannot hold it.
     [[nodiscard]] static std::string ratingBackupTag();

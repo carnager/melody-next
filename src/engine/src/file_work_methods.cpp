@@ -24,6 +24,7 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
+#include <iostream>
 
 #include <string>
 #include <thread>
@@ -97,7 +98,8 @@ published_document(const operations::FilePublicationCommitResult& result) {
 } // namespace
 
 FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalogue,
-                                   const MoveFollower& follow) {
+                                   const MoveFollower& follow,
+                                   const operations::MetadataBackupRetentionPolicy& retention) {
     FileWorkRecovery recovery;
     const auto remember = [&recovery](core::Error error) {
         if (!recovery.error) {
@@ -126,7 +128,6 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
         // A finished write keeps the file it replaced, for undo (ADR-0263),
         // within the retention policy: the newest first, by age, count and
         // size.
-        constexpr operations::MetadataBackupRetentionPolicy retention{};
         if (auto maintained = operations::maintain_metadata_backups(
                 journal, retention, static_cast<std::int64_t>(std::time(nullptr)));
             !maintained) {
@@ -167,12 +168,129 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
     // publications kept, retained as metadata backups are.
     count(operations::recover_publication_undos(file_journal, moved));
     if (auto maintained = operations::maintain_publication_backups(
-            file_journal, operations::MetadataBackupRetentionPolicy{},
-            static_cast<std::int64_t>(std::time(nullptr)));
+            file_journal, retention, static_cast<std::int64_t>(std::time(nullptr)));
         !maintained) {
         remember(std::move(maintained.error()));
     }
     return recovery;
+}
+
+namespace {
+
+constexpr std::string_view retention_key = "backups.retention";
+constexpr std::int64_t seconds_a_day = 24 * 60 * 60;
+constexpr std::uint64_t bytes_a_gigabyte = 1024ULL * 1024ULL * 1024ULL;
+
+[[nodiscard]] Json retention_document(const operations::MetadataBackupRetentionPolicy& policy) {
+    return Json{{"max_age_days", policy.maximum_age_seconds / seconds_a_day},
+                {"max_writes", policy.maximum_entries},
+                {"max_gigabytes", policy.maximum_total_bytes / bytes_a_gigabyte}};
+}
+
+// The limits a document names over `base`; an out-of-range one refused.
+[[nodiscard]] core::Result<operations::MetadataBackupRetentionPolicy>
+retention_of(const Json& document, operations::MetadataBackupRetentionPolicy base) {
+    const auto limit = [&document](const char* name, const std::int64_t most)
+        -> core::Result<std::optional<std::int64_t>> {
+        const auto found = document.find(name);
+        if (found == document.end()) {
+            return std::optional<std::int64_t>{};
+        }
+        if (!found->is_number_integer() || found->get<std::int64_t>() < 0 ||
+            found->get<std::int64_t>() > most) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = std::string{name} + " is a whole number from 0 to " +
+                           std::to_string(most),
+                .context = {{.key = "param", .value = name}}});
+        }
+        return std::optional{found->get<std::int64_t>()};
+    };
+    auto days = limit("max_age_days", 3'650);
+    auto writes = limit("max_writes", 100'000);
+    auto gigabytes = limit("max_gigabytes", 100'000);
+    for (auto* checked : {&days, &writes, &gigabytes}) {
+        if (!*checked) {
+            return std::unexpected(checked->error());
+        }
+    }
+    if (days->has_value()) {
+        base.maximum_age_seconds = **days * seconds_a_day;
+    }
+    if (writes->has_value()) {
+        base.maximum_entries = static_cast<std::size_t>(**writes);
+    }
+    if (gigabytes->has_value()) {
+        base.maximum_total_bytes = static_cast<std::uint64_t>(**gigabytes) * bytes_a_gigabyte;
+    }
+    return base;
+}
+
+// Both kinds of backup brought within the policy, now.
+[[nodiscard]] core::Result<void>
+apply_retention(const std::filesystem::path& database,
+                const operations::MetadataBackupRetentionPolicy& policy) {
+    const auto now = static_cast<std::int64_t>(std::time(nullptr));
+    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
+    if (!metadata_journal) {
+        return std::unexpected(std::move(metadata_journal.error()));
+    }
+    if (auto kept = operations::maintain_metadata_backups(*metadata_journal, policy, now); !kept) {
+        return std::unexpected(std::move(kept.error()));
+    }
+    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
+    if (!file_journal) {
+        return std::unexpected(std::move(file_journal.error()));
+    }
+    if (auto kept = operations::maintain_publication_backups(*file_journal, policy, now); !kept) {
+        return std::unexpected(std::move(kept.error()));
+    }
+    return {};
+}
+
+} // namespace
+
+operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& workspace) {
+    const operations::MetadataBackupRetentionPolicy defaults{};
+    auto stored = workspace.load_engine_state(retention_key);
+    if (!stored || !*stored) {
+        return defaults;
+    }
+    auto document = Json::parse(**stored, nullptr, false);
+    if (document.is_discarded() || !document.is_object()) {
+        return defaults;
+    }
+    auto policy = retention_of(document, defaults);
+    return policy ? *policy : defaults;
+}
+
+void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
+                             Workspace& workspace) {
+    dispatcher.on("backups.retention", [&workspace](const Json&) -> core::Result<Json> {
+        return retention_document(backup_retention(workspace));
+    });
+    dispatcher.on("backups.set_retention",
+                  [&workspace, database](const Json& params) -> core::Result<Json> {
+                      auto policy = retention_of(params, backup_retention(workspace));
+                      if (!policy) {
+                          return std::unexpected(std::move(policy.error()));
+                      }
+                      const auto document = retention_document(*policy);
+                      const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                              .count();
+                      if (auto saved =
+                              workspace.save_engine_state(retention_key, document.dump(), now_ms);
+                          !saved) {
+                          return std::unexpected(std::move(saved.error()));
+                      }
+                      // Applied at once: a lower limit frees its space now.
+                      if (auto applied = apply_retention(database, *policy); !applied) {
+                          std::cerr << "melodyd: backups not brought within the new limits: "
+                                    << applied.error().message << "\n";
+                      }
+                      return document;
+                  });
 }
 
 void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,

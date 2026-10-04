@@ -16,6 +16,9 @@ engine's level with its own and says once when the engine is older.
   backups are kept within the retention policy rather than released at the
   engine's start (ADR-0263): the journal ids `metadata.apply` and
   `preparation.apply` answer can be undone.
+- `backups.retention` and `backups.set_retention {max_age_days?,
+  max_writes?, max_gigabytes?}`: how long the files writes replaced are
+  kept for undo; a lower limit lets go of the rest at once (ADR-0263).
 
 ### Level 1 (2026-10-03)
 

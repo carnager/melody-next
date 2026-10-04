@@ -356,6 +356,42 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     ratings_form->addRow(QStringLiteral("Other players' RATING tags:"), rating_tag_scale_);
     library_layout->addWidget(ratings);
 
+    // ADR-0263: what each engine keeps of what its writes replaced, so the
+    // writes can be undone.
+    auto* undo = new QGroupBox(QStringLiteral("Undo"), library);
+    undo->setObjectName(QStringLiteral("bench-settings-undo"));
+    auto* undo_form = new QFormLayout(undo);
+    const auto keep_box = [&](const char* key, const int most, const QString& suffix,
+                              const QString& name) {
+        auto* box = new QSpinBox(undo);
+        box->setObjectName(name);
+        box->setRange(0, most);
+        box->setSuffix(suffix);
+        box->setSpecialValueText(QStringLiteral("Keep none"));
+        bind(box, key);
+        return box;
+    };
+    undo_form->addRow(QStringLiteral("Keep for:"),
+                      keep_box(SettingsKeys::undo_keep_days_key, 3'650, QStringLiteral(" days"),
+                               QStringLiteral("bench-settings-undo-days")));
+    undo_form->addRow(QStringLiteral("At most:"),
+                      keep_box(SettingsKeys::undo_keep_writes_key, 100'000,
+                               QStringLiteral(" writes"),
+                               QStringLiteral("bench-settings-undo-writes")));
+    undo_form->addRow(QStringLiteral("Using at most:"),
+                      keep_box(SettingsKeys::undo_keep_gigabytes_key, 100'000,
+                               QStringLiteral(" GB"),
+                               QStringLiteral("bench-settings-undo-gigabytes")));
+    auto* undo_note = new QLabel(
+        QStringLiteral("Each engine keeps the files its writes replace -- tags rewritten, files "
+                       "moved -- so a write can be undone. The newest are kept within these "
+                       "limits; older ones are let go."),
+        undo);
+    undo_note->setWordWrap(true);
+    undo_note->setForegroundRole(QPalette::PlaceholderText);
+    undo_form->addRow(undo_note);
+    library_layout->addWidget(undo);
+
     const auto refresh_backup = [this, backup_label] {
         const auto writing = ratings_in_tags_->isChecked();
         rating_backup_->setEnabled(writing);

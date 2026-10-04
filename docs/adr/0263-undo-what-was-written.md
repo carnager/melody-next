@@ -75,3 +75,9 @@ bytes were gone: nothing could be undone.
   the albums staged again -- with the pairing the person confirmed -- ready
   for another Write. Opened from a track's menu there is no tag editor to
   fall back on, so the undo belongs to the window.
+- Kept as long as asked (2026-10-04): Settings › Library › Undo sets how
+  long each engine keeps what its writes replace -- days, writes, GB, 0
+  keeping none -- handed to every engine when saved and when it connects,
+  as the ratings settings are (`backups.set_retention`, kept in the
+  engine's state as `backups.retention`), applied at its start and at once
+  when lowered. The policy's 10 GB had been 2 GB: computed in 32 bits.

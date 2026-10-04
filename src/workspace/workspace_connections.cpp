@@ -388,6 +388,21 @@ void Workspace::watchFileWork(EngineLink& link) {
                     static_cast<void>(
                         work->set_rating_backup_tag(SettingsKeys::ratingBackupTag()));
                 }
+                // ADR-0263: once chosen, how long it keeps what writes replace.
+                if (chosen.contains(QLatin1String(SettingsKeys::undo_keep_days_key)) ||
+                    chosen.contains(QLatin1String(SettingsKeys::undo_keep_writes_key)) ||
+                    chosen.contains(QLatin1String(SettingsKeys::undo_keep_gigabytes_key))) {
+                    static_cast<void>(work->set_backup_retention(
+                        chosen.value(QLatin1String(SettingsKeys::undo_keep_days_key),
+                                     SettingsKeys::undo_keep_days_default)
+                            .toInt(),
+                        chosen.value(QLatin1String(SettingsKeys::undo_keep_writes_key),
+                                     SettingsKeys::undo_keep_writes_default)
+                            .toInt(),
+                        chosen.value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
+                                     SettingsKeys::undo_keep_gigabytes_default)
+                            .toInt()));
+                }
                 if (auto answer = work->interrupted()) {
                     // What it finished or rolled back at its start, itself.
                     recovered = answer->value("recovered", std::size_t{0U});

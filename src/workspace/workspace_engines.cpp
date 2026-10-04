@@ -188,15 +188,28 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
             .toString()
             .toStdString();
     const auto rating_backup = SettingsKeys::ratingBackupTag();
+    // ADR-0263: how long each keeps what its writes replace.
+    const auto keep_days = chosen.value(QLatin1String(SettingsKeys::undo_keep_days_key),
+                                        SettingsKeys::undo_keep_days_default)
+                               .toInt();
+    const auto keep_writes = chosen.value(QLatin1String(SettingsKeys::undo_keep_writes_key),
+                                          SettingsKeys::undo_keep_writes_default)
+                                 .toInt();
+    const auto keep_gigabytes = chosen.value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
+                                             SettingsKeys::undo_keep_gigabytes_default)
+                                    .toInt();
     for (const auto& engine : engines_) {
         if (engine->does_file_work && engine->file_work) {
-            static_cast<void>(QtConcurrent::run(
-                [work = engine->file_work, key, rating_tags, rating_scale, rating_backup] {
-                    static_cast<void>(work->set_acoustid_key(key));
-                    static_cast<void>(work->set_rating_tags(rating_tags));
-                    static_cast<void>(work->set_rating_scale(rating_scale));
-                    static_cast<void>(work->set_rating_backup_tag(rating_backup));
-                }));
+            static_cast<void>(QtConcurrent::run([work = engine->file_work, key, rating_tags,
+                                                 rating_scale, rating_backup, keep_days,
+                                                 keep_writes, keep_gigabytes] {
+                static_cast<void>(work->set_acoustid_key(key));
+                static_cast<void>(work->set_rating_tags(rating_tags));
+                static_cast<void>(work->set_rating_scale(rating_scale));
+                static_cast<void>(work->set_rating_backup_tag(rating_backup));
+                static_cast<void>(
+                    work->set_backup_retention(keep_days, keep_writes, keep_gigabytes));
+            }));
         }
     }
     // ADR-0234: engines added, removed or pointed elsewhere, at once.

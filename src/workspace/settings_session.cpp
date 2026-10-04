@@ -157,7 +157,7 @@ SettingsSession::~SettingsSession() = default;
 QStringList SettingsSession::pageTitles() {
     return {QStringLiteral("General"),    QStringLiteral("Playback"),
             QStringLiteral("Library"),    QStringLiteral("Engine"),
-            QStringLiteral("Naming"),     QStringLiteral("ReplayGain"),
+            QStringLiteral("File operations"), QStringLiteral("Ratings"),
             QStringLiteral("Covers"),     QStringLiteral("Metadata services"),
             QStringLiteral("Last.fm"),    QStringLiteral("Shortcuts")};
 }
@@ -166,7 +166,7 @@ QString SettingsSession::saveNote(const Page page) {
     if (page == Page::library) {
         return QStringLiteral("Folder changes save immediately. Cancel does not undo them.");
     }
-    if (page == Page::naming) {
+    if (page == Page::file_operations) {
         return QStringLiteral("Save layout, Save destination, and Remove take effect immediately. "
                               "Cancel does not undo them.");
     }

@@ -952,10 +952,40 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return existing;
         }
     }
+    // Every engine's music folders, one at a time: the same folders its
+    // library's Folders… opens.
     std::function<QWidget*(QWidget*)> library_folders;
-    if (localLibrary()) {
-        library_folders = [this](QWidget* parent) {
-            return localLibrary()->createFoldersWidget(parent);
+    if (std::ranges::any_of(engines_, [](const auto& engine) { return engine->library != nullptr; })) {
+        library_folders = [this](QWidget* parent) -> QWidget* {
+            auto* widget = new QWidget(parent);
+            auto* layout = new QVBoxLayout(widget);
+            layout->setContentsMargins(0, 0, 0, 0);
+            auto* row = new QHBoxLayout;
+            auto* label = new QLabel(tr("Engine:"), widget);
+            auto* picker = new QComboBox(widget);
+            picker->setObjectName(QStringLiteral("bench-settings-library-engine"));
+            picker->setAccessibleName(tr("Engine whose music folders are shown"));
+            row->addWidget(label);
+            row->addWidget(picker);
+            row->addStretch(1);
+            layout->addLayout(row);
+            auto* folders = new QStackedWidget(widget);
+            for (const auto& engine : engines_) {
+                if (engine->library == nullptr) {
+                    continue;
+                }
+                picker->addItem(engine->key.isLocal() ? tr("This computer")
+                                                      : engineName(engine->key),
+                                engine->key.text());
+                folders->addWidget(engine->library->createFoldersWidget(folders));
+            }
+            // One engine: nothing to choose.
+            label->setVisible(picker->count() > 1);
+            picker->setVisible(picker->count() > 1);
+            connect(picker, &QComboBox::currentIndexChanged, folders,
+                    &QStackedWidget::setCurrentIndex);
+            layout->addWidget(folders, 1);
+            return widget;
         };
     }
     auto* dialog = new SettingsDialog(

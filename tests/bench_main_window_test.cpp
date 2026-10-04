@@ -16,6 +16,7 @@
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "workspace/lastfm_settings_session.hpp"
+#include "workspace/settings_session.hpp"
 #include "workspace/tab_store.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
@@ -317,6 +318,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsOpensFromTools();
     void identifyAlbumsStagesAlongsideAutomaticScripts();
     void cachedRowsAreReadEvenWithARevision();
+    void settingsGroupWhatTheyAreAbout();
     void applyMeasuresReplayGainAndWritesOnce();
     void applyMovesIntoAChosenFolder();
     void musicBrainzFingerprintScanRanksAndStages();
@@ -979,6 +981,62 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
     QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
+}
+
+// Settings by what they are about: writing files (rename and move,
+// ReplayGain, undo) as tabs of one page, ratings on their own, and the music
+// folders of each engine on Library.
+void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::replaygain);
+    QVERIFY(dialog != nullptr);
+    auto* pages = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-pages"));
+    QStringList titles;
+    for (int row = 0; row < pages->count(); ++row) {
+        titles << pages->item(row)->text();
+    }
+    QCOMPARE(titles.mid(0, 7),
+             (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
+                          QStringLiteral("Library"), QStringLiteral("Engine"),
+                          QStringLiteral("File operations"), QStringLiteral("Ratings"),
+                          QStringLiteral("Covers")}));
+    QCOMPARE(titles, SettingsSession::pageTitles().mid(0, titles.size()));
+    // A tab of File operations opens that page at the tab.
+    auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
+    QVERIFY(tabs != nullptr);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("File operations"));
+    QCOMPARE(tabs->tabText(tabs->currentIndex()), QStringLiteral("ReplayGain"));
+    QVERIFY(tabs->currentWidget()->isAncestorOf(
+        dialog->findChild<QWidget*>(QStringLiteral("bench-replaygain-sidecar-only"))));
+    dialog->showPage(SettingsDialog::Page::undo);
+    QCOMPARE(tabs->currentWidget()->objectName(), QStringLiteral("bench-settings-undo"));
+    dialog->showPage(SettingsDialog::Page::ratings);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("Ratings"));
+    dialog->showPage(SettingsDialog::Page::naming);
+    QCOMPARE(tabs->currentIndex(), 0);
+    QCOMPARE(pages->currentItem()->text(), QStringLiteral("File operations"));
+    auto* stack = dialog->findChild<QStackedWidget*>();
+    QVERIFY(stack != nullptr);
+    const auto page_of = [stack](const char* name) {
+        auto* widget = stack->findChild<QWidget*>(QLatin1String(name));
+        for (int index = 0; widget != nullptr && index < stack->count(); ++index) {
+            if (stack->widget(index)->isAncestorOf(widget)) {
+                return index;
+            }
+        }
+        return -1;
+    };
+    QCOMPARE(page_of("bench-settings-ratings-in-tags"),
+             static_cast<int>(SettingsDialog::Page::ratings));
+    // Library: the engine picker, not needed with this computer alone.
+    auto* picker = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-library-engine"));
+    QVERIFY(picker != nullptr);
+    QCOMPARE(page_of("bench-settings-library-engine"), static_cast<int>(SettingsDialog::Page::library));
+    QCOMPARE(picker->count(), 1);
+    QVERIFY(!picker->isVisibleTo(dialog));
+    dialog->close();
 }
 
 void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {

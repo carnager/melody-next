@@ -23,6 +23,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QStackedWidget;
+class QTabWidget;
 class QSpinBox;
 class QDoubleSpinBox;
 class QMenu;
@@ -60,12 +61,17 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
         playback,
         library,
         engine,
-        naming,
-        replaygain,
+        file_operations,
+        ratings,
         covers,
         metadata_services,
         lastfm,
-        shortcuts
+        shortcuts,
+        // Not pages: File operations, opened at its tab -- naming layouts
+        // and move destinations, ReplayGain, Undo.
+        naming,
+        replaygain,
+        undo
     };
     explicit SettingsDialog(QWidget* parent = nullptr, OutputProfileStore profile_store = {},
                             std::function<QWidget*(QWidget*)> library_folders = {},
@@ -101,6 +107,7 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
 
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
+    QTabWidget* file_operations_{nullptr};
     QCheckBox* panel_animations_{nullptr};
     QComboBox* lists_display_{nullptr};
     QComboBox* color_scheme_{nullptr};

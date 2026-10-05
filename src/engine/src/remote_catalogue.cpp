@@ -371,6 +371,7 @@ template <typename Field>
 [[nodiscard]] core::Result<persistence::LibraryPage> decode_page(const Json& answer) {
     persistence::LibraryPage page;
     page.more = answer.value("more", false);
+    page.located = answer.value("located", false);
     // Compact: the names once, then rows of values in their order.
     if (const auto rows = answer.find("rows"); rows != answer.end()) {
         const auto columns = answer.find("columns");

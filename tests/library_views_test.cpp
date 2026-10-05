@@ -157,6 +157,28 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
     auto gone = catalogue.query(view(genres, {"Polka"}));
     require(gone.has_value() && gone->entries.empty(), say("a node that is gone is empty"));
 
+    // ADR-0273: a file named, the way to it -- its node at each level, the
+    // first genre it is under -- said to be that, not a node's children.
+    auto to_file = view(genres);
+    to_file.raw_path = tracks->entries[0].key;
+    auto way = catalogue.query(to_file);
+    require(way.has_value() && way->located &&
+                labels(*way) == std::vector<std::string>{"Jazz", "Alpha", "One"},
+            say("the way to a file, a node per level"));
+    require(way->entries[2].kind == LibraryEntryKind::album && way->entries[0].tracks == 2U,
+            say("each node as its parent lists it"));
+    auto below = view(genres, {"Rock"});
+    below.raw_path = tracks->entries[0].key;
+    auto under_rock = catalogue.query(below);
+    require(under_rock.has_value() &&
+                labels(*under_rock) == std::vector<std::string>{"Alpha", "One"},
+            say("the way on from a node"));
+    auto filtered = view(genres, {}, "genre IS polka");
+    filtered.raw_path = tracks->entries[0].key;
+    auto nowhere = catalogue.query(filtered);
+    require(nowhere.has_value() && nowhere->located && nowhere->entries.empty(),
+            say("a file the view leaves out has no way, and says so"));
+
     // Ordered by value, newest first; digit runs as numbers.
     auto years = catalogue.query(view({{.format = "%date%", .sort = {}, .descending = true}}));
     require(years.has_value() &&

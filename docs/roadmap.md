@@ -27,7 +27,7 @@ on its machine (ADR-0237); what a write replaced can be undone (ADRs 0263,
 hold. What remains of them:
 
 - [ ] **The quiet period:** a few weeks of everyday use with no protocol or
-  schema change, counted from the last level bump (level 6 on 2026-10-05;
+  schema change, counted from the last level bump (level 7 on 2026-10-05;
   schema 53 on 2026-10-04).
 - [ ] **Measure again on the real setup** what changed since the measurements
   of 2026-10-03 (`docs/release-measurements.md`): a tag write on the NAS with

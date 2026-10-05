@@ -14,6 +14,7 @@
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
+#include <filesystem>
 #include <unordered_set>
 #include <utility>
 
@@ -484,21 +485,37 @@ void LibraryBrowser::locatePath(std::string raw_path, bool album) {
     ++generation_;
     const auto generation = generation_;
     setStatus(tr("Locating in library…"));
+    // ADR-0273: found in the layout shown, not by switching to another --
+    // a view asks the engine for the way to the file through its levels.
+    auto view = view_;
     enqueue(
-        {[raw_path = std::move(raw_path),
-          cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
+        {[raw_path, view, cancellation = lifetime_cancellation_.token()](
+             engine::Catalogue& library) {
              Outcome outcome;
              persistence::LibraryQuery query;
              query.kind = persistence::LibraryEntryKind::album;
              query.raw_path = raw_path;
              auto page = library.query(query, cancellation);
-             if (page)
-                 outcome.page = std::move(*page);
-             else
+             if (!page) {
                  outcome.error = text(page.error().message);
+                 return outcome;
+             }
+             outcome.page = std::move(*page);
+             if (!view.empty() && !outcome.page.entries.empty()) {
+                 persistence::LibraryQuery way;
+                 way.kind = persistence::LibraryEntryKind::group;
+                 way.view = view;
+                 way.raw_path = raw_path;
+                 auto located = library.query(way, cancellation);
+                 if (!located) {
+                     outcome.error = text(located.error().message);
+                     return outcome;
+                 }
+                 outcome.way = std::move(*located);
+             }
              return outcome;
          },
-         [this, generation, album](Outcome outcome) {
+         [this, generation, album, raw_path](Outcome outcome) {
              // A failed or empty lookup is a fact about the queried path, true
              // however the tree changed while the query ran. Reported before
              // the staleness check, which guards the navigation below.
@@ -516,24 +533,89 @@ void LibraryBrowser::locatePath(std::string raw_path, bool album) {
              }
              if (generation != generation_)
                  return;
-             auto entry = outcome.page.entries.front();
-             search_.clear();
-             // Found under its artist, so the artist tree, not the newest
-             // nor another view.
-             if (view_id_ != default_library_view_id) {
-                 adoptView(default_library_view_id);
+             const auto found = outcome.page.entries.front();
+             auto locating = this->locating(found, raw_path, album, outcome.way);
+             if (!locating) {
+                 setStatus(view_.empty() ? tr("This file is not in this view.")
+                                         : !outcome.way.located
+                                             ? tr("This engine cannot locate in a view yet; update "
+                                                  "its melodyd.")
+                                             : tr("This file is not in this view."));
+                 return;
              }
+             search_.clear();
              emit searchChanged();
              expanded_entries_.clear();
              current_entry_.clear();
              reload();
-             locate_artist_ = entry.artist;
-             if (!album) {
-                 entry.kind = persistence::LibraryEntryKind::artist;
-                 entry.key = entry.artist;
-             }
-             locate_target_ = std::move(entry);
+             locating_ = std::move(locating);
          }});
+}
+
+LibraryBrowser::Locating LibraryBrowser::locating(const persistence::LibraryEntry& album_entry,
+                                                  const std::string& raw_path, const bool album,
+                                                  const persistence::LibraryPage& way) const {
+    using Kind = persistence::LibraryEntryKind;
+    // The library's folders: every folder the file is under, down to its own.
+    if (folders_) {
+        const auto folder = std::filesystem::path{raw_path}.parent_path().native();
+        return [folder](const persistence::LibraryEntry& entry, std::size_t) {
+            if (entry.kind == Kind::track || entry.view_value.empty()) {
+                return Step::none;
+            }
+            if (entry.view_value == folder) {
+                return Step::target;
+            }
+            const auto& under = entry.view_value;
+            const bool inside = folder.size() > under.size() && folder.starts_with(under) &&
+                                (under.ends_with('/') || folder[under.size()] == '/');
+            return inside ? Step::on_way : Step::none;
+        };
+    }
+    // A view: its node at each level, as the engine found the way; an
+    // artist at the level that names it, an album -- or an artist no level
+    // names -- at the last.
+    if (!view_.empty()) {
+        if (!way.located || way.entries.empty()) {
+            return {};
+        }
+        std::vector<std::string> labels;
+        auto target = way.entries.size() - 1U;
+        for (std::size_t depth = 0; depth < way.entries.size(); ++depth) {
+            const auto& node = way.entries[depth];
+            labels.push_back(node.view_value);
+            if (!album && target == way.entries.size() - 1U && !album_entry.artist.empty() &&
+                node.view_value == album_entry.artist) {
+                target = depth;
+            }
+        }
+        labels.resize(target + 1U);
+        return [labels](const persistence::LibraryEntry& entry, const std::size_t depth) {
+            if (depth >= labels.size() || entry.kind == Kind::track ||
+                entry.view_value != labels[depth]) {
+                return Step::none;
+            }
+            return depth + 1U == labels.size() ? Step::target : Step::on_way;
+        };
+    }
+    // Recently added lists albums, newest first: the album, whichever asked.
+    if (newest_first_) {
+        return [key = album_entry.key](const persistence::LibraryEntry& entry, const std::size_t depth) {
+            return depth == 0U && entry.kind == Kind::album && entry.key == key ? Step::target
+                                                                               : Step::none;
+        };
+    }
+    // The artist tree: the artist, and under it the album.
+    return [artist = album_entry.artist, key = album_entry.key,
+            album](const persistence::LibraryEntry& entry, const std::size_t depth) {
+        if (depth == 0U && entry.kind == Kind::artist && entry.key == artist) {
+            return album ? Step::on_way : Step::target;
+        }
+        if (album && depth == 1U && entry.kind == Kind::album && entry.key == key) {
+            return Step::target;
+        }
+        return Step::none;
+    };
 }
 
 QString LibraryBrowser::emptyLibraryText() const {
@@ -545,7 +627,7 @@ QString LibraryBrowser::emptyLibraryText() const {
 }
 
 void LibraryBrowser::reload() {
-    locate_target_.reset();
+    locating_ = {};
     ++generation_;
     artwork_cancellation_.request_cancellation();
     view_cancellation_.request_cancellation();
@@ -942,22 +1024,27 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  setStatus(search_.trimmed().isEmpty() ? tr("Browse artists and albums.")
                                                        : tr("Search results"));
              }
+             // ADR-0273: how deep these rows are, for the way being located.
+             std::size_t depth = 0U;
+             for (QModelIndex above = parent; above.isValid(); above = above.parent()) {
+                 ++depth;
+             }
+             bool on_the_way = false;
              for (auto entry : outcome.page.entries) {
                  prepareEntry(entry, query);
                  auto* item = new QStandardItem;
                  describeItem(*item, entry);
                  target->appendRow(item);
-                 if (locate_target_) {
-                     const bool found =
-                         entry.kind == locate_target_->kind && entry.key == locate_target_->key;
-                     if (found) {
-                         emit currentRequested(item->index(), true);
-                         locate_target_.reset();
-                         setStatus(tr("Located in library."));
-                     }
-                     if (found || (entry.kind == persistence::LibraryEntryKind::artist &&
-                                   entry.key == locate_artist_)) {
+                 if (locating_) {
+                     const auto step = locating_(entry, depth);
+                     if (step != Step::none) {
+                         on_the_way = true;
                          emit expandRequested(item->index());
+                     }
+                     if (step == Step::target) {
+                         emit currentRequested(item->index(), true);
+                         locating_ = {};
+                         setStatus(tr("Located in library."));
                      }
                  }
                  if (current_entry_ == entryKey(entry)) {
@@ -975,24 +1062,10 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  more->setData(true, more_role);
                  more->setData(QVariant::fromValue(query), query_role);
                  target->appendRow(more);
-                 if (locate_target_) {
-                     bool seek_more = query.kind == persistence::LibraryEntryKind::album &&
-                                      query.artist == locate_artist_;
-                     if (query.kind == persistence::LibraryEntryKind::artist) {
-                         seek_more = true;
-                         for (int row = 0; row < target->rowCount(); ++row) {
-                             const auto value = target->child(row)->data(entry_role);
-                             if (value.isValid() &&
-                                 value.value<persistence::LibraryEntry>().key == locate_artist_) {
-                                 seek_more = false;
-                                 break;
-                             }
-                         }
-                     }
-                     if (seek_more) {
-                         target->removeRow(more->row());
-                         loadChildren(parent, query);
-                     }
+                 // Not among these: further on, then.
+                 if (locating_ && !on_the_way) {
+                     target->removeRow(more->row());
+                     loadChildren(parent, query);
                  }
              } else if (target->rowCount() == 0) {
                  // Why it is empty, at the top: a search that found nothing

@@ -120,6 +120,11 @@ struct LibraryEntry {
 struct LibraryPage {
     std::vector<LibraryEntry> entries;
     bool more{false};
+    // ADR-0273: a view's query that named a file answered with the way to
+    // it -- its node at each level, from the top -- rather than a node's
+    // children. Said, so an engine that does not know the question is not
+    // read as having answered it.
+    bool located{false};
 };
 
 // Presentation snapshot only; never a complete native metadata write baseline.

@@ -47,7 +47,8 @@ value of a multi-value field.
   added, until now a footer toggle, is one of its choices -- and an editor
   makes, changes and removes them, with a live preview. The shipped views can
   be copied, not changed. Go to album and Go to artist return to the artist
-  tree, as they already left Recently added.
+  tree, as they already left Recently added. *(Superseded by ADR-0273:
+  they find the file in the layout shown.)*
 - **Folders is a view too.** The engine's index knows every track's folder,
   so the dropdown offers the library's folders from its roots down, read
   from the index of whichever engine is shown -- the only way to browse a

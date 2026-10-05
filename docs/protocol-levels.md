@@ -7,6 +7,13 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 7 (2026-10-05)
+
+- A view's `catalogue.query` that names a file (`path`) answers the way to
+  it -- its node at each level below `view_path` -- with `located: true`,
+  for a client to locate a file in the view shown (ADR-0273). An older
+  engine answers the node's children and no `located`.
+
 ### Level 6 (2026-10-05)
 
 - The protocol as a WebSocket at `/protocol` on the stream port (`--http`),

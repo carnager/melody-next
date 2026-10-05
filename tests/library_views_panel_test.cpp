@@ -284,10 +284,46 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
                          [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
     QTRY_COMPARE(resolved.size(), std::size_t{3});
 
-    // Go to album finds the file under its artist, in the artist tree.
+    // ADR-0273: locating finds the file in the layout shown, and keeps it.
+    // In Folders, its folder under the root.
     panel.locatePath(jazz_and_rock, true);
-    QTRY_COMPARE(choice->currentData().toString(), default_library_view_id);
+    QTRY_COMPARE(tree->currentIndex().data().toString(), QStringLiteral("one"));
+    QCOMPARE(tree->currentIndex().parent().data().toString(), model->index(0, 0).data().toString());
+    QCOMPARE(choice->currentData().toString(), folders_library_view_id);
+    QCOMPARE(QSettings{}.value(QStringLiteral("library/view")).toString(), folders_library_view_id);
+
+    // In a view, through its levels as the engine found them: the artist at
+    // the level that names it, under the file's first genre.
+    choice->setCurrentIndex(genres);
+    emit choice->activated(genres);
+    QTRY_COMPARE(rows(model).size(), 3);
+    panel.locatePath(jazz_and_rock, false);
+    QTRY_COMPARE(tree->currentIndex().data().toString(), QStringLiteral("Alpha"));
+    QCOMPARE(tree->currentIndex().parent().data().toString(), QStringLiteral("Jazz"));
+    QCOMPARE(choice->currentData().toString(), QStringLiteral("genre-artist-album"));
+    // The album at the last level.
+    panel.locatePath(jazz_and_rock, true);
+    QTRY_COMPARE(tree->currentIndex().data().toString(), QStringLiteral("One"));
+    QCOMPARE(tree->currentIndex().parent().data().toString(), QStringLiteral("Alpha"));
+    QCOMPARE(tree->currentIndex().parent().parent().data().toString(), QStringLiteral("Jazz"));
+
+    // Recently added: the album, whichever is asked for.
+    const auto recent = choice->findData(recent_library_view_id);
+    choice->setCurrentIndex(recent);
+    emit choice->activated(recent);
+    QTRY_COMPARE(rows(model).size(), 2);
+    panel.locatePath(jazz_and_rock, false);
+    QTRY_VERIFY(tree->currentIndex().data().toString().contains(QStringLiteral("One")));
+    QCOMPARE(choice->currentData().toString(), recent_library_view_id);
+
+    // The artist tree as ever: the artist, the album under it.
+    const auto artists = choice->findData(default_library_view_id);
+    choice->setCurrentIndex(artists);
+    emit choice->activated(artists);
     QTRY_COMPARE(rows(model), (QStringList{QStringLiteral("Alpha"), QStringLiteral("Beta")}));
+    panel.locatePath(jazz_and_rock, true);
+    QTRY_COMPARE(tree->currentIndex().data().toString(), QStringLiteral("One"));
+    QCOMPARE(tree->currentIndex().parent().data().toString(), QStringLiteral("Alpha"));
 
     (*server)->stop();
 }

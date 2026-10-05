@@ -222,6 +222,8 @@ class LibraryBrowser final : public QObject {
   private:
     struct Outcome {
         persistence::LibraryPage page;
+        // A view's way to a file being located, its node at each level.
+        persistence::LibraryPage way;
         std::vector<persistence::LibraryRoot> roots;
         std::vector<std::string> paths;
         std::vector<LocalTrackRow> rows;
@@ -229,6 +231,17 @@ class LibraryBrowser final : public QObject {
         QString error;
         std::size_t unavailable{0};
     };
+    // Where a row lies for what is being located: off the way, on it --
+    // opened -- or the row itself, made current.
+    enum class Step { none, on_way, target };
+    using Locating = std::function<Step(const persistence::LibraryEntry&, std::size_t depth)>;
+    // The rule for the layout shown: the artist tree by artist and album,
+    // Recently added by album, Folders by the file's folders, a view by the
+    // way the engine found. Empty when the file is not in it.
+    [[nodiscard]] Locating locating(const persistence::LibraryEntry& album_entry,
+                                    const std::string& raw_path, bool album,
+                                    const persistence::LibraryPage& way) const;
+
     struct Task {
         // ADR-0220: queued work is handed the core's front door, not the
         // database.
@@ -309,8 +322,9 @@ class LibraryBrowser final : public QObject {
     std::size_t generation_{0};
     QSet<QByteArray> expanded_entries_;
     QByteArray current_entry_;
-    std::optional<persistence::LibraryEntry> locate_target_;
-    std::string locate_artist_;
+    // ADR-0273: what is being located, as the rows loading meet it -- in
+    // whichever layout shows; empty when nothing is.
+    Locating locating_;
     bool querying_{false};
     bool scanning_{false};
     bool stopped_{false};

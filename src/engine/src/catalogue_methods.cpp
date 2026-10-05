@@ -261,7 +261,11 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 }
                 rows.push_back(std::move(row));
             }
-            return Json{{"columns", std::move(names)}, {"rows", std::move(rows)}, {"more", page.more}};
+            Json answer{{"columns", std::move(names)}, {"rows", std::move(rows)}, {"more", page.more}};
+            if (page.located) {
+                answer["located"] = true;
+            }
+            return answer;
         }
         auto entries = Json::array();
         for (const auto& entry : page.entries) {
@@ -276,7 +280,11 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             entries.push_back(std::move(rendered));
         }
-        return Json{{"entries", std::move(entries)}, {"more", page.more}};
+        Json answer{{"entries", std::move(entries)}, {"more", page.more}};
+        if (page.located) {
+            answer["located"] = true;
+        }
+        return answer;
     };
 
     dispatcher.on("catalogue.query",

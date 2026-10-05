@@ -331,6 +331,62 @@ namespace {
 
 } // namespace
 
+namespace {
+
+// A node as its parent lists it: a group, or at the last level an album
+// when it holds one.
+[[nodiscard]] LibraryEntry describe_node(const LibraryViews::Tree& grouped, const Node& child,
+                                         const bool last_level) {
+    LibraryEntry entry;
+    entry.kind = LibraryEntryKind::group;
+    entry.key = child.label;
+    entry.label = child.label;
+    entry.view_value = child.label;
+    entry.tracks = child.tracks.size();
+    entry.duration_ms = 0;
+    std::set<std::string_view> albums;
+    bool one_artist = true;
+    for (const auto index : child.tracks) {
+        const auto& track = grouped.tracks[index];
+        entry.available += track.available;
+        albums.insert(grouped.album_keys[index]);
+        if (entry.duration_ms >= 0) {
+            entry.duration_ms = track.duration_ms >= 0 ? entry.duration_ms + track.duration_ms
+                                                       : -1;
+        }
+        if (!track.date.empty() && (entry.date.empty() || track.date < entry.date)) {
+            entry.date = track.date;
+        }
+        entry.added = std::max(entry.added, track.added);
+        if (index == child.tracks.front()) {
+            entry.artist = track.artist;
+            entry.album = track.album;
+        } else if (one_artist && track.artist != entry.artist) {
+            one_artist = false;
+        }
+    }
+    if (!one_artist) {
+        entry.artist.clear();
+    }
+    entry.albums = albums.size();
+    // One album at the last level is that album, as the artist tree has
+    // it: its cover, its rating, Go to album.
+    if (last_level && albums.size() == 1U && !child.tracks.empty()) {
+        const auto& first = grouped.tracks[child.tracks.front()];
+        entry.kind = LibraryEntryKind::album;
+        entry.key = grouped.album_keys[child.tracks.front()];
+        entry.rating_hash = first.album_rating_hash;
+        entry.rating = first.album_rating;
+        entry.album_rating_hash = first.album_rating_hash;
+        entry.album_rating = first.album_rating;
+    } else {
+        entry.album.clear();
+    }
+    return entry;
+}
+
+} // namespace
+
 core::Result<LibraryPage> LibraryViews::query(const persistence::LocalLibrary& library,
                                               const LibraryQuery& request,
                                               const core::CancellationToken& cancellation) const {
@@ -352,6 +408,29 @@ core::Result<LibraryPage> LibraryViews::query(const persistence::LocalLibrary& l
     if (node == nullptr) {
         return page;
     }
+    // ADR-0273: where a file is -- its node at each level below this one,
+    // the first it is under, as the levels order them -- for a client to
+    // open the way to it. Not there (filtered out, or not in the library):
+    // no way, and still an answer.
+    if (request.raw_path) {
+        page.located = true;
+        const auto found = std::ranges::find(grouped.tracks, *request.raw_path, &LibraryEntry::key);
+        if (found == grouped.tracks.end()) {
+            return page;
+        }
+        const auto wanted = static_cast<std::uint32_t>(found - grouped.tracks.begin());
+        for (auto depth = request.view_path.size(); depth < request.view.size(); ++depth) {
+            const auto under = std::ranges::find_if(node->children, [wanted](const Node& child) {
+                return std::ranges::contains(child.tracks, wanted);
+            });
+            if (under == node->children.end()) {
+                break;
+            }
+            page.entries.push_back(describe_node(grouped, *under, depth + 1U == request.view.size()));
+            node = &*under;
+        }
+        return page;
+    }
     const auto limit = std::max<std::size_t>(request.limit, 1U);
     if (request.view_path.size() == request.view.size()) {
         for (auto position = request.offset; position < node->tracks.size(); ++position) {
@@ -369,53 +448,7 @@ core::Result<LibraryPage> LibraryViews::query(const persistence::LocalLibrary& l
             page.more = true;
             break;
         }
-        const auto& child = node->children[position];
-        LibraryEntry entry;
-        entry.kind = LibraryEntryKind::group;
-        entry.key = child.label;
-        entry.label = child.label;
-        entry.view_value = child.label;
-        entry.tracks = child.tracks.size();
-        entry.duration_ms = 0;
-        std::set<std::string_view> albums;
-        bool one_artist = true;
-        for (const auto index : child.tracks) {
-            const auto& track = grouped.tracks[index];
-            entry.available += track.available;
-            albums.insert(grouped.album_keys[index]);
-            if (entry.duration_ms >= 0) {
-                entry.duration_ms = track.duration_ms >= 0 ? entry.duration_ms + track.duration_ms
-                                                           : -1;
-            }
-            if (!track.date.empty() && (entry.date.empty() || track.date < entry.date)) {
-                entry.date = track.date;
-            }
-            entry.added = std::max(entry.added, track.added);
-            if (index == child.tracks.front()) {
-                entry.artist = track.artist;
-                entry.album = track.album;
-            } else if (one_artist && track.artist != entry.artist) {
-                one_artist = false;
-            }
-        }
-        if (!one_artist) {
-            entry.artist.clear();
-        }
-        entry.albums = albums.size();
-        // One album at the last level is that album, as the artist tree has
-        // it: its cover, its rating, Go to album.
-        if (last_level && albums.size() == 1U && !child.tracks.empty()) {
-            const auto& first = grouped.tracks[child.tracks.front()];
-            entry.kind = LibraryEntryKind::album;
-            entry.key = grouped.album_keys[child.tracks.front()];
-            entry.rating_hash = first.album_rating_hash;
-            entry.rating = first.album_rating;
-            entry.album_rating_hash = first.album_rating_hash;
-            entry.album_rating = first.album_rating;
-        } else {
-            entry.album.clear();
-        }
-        page.entries.push_back(std::move(entry));
+        page.entries.push_back(describe_node(grouped, node->children[position], last_level));
     }
     return page;
 }

@@ -181,8 +181,10 @@ class OfflineStore(
         val params = JSONObject().put("path", track.entry.key)
         if (bitrateKbps > 0) params.put("format", "opus").put("bitrate", bitrateKbps)
         val ticket = client.call("streams.ticket", params)
-        val host = client.engineHost() ?: throw IOException("not connected to an engine")
-        val url = URL("http://${if (host.contains(':')) "[$host]" else host}:${ticket.getInt("port")}/stream?${ticket.getString("query")}")
+        val engine = client.engineEndpoint() ?: throw IOException("not connected to an engine")
+        // ADR-0270: where this phone reached the engine, over HTTPS behind a
+        // TLS proxy.
+        val url = URL(engine.streamUrl(ticket.getInt("port"), ticket.getString("query")))
         withContext(Dispatchers.IO) {
             val part = File(track.file.path + ".part")
             val connection = url.openConnection() as HttpURLConnection

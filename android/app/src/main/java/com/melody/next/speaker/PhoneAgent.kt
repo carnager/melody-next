@@ -22,7 +22,6 @@ import java.io.BufferedWriter
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.UUID
 
@@ -79,6 +78,9 @@ class PhoneAgent(
     private val writing = Mutex()
     @Volatile private var changed = true
 
+    // The engine as this phone reached it, for where its streams are.
+    @Volatile private var reached: Endpoint? = null
+
     fun start(endpoint: Endpoint) {
         session?.cancel()
         session = scope.launch(Dispatchers.IO) { run(endpoint) }
@@ -120,11 +122,10 @@ class PhoneAgent(
         while (scope.isActive) {
             var registered = false
             _status.value = Status.Connecting(endpoint, problem)
-            val socket = Socket()
+            var socket: Socket? = null
             try {
-                socket.tcpNoDelay = true
-                socket.keepAlive = true
-                socket.connect(InetSocketAddress(endpoint.host, endpoint.port), 5_000)
+                socket = withContext(Dispatchers.IO) { endpoint.openSocket(5_000) }
+                reached = endpoint
                 val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
                 val out = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
                 writer = out
@@ -155,7 +156,7 @@ class PhoneAgent(
                 problem = failure.message ?: failure.javaClass.simpleName
             } finally {
                 writer = null
-                runCatching { socket.close() }
+                runCatching { socket?.close() }
             }
             // Gone, cleanly or not -- a network switch usually breaks the
             // connection rather than closing it. What played belonged to it;
@@ -208,15 +209,28 @@ class PhoneAgent(
         }
     }
 
+    /**
+     * ADR-0270: a stream as this phone reaches the engine -- the engine names
+     * its own address, which behind a proxy is not one this phone can reach,
+     * and says http where the proxy speaks TLS.
+     */
+    private fun reachable(source: JSONObject?): JSONObject {
+        source ?: throw AgentError("invalid_argument", "a source is required")
+        val url = source.optString("url", "")
+        val via = reached
+        if (url.isNotEmpty() && via != null) source.put("url", via.streamUrl(url))
+        return source
+    }
+
     private fun handle(method: String, params: JSONObject): JSONObject {
         when (method) {
             "audition.load" -> audition.load(
-                params.optJSONObject("source") ?: throw AgentError("invalid_argument", "a source is required"),
+                reachable(params.optJSONObject("source")),
                 params.optBoolean("play", true),
                 params.optLong("position_ms", 0),
             )
             "audition.queue_next" -> audition.queueNext(
-                params.optJSONObject("source") ?: throw AgentError("invalid_argument", "a source is required"),
+                reachable(params.optJSONObject("source")),
                 params.optLong("token", 0),
             )
             "audition.clear_next" -> audition.clearNext()

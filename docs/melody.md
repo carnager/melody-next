@@ -66,6 +66,25 @@ ports off the internet and use a VPN from outside -- or, if you want TLS, put
 a proxy (stunnel, an nginx or Caddy stream proxy) in front of an engine
 listening on `127.0.0.1`. `melodyd --help` lists everything.
 
+### The phone through a TLS proxy
+
+A phone away from home that does not run the VPN can reach an engine through
+a server that does (ADR-0270). The server terminates TLS and forwards both
+ports, at the same numbers, to the engine -- 6603 is not HTTP, so it takes a
+stream proxy; 6604 carries the audio:
+
+```nginx
+stream {
+    server { listen 6603 ssl; ssl_certificate …; ssl_certificate_key …;
+             proxy_pass 10.10.10.200:6603; }
+    server { listen 6604 ssl; ssl_certificate …; ssl_certificate_key …;
+             proxy_pass 10.10.10.200:6604; }
+}
+```
+
+In the app, give the engine as `tls://your.server:6603`. The certificate must
+be one the phone trusts -- Let's Encrypt's is.
+
 ## A NAS that can't run the engine
 
 When the music is on a NAS and the engine runs on another machine, the engine

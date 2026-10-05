@@ -202,7 +202,7 @@ private fun OtherEngines(vm: MainViewModel) {
         value = typed,
         onValueChange = { typed = it },
         label = { Text("Add by address") },
-        placeholder = { Text("host or host:port") },
+        placeholder = { Text("host:port, or tls://host:port") },
         singleLine = true,
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = {
             com.melody.next.engine.Endpoint.parse(typed, password)?.let {

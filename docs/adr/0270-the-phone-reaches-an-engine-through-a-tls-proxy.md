@@ -3,7 +3,10 @@
 ## Status
 
 Accepted, 2026-10-05. Extends ADR-0223 (TCP and passwords; no built-in TLS)
-and ADR-0231 (the Android client).
+and ADR-0231 (the Android client). Amended by ADR-0271 the same day: a raw
+TCP proxy takes a server most people cannot build, so the `tls://` address
+gave way to `wss://`; fetching streams where the phone reached the engine
+stands.
 
 ## Context
 

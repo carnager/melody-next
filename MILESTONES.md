@@ -83,7 +83,8 @@ and compatibility policy are ADR-0260 (`docs/protocol-levels.md`).
   (ADR-0266), and the library panel learned to follow changes (ADR-0268);
   with them the schema reached 53. Use of 2026-10-05 found Up Next asked for
   by other clients missing from the window (ADR-0269), which brought the
-  protocol to level 5. The period counts from that last change.
+  protocol to level 5, and the WebSocket for phones behind a web proxy
+  (ADR-0271) to level 6. The period counts from that last change.
 - **Measured on 2026-10-03,** the 66,841-track library on gemenon end to end,
   engine and window, with no step stalling the window
   (`docs/release-measurements.md`). What changed since is measured again: a

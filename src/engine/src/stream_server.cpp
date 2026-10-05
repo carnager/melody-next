@@ -4,6 +4,7 @@
 #include "trackknife/engine/stream_server.hpp"
 
 #include "trackknife/engine/token.hpp"
+#include "trackknife/engine/websocket.hpp"
 #include "trackknife/output/stream_query.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -215,7 +216,8 @@ struct StreamServer::Transfer final {
 };
 
 core::Result<std::unique_ptr<StreamServer>>
-StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve resolve) {
+StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve resolve,
+                     Connect connect) {
     if (!resolve) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::invalid_argument,
@@ -278,13 +280,14 @@ StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve 
         return std::unexpected(failed);
     }
     return std::unique_ptr<StreamServer>{
-        new StreamServer{listener, wakeup[0], wakeup[1], bound_port, std::move(resolve)}};
+        new StreamServer{listener, wakeup[0], wakeup[1], bound_port, std::move(resolve),
+                         std::move(connect)}};
 }
 
 StreamServer::StreamServer(const int listener, const int wakeup_read, const int wakeup_write,
-                           const std::uint16_t port, Resolve resolve)
+                           const std::uint16_t port, Resolve resolve, Connect connect)
     : listener_(listener), wakeup_read_(wakeup_read), wakeup_write_(wakeup_write), port_(port),
-      resolve_(std::move(resolve)) {}
+      resolve_(std::move(resolve)), connect_(std::move(connect)) {}
 
 StreamServer::~StreamServer() {
     stop();
@@ -408,6 +411,41 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
     const bool head_only = method == "HEAD";
     if (method != "GET" && !head_only) {
         answer_status(descriptor, "405 Method Not Allowed");
+        finish();
+        return;
+    }
+    // ADR-0271: the protocol, as a WebSocket -- for a client that reaches
+    // the engine through an HTTP proxy.
+    if (target == "/protocol" && !head_only) {
+        const auto upgrade = header(text, "Upgrade");
+        const auto key = header(text, "Sec-WebSocket-Key");
+        const auto version = header(text, "Sec-WebSocket-Version");
+        if (!connect_) {
+            answer_status(descriptor, "404 Not Found");
+            finish();
+            return;
+        }
+        if (!upgrade || !equal_ignoring_case(*upgrade, "websocket") || !key || key->empty() ||
+            !version || *version != "13") {
+            answer_status(descriptor, "400 Bad Request");
+            finish();
+            return;
+        }
+        const auto inner = connect_();
+        if (inner < 0) {
+            answer_status(descriptor, "503 Service Unavailable");
+            finish();
+            return;
+        }
+        const std::string response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                     "Connection: Upgrade\r\nSec-WebSocket-Accept: " +
+                                     websocket_accept(*key) + "\r\n\r\n";
+        if (send_all(descriptor, response)) {
+            bridge_websocket(descriptor, inner, std::string{text.substr(text.find("\r\n\r\n") + 4U)},
+                             running_);
+        } else {
+            ::close(inner);
+        }
         finish();
         return;
     }

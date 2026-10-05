@@ -712,9 +712,24 @@ int main(int argc, char** argv) {
         media = std::make_unique<trackknife::engine::MediaStreams>(
             *token, [&player](const std::string& raw_path) { return player->holds(raw_path); },
             transcodes.get());
+        // ADR-0271: the protocol as a WebSocket at /protocol, for clients
+        // behind an HTTP proxy -- a connection to the TCP listener, asking
+        // its password; none without one, as TCP needs one.
+        trackknife::engine::StreamServer::Connect connect;
+        if (tcp_server) {
+            connect = [&tcp_server]() -> int {
+                std::array<int, 2> pair{-1, -1};
+                if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) < 0) {
+                    return -1;
+                }
+                tcp_server->attach(pair[0], false);
+                return pair[1];
+            };
+        }
         auto listening = trackknife::engine::StreamServer::listen(
             endpoint->host, endpoint->port,
-            [&media](const std::string_view query) { return media->resolve(query); });
+            [&media](const std::string_view query) { return media->resolve(query); },
+            std::move(connect));
         if (!listening && listen_by_default) {
             std::cerr << "melodyd: " << http_address << " is taken (" << listening.error().message
                       << "); agents with no copy of the music "

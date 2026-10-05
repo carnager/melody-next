@@ -158,7 +158,7 @@ fun SetupScreen(onChosen: () -> Unit, onCancel: (() -> Unit)? = null) {
                 onValueChange = { address = it },
                 label = { Text("Address") },
                 placeholder = { Text("gemenon:6603") },
-                supportingText = { Text("Through a proxy that speaks TLS: tls://host:port") },
+                supportingText = { Text("Through a web proxy: wss://your.server") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),

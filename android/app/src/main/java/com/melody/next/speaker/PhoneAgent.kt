@@ -2,6 +2,7 @@ package com.melody.next.speaker
 
 import androidx.media3.common.util.UnstableApi
 import com.melody.next.engine.Endpoint
+import com.melody.next.engine.Lines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -17,12 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.IOException
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.Socket
 import java.util.UUID
 
 /**
@@ -74,7 +70,7 @@ class PhoneAgent(
     /** Per process: the engine tells a restarted agent from a second one by it. */
     private val instance = UUID.randomUUID().toString()
     private var session: Job? = null
-    @Volatile private var writer: BufferedWriter? = null
+    @Volatile private var writer: Lines? = null
     private val writing = Mutex()
     @Volatile private var changed = true
 
@@ -122,13 +118,12 @@ class PhoneAgent(
         while (scope.isActive) {
             var registered = false
             _status.value = Status.Connecting(endpoint, problem)
-            var socket: Socket? = null
+            var lines: Lines? = null
             try {
-                socket = withContext(Dispatchers.IO) { endpoint.openSocket(5_000) }
+                lines = withContext(Dispatchers.IO) { endpoint.openLines(5_000) }
                 reached = endpoint
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-                val out = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
-                writer = out
+                val reader = lines
+                writer = lines
                 if (endpoint.password.isNotEmpty()) {
                     ask(reader, 1, "session.authenticate", JSONObject().put("password", endpoint.password))
                 }
@@ -156,7 +151,7 @@ class PhoneAgent(
                 problem = failure.message ?: failure.javaClass.simpleName
             } finally {
                 writer = null
-                runCatching { socket?.close() }
+                runCatching { lines?.close() }
             }
             // Gone, cleanly or not -- a network switch usually breaks the
             // connection rather than closing it. What played belonged to it;
@@ -172,10 +167,10 @@ class PhoneAgent(
     }
 
     /** A request of our own, before the connection turns round. */
-    private suspend fun ask(reader: BufferedReader, id: Int, method: String, params: JSONObject) {
+    private suspend fun ask(reader: Lines, id: Int, method: String, params: JSONObject) {
         send(JSONObject().put("id", id).put("method", method).put("params", params))
         while (true) {
-            val line = withContext(Dispatchers.IO) { reader.readLine() } ?: throw IOException("the engine closed the connection")
+            val line = withContext(Dispatchers.IO) { reader.read() } ?: throw IOException("the engine closed the connection")
             val message = JSONObject(line)
             if (message.optInt("id", -1) != id) continue
             message.optJSONObject("error")?.let { throw IOException(it.optString("message", "refused")) }
@@ -184,9 +179,9 @@ class PhoneAgent(
     }
 
     /** From here the engine asks; every request is answered, in order. */
-    private suspend fun serve(reader: BufferedReader) {
+    private suspend fun serve(reader: Lines) {
         while (true) {
-            val line = withContext(Dispatchers.IO) { reader.readLine() } ?: return
+            val line = withContext(Dispatchers.IO) { reader.read() } ?: return
             if (line.isBlank()) continue
             val request = JSONObject(line)
             if (!request.has("method")) continue
@@ -273,11 +268,7 @@ class PhoneAgent(
     private suspend fun send(message: JSONObject) {
         val out = writer ?: throw IOException("not connected")
         withContext(Dispatchers.IO) {
-            writing.withLock {
-                out.write(message.toString())
-                out.write("\n")
-                out.flush()
-            }
+            writing.withLock { out.write(message.toString()) }
         }
     }
 

@@ -31,10 +31,14 @@ class StreamServer final {
     // The file to send for a query string; an error says why not, as a
     // status: unauthorized is 403, not_found 404, a bad request 400.
     using Resolve = std::function<core::Result<std::string>(std::string_view query)>;
+    // ADR-0271: a protocol connection for a WebSocket asked at /protocol --
+    // a descriptor whose lines are the engine's protocol, needing the
+    // password as one on TCP does; -1 when there is none to give.
+    using Connect = std::function<int()>;
 
     // Port 0 asks for an ephemeral port, which `port()` then reports.
     [[nodiscard]] static core::Result<std::unique_ptr<StreamServer>>
-    listen(const std::string& host, std::uint16_t port, Resolve resolve);
+    listen(const std::string& host, std::uint16_t port, Resolve resolve, Connect connect = {});
 
     StreamServer(const StreamServer&) = delete;
     StreamServer(StreamServer&&) = delete;
@@ -52,7 +56,7 @@ class StreamServer final {
     struct Transfer;
 
     StreamServer(int listener, int wakeup_read, int wakeup_write, std::uint16_t port,
-                 Resolve resolve);
+                 Resolve resolve, Connect connect);
     void accept_loop();
     void serve(const std::shared_ptr<Transfer>& transfer);
     void reap();
@@ -62,6 +66,7 @@ class StreamServer final {
     int wakeup_write_;
     std::uint16_t port_;
     const Resolve resolve_;
+    const Connect connect_;
     std::atomic<bool> running_{false};
     std::thread acceptor_;
     std::mutex mutex_;

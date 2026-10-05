@@ -141,9 +141,11 @@ class PhoneAgentTest {
             assertTrue(engine.ask(11, "audition.queue_next", JSONObject().put("source", source).put("token", 7)).has("result"))
             assertTrue(engine.ask(12, "audition.volume", JSONObject().put("percent", 40)).has("result"))
             assertTrue(engine.ask(13, "audition.replay_gain", JSONObject().put("mode", 2)).has("result"))
+            // ADR-0270: fetched where this phone reached the engine, not
+            // where the engine says it is.
+            val reached = engine.endpoint.streamUrl(6604, "path=x&token=t")
             assertEquals(
-                listOf("load http://engine:6604/stream?path=x&token=t play=true at=1500",
-                    "next http://engine:6604/stream?path=x&token=t token=7", "volume 40", "gain 2"),
+                listOf("load $reached play=true at=1500", "next $reached token=7", "volume 40", "gain 2"),
                 player.asked.toList(),
             )
             // What it does not do is refused, not ignored: the engine hears why.

@@ -18,34 +18,97 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URI
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Where an engine listens, and the password it wants, if any. */
-data class Endpoint(val host: String, val port: Int = DEFAULT_PORT, val password: String = "") {
+/**
+ * Where an engine listens, and the password it wants, if any. With [tls] it
+ * is reached through a proxy that speaks TLS (ADR-0270) -- the engine itself
+ * speaks plain TCP, behind it.
+ */
+data class Endpoint(
+    val host: String,
+    val port: Int = DEFAULT_PORT,
+    val password: String = "",
+    val tls: Boolean = false,
+) {
     companion object {
         const val DEFAULT_PORT = 6603
+        private const val TLS_PREFIX = "tls://"
 
-        /** "host", "host:port" or "[v6]:port", as a person types it. */
+        /**
+         * "host", "host:port" or "[v6]:port", as a person types it; with
+         * "tls://" before it, reached over TLS.
+         */
         fun parse(text: String, password: String = ""): Endpoint? {
-            val trimmed = text.trim()
+            var trimmed = text.trim()
+            val tls = trimmed.startsWith(TLS_PREFIX, ignoreCase = true)
+            if (tls) trimmed = trimmed.substring(TLS_PREFIX.length)
             if (trimmed.isEmpty()) return null
             if (trimmed.startsWith("[")) {
                 val close = trimmed.indexOf(']')
                 if (close < 0) return null
                 val host = trimmed.substring(1, close)
                 val port = trimmed.substring(close + 1).removePrefix(":").toIntOrNull() ?: DEFAULT_PORT
-                return Endpoint(host, port, password)
+                return Endpoint(host, port, password, tls)
             }
             val colon = trimmed.lastIndexOf(':')
             // More than one colon without brackets is a bare IPv6 address.
-            if (colon < 0 || trimmed.indexOf(':') != colon) return Endpoint(trimmed, DEFAULT_PORT, password)
+            if (colon < 0 || trimmed.indexOf(':') != colon) return Endpoint(trimmed, DEFAULT_PORT, password, tls)
             val port = trimmed.substring(colon + 1).toIntOrNull() ?: return null
-            return Endpoint(trimmed.substring(0, colon), port, password)
+            return Endpoint(trimmed.substring(0, colon), port, password, tls)
         }
     }
 
-    override fun toString(): String = if (host.contains(':')) "[$host]:$port" else "$host:$port"
+    private val authorityHost: String get() = if (host.contains(':')) "[$host]" else host
+
+    override fun toString(): String = (if (tls) TLS_PREFIX else "") + "$authorityHost:$port"
+
+    /**
+     * A stream of this engine's, as this phone reaches it: at the host it
+     * connected to -- which behind a proxy is not the address the engine sees
+     * itself at -- over HTTPS when the engine is reached over TLS, at the
+     * stream port the engine named.
+     */
+    fun streamUrl(port: Int, query: String): String =
+        "${if (tls) "https" else "http"}://$authorityHost:$port/stream?$query"
+
+    /** An address the engine gave for a stream, taken to this host likewise. */
+    fun streamUrl(given: String): String {
+        val uri = runCatching { URI(given) }.getOrNull() ?: return given
+        if (uri.port < 0 || uri.rawPath != "/stream") return given
+        return streamUrl(uri.port, uri.rawQuery ?: "")
+    }
+
+    /**
+     * A socket to the engine, connected -- and with [tls] the handshake made
+     * and the certificate checked against the host's name, as a browser does.
+     */
+    fun openSocket(timeoutMs: Int, factory: SSLSocketFactory? = null): Socket {
+        // Named: inside apply, `port` would be the unconnected socket's own.
+        val address = InetSocketAddress(host, port)
+        val plain = Socket().apply {
+            tcpNoDelay = true
+            keepAlive = true
+            connect(address, timeoutMs)
+        }
+        if (!tls) return plain
+        return try {
+            val secured = (factory ?: SSLSocketFactory.getDefault() as SSLSocketFactory)
+                .createSocket(plain, host, port, true) as SSLSocket
+            secured.sslParameters = secured.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+            secured.soTimeout = timeoutMs
+            secured.startHandshake()
+            secured.soTimeout = 0
+            secured
+        } catch (failure: Throwable) {
+            runCatching { plain.close() }
+            throw failure
+        }
+    }
 }
 
 /** An error the engine answered with: a stable code, and text for a person. */
@@ -160,13 +223,7 @@ class EngineConnection private constructor(
          * returned is ready for any request.
          */
         suspend fun open(endpoint: Endpoint, scope: CoroutineScope, timeoutMs: Int = 5_000): EngineConnection {
-            val socket = withContext(Dispatchers.IO) {
-                Socket().apply {
-                    tcpNoDelay = true
-                    keepAlive = true
-                    connect(InetSocketAddress(endpoint.host, endpoint.port), timeoutMs)
-                }
-            }
+            val socket = withContext(Dispatchers.IO) { endpoint.openSocket(timeoutMs) }
             val connection = EngineConnection(socket, scope)
             if (endpoint.password.isNotEmpty()) {
                 try {

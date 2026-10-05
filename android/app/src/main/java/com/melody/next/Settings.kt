@@ -13,16 +13,20 @@ class Settings(context: Context) {
     var endpoint: Endpoint?
         get() {
             val host = preferences.getString("host", null) ?: return null
-            return Endpoint(host, preferences.getInt("port", Endpoint.DEFAULT_PORT), preferences.getString("password", "") ?: "")
+            return Endpoint(
+                host, preferences.getInt("port", Endpoint.DEFAULT_PORT), preferences.getString("password", "") ?: "",
+                preferences.getBoolean("tls", false),
+            )
         }
         set(value) {
             preferences.edit().apply {
                 if (value == null) {
-                    remove("host"); remove("port"); remove("password")
+                    remove("host"); remove("port"); remove("password"); remove("tls")
                 } else {
                     putString("host", value.host)
                     putInt("port", value.port)
                     putString("password", value.password)
+                    putBoolean("tls", value.tls)
                 }
             }.apply()
         }
@@ -38,7 +42,10 @@ class Settings(context: Context) {
         otherEngines = engines.distinctBy { it.host to it.port }
         val stored = org.json.JSONArray()
         otherEngines.forEach {
-            stored.put(org.json.JSONObject().put("host", it.host).put("port", it.port).put("password", it.password))
+            stored.put(
+                org.json.JSONObject().put("host", it.host).put("port", it.port).put("password", it.password)
+                    .put("tls", it.tls)
+            )
         }
         preferences.edit().putString("other_engines", stored.toString()).apply()
     }
@@ -47,7 +54,10 @@ class Settings(context: Context) {
         val stored = org.json.JSONArray(preferences.getString("other_engines", "[]") ?: "[]")
         (0 until stored.length()).map { index ->
             val engine = stored.getJSONObject(index)
-            Endpoint(engine.getString("host"), engine.optInt("port", Endpoint.DEFAULT_PORT), engine.optString("password"))
+            Endpoint(
+                engine.getString("host"), engine.optInt("port", Endpoint.DEFAULT_PORT), engine.optString("password"),
+                engine.optBoolean("tls", false),
+            )
         }
     }.getOrDefault(emptyList())
 

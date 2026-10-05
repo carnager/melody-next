@@ -34,6 +34,7 @@ older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
+- [ADR-0270: The phone reaches an engine through a TLS proxy](adr/0270-the-phone-reaches-an-engine-through-a-tls-proxy.md).
 - [ADR-0269: Up Next is the engine's, and the window shows it](adr/0269-up-next-is-the-engines.md).
 - [ADR-0268: What shows a library follows its changes](adr/0268-the-library-follows-its-files.md).
 - [ADR-0267: One Trackknife per workspace](adr/0267-one-trackknife-per-workspace.md).

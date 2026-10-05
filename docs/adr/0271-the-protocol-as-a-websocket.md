@@ -33,5 +33,24 @@ over a WebSocket.
 
 - Protocol level 6. An older engine has no `/protocol`; the app says the
   server did not take the WebSocket.
-- Pings are answered by the engine; nothing pings on its own, so a proxy's
-  idle timeout may end a quiet connection, which the app then makes again.
+- Pings are answered by the engine. The app pings (below), which also keeps
+  a proxy's idle timeout from ending a quiet connection.
+
+## Amendment: the app pings (2026-10-05)
+
+Out on mobile data the phone stopped playing after a few minutes, and
+played on once unlocked. Through WireGuard it never had: WireGuard roams,
+so a connection inside it survives the phone's address changing; a bare
+connection over mobile data dies without a word when it changes. The
+phone's speaker waited for its next track on a connection already gone,
+the track ended, and with nothing playing Android let the app reach the
+network only once it was in front again.
+
+- **The app pings every 10 s** over a WebSocket, and closes a connection
+  it has heard nothing on -- pongs included -- for 25 s. Reading ends, and
+  the connection is made again; mid-track, the speaker's wait for the
+  engine keeps the app running until it is back, and the engine plays on.
+- A ping never waits behind a write stuck on a dead connection, so the
+  check goes on running.
+- The speaker closes its connection when a report cannot be sent, rather
+  than reading on.

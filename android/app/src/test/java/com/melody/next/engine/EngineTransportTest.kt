@@ -212,6 +212,42 @@ class EngineTransportTest {
     }
 
     @Test
+    fun aWebSocketGoneQuietIsClosed() {
+        val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        var pings = 0
+        withServer(server, { socket ->
+            val side = ServerSide(socket)
+            side.handshake()
+            // Answering pings for longer than the silence allowed: kept.
+            val answering = System.nanoTime() + 1_000_000_000L
+            while (System.nanoTime() < answering) {
+                val (opcode, payload) = side.frame()
+                if (opcode == 0x9) {
+                    pings++
+                    side.send(0xA, payload)
+                }
+            }
+            // Then nothing, as a connection gone with the phone's address.
+            runCatching { while (true) side.frame() }
+        }) { port ->
+            val socket = Socket().apply { connect(java.net.InetSocketAddress("127.0.0.1", port), 5_000) }
+            val lines = WebSocketLines.open(socket, "127.0.0.1", port, "/protocol", 80, pingMs = 100, silentMs = 400)
+            val started = System.nanoTime()
+            try {
+                lines.read()
+                fail("a silent connection must not be read from for ever")
+            } catch (gone: java.io.IOException) {
+                assertEquals("the engine stopped answering", gone.message)
+            }
+            val tookMs = (System.nanoTime() - started) / 1_000_000
+            assertTrue("kept while pongs came ($tookMs ms)", tookMs >= 1_000)
+            assertTrue("closed soon after they stopped ($tookMs ms)", tookMs < 3_000)
+            lines.close()
+        }
+        assertTrue("pinged ($pings)", pings >= 5)
+    }
+
+    @Test
     fun aServerThatDoesNotTakeTheWebSocketIsSaidSo() {
         val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         withServer(server, { socket ->

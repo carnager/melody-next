@@ -7,6 +7,13 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 6 (2026-10-05)
+
+- The protocol as a WebSocket at `/protocol` on the stream port (`--http`),
+  for a client behind an HTTP proxy: one message in each text message, both
+  ways, the password asked as on TCP; refused where the engine has no TCP
+  listener with a password (ADR-0271).
+
 ### Level 5 (2026-10-05)
 
 - Playback states carry `requests_revision`, which moves whenever Up Next

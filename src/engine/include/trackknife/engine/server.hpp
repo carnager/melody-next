@@ -50,8 +50,9 @@ class Server final {
     // opened -- an output agent serving the engine it connected to.
     [[nodiscard]] static std::unique_ptr<Server> detached(protocol::Dispatcher& dispatcher);
     // Serves `descriptor` like an accepted connection, trusted from its first
-    // line (whatever it needed happened before). Takes ownership.
-    void attach(int descriptor);
+    // line (whatever it needed happened before) -- or, not `trusted`, asked
+    // for the password as a TCP connection is (ADR-0271). Takes ownership.
+    void attach(int descriptor, bool trusted = true);
 
     // ADR-0228: called when an authenticated connection sends
     // agent.register, with its parameters and the connection, which is then

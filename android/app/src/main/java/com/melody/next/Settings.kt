@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.melody.next.engine.Endpoint
+import com.melody.next.engine.Transport
 
 /** What this phone remembers: the engine it talks to and how it looks. */
 class Settings(context: Context) {
@@ -15,18 +16,20 @@ class Settings(context: Context) {
             val host = preferences.getString("host", null) ?: return null
             return Endpoint(
                 host, preferences.getInt("port", Endpoint.DEFAULT_PORT), preferences.getString("password", "") ?: "",
-                preferences.getBoolean("tls", false),
+                transportOf(preferences.getString("transport", null)),
+                preferences.getString("path", null) ?: Endpoint.DEFAULT_PATH,
             )
         }
         set(value) {
             preferences.edit().apply {
                 if (value == null) {
-                    remove("host"); remove("port"); remove("password"); remove("tls")
+                    remove("host"); remove("port"); remove("password"); remove("transport"); remove("path")
                 } else {
                     putString("host", value.host)
                     putInt("port", value.port)
                     putString("password", value.password)
-                    putBoolean("tls", value.tls)
+                    putString("transport", value.transport.name)
+                    putString("path", value.path)
                 }
             }.apply()
         }
@@ -44,7 +47,7 @@ class Settings(context: Context) {
         otherEngines.forEach {
             stored.put(
                 org.json.JSONObject().put("host", it.host).put("port", it.port).put("password", it.password)
-                    .put("tls", it.tls)
+                    .put("transport", it.transport.name).put("path", it.path)
             )
         }
         preferences.edit().putString("other_engines", stored.toString()).apply()
@@ -56,7 +59,8 @@ class Settings(context: Context) {
             val engine = stored.getJSONObject(index)
             Endpoint(
                 engine.getString("host"), engine.optInt("port", Endpoint.DEFAULT_PORT), engine.optString("password"),
-                engine.optBoolean("tls", false),
+                transportOf(engine.optString("transport", "")),
+                engine.optString("path", Endpoint.DEFAULT_PATH).ifEmpty { Endpoint.DEFAULT_PATH },
             )
         }
     }.getOrDefault(emptyList())
@@ -132,3 +136,6 @@ class Settings(context: Context) {
         preferences.edit().putBoolean("dynamic_color", on).apply()
     }
 }
+
+private fun transportOf(name: String?): Transport =
+    Transport.entries.firstOrNull { it.name == name } ?: Transport.TCP

@@ -450,10 +450,10 @@ std::unique_ptr<Server> Server::detached(protocol::Dispatcher& dispatcher) {
     return server;
 }
 
-void Server::attach(const int descriptor) {
+void Server::attach(const int descriptor, const bool trusted) {
     auto connection = std::make_shared<Connection>();
     connection->descriptor = descriptor;
-    connection->authenticated.store(true);
+    connection->authenticated.store(trusted);
     connection->ends_at_eof = true;
     reap();
     const std::lock_guard guard{mutex_};

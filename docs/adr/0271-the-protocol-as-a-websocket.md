@@ -54,3 +54,9 @@ network only once it was in front again.
   check goes on running.
 - The speaker closes its connection when a report cannot be sent, rather
   than reading on.
+- **The phone fetches minutes ahead**, not ExoPlayer's 50 s: up to ten
+  minutes, within 16 MB. The engine sends a converted track whole, as fast
+  as the network takes it, so on mobile data -- Opus, 9.6 MB for ten
+  minutes at 128 kbps -- a dead zone or a connection made again is played
+  through; original files stop at the size, CD FLAC at about two and a
+  half minutes.

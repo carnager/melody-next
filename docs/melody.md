@@ -79,8 +79,13 @@ music.example.org {
 }
 ```
 
-In the app, give the engine as `wss://music.example.org`, with its password.
-The engine needs a password (`--password-file`) for this, as for its TCP port.
+In the app, give the engine as `wss://music.example.org`, with its password
+-- without the port: the proxy's is the usual one. The engine needs a
+password (`--password-file`) for this, as for its TCP port.
+
+At home the app finds the engine on the network by the id it announces and
+connects to it there directly, streams too, and goes back through the proxy
+when the phone leaves (ADR-0272).
 
 ## A NAS that can't run the engine
 

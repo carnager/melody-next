@@ -4,6 +4,7 @@ import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,8 @@ data class LibraryPage(val entries: List<LibraryEntry>, val more: Boolean)
 class EngineClient(
     private val scope: CoroutineScope,
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
+    /** ADR-0272: engines on this network, to reach this one the nearer way. */
+    private val nearby: Nearby = Nearby(),
 ) {
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val _state = MutableStateFlow(PlaybackState())
@@ -58,6 +61,13 @@ class EngineClient(
     /** ADR-0233: a list on the engine was written or deleted, by anyone: its id. */
     val listsChanged: SharedFlow<String> = _listsChanged
 
+    private val _engineId = MutableStateFlow<String?>(null)
+    /**
+     * The engine's id, as its engine.info gives it: known from the last
+     * time, or learnt on connecting -- what it is found by on this network.
+     */
+    val engineId: StateFlow<String?> = _engineId
+
     @Volatile private var control: EngineConnection? = null
     @Volatile private var covers: EngineConnection? = null
     private val coversOpening = Mutex()
@@ -65,9 +75,13 @@ class EngineClient(
     private var endpoint: Endpoint? = null
     private var queueRevision = -1L
 
-    /** Connects, and keeps reconnecting until told otherwise. */
-    fun connect(to: Endpoint) {
+    /**
+     * Connects, and keeps reconnecting until told otherwise -- at `to`, or
+     * where the engine with `id` is found on this network (ADR-0272).
+     */
+    fun connect(to: Endpoint, id: String? = null) {
         session?.cancel()
+        if (endpoint?.sameAddress(to) != true || id != null) _engineId.value = id
         endpoint = to
         covers?.close()
         covers = null
@@ -90,35 +104,60 @@ class EngineClient(
         if (control?.isOpen != true) connect(current)
     }
 
+    /**
+     * The phone changed networks: a connection made the nearer way is made
+     * again -- left home, the engine is not there any more (ADR-0272).
+     */
+    fun networkChanged() {
+        val saved = endpoint ?: return
+        val reached = engineEndpoint() ?: return
+        if (!reached.sameAddress(saved)) control?.close()
+    }
+
     private suspend fun run(to: Endpoint) {
         var lastError = ""
         while (true) {
             _connection.value = ConnectionState.Connecting(to, lastError)
+            var switching = false
             try {
-                val opened = EngineConnection.open(to, scope)
+                val (via, opened) = nearby.reach(to, _engineId.value, CONNECT_TIMEOUT_MS) { at, timeoutMs ->
+                    EngineConnection.open(at, scope, timeoutMs)
+                }
                 control = opened
                 val listening = scope.launch { opened.events.collect { handle(it) } }
+                var nearer: Job? = null
                 try {
                     val info = opened.call("engine.info")
-                    val name = info.optString("name").ifEmpty { to.host }
+                    val name = info.optString("name").ifEmpty { via.host }
+                    info.optString("id").takeIf { it.isNotEmpty() }?.let { _engineId.value = it }
                     // ADR-0260: another protocol is not used, nor asked again
                     // until the app is; an older engine is, and said so.
                     val verdict = ProtocolVersion.of(info, name)
                     if (verdict.incompatible) {
-                        _connection.value = ConnectionState.Refused(to, verdict.message)
+                        _connection.value = ConnectionState.Refused(via, verdict.message)
                         return
                     }
                     queueRevision = -1
                     sequence = 0
                     adoptState(opened.call("playback.state"))
                     refreshOutputs()
-                    _connection.value = ConnectionState.Connected(to, name, verdict.message)
+                    _connection.value = ConnectionState.Connected(via, name, verdict.message)
                     lastError = ""
+                    // Reached the long way, and the engine turns up here --
+                    // come home: connected again, the nearer way.
+                    if (via === to) {
+                        nearer = scope.launch {
+                            nearby.awaitNearer(to) { _engineId.value }
+                            switching = true
+                            opened.close()
+                        }
+                    }
                     val polling = scope.launch { keepTime(opened) }
                     val why = opened.awaitClosed()
                     polling.cancel()
-                    lastError = why.message ?: "connection lost"
+                    lastError = if (switching) "" else why.message ?: "connection lost"
                 } finally {
+                    nearer?.cancel()
                     listening.cancel()
                     opened.close()
                 }
@@ -133,7 +172,7 @@ class EngineClient(
                 }
             }
             control = null
-            delay(RETRY_MS)
+            if (!switching) delay(RETRY_MS)
         }
     }
 
@@ -145,7 +184,19 @@ class EngineClient(
     private suspend fun keepTime(connection: EngineConnection) {
         while (connection.isOpen) {
             delay(if (_state.value.playing) 5_000 else 15_000)
-            runCatching { adoptState(connection.call("playback.state")) }
+            try {
+                adoptState(connection.call("playback.state"))
+            } catch (unanswered: TimeoutCancellationException) {
+                connection.close()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (refused: EngineError) {
+                // Answered, if not as hoped: still there.
+            } catch (gone: Throwable) {
+                // Unanswered: a network left behind breaks a connection
+                // without closing it. Made again, the way there is now.
+                connection.close()
+            }
         }
     }
 
@@ -406,8 +457,8 @@ class EngineClient(
 
     private suspend fun coverConnection(): EngineConnection? {
         covers?.takeIf { it.isOpen }?.let { return it }
-        val to = endpoint ?: return null
-        if (_connection.value !is ConnectionState.Connected) return null
+        // Where the engine was reached: the nearer way, when it was.
+        val to = engineEndpoint() ?: return null
         return coversOpening.withLock {
             covers?.takeIf { it.isOpen } ?: EngineConnection.open(to, scope).also { covers = it }
         }
@@ -415,5 +466,6 @@ class EngineClient(
 
     companion object {
         private const val RETRY_MS = 2_000L
+        private const val CONNECT_TIMEOUT_MS = 5_000
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.melody.next.engine.Endpoint
 import com.melody.next.engine.Transport
+import com.melody.next.engine.sameAddress
 
 /** What this phone remembers: the engine it talks to and how it looks. */
 class Settings(context: Context) {
@@ -21,7 +22,10 @@ class Settings(context: Context) {
             )
         }
         set(value) {
+            val before = endpoint
             preferences.edit().apply {
+                // Another engine: the id known was the last one's.
+                if (value == null || before == null || !before.sameAddress(value)) remove("engine_id")
                 if (value == null) {
                     remove("host"); remove("port"); remove("password"); remove("transport"); remove("path")
                 } else {
@@ -33,6 +37,14 @@ class Settings(context: Context) {
                 }
             }.apply()
         }
+
+    /**
+     * ADR-0272: the id of the engine at [endpoint], as it gave it -- what it
+     * is found by on this network, before the first connection is made.
+     */
+    var engineId: String?
+        get() = preferences.getString("engine_id", null)
+        set(value) = preferences.edit().putString("engine_id", value).apply()
 
     /**
      * ADR-0234: engines besides the one this phone plays through, whose lists

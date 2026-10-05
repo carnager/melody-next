@@ -8,6 +8,7 @@ import androidx.media3.common.util.UnstableApi
 import com.melody.next.engine.ConnectionState
 import com.melody.next.engine.Endpoint
 import com.melody.next.engine.EngineClient
+import com.melody.next.engine.sameAddress
 import com.melody.next.speaker.PhoneAgent
 import com.melody.next.speaker.PhoneAudition
 import com.melody.next.speaker.SharedSpeaker
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** The one engine client, the settings and the covers, for the whole app. */
@@ -25,6 +27,9 @@ class MelodyApp : Application() {
     lateinit var settings: Settings
         private set
     lateinit var client: EngineClient
+        private set
+    /** ADR-0272: the engines on the network the phone is on. */
+    lateinit var nearby: com.melody.next.engine.Nearby
         private set
     lateinit var covers: Covers
         private set
@@ -44,7 +49,9 @@ class MelodyApp : Application() {
     fun updateOtherEngines() {
         otherClients.value.forEach { it.disconnect() }
         otherCovers.clear()
-        otherClients.value = settings.otherEngines.map { endpoint -> EngineClient(scope).also { it.connect(endpoint) } }
+        otherClients.value = settings.otherEngines.map { endpoint ->
+            EngineClient(scope, nearby = nearby).also { it.connect(endpoint) }
+        }
         if (followed.value !== client && followed.value !in otherClients.value) following.gone(followed.value, client)
         updateSpeaker()
     }
@@ -105,7 +112,16 @@ class MelodyApp : Application() {
         super.onCreate()
         instance = this
         settings = Settings(this)
-        client = EngineClient(scope)
+        // ADR-0272: engines are looked for here all along, so one known by
+        // another address is reached directly once the phone is home.
+        nearby = com.melody.next.engine.Nearby(
+            com.melody.next.engine.discoverEngines(this)
+                .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+        )
+        client = EngineClient(scope, nearby = nearby)
+        scope.launch {
+            client.engineId.collect { id -> if (id != null && id != settings.engineId) settings.engineId = id }
+        }
         following = Following(client, { it.state.value.playing }, { it.stop() })
         covers = Covers(this, client)
         scope.launch {
@@ -114,6 +130,14 @@ class MelodyApp : Application() {
             }
         }
         network = com.melody.next.speaker.Network(this)
+        scope.launch {
+            network.changes.collect {
+                nearby.networkChanged()
+                client.networkChanged()
+                otherClients.value.forEach { it.networkChanged() }
+                agents.values.forEach { it.agent.networkChanged() }
+            }
+        }
         offline = com.melody.next.offline.OfflineStore(this, scope, client, covers) {
             com.melody.next.offline.OfflineStore.Wanted(settings.downloadBitrate, settings.downloadOnWifiOnly, network.metered)
         }
@@ -129,7 +153,7 @@ class MelodyApp : Application() {
             ) { metered, (mobile, wifi) -> if (metered) mobile else wifi }
                 .collect { bitrate -> agents.values.forEach { it.agent.bitrateKbps = bitrate } }
         }
-        settings.endpoint?.let(::useEngine)
+        settings.endpoint?.let { client.connect(it, settings.engineId) }
         updateOtherEngines()
         followStartsElsewhere()
         // Back in front: a connection the system dropped in the background
@@ -144,8 +168,9 @@ class MelodyApp : Application() {
 
     /** Talks to this engine, and offers it this phone to play on. */
     fun useEngine(endpoint: Endpoint) {
+        val sameEngine = settings.endpoint?.sameAddress(endpoint) == true
         settings.endpoint = endpoint
-        client.connect(endpoint)
+        client.connect(endpoint, settings.engineId.takeIf { sameEngine })
         updateSpeaker()
     }
 
@@ -183,11 +208,18 @@ class MelodyApp : Application() {
     private fun startAgent(endpoint: Endpoint): Speaking {
         lateinit var agent: PhoneAgent
         val seat = speaker.seat { agent.noteChange() }
-        agent = PhoneAgent(scope, seat, settings.speakerName).also {
+        agent = PhoneAgent(scope, seat, settings.speakerName, nearby = nearby).also {
             it.bitrateKbps = if (network.metered.value) settings.mobileBitrate else settings.wifiBitrate
-            it.start(endpoint)
+            it.start(endpoint) { clientAt(endpoint)?.engineId?.value }
         }
         return Speaking(agent, seat, settings.speakerName)
+    }
+
+    /** The client for the engine saved at `endpoint`: the main one, or another listed. */
+    private fun clientAt(endpoint: Endpoint): EngineClient? {
+        if (settings.endpoint?.sameAddress(endpoint) == true) return client
+        val index = settings.otherEngines.indexOfFirst { it.sameAddress(endpoint) }
+        return otherClients.value.getOrNull(index)
     }
 
     companion object {

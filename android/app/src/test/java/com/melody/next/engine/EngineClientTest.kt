@@ -6,6 +6,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -31,7 +32,7 @@ import kotlin.concurrent.thread
  * records what it was asked, and can push events -- enough to hold the
  * client to protocol v1 without a real engine.
  */
-private class FakeEngine(private val password: String = "", port: Int = 0) : AutoCloseable {
+private class FakeEngine(private val password: String = "", port: Int = 0, private val engineId: String = "") : AutoCloseable {
     val server = ServerSocket().apply { reuseAddress = true; bind(java.net.InetSocketAddress("127.0.0.1", port)) }
     private val sockets = CopyOnWriteArrayList<Socket>()
     val asked = CopyOnWriteArrayList<JSONObject>()
@@ -77,7 +78,7 @@ private class FakeEngine(private val password: String = "", port: Int = 0) : Aut
                         answer.put("error", JSONObject().put("code", "unauthorized").put("message", "wrong password"))
                     }
                 !authenticated -> answer.put("error", JSONObject().put("code", "unauthorized").put("message", "authenticate first"))
-                method == "engine.info" -> answer.put("result", JSONObject().put("name", "fake").put("protocol", 1))
+                method == "engine.info" -> answer.put("result", JSONObject().put("name", "fake").put("protocol", 1).put("id", engineId))
                 method == "playback.state" -> answer.put("result", state)
                 method == "playback.queue" -> answer.put("result", JSONObject().put("entries", queue))
                 method == "playback.requests" -> answer.put("result", JSONObject().put("entries", JSONArray()))
@@ -126,6 +127,64 @@ class EngineClientTest {
         } catch (_: Throwable) {
             fail("never: $what (last ${read()})"); throw IllegalStateException()
         }
+    }
+
+    @Test
+    fun anEngineFoundHereUnderItsIdIsReachedDirectly() = runBlocking {
+        // One engine twice: through the proxy (far) and on this network (near).
+        FakeEngine(password = "pw", engineId = "E1").use { far ->
+            FakeEngine(password = "pw", engineId = "E1").use { near ->
+                val found = MutableStateFlow<List<FoundEngine>>(emptyList())
+                val client = EngineClient(scope, clock = { 0L }, nearby = Nearby(found))
+                client.connect(far.endpoint)
+                val first = eventually("connected", { client.connection.value }) { it is ConnectionState.Connected }
+                assertEquals(far.endpoint.port, (first as ConnectionState.Connected).endpoint.port)
+                assertEquals("E1", client.engineId.value)
+
+                // Another engine found here is not this one.
+                found.value = listOf(FoundEngine("other", "127.0.0.1", 1, true, "E2"))
+                delay(300)
+                assertEquals(far.endpoint.port, client.engineEndpoint()?.port)
+
+                // Home: the same id found here -- reached there, with the password.
+                found.value = listOf(FoundEngine("fake", "127.0.0.1", near.server.localPort, true, "E1"))
+                eventually("reached nearer", { client.engineEndpoint()?.port }) { it == near.server.localPort }
+                assertEquals("pw", client.engineEndpoint()?.password)
+                assertTrue(near.asked.any { it.getString("method") == "session.authenticate" })
+
+                // Left home: gone from here -- the saved way again.
+                near.close()
+                client.networkChanged()
+                eventually("back the long way", { client.engineEndpoint()?.port }) { it == far.endpoint.port }
+                client.disconnect()
+            }
+        }
+    }
+
+    @Test
+    fun anEngineFoundButNotThereIsPassedOver() = runBlocking {
+        FakeEngine(engineId = "E1").use { far ->
+            val gone = ServerSocket(0).let { val port = it.localPort; it.close(); port }
+            val found = MutableStateFlow(listOf(FoundEngine("fake", "127.0.0.1", gone, false, "E1")))
+            val client = EngineClient(scope, clock = { 0L }, nearby = Nearby(found))
+            // Known from the last time: the nearer way is tried first, and fails.
+            client.connect(far.endpoint, id = "E1")
+            eventually("connected", { client.connection.value }) { it is ConnectionState.Connected }
+            assertEquals(far.endpoint.port, client.engineEndpoint()?.port)
+            // Still announced, still not there: passed over, not tried again and again.
+            delay(1_000)
+            assertEquals(1, far.asked.count { it.getString("method") == "engine.info" })
+            client.disconnect()
+        }
+    }
+
+    @Test
+    fun theSavedAddressIsNotItsOwnNearerWay() {
+        val saved = Endpoint("127.0.0.1", 6603, "pw")
+        val nearby = Nearby(MutableStateFlow(listOf(FoundEngine("e", "127.0.0.1", 6603, true, "E1"))))
+        assertEquals(null, nearby.nearer(saved, "E1"))
+        assertEquals(null, nearby.nearer(saved.copy(host = "10.0.0.1"), null))
+        assertEquals(saved, nearby.nearer(Endpoint("music.example", 443, "pw", Transport.WSS), "E1"))
     }
 
     @Test

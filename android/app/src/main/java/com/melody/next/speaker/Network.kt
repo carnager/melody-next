@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** What decides whether a network costs: as much of it as matters here. */
@@ -42,12 +44,25 @@ class Network(context: Context) {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val _metered = MutableStateFlow(decide())
     val metered: StateFlow<Boolean> = _metered
+    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** A Wi-Fi or Ethernet network came or went: home joined or left. */
+    val changes: SharedFlow<Unit> = _changes
 
     init {
         // Any network, not only the default: behind a VPN the default stays
         // the VPN while what it runs over changes underneath it.
         connectivity.registerDefaultNetworkCallback(refresher())
         connectivity.registerNetworkCallback(NetworkRequest.Builder().build(), refresher())
+        // Wi-Fi and Ethernet themselves: behind a VPN the default network
+        // stays the VPN while home is joined or left beneath it.
+        val local = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
+            .build()
+        connectivity.registerNetworkCallback(local, object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { _changes.tryEmit(Unit) }
+            override fun onLost(network: Network) { _changes.tryEmit(Unit) }
+        })
     }
 
     private fun refresher() = object : ConnectivityManager.NetworkCallback() {

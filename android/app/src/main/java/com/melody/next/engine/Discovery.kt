@@ -9,8 +9,17 @@ import kotlinx.coroutines.flow.callbackFlow
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** An engine announcing itself on this network (`_melody._tcp`). */
-data class FoundEngine(val name: String, val host: String, val port: Int, val wantsPassword: Boolean) {
+/**
+ * An engine announcing itself on this network (`_melody._tcp`); `id` is the
+ * one its engine.info gives, to know it by when it is reached otherwise too.
+ */
+data class FoundEngine(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val wantsPassword: Boolean,
+    val id: String = "",
+) {
     fun endpoint(password: String = "") = Endpoint(host, port, password)
 }
 
@@ -46,9 +55,10 @@ fun discoverEngines(context: Context): Flow<List<FoundEngine>> = callbackFlow {
                 @Suppress("DEPRECATION")
                 val host = info.host?.hostAddress
                 if (host != null) {
-                    val auth = info.attributes["auth"]?.let { String(it, Charsets.UTF_8) }
+                    fun text(key: String) = info.attributes[key]?.let { String(it, Charsets.UTF_8) }
                     synchronized(found) {
-                        found[info.serviceName] = FoundEngine(info.serviceName, host, info.port, auth == "1")
+                        found[info.serviceName] =
+                            FoundEngine(info.serviceName, host, info.port, text("auth") == "1", text("id") ?: "")
                         publish()
                     }
                 }

@@ -3,6 +3,8 @@ package com.melody.next.speaker
 import androidx.media3.common.util.UnstableApi
 import com.melody.next.engine.Endpoint
 import com.melody.next.engine.Lines
+import com.melody.next.engine.Nearby
+import com.melody.next.engine.sameAddress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +45,8 @@ class PhoneAgent(
      */
     val reconnecting: MutableStateFlow<Boolean> = MutableStateFlow(false),
     private val giveUpMs: Long = 10 * 60_000,
+    /** ADR-0272: engines on this network, to reach the engine the nearer way. */
+    private val nearby: Nearby = Nearby(),
 ) {
     /**
      * What this phone wants streamed: the original, or Opus at a bit rate
@@ -76,10 +80,23 @@ class PhoneAgent(
 
     // The engine as this phone reached it, for where its streams are.
     @Volatile private var reached: Endpoint? = null
+    @Volatile private var saved: Endpoint? = null
 
-    fun start(endpoint: Endpoint) {
+    /** Plays for the engine at `endpoint` -- or nearer, found here by the id `id` gives. */
+    fun start(endpoint: Endpoint, id: () -> String? = { null }) {
         session?.cancel()
-        session = scope.launch(Dispatchers.IO) { run(endpoint) }
+        saved = endpoint
+        session = scope.launch(Dispatchers.IO) { run(endpoint, id) }
+    }
+
+    /**
+     * The phone changed networks: a connection made the nearer way is made
+     * again -- left home, the engine is not there any more (ADR-0272).
+     */
+    fun networkChanged() {
+        val wanted = saved ?: return
+        val via = reached ?: return
+        if (!via.sameAddress(wanted)) writer?.let { runCatching { it.close() } }
     }
 
     fun stop() {
@@ -113,19 +130,24 @@ class PhoneAgent(
         }
     }
 
-    private suspend fun run(endpoint: Endpoint) {
+    private suspend fun run(endpoint: Endpoint, id: () -> String?) {
         var problem = ""
         while (scope.isActive) {
             var registered = false
+            var switching = false
+            var nearer: Job? = null
             _status.value = Status.Connecting(endpoint, problem)
             var lines: Lines? = null
             try {
-                lines = withContext(Dispatchers.IO) { endpoint.openLines(5_000) }
-                reached = endpoint
-                val reader = lines
-                writer = lines
-                if (endpoint.password.isNotEmpty()) {
-                    ask(reader, 1, "session.authenticate", JSONObject().put("password", endpoint.password))
+                val (via, opened) = nearby.reach(endpoint, id(), 5_000) { at, timeoutMs ->
+                    withContext(Dispatchers.IO) { at.openLines(timeoutMs) }
+                }
+                lines = opened
+                reached = via
+                val reader = opened
+                writer = opened
+                if (via.password.isNotEmpty()) {
+                    ask(reader, 1, "session.authenticate", JSONObject().put("password", via.password))
                 }
                 ask(
                     reader, 2, "agent.register",
@@ -138,6 +160,16 @@ class PhoneAgent(
                 stopWaiting()
                 problem = ""
                 changed = true
+                // Reached the long way, and the engine turns up here: come
+                // home -- once nothing plays here, not cutting a track off.
+                if (via === endpoint) {
+                    nearer = scope.launch {
+                        nearby.awaitNearer(endpoint, id)
+                        while (withContext(playerThread) { audition.playing }) delay(retryMs)
+                        switching = true
+                        runCatching { opened.close() }
+                    }
+                }
                 val reporting = scope.launch(playerThread) { report() }
                 try {
                     serve(reader)
@@ -150,9 +182,11 @@ class PhoneAgent(
             } catch (failure: Throwable) {
                 problem = failure.message ?: failure.javaClass.simpleName
             } finally {
+                nearer?.cancel()
                 writer = null
                 runCatching { lines?.close() }
             }
+            if (switching) continue
             // Gone, cleanly or not -- a network switch usually breaks the
             // connection rather than closing it. What played belonged to it;
             // if something was, the engine is waited for.

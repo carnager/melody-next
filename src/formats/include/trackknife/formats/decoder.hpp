@@ -112,6 +112,10 @@ class AudioDecoder final {
   private:
     struct Impl;
     explicit AudioDecoder(std::unique_ptr<Impl> implementation);
+    // The file at the path is another one than was opened -- replaced, as a
+    // tag write does, by a rename over it: reopened and taken on at the
+    // next sample. False when it is the same file or cannot be.
+    [[nodiscard]] bool reopen_if_replaced();
 
     std::unique_ptr<Impl> implementation_;
 };

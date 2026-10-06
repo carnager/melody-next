@@ -14,6 +14,8 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -82,6 +84,12 @@ struct AudioDecoder::Impl {
     std::optional<std::int64_t> timeline_origin_sample;
     std::optional<std::int64_t> next_decoded_sample;
     std::int64_t next_output_sample{0};
+    // Which file was opened, to know it from one put in its place: a tag
+    // write renames a new file over it. Read through another machine's
+    // mount, the one opened is gone with it -- NFS keeps a replaced file
+    // only for the machine that replaced it -- and reading fails mid-track.
+    std::optional<std::pair<dev_t, ino_t>> identity;
+    unsigned reopened{0};
     bool input_finished{false};
     bool drain_sent{false};
     bool range_finished{false};
@@ -280,6 +288,9 @@ core::Result<AudioDecoder> AudioDecoder::open_selected(std::string raw_path,
                 .context = {{.key = "path", .value = decoder->raw_path}},
             });
         }
+    }
+    if (struct stat opened{}; ::stat(decoder->raw_path.c_str(), &opened) == 0) {
+        decoder->identity = std::pair{opened.st_dev, opened.st_ino};
     }
     const auto open_result =
         avformat_open_input(&decoder->format, decoder->raw_path.c_str(), nullptr, &input_options);
@@ -699,6 +710,37 @@ core::Result<void> AudioDecoder::seek_to_sample(const std::int64_t target_sample
     return {};
 }
 
+bool AudioDecoder::reopen_if_replaced() {
+    auto& decoder = *implementation_;
+    // A few times a track: a file rewritten again and again is not chased.
+    constexpr unsigned most_reopens = 3U;
+    if (!decoder.identity || decoder.reopened >= most_reopens ||
+        decoder.cancellation.is_cancellation_requested()) {
+        return false;
+    }
+    struct stat now{};
+    if (::stat(decoder.raw_path.c_str(), &now) != 0 ||
+        (now.st_dev == decoder.identity->first && now.st_ino == decoder.identity->second)) {
+        return false;
+    }
+    const auto resume = decoder.next_output_sample;
+    const bool whole = decoder.range.start_sample == 0 && !decoder.range.end_sample;
+    auto fresh = whole ? open_selected(decoder.raw_path, decoder.selection, decoder.cancellation)
+                       : open_selected_segment(decoder.raw_path, decoder.selection, decoder.range,
+                                               decoder.cancellation);
+    if (!fresh) {
+        return false;
+    }
+    // The same audio, its tags rewritten: on from the next sample.
+    if (resume > fresh->implementation_->range.start_sample && !fresh->seek_to_sample(resume)) {
+        return false;
+    }
+    const auto times = decoder.reopened + 1U;
+    implementation_ = std::move(fresh->implementation_);
+    implementation_->reopened = times;
+    return true;
+}
+
 core::Result<std::optional<PcmChunk>> AudioDecoder::next_chunk() {
     auto& decoder = *implementation_;
     while (true) {
@@ -739,6 +781,9 @@ core::Result<std::optional<PcmChunk>> AudioDecoder::next_chunk() {
             return std::optional<PcmChunk>{};
         }
         if (receive_result != AVERROR(EAGAIN)) {
+            if (reopen_if_replaced()) {
+                return next_chunk();
+            }
             return std::unexpected(decoder_error(receive_result, "receiving decoded audio",
                                                  decoder.raw_path, decoder.cancellation));
         }
@@ -762,16 +807,26 @@ core::Result<std::optional<PcmChunk>> AudioDecoder::next_chunk() {
             read_result = av_read_frame(decoder.format, decoder.packet);
         } while (read_result >= 0 && decoder.packet->stream_index != decoder.stream_index);
         if (read_result == AVERROR_EOF) {
+            // A read cut off by the file going reads as its end, too early.
+            if (reopen_if_replaced()) {
+                return next_chunk();
+            }
             decoder.input_finished = true;
             continue;
         }
         if (read_result < 0) {
+            if (reopen_if_replaced()) {
+                return next_chunk();
+            }
             return std::unexpected(decoder_error(read_result, "reading encoded audio",
                                                  decoder.raw_path, decoder.cancellation));
         }
         const auto send_result = avcodec_send_packet(decoder.codec, decoder.packet);
         av_packet_unref(decoder.packet);
         if (send_result < 0 && send_result != AVERROR(EAGAIN)) {
+            if (reopen_if_replaced()) {
+                return next_chunk();
+            }
             return std::unexpected(decoder_error(send_result, "submitting encoded audio",
                                                  decoder.raw_path, decoder.cancellation));
         }

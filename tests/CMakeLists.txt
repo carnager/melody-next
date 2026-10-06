@@ -331,6 +331,17 @@ add_test(
     COMMAND trackknife_formats_probe_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
+# A file renamed over while it is decoded is decoded on from the next sample.
+add_executable(trackknife_decoder_replaced_file_tests decoder_replaced_file_test.cpp)
+target_link_libraries(
+    trackknife_decoder_replaced_file_tests
+    PRIVATE Trackknife::Formats trackknife_project_options trackknife_project_warnings
+)
+add_test(
+    NAME decoder-replaced-file
+    COMMAND trackknife_decoder_replaced_file_tests
+)
+
 add_executable(trackknife_cue_sheet_tests cue_sheet_test.cpp)
 target_link_libraries(
     trackknife_cue_sheet_tests

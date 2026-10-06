@@ -85,3 +85,12 @@ And undo restored by exchanging the file and its backup atomically
   engine and changed there at once (`UndoLocationSession`,
   `backups.location`): its own folder (shown), a folder chosen on its
   machine, or beside each file, each said for what it costs.
+- A file replaced while another machine plays it (2026-10-06): an engine's
+  speaker on another machine reads the library through its own mount, and
+  NFS keeps a file renamed over only for the machine that renamed it --
+  for the speaker, the file it had open was gone, and playing stopped with
+  "Invalid data found". The decoder knows the file it opened (device and
+  inode); a read that fails, or ends early, with another file at the path
+  reopens that one and decodes on from the next sample -- the same audio,
+  its tags rewritten. A file only emptied is not chased (tested in
+  `decoder-replaced-file`).

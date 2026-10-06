@@ -19,6 +19,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -116,6 +117,8 @@ void usage(std::ostream& out) {
            "                              as Trackknife keeps it; 0 clears it, and is\n"
            "                              what an unrated track says (also: rate)\n"
            "  albumrating [0-10]          the same, for the playing track's album\n"
+           "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
+           "                              SIZE pixels across at most if given\n"
            "  love | unlove               the playing track, on Last.fm\n"
            "\n"
            "  replaygain album|track WORDS... [--track-gain] [--true-peak] [--sidecar]\n"
@@ -1315,6 +1318,58 @@ int run(const Options& options) {
         }
         std::cerr << "\n";
         return not_written > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+    } else if (command == "cover") {
+        // The playing track's cover, into a file -- for a bar widget, which
+        // shows a file. Written whole, then renamed into place, so what
+        // reads it never reads half of one.
+        if (words.size() < 2U || words.size() > 3U) {
+            fail("cover wants a file to write it to, and a size in pixels to have it smaller");
+        }
+        int size = 0;
+        if (words.size() == 3U) {
+            const auto& given = words[2];
+            const auto* const end_of = given.data() + given.size();
+            if (const auto [rest, error] = std::from_chars(given.data(), end_of, size);
+                error != std::errc{} || rest != end_of || size <= 0) {
+                fail("cover's size is a number of pixels");
+            }
+        }
+        const auto path = text_of(state(), "path");
+        if (path.empty()) {
+            fail("nothing is playing");
+        }
+        Json params{{"path", path}};
+        if (size > 0) {
+            params["size"] = size;
+        }
+        const auto answer = call(*client, "catalogue.artwork", params);
+        const auto image = answer.find("image");
+        if (image == answer.end() || !image->is_string()) {
+            fail("what plays has no cover");
+        }
+        auto bytes = trackknife::protocol::decode_raw_path(image->get<std::string>());
+        if (!bytes) {
+            fail("the engine sent a cover that does not decode");
+        }
+        const std::filesystem::path target{words[1]};
+        auto written = target;
+        written += ".part";
+        {
+            std::ofstream file{written, std::ios::binary | std::ios::trunc};
+            file.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
+            if (!file.good()) {
+                fail("cannot write " + written.string());
+            }
+        }
+        std::error_code error;
+        std::filesystem::rename(written, target, error);
+        if (error) {
+            std::filesystem::remove(written, error);
+            fail("cannot write " + target.string());
+        }
+        if (!options.json) {
+            std::cout << target.string() << "\n";
+        }
     } else if (command == "love" || command == "unlove") {
         const auto track = now_playing(*client, state());
         if (track.is_null()) {

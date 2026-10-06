@@ -7,9 +7,13 @@ import qs.Services
 import qs.Widgets
 
 // What Melody plays, from `melody-cli --json watch`: a line for each change.
-// The buttons are melody-cli commands too.
+// The buttons are melody-cli commands too. Clicking the text opens what
+// plays: its cover, title, artist and album, and its rating as stars.
 PluginComponent {
     id: root
+
+    popoutWidth: 380
+    popoutHeight: 220
 
     property string cli: String(pluginData.cli || "melody-cli").trim() || "melody-cli"
     property string engine: String(pluginData.engine || "").trim()
@@ -76,17 +80,49 @@ PluginComponent {
     function toggleHeart() {
         if (!rateable)
             return;
-        ratingShownFor = track.path;
         if (hearted) {
-            ratingShown = 0;
-            run(["rate", "0"]);
+            rate(0);
             run(["unlove"]);
         } else {
-            ratingShown = 10;
-            run(["rate", "5"]);
+            rate(10);
             run(["love"]);
         }
     }
+
+    // 0-10, as every client keeps it: a half star is an odd number.
+    function rate(value) {
+        if (!rateable)
+            return;
+        ratingShownFor = track.path;
+        ratingShown = value;
+        run(["rate", String(value)]);
+    }
+
+    // The cover, as a file the popout shows: fetched when the track changes,
+    // at most 512 pixels across. A new name each time, or the image would
+    // be shown from Qt's cache.
+    readonly property string coverDirectory: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/melody-dms"
+    property string coverFile: ""
+    property string coverFor: ""
+    property int coverCount: 0
+
+    function fetchCover() {
+        const path = track ? String(track.path || "") : "";
+        if (path === coverFor)
+            return;
+        coverFor = path;
+        coverFile = "";
+        if (path.length === 0 || coverFetch.running)
+            return;
+        coverCount += 1;
+        const file = coverDirectory + "/cover-" + coverCount;
+        coverFetch.target = file;
+        coverFetch.command = ["sh", "-c", "mkdir -p \"$1\" && rm -f \"$1\"/cover-* && shift && exec \"$@\"", "sh", coverDirectory]
+            .concat([cli], engineArguments(), ["cover", file, "512"]);
+        coverFetch.running = true;
+    }
+
+    onTrackChanged: fetchCover()
 
     function startWatcher() {
         shownServer = "";
@@ -141,6 +177,24 @@ PluginComponent {
     }
 
     Process {
+        id: coverFetch
+
+        property string target: ""
+
+        running: false
+        onExited: exitCode => {
+            if (exitCode === 0)
+                root.coverFile = target;
+            // The track moved on while this was fetched: that one's now.
+            const path = root.track ? String(root.track.path || "") : "";
+            if (path !== root.coverFor) {
+                root.coverFor = "";
+                root.fetchCover();
+            }
+        }
+    }
+
+    Process {
         id: action
 
         running: false
@@ -155,6 +209,57 @@ PluginComponent {
         }
 
         onExited: root.runNext()
+    }
+
+    // Five stars over 0-10: the left half of a star gives the half, the
+    // right half the whole one; the rating already set, clicked, clears it.
+    component RatingStars: Row {
+        id: stars
+
+        property int rating: 0
+        property int starSize: 22
+        signal rated(int value)
+
+        spacing: 2
+
+        Repeater {
+            model: 5
+
+            Item {
+                id: star
+
+                required property int index
+                readonly property int whole: (index + 1) * 2
+
+                width: stars.starSize
+                height: stars.starSize
+
+                DankIcon {
+                    anchors.centerIn: parent
+                    name: stars.rating === star.whole - 1 ? "star_half" : "star"
+                    size: stars.starSize
+                    filled: stars.rating >= star.whole - 1
+                    color: stars.rating >= star.whole - 1 ? Theme.primary : Theme.surfaceVariantText
+                }
+
+                Row {
+                    anchors.fill: parent
+
+                    Repeater {
+                        model: [star.whole - 1, star.whole]
+
+                        MouseArea {
+                            required property int modelData
+
+                            width: stars.starSize / 2
+                            height: stars.starSize
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: stars.rated(stars.rating === modelData ? 0 : modelData)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     component ControlButton: Rectangle {
@@ -187,6 +292,136 @@ PluginComponent {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: button.activated()
+        }
+    }
+
+    popoutContent: Component {
+        Item {
+            implicitWidth: root.popoutWidth
+            implicitHeight: root.popoutHeight
+
+            Row {
+                anchors.fill: parent
+                anchors.margins: Theme.spacingL
+                spacing: Theme.spacingL
+
+                Rectangle {
+                    id: coverBox
+
+                    width: 160
+                    height: 160
+                    radius: Theme.cornerRadius
+                    color: Theme.surfaceContainerHigh
+                    clip: true
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Image {
+                        anchors.fill: parent
+                        source: root.coverFile.length > 0 ? "file://" + root.coverFile : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: false
+                        visible: status === Image.Ready
+                    }
+
+                    DankIcon {
+                        anchors.centerIn: parent
+                        name: "music_note"
+                        size: 48
+                        color: Theme.surfaceVariantText
+                        visible: root.coverFile.length === 0
+                    }
+                }
+
+                Column {
+                    width: parent.width - coverBox.width - parent.spacing
+                    spacing: Theme.spacingXS
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    StyledText {
+                        width: parent.width
+                        text: root.track ? root.track.title : (root.connected ? "Nothing playing" : "Melody")
+                        font.pixelSize: Theme.fontSizeLarge
+                        font.weight: Font.Bold
+                        color: Theme.surfaceText
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                    }
+
+                    StyledText {
+                        width: parent.width
+                        visible: text.length > 0
+                        text: root.track ? (root.track.artist || "") : ""
+                        font.pixelSize: Theme.fontSizeMedium
+                        color: Theme.surfaceText
+                        elide: Text.ElideRight
+                    }
+
+                    StyledText {
+                        width: parent.width
+                        visible: text.length > 0
+                        text: {
+                            if (!root.track || !root.track.album)
+                                return "";
+                            const year = String(root.track.date || "").substring(0, 4);
+                            return year.length > 0 ? root.track.album + " · " + year : root.track.album;
+                        }
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.surfaceVariantText
+                        elide: Text.ElideRight
+                    }
+
+                    Item {
+                        width: 1
+                        height: Theme.spacingS
+                    }
+
+                    RatingStars {
+                        visible: root.rateable
+                        rating: root.rating
+                        onRated: value => root.rate(value)
+                    }
+
+                    Row {
+                        spacing: Theme.spacingS
+                        topPadding: Theme.spacingS
+
+                        ControlButton {
+                            icon: "skip_previous"
+                            iconSize: 18
+                            width: 30
+                            height: 30
+                            iconColor: Theme.surfaceText
+                            enabled: root.connected
+                            anchors.verticalCenter: parent.verticalCenter
+                            onActivated: root.run(["prev"])
+                        }
+
+                        ControlButton {
+                            icon: root.playing ? "pause" : "play_arrow"
+                            iconSize: 20
+                            width: 36
+                            height: 36
+                            iconColor: Theme.surfaceText
+                            enabled: root.connected
+                            anchors.verticalCenter: parent.verticalCenter
+                            onActivated: root.run(["toggle"])
+                        }
+
+                        ControlButton {
+                            icon: "skip_next"
+                            iconSize: 18
+                            width: 30
+                            height: 30
+                            iconColor: Theme.surfaceText
+                            enabled: root.connected
+                            anchors.verticalCenter: parent.verticalCenter
+                            onActivated: root.run(["next"])
+                        }
+                    }
+                }
+            }
         }
     }
 

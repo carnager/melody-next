@@ -5,6 +5,11 @@ The heart gives the track five stars and loves it on Last.fm; click it again
 to take both back. Last.fm love uses the engine's own account, the one it
 scrobbles with.
 
+Click the text for what plays: its cover, title, artist, album and year, the
+same controls, and five stars to rate it on the 0-10 scale every Melody
+client uses -- the left half of a star gives the half, the rating already
+set, clicked, clears it.
+
 It runs `melody-cli`, so that has to be installed.
 
 ```sh

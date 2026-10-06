@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import org.json.JSONArray
 import org.json.JSONObject
@@ -147,6 +148,7 @@ class PhoneAudition(
         )
         .setHandleAudioBecomingNoisy(true)
         .setWakeMode(C.WAKE_MODE_NETWORK)
+        .setLoadControl(loadControl())
         .build()
 
     private var failure: String? = null
@@ -308,6 +310,37 @@ class PhoneAudition(
     }
 
     @MainThread
+    companion object {
+        /**
+         * How far ahead the phone fetches: minutes, not ExoPlayer's 50 s, so
+         * a dead zone, or a connection made again after the phone's address
+         * changed, is played through rather than heard. The engine sends a
+         * converted track whole, as fast as the network takes it, so the
+         * phone can get this far ahead -- into the next track too, armed as
+         * the current one starts.
+         */
+        const val AHEAD_MS = 10 * 60_000
+
+        /**
+         * And no more memory than this: ten minutes of Opus at 128 kbps
+         * is 9.6 MB; original files stop here sooner -- CD FLAC at about
+         * two and a half minutes, still more than before.
+         */
+        const val AHEAD_BYTES = 16 * 1024 * 1024
+
+        fun loadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+            // Loaded up to the minimum and on to it again at once: kept full.
+            .setBufferDurationsMs(
+                AHEAD_MS,
+                AHEAD_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .setTargetBufferBytes(AHEAD_BYTES)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+    }
+
     override fun setBuffer(capacityMs: Long, startMs: Long) {
         // Kept to report back; ExoPlayer sizes its own buffer.
         bufferCapacityMs = capacityMs

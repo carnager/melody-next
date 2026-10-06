@@ -14,6 +14,9 @@ import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.thread
+import kotlin.concurrent.withLock
 
 /**
  * Protocol v1 as it travels: one message a line, both ways (ADR-0222) --
@@ -49,15 +52,60 @@ class SocketLines(private val socket: Socket) : Lines {
 /**
  * Lines as WebSocket text messages (RFC 6455), a client's: its frames masked,
  * pings answered, a close returned. Only what talking to an engine needs.
+ *
+ * And pinged: a connection over mobile data dies without a word when the
+ * phone's address changes -- WireGuard roams, a bare connection does not --
+ * and an agent waiting for its next track would wait for good. Every
+ * [pingMs] a ping goes; nothing heard for [silentMs], pongs included, and
+ * the connection is closed: reading ends, and it is made again.
  */
 class WebSocketLines private constructor(
     private val socket: Socket,
     private val input: DataInputStream,
     private val output: OutputStream,
+    private val pingMs: Long,
+    private val silentMs: Long,
 ) : Lines {
     private val random = SecureRandom()
-    private val writing = Any()
+    private val writing = ReentrantLock()
     @Volatile private var closed = false
+    @Volatile private var heard = System.nanoTime()
+    @Volatile private var silent = false
+
+    init {
+        thread(isDaemon = true, name = "websocket-ping") { keepAlive() }
+    }
+
+    private fun keepAlive() {
+        while (!closed) {
+            try {
+                Thread.sleep(pingMs)
+            } catch (_: InterruptedException) {
+                return
+            }
+            if (closed) return
+            if ((System.nanoTime() - heard) / 1_000_000 >= silentMs) {
+                // Gone without a word: closing ends the read waiting on it.
+                silent = true
+                closed = true
+                runCatching { socket.close() }
+                return
+            }
+            // Never behind a write stuck on a dead connection: the check
+            // above must go on running. Someone writing, the ping waits.
+            if (!writing.tryLock()) continue
+            try {
+                output.write(frame(PING, ByteArray(0)))
+                output.flush()
+            } catch (_: IOException) {
+                closed = true
+                runCatching { socket.close() }
+                return
+            } finally {
+                writing.unlock()
+            }
+        }
+    }
 
     companion object {
         private const val GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -69,6 +117,9 @@ class WebSocketLines private constructor(
         private const val CLOSE = 0x8
         private const val PING = 0x9
         private const val PONG = 0xA
+        /** WireGuard's keepalive is 25 s; a mobile network's quiet is shorter. */
+        const val PING_MS = 10_000L
+        const val SILENT_MS = 25_000L
 
         /** The handshake's answer to `key`, as a server must give it. */
         fun accept(key: String): String = Base64.getEncoder().encodeToString(
@@ -79,7 +130,15 @@ class WebSocketLines private constructor(
          * Asks `socket` -- connected, and secured for wss -- to carry a
          * WebSocket at `path`; `host` is what the proxy routes by.
          */
-        fun open(socket: Socket, host: String, port: Int, path: String, defaultPort: Int): WebSocketLines {
+        fun open(
+            socket: Socket,
+            host: String,
+            port: Int,
+            path: String,
+            defaultPort: Int,
+            pingMs: Long = PING_MS,
+            silentMs: Long = SILENT_MS,
+        ): WebSocketLines {
             val input = DataInputStream(socket.getInputStream().buffered())
             val output = socket.getOutputStream()
             val key = Base64.getEncoder().encodeToString(ByteArray(16).also { SecureRandom().nextBytes(it) })
@@ -103,16 +162,24 @@ class WebSocketLines private constructor(
             val accepted = lines.drop(1).firstOrNull { it.startsWith("Sec-WebSocket-Accept:", ignoreCase = true) }
                 ?.substringAfter(':')?.trim()
             if (accepted != accept(key)) throw IOException("the WebSocket handshake was answered wrongly")
-            return WebSocketLines(socket, input, output)
+            return WebSocketLines(socket, input, output, pingMs, silentMs)
         }
     }
 
-    override fun read(): String? {
+    override fun read(): String? = try {
+        readMessage()
+    } catch (failure: IOException) {
+        if (silent) throw IOException("the engine stopped answering", failure)
+        throw failure
+    }
+
+    private fun readMessage(): String? {
         val message = ByteArrayOutputStream()
         var inMessage = false
         while (true) {
             val first = input.read()
             if (first < 0) return null
+            heard = System.nanoTime()
             val second = input.readUnsignedByte()
             val fin = first and 0x80 != 0
             val opcode = first and 0x0F
@@ -146,8 +213,16 @@ class WebSocketLines private constructor(
 
     override fun write(line: String) = send(TEXT, line.toByteArray(Charsets.UTF_8))
 
-    // A client's frame: always masked (RFC 6455, 5.3).
     private fun send(opcode: Int, payload: ByteArray) {
+        val bytes = frame(opcode, payload)
+        writing.withLock {
+            output.write(bytes)
+            output.flush()
+        }
+    }
+
+    // A client's frame: always masked (RFC 6455, 5.3).
+    private fun frame(opcode: Int, payload: ByteArray): ByteArray {
         val mask = ByteArray(4).also { random.nextBytes(it) }
         val frame = ByteArrayOutputStream(payload.size + 14)
         frame.write(0x80 or opcode)
@@ -165,10 +240,7 @@ class WebSocketLines private constructor(
         }
         frame.write(mask)
         for (index in payload.indices) frame.write(payload[index].toInt() xor mask[index % 4].toInt())
-        synchronized(writing) {
-            output.write(frame.toByteArray())
-            output.flush()
-        }
+        return frame.toByteArray()
     }
 
     override fun close() {

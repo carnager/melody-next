@@ -293,7 +293,10 @@ class PhoneAgent(
                 changed = false
                 last = text
                 lastSent = now
+                // Not sent: the connection is gone, whatever reading says --
+                // closed, so it is made again rather than waited on.
                 runCatching { send(JSONObject().put("event", "audition.changed").put("data", snapshot)) }
+                    .onFailure { writer?.let { gone -> scope.launch(Dispatchers.IO) { runCatching { gone.close() } } } }
             }
             delay(100)
         }

@@ -111,6 +111,9 @@ class MelodyApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        Diagnostics.start(this)
+        Diagnostics.note("started, process ${android.os.Process.myPid()}")
+        noteLastExits()
         settings = Settings(this)
         // ADR-0272: engines are looked for here all along, so one known by
         // another address is reached directly once the phone is home.
@@ -158,8 +161,16 @@ class MelodyApp : Application() {
         followStartsElsewhere()
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
+        watchForDiagnostics()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStop(owner: LifecycleOwner) {
+                inFront = false
+                Diagnostics.note("in the background")
+            }
+
             override fun onStart(owner: LifecycleOwner) {
+                inFront = true
+                Diagnostics.note("in front")
                 client.reconnectNow()
                 otherClients.value.forEach { it.reconnectNow() }
             }
@@ -178,6 +189,9 @@ class MelodyApp : Application() {
     fun stopWaitingForSpeaker() {
         agents.values.forEach { it.agent.reconnecting.value = false }
         speakerReconnecting.value = false
+        // Playing on from its buffer while the engine is away (ADR-0274):
+        // paused here, as the engine cannot be asked; it hears so on return.
+        audition.pause()
     }
 
     /**
@@ -212,6 +226,7 @@ class MelodyApp : Application() {
             it.bitrateKbps = if (network.metered.value) settings.mobileBitrate else settings.wifiBitrate
             it.start(endpoint) { clientAt(endpoint)?.engineId?.value }
         }
+        scope.launch { agent.status.collect { Diagnostics.note("speaker for $endpoint: $it") } }
         return Speaking(agent, seat, settings.speakerName)
     }
 
@@ -221,6 +236,86 @@ class MelodyApp : Application() {
         val index = settings.otherEngines.indexOfFirst { it.sameAddress(endpoint) }
         return otherClients.value.getOrNull(index)
     }
+
+    @Volatile private var inFront = false
+
+    // Why the system ended this app's last processes: frozen, killed for
+    // memory, its background use restricted -- the one thing no log of its
+    // own can say.
+    private fun noteLastExits() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        val manager = getSystemService(android.app.ActivityManager::class.java)
+        runCatching { manager.getHistoricalProcessExitReasons(packageName, 0, 3) }.getOrNull()?.forEach { exit ->
+            Diagnostics.note(
+                "earlier process ${exit.pid} ended ${java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date(exit.timestamp))}: " +
+                    "reason ${exit.reason} (${exit.description ?: "no description"}), importance ${exit.importance}"
+            )
+        }
+    }
+
+    private fun watchForDiagnostics() {
+        scope.launch { client.connection.collect { Diagnostics.note("engine: $it") } }
+        scope.launch { speakerReconnecting.collect { Diagnostics.note("speaker waiting for the engine: $it") } }
+        scope.launch { network.metered.collect { Diagnostics.note("network metered: $it") } }
+        scope.launch { network.changes.collect { Diagnostics.note("Wi-Fi or Ethernet came or went") } }
+        // Every network, VPNs too: a VPN rebuilt when the phone locks drops
+        // every connection through it.
+        val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+        val describe = { network: android.net.Network ->
+            "$network (${connectivity.getNetworkCapabilities(network)?.let(::transportsOf) ?: "gone"})"
+        }
+        connectivity.registerNetworkCallback(
+            android.net.NetworkRequest.Builder()
+                .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build(),
+            object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) = Diagnostics.note("network up: ${describe(network)}")
+                override fun onLost(network: android.net.Network) = Diagnostics.note("network lost: $network")
+            },
+        )
+        connectivity.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = Diagnostics.note("default network now: ${describe(network)}")
+        })
+        scope.launch { nearby.engines.collect { found -> Diagnostics.note("engines on this network: ${found.map { "${it.name}@${it.host}:${it.port}" }}") } }
+        audition.player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) = Diagnostics.note("player playing: $isPlaying")
+            override fun onPlaybackStateChanged(state: Int) = Diagnostics.note("player state: $state")
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) =
+                Diagnostics.note("player error: ${error.errorCodeName} ${error.message} ${error.cause}")
+        })
+        // A gap between these is the app frozen, or gone.
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000)
+                Diagnostics.note(
+                    "heartbeat: front=$inFront service-foreground=${serviceInForeground()} " +
+                        "engine-playing=${client.state.value.playing} player-playing=${audition.player.isPlaying} " +
+                        "buffered-ahead=${audition.player.totalBufferedDuration / 1000}s " +
+                        "speakers=${agents.values.map { it.agent.status.value::class.simpleName }} network=${transports()}"
+                )
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION") // For its own services it still answers.
+    private fun serviceInForeground(): Boolean? = runCatching {
+        getSystemService(android.app.ActivityManager::class.java).getRunningServices(50)
+            .firstOrNull { it.service.className == PlaybackService::class.java.name }?.foreground ?: false
+    }.getOrNull()
+
+    private fun transports(): String {
+        val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+        val capabilities = connectivity.activeNetwork?.let(connectivity::getNetworkCapabilities) ?: return "none"
+        return transportsOf(capabilities)
+    }
+
+    private fun transportsOf(capabilities: android.net.NetworkCapabilities): String =
+        listOf(
+            android.net.NetworkCapabilities.TRANSPORT_WIFI to "wifi",
+            android.net.NetworkCapabilities.TRANSPORT_CELLULAR to "cellular",
+            android.net.NetworkCapabilities.TRANSPORT_VPN to "vpn",
+            android.net.NetworkCapabilities.TRANSPORT_ETHERNET to "ethernet",
+        ).filter { capabilities.hasTransport(it.first) }.joinToString("+") { it.second }
 
     companion object {
         lateinit var instance: MelodyApp

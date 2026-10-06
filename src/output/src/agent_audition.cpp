@@ -92,8 +92,8 @@ StreamWishes StreamWishes::from_json(const Json& params) {
 AgentAudition::AgentAudition(std::string name, AgentPaths paths)
     : name_(std::move(name)), paths_(std::move(paths)) {}
 
-void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool files,
-                           std::string reached, StreamWishes wishes) {
+bool AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool files,
+                           std::string reached, StreamWishes wishes, Returning returning) {
     std::shared_ptr<protocol::Client> shared{std::move(client)};
     std::weak_ptr<protocol::Client> weak = shared;
     shared->on_event([this, weak](const protocol::Event& event) {
@@ -128,25 +128,40 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
         }
     });
     std::shared_ptr<protocol::Client> previous;
+    bool kept = false;
     {
         const std::lock_guard guard{mutex_};
         previous = std::exchange(client_, std::move(shared));
         files_ = files;
         reached_ = std::move(reached);
         wishes_ = std::move(wishes);
-        // A new process knows nothing of what the old one played, and counts
-        // its handovers from nothing; the engine's count stays where it was.
-        reported_ = audio::LocalAuditionSnapshot{};
-        reported_.chain_transitions = seen_transitions_;
-        next_armed_ = false;
-        current_raw_.clear();
-        next_raw_.clear();
-        agent_transitions_ = 0U;
+        // ADR-0274: the same process, back with what it was given still
+        // loaded: its handovers counted on from where they were, and what it
+        // says it plays now taken -- a handover it made while away moves on
+        // to what was armed, as any report's does.
+        kept = !returning.instance.empty() && returning.instance == instance_ &&
+               returning.report && !current_raw_.empty() &&
+               snapshot_from_json(*returning.report).state != audio::LocalAuditionState::empty;
+        instance_ = std::move(returning.instance);
+        if (kept) {
+            adopt(*returning.report);
+        } else {
+            // A new process knows nothing of what the old one played, and
+            // counts its handovers from nothing; the engine's count stays
+            // where it was.
+            reported_ = audio::LocalAuditionSnapshot{};
+            reported_.chain_transitions = seen_transitions_;
+            next_armed_ = false;
+            current_raw_.clear();
+            next_raw_.clear();
+            agent_transitions_ = 0U;
+        }
     }
     if (previous) {
         previous->close();
     }
     send_wanted_settings();
+    return kept;
 }
 
 void AgentAudition::send_wanted_settings() {

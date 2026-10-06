@@ -106,10 +106,21 @@ void Outputs::admit(const Json& params, const int descriptor) {
     // Asked before the descriptor is handed over: where this agent reached
     // the engine, which is where it can fetch streams.
     auto reached = local_address(descriptor);
-    agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached),
-                  output::StreamWishes::from_json(params));
+    output::AgentAudition::Returning returning{.instance = params.value("instance", std::string{}),
+                                               .report = std::nullopt};
+    if (const auto report = params.find("report"); report != params.end() && report->is_object()) {
+        returning.report = *report;
+    }
+    const bool kept = agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached),
+                                    output::StreamWishes::from_json(params), std::move(returning));
     if (adopt_first) {
         static_cast<void>(select(std::string{agent_prefix} + name));
+        return;
+    }
+    // ADR-0274: back having played on from its buffer, and still on what the
+    // engine plays: taken as it is, not wound back to where it dropped.
+    if (selected && kept && player_->keep_output(agent->snapshot().raw_path)) {
+        announce();
         return;
     }
     if (selected) {

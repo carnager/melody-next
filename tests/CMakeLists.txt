@@ -431,6 +431,19 @@ add_test(
 )
 set_tests_properties(output-agent PROPERTIES TIMEOUT 90)
 
+# ADR-0274: a speaker that drops plays on, and is taken as it is on return.
+add_executable(trackknife_speaker_plays_through_tests speaker_plays_through_test.cpp)
+target_link_libraries(
+    trackknife_speaker_plays_through_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(
+    NAME speaker-plays-through
+    COMMAND trackknife_speaker_plays_through_tests
+)
+set_tests_properties(speaker-plays-through PROPERTIES TIMEOUT 60)
+
 # ADR-0239: the original nearby, Opus from afar.
 add_executable(trackknife_stream_route_tests stream_route_test.cpp)
 target_link_libraries(

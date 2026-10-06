@@ -257,3 +257,51 @@ data class ListEntry(
         }
     }
 }
+
+/**
+ * What a ReplayGain choice asks of the engine: Automatic is track gain while
+ * Random is on and album gain otherwise -- Trackknife's rule, so the two
+ * agree. The engine knows only off, track and album.
+ */
+fun resolveReplayGain(choice: String, random: Boolean): String = when (choice) {
+    "auto" -> if (random) "track" else "album"
+    "track", "album" -> choice
+    else -> "off"
+}
+
+/**
+ * Automatic ReplayGain kept by the phone against one engine: told what the
+ * engine reports, it says what to do. Random moving -- or Automatic just
+ * chosen, or the engine just reached -- tells the engine the mode it means;
+ * a mode the engine reports otherwise, with nothing of ours on its way, was
+ * chosen elsewhere and ends Automatic, as it does in Trackknife.
+ */
+class AutomaticReplayGain {
+    sealed interface Step {
+        data object Nothing : Step
+        data class Tell(val mode: String) : Step
+        data object Chosen : Step
+    }
+
+    private var random: Boolean? = null
+    private var told: String? = null
+
+    fun on(state: PlaybackState, auto: Boolean, connected: Boolean): Step {
+        if (!auto || !connected) {
+            random = null
+            told = null
+            return Step.Nothing
+        }
+        val wanted = resolveReplayGain("auto", state.modes.random)
+        return when {
+            random != state.modes.random -> {
+                random = state.modes.random
+                if (state.replayGain == wanted) Step.Nothing else Step.Tell(wanted).also { told = wanted }
+            }
+            state.replayGain == wanted -> Step.Nothing.also { told = null }
+            // A state from before what was told, still on its way.
+            told != null -> Step.Nothing
+            else -> Step.Chosen
+        }
+    }
+}

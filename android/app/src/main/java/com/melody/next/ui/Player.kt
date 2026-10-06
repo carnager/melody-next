@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LooksOne
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
@@ -294,10 +296,49 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
                 IconButton(onClick = engine::cycleConsume) {
                     ConsumeMark(modes.consume != 0, modes.consume == 2, if (modes.consume != 0) colours.accent else colours.muted)
                 }
+                ReplayGainChoice(
+                    current = if (vm.app.settings.replayGainAuto) "auto" else state.replayGain,
+                    colours = colours,
+                    onChoose = vm.app::chooseReplayGain,
+                )
             }
             Spacer(Modifier.height(8.dp))
             VolumeBar(state.volume, colours, engine::setVolume)
             Spacer(Modifier.weight(0.35f))
+        }
+    }
+}
+
+/**
+ * ReplayGain, as Trackknife offers it: off, the track's, the album's, or
+ * Automatic -- track gain with Random, album gain otherwise. In the accent
+ * when on, with a dot beneath when Automatic.
+ */
+@Composable
+private fun ReplayGainChoice(current: String, colours: CoverColours, onChoose: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        ModeToggle(androidx.compose.material.icons.Icons.Default.GraphicEq, "ReplayGain: $current",
+            on = current != "off", once = current == "auto", colours = colours) { open = true }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "ReplayGain",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            listOf("off" to "Off", "track" to "Track", "album" to "Album", "auto" to "Automatic").forEach { (mode, label) ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(label) },
+                    trailingIcon = {
+                        if (mode == current) Icon(androidx.compose.material.icons.Icons.Default.Check, null)
+                    },
+                    onClick = {
+                        open = false
+                        onChoose(mode)
+                    },
+                )
+            }
         }
     }
 }

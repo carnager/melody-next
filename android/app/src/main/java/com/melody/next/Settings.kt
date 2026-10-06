@@ -131,6 +131,18 @@ class Settings(context: Context) {
         preferences.edit().putBoolean("download_wifi_only", on).apply()
     }
 
+    /**
+     * ReplayGain left to the phone: Automatic, resolved against the engine's
+     * Random. Off, track and album are the engine's own setting.
+     */
+    var replayGainAuto by mutableStateOf(preferences.getBoolean("replay_gain_auto", false))
+        private set
+
+    fun updateReplayGainAuto(on: Boolean) {
+        replayGainAuto = on
+        preferences.edit().putBoolean("replay_gain_auto", on).apply()
+    }
+
     /** "system", "dark" or "light". */
     var theme by mutableStateOf(preferences.getString("theme", "system") ?: "system")
         private set

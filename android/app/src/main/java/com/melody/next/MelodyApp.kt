@@ -159,6 +159,7 @@ class MelodyApp : Application() {
         settings.endpoint?.let { client.connect(it, settings.engineId) }
         updateOtherEngines()
         followStartsElsewhere()
+        followReplayGain()
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
         watchForDiagnostics()
@@ -175,6 +176,39 @@ class MelodyApp : Application() {
                 otherClients.value.forEach { it.reconnectNow() }
             }
         })
+    }
+
+    /**
+     * The phone's ReplayGain choice: off, track or album are told to the
+     * engine playing; Automatic is kept here and resolved against its Random.
+     */
+    fun chooseReplayGain(choice: String) {
+        settings.updateReplayGainAuto(choice == "auto")
+        if (choice != "auto") followed.value.setReplayGain(choice)
+    }
+
+    // Automatic follows Random on the engine the phone follows. A mode
+    // chosen elsewhere -- Trackknife set to Album -- is a choice, and ends
+    // Automatic here, as it does there.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun followReplayGain() {
+        scope.launch {
+            followed.collectLatest { engine ->
+                val automatic = com.melody.next.engine.AutomaticReplayGain()
+                kotlinx.coroutines.flow.combine(
+                    engine.state,
+                    engine.connection,
+                    androidx.compose.runtime.snapshotFlow { settings.replayGainAuto },
+                ) { state, connection, auto -> Triple(state, connection, auto) }
+                    .collect { (state, connection, auto) ->
+                        when (val step = automatic.on(state, auto, connection is ConnectionState.Connected)) {
+                            is com.melody.next.engine.AutomaticReplayGain.Step.Tell -> engine.setReplayGain(step.mode)
+                            com.melody.next.engine.AutomaticReplayGain.Step.Chosen -> settings.updateReplayGainAuto(false)
+                            com.melody.next.engine.AutomaticReplayGain.Step.Nothing -> Unit
+                        }
+                    }
+            }
+        }
     }
 
     /** Talks to this engine, and offers it this phone to play on. */

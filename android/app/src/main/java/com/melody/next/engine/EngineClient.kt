@@ -318,6 +318,9 @@ class EngineClient(
     fun setModes(change: JSONObject) = command("playback.set_modes", change)
     fun toggleRepeat() = setModes(JSONObject().put("repeat", !_state.value.modes.repeat))
     fun toggleRandom() = setModes(JSONObject().put("random", !_state.value.modes.random))
+
+    /** "off", "track" or "album": the engine's, for every output it plays on. */
+    fun setReplayGain(mode: String) = command("playback.set_replay_gain", JSONObject().put("mode", mode))
     fun cycleSingle() = setModes(JSONObject().put("single", (_state.value.modes.single + 1) % 3))
     fun cycleConsume() = setModes(JSONObject().put("consume", (_state.value.modes.consume + 1) % 3))
 

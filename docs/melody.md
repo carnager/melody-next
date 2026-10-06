@@ -173,6 +173,7 @@ melody-cli play list road trip        # one of them, by name or its words
 melody-cli output "Pixel 10 Pro"
 melody-cli rating 8                   # what plays, 1-10; 0 clears
 melody-cli albumrating 9              # its album
+melody-cli cover /tmp/cover.jpg 512   # its cover, 512 pixels across at most
 melody-cli love                       # on Last.fm, with the engine's account
 melody-cli replaygain album doors 1967  # measured and written by the engine
 melody-cli --json watch               # a line each time something changes

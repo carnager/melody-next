@@ -21,8 +21,8 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-10-05, through ADR-0273: database schema 53, protocol 1 at
-level 7 ([protocol levels](protocol-levels.md)).
+Updated on 2026-10-06, through ADR-0274: database schema 53, protocol 1 at
+level 8 ([protocol levels](protocol-levels.md)).
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
@@ -37,6 +37,7 @@ older ADRs and in `architecture.md`.
 - [ADR-0271: The protocol as a WebSocket, for clients behind a web proxy](adr/0271-the-protocol-as-a-websocket.md).
 - [ADR-0272: The phone at home reaches the engine directly](adr/0272-the-phone-at-home-reaches-the-engine-directly.md).
 - [ADR-0273: Locate in the layout shown](adr/0273-locate-in-the-layout-shown.md).
+- [ADR-0274: The phone plays through a drop](adr/0274-the-phone-plays-through-a-drop.md).
 - [ADR-0270: The phone reaches an engine through a TLS proxy](adr/0270-the-phone-reaches-an-engine-through-a-tls-proxy.md).
 - [ADR-0269: Up Next is the engine's, and the window shows it](adr/0269-up-next-is-the-engines.md).
 - [ADR-0268: What shows a library follows its changes](adr/0268-the-library-follows-its-files.md).

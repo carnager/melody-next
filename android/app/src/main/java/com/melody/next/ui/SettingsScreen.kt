@@ -140,8 +140,33 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                     trailingContent = { Switch(settings.dynamicColor, onCheckedChange = settings::updateDynamicColor) },
                 )
             }
+            Diagnostics()
         }
     }
+}
+
+/** What the app kept of its connections and playing, to send to whoever looks into a problem. */
+@Composable
+private fun Diagnostics() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Section("Diagnostics")
+    ListItem(
+        headlineContent = { Text("Share the connection log") },
+        supportingContent = { Text("When the engine was reached and lost, and what played -- no passwords") },
+        modifier = Modifier.clickable {
+            // The newest of it: a shared text has a size limit.
+            val log = com.melody.next.Diagnostics.read().takeLast(200 * 1024)
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Melody connection log")
+                .putExtra(android.content.Intent.EXTRA_TEXT, log)
+            context.startActivity(android.content.Intent.createChooser(send, "Share the connection log"))
+        },
+    )
+    ListItem(
+        headlineContent = { Text("Clear the connection log") },
+        modifier = Modifier.clickable { com.melody.next.Diagnostics.clear() },
+    )
 }
 
 /**

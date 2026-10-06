@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -56,7 +57,7 @@ class PhoneAgent(
     @Volatile var bitrateKbps: Int = 0
         set(value) {
             field = value
-            changed = true
+            noteChange()
         }
 
     private fun wish(): JSONObject =
@@ -110,7 +111,13 @@ class PhoneAgent(
     /** Something changed in playback: reported at the next chance. */
     fun noteChange() {
         changed = true
+        nudge.trySend(Unit)
     }
+
+    // Wakes the reports: idle, they wait for a change rather than looking
+    // ten times a second -- which in the background is CPU enough for
+    // Android to end the app.
+    private val nudge = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     private var giveUp: Job? = null
 
@@ -149,10 +156,17 @@ class PhoneAgent(
                 if (via.password.isNotEmpty()) {
                     ask(reader, 1, "session.authenticate", JSONObject().put("password", via.password))
                 }
+                // ADR-0274: what this phone plays now, so an engine it comes
+                // back to after a drop takes it up as it is -- having played
+                // on from what it had -- rather than from where it was.
+                val holding = withContext(playerThread) {
+                    if (audition.loaded) audition.snapshot().put("stream", wish()) else null
+                }
                 ask(
                     reader, 2, "agent.register",
                     JSONObject().put("name", name).put("instance", instance).put("files", false).put("protocol", 1)
-                        .put("decodes", JSONArray(DECODES)).put("stream", wish()),
+                        .put("decodes", JSONArray(DECODES)).put("stream", wish())
+                        .apply { if (holding != null) put("report", holding) },
                 )
                 _status.value = Status.Registered(endpoint)
                 registered = true
@@ -188,14 +202,11 @@ class PhoneAgent(
             }
             if (switching) continue
             // Gone, cleanly or not -- a network switch usually breaks the
-            // connection rather than closing it. What played belonged to it;
-            // if something was, the engine is waited for.
-            if (registered) {
-                val wasPlaying = withContext(playerThread) {
-                    audition.playing.also { if (audition.loaded) audition.pause() }
-                }
-                if (wasPlaying) waitForReturn()
-            }
+            // connection rather than closing it; on mobile data the phone
+            // locking does. What plays goes on from what is buffered --
+            // minutes of it (ADR-0274) -- while the engine is made again,
+            // and is waited for, which keeps the app running to do it.
+            if (registered && withContext(playerThread) { audition.playing }) waitForReturn()
             delay(retryMs)
         }
     }
@@ -293,9 +304,14 @@ class PhoneAgent(
                 changed = false
                 last = text
                 lastSent = now
+                // Not sent: the connection is gone, whatever reading says --
+                // closed, so it is made again rather than waited on.
                 runCatching { send(JSONObject().put("event", "audition.changed").put("data", snapshot)) }
+                    .onFailure { writer?.let { gone -> scope.launch(Dispatchers.IO) { runCatching { gone.close() } } } }
             }
-            delay(100)
+            // Playing: looked at often, for the position. Not: woken by a
+            // change, or once a second for what nothing said had changed.
+            withTimeoutOrNull(if (playing) 100L else 1_000L) { nudge.receive() }
         }
     }
 

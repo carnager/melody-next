@@ -7,6 +7,14 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 8 (2026-10-06)
+
+- `agent.register` takes `report`: what the agent plays now, as its
+  `audition.changed` reports say it. The same `instance` back after a drop,
+  still on what the engine plays (or what it armed), is taken as it is --
+  nothing loaded again (ADR-0274). An older engine takes it up where it
+  dropped.
+
 ### Level 7 (2026-10-05)
 
 - A view's `catalogue.query` that names a file (`path`) answers the way to

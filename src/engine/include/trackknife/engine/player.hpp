@@ -179,6 +179,11 @@ class Player final {
     // resume -- a restore that failed because the output was not there yet.
     [[nodiscard]] core::Result<void> resume_output(std::optional<std::int64_t> position_ms,
                                                    std::optional<bool> playing);
+    // ADR-0274: an agent back after a drop that played on from its buffer,
+    // and holds `raw_path`: true, and nothing taken up again, when that is
+    // the playing entry -- or the one armed after it, handed over while the
+    // agent was away, which its report moves the player on to.
+    [[nodiscard]] bool keep_output(const std::string& raw_path);
 
     // Which sink plays and how much decoded audio is held ahead of it. The
     // engine's, not a client's: they describe the machine the engine runs on,

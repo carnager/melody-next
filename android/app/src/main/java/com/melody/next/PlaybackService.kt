@@ -134,9 +134,10 @@ private class EnginePlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        // Paused by hand while waiting for the speaker: stop waiting; the
-        // engine is paused already.
-        if (!playWhenReady && speakerReconnecting.value && !state.playing) {
+        // Paused by hand while waiting for the speaker: it plays on from its
+        // buffer meanwhile (ADR-0274), so it is paused here, and the waiting
+        // stops; the engine hears it when the speaker is back.
+        if (!playWhenReady && speakerReconnecting.value) {
             stopWaiting()
             return Futures.immediateVoidFuture()
         }
@@ -171,6 +172,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        Diagnostics.note("playback service created")
         val app = application as MelodyApp
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -196,12 +198,14 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        Diagnostics.note("task removed")
         // Swiped away while the engine is not playing: nothing to control.
         val playing = session?.player?.playWhenReady == true || offlineSession?.player?.playWhenReady == true
         if (!playing) stopSelf()
     }
 
     override fun onDestroy() {
+        Diagnostics.note("playback service destroyed")
         session?.run {
             player.release()
             release()

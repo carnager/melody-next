@@ -172,6 +172,21 @@ core::Result<void> Player::resume_output(std::optional<std::int64_t> position_ms
                           playing.value_or(pending && pending->playing), std::nullopt);
 }
 
+bool Player::keep_output(const std::string& raw_path) {
+    const std::lock_guard guard{mutex_};
+    if (raw_path.empty() || audition_ == silent_.get()) {
+        return false;
+    }
+    const auto* current = anchors_.current.is_nil() ? nullptr : find_locked(anchors_.current);
+    const auto* armed = gapless_entry_ ? find_locked(*gapless_entry_) : nullptr;
+    const bool held = (current != nullptr && current->source.raw_path == raw_path) ||
+                      (armed != nullptr && armed->source.raw_path == raw_path);
+    if (held) {
+        pending_resume_.reset();
+    }
+    return held;
+}
+
 core::Result<void> Player::take_up_locked(const std::int64_t position_ms, const bool playing,
                                           std::optional<core::LocalSourceRevision> revision) {
     const auto* entry = anchors_.current.is_nil() ? nullptr : find_locked(anchors_.current);

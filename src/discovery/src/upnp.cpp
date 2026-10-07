@@ -314,11 +314,15 @@ struct UpnpDiscovery::Impl {
     std::map<std::string, UpnpValues> reports;
     std::thread worker;
 
-#if UPNP_VERSION_MAJOR >= 2
-    using EventPointer = void*;
-#else
-    using EventPointer = const void*;
-#endif
+    // The event's pointer as this libupnp's callback type has it -- const on
+    // Arch and Debian, not on macOS -- read from the type itself: the
+    // version does not say (Debian's 1.14 calls itself 17.2).
+    template <typename> struct EventOf;
+    template <typename Result, typename Type, typename Event, typename Cookie>
+    struct EventOf<Result (*)(Type, Event, Cookie)> {
+        using type = Event;
+    };
+    using EventPointer = EventOf<Upnp_FunPtr>::type;
     static int callback(Upnp_EventType type, EventPointer event, void* cookie) {
         auto& self = *static_cast<Impl*>(cookie);
         const std::lock_guard lock{self.mutex};

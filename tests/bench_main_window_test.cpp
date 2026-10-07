@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "drag_position.hpp"
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/trackknife_style.hpp"
@@ -1593,7 +1594,7 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     std::unique_ptr<QMimeData> mime{tree->model()->mimeData({tree->model()->index(0, 0)})};
     QVERIFY(mime != nullptr);
     auto* viewport = window.up_next_view_->viewport();
-    QDragEnterEvent enter{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{dragPosition(QPoint{10, 10}), Qt::CopyAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
@@ -1607,7 +1608,7 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     // And onto the header's Up Next button: queued at the end.
     {
         auto* button = window.up_next_button_;
-        QDragEnterEvent over{QPointF{5, 5}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+        QDragEnterEvent over{dragPosition(QPoint{5, 5}), Qt::CopyAction, mime.get(), Qt::LeftButton,
                              Qt::NoModifier};
         QApplication::sendEvent(button, &over);
         QVERIFY(over.isAccepted());
@@ -2530,7 +2531,7 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     std::unique_ptr<QMimeData> mime{folder_model->mimeData({album})};
     QVERIFY(mime != nullptr);
     auto* viewport = current->view->viewport();
-    QDragEnterEvent enter{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{dragPosition(QPoint{10, 10}), Qt::CopyAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
@@ -2655,10 +2656,10 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     QTRY_VERIFY(panel->itemFor(target) != nullptr);
     const auto at = panel->visualItemRect(panel->itemFor(target)).center();
     auto* viewport = panel->viewport();
-    QDragEnterEvent enter{QPointF(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{QPointF(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragMoveEvent move{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(viewport, &move);
     QVERIFY(move.isAccepted());
     QDropEvent drop{QPointF{at}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -7499,7 +7500,7 @@ void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
             rows->model()->mimeData({rows->model()->index(3, 0)})};
         QVERIFY(mime != nullptr);
         const auto at = tracks->visualItemRect(tracks->topLevelItem(2)).center();
-        QDragEnterEvent enter{QPointF(at), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(at), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QCoreApplication::sendEvent(tracks->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{at}, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -7725,14 +7726,14 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         std::unique_ptr<QMimeData> mime{pairs->model()->mimeData({pairs->model()->index(0, 0)})};
         const auto rect = pairs->visualItemRect(pairs->topLevelItem(1));
         const QPoint position{rect.center().x(), rect.bottom() - 1};
-        QDragEnterEvent enter{QPointF(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{position}, Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &drop);
         QVERIFY(drop.isAccepted());
-        QDragEnterEvent stale{QPointF(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent stale{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &stale);
         QVERIFY(!stale.isAccepted());
         QVERIFY(pairs->topLevelItem(1)->text(0).endsWith(QStringLiteral("2-first.flac")));
@@ -12635,7 +12636,7 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
     QVERIFY(image.save(incoming));
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(incoming)});
-    QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent enter(dragPosition(QPoint(10, 10)), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(thumbnail, &enter);
     QVERIFY(enter.isAccepted());
     QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -13939,7 +13940,7 @@ void BenchMainWindowTest::filesDroppedOnTheTabBarMakeATab() {
     const auto drop_files = [&](const QString& path, const QPoint position) {
         QMimeData mime;
         mime.setUrls({QUrl::fromLocalFile(path)});
-        QDragEnterEvent enter{QPointF(position), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
         window.handleTabTrackDrop(nullptr, &enter, position);
         if (!enter.isAccepted()) {
             return false;
@@ -13983,7 +13984,7 @@ void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
     // the handler used by the tab-bar event filter.
     const auto send_drop = [&](QTableView* from, const QPoint position,
                                const Qt::KeyboardModifiers modifiers, const bool commit) {
-        QDragEnterEvent enter{QPointF(position), Qt::CopyAction | Qt::MoveAction, &mime,
+        QDragEnterEvent enter{dragPosition(position), Qt::CopyAction | Qt::MoveAction, &mime,
                               Qt::LeftButton, modifiers};
         window.handleTabTrackDrop(from, &enter, position);
         if (!enter.isAccepted() || !commit)

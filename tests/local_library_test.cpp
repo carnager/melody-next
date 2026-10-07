@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "drag_position.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
@@ -117,7 +118,7 @@ bool triggerLibraryAction(LocalLibraryPanel* panel, const QModelIndex& index, in
 }
 
 bool dropFiles(QTableView* view, const QMimeData* mime, const QPoint& position) {
-    QDragEnterEvent enter{QPointF(position), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view->viewport(), &enter);
     if (!enter.isAccepted()) {
         return false;

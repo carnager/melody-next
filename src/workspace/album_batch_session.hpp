@@ -82,6 +82,7 @@ class AlbumBatchSession final : public QObject {
     // own test: no tag of its files changes. Asked of the tagger's draft as
     // it is now, so an edit made since counts.
     [[nodiscard]] bool alreadyTagged(std::size_t album) const;
+
     [[nodiscard]] std::size_t fileCount() const;
     [[nodiscard]] std::size_t count(State state) const;
     [[nodiscard]] bool started() const { return started_; }
@@ -149,6 +150,9 @@ class AlbumBatchSession final : public QObject {
     void undoFinished();
 
   private:
+    // Looked at whenever the tagger's draft changes: changed() when what is
+    // already tagged so is not what it was.
+    void noteDraft();
     void group();
     void describe(Album& album) const;
     // Its folders, from its files.
@@ -187,6 +191,8 @@ class AlbumBatchSession final : public QObject {
     std::optional<LastWrite> last_write_;
     bool undoing_{false};
     void undone(std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome);
+    // The albums already tagged so, as last told.
+    std::vector<std::size_t> already_tagged_;
 };
 
 } // namespace trackknife::bench

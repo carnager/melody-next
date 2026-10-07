@@ -73,7 +73,10 @@ AlbumBatchSession::AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupSer
     connect(queue_, &AlbumLookupQueue::idle, this, &AlbumBatchSession::changed);
     connect(&tagger, &TaggerSession::proposalsSettled, this, &AlbumBatchSession::settled);
     // The tagger may still show cached tags: staging waits for the files.
-    connect(&tagger, &TaggerSession::changed, this, &AlbumBatchSession::stageNext);
+    connect(&tagger, &TaggerSession::changed, this, [this] {
+        noteDraft();
+        stageNext();
+    });
     group();
 }
 
@@ -663,6 +666,22 @@ void AlbumBatchSession::undone(
             Qt::SingleShotConnection);
     emit changed();
     tagger_->finishWriteElsewhere(std::move(rewritten));
+}
+
+void AlbumBatchSession::noteDraft() {
+    // A staged album's patches can turn out to change nothing a moment after
+    // it is staged -- what it said, it already said -- and the window shows
+    // it so then, not once something else makes it look again.
+    std::vector<std::size_t> tagged;
+    for (std::size_t album = 0U; album < albums_.size(); ++album) {
+        if (alreadyTagged(album)) {
+            tagged.push_back(album);
+        }
+    }
+    if (tagged != already_tagged_) {
+        already_tagged_ = std::move(tagged);
+        emit changed();
+    }
 }
 
 bool AlbumBatchSession::alreadyTagged(const std::size_t album) const {

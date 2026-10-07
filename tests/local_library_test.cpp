@@ -117,7 +117,7 @@ bool triggerLibraryAction(LocalLibraryPanel* panel, const QModelIndex& index, in
 }
 
 bool dropFiles(QTableView* view, const QMimeData* mime, const QPoint& position) {
-    QDragEnterEvent enter{position, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{QPointF(position), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view->viewport(), &enter);
     if (!enter.isAccepted()) {
         return false;

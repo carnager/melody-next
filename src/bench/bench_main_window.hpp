@@ -85,6 +85,7 @@ namespace trackknife::ui {
 class QueueTableView;
 class ListPersistenceService;
 class LocalFolderTreeModel;
+class RatingStrip;
 } // namespace trackknife::ui
 
 namespace trackknife::query {
@@ -708,6 +709,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QLabel* now_playing_{nullptr};
     QLabel* now_playing_context_{nullptr};
     QLabel* now_playing_cover_{nullptr};
+    // What plays, rated from the header: on the engine of the list it plays
+    // from, by its key there.
+    ui::RatingStrip* now_playing_rating_{nullptr};
+    QString header_rating_hash_;
+    EngineKey header_rating_engine_;
     // The group whose cover the header shows, so a tick does not rescale it.
     QString header_cover_key_;
     // The album whose cover the header is waiting for, and the entry playing.

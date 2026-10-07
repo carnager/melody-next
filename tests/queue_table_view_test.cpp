@@ -149,7 +149,7 @@ void QueueTableViewTest::localFilesResolveOnlyOnAcceptedDrop() {
         done({"/music/raw-\xff.flac"});
     }};
     const auto position = view.visualRect(model.index(1, 0)).topLeft() + QPoint{2, 2};
-    QDragEnterEvent rejected{position, Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent rejected{QPointF(position), Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &rejected);
     QVERIFY(!rejected.isAccepted());
     QCOMPARE(resolutions, 0);
@@ -162,10 +162,10 @@ void QueueTableViewTest::localFilesResolveOnlyOnAcceptedDrop() {
     });
     QMimeData counterfeit;
     counterfeit.setData(LocalFilesMimeData::mimeType(), QByteArrayLiteral("1"));
-    QDragEnterEvent invalid{position, Qt::CopyAction, &counterfeit, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent invalid{QPointF(position), Qt::CopyAction, &counterfeit, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &invalid);
     QVERIFY(!invalid.isAccepted());
-    QDragEnterEvent enter{position, Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{QPointF(position), Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &enter);
     QVERIFY(enter.isAccepted());
     QCOMPARE(resolutions, 0);
@@ -529,10 +529,10 @@ void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {
 
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(QStringLiteral("/tmp/drop-target.flac"))});
-    QDragEnterEvent enter{target, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{QPointF(target), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{target, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+    QDragMoveEvent move{QPointF(target), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &move);
     QVERIFY(move.isAccepted());
 

@@ -192,3 +192,7 @@ presets…** opens them.
   are renamed or moved, and closing does not ask about it: the Write's own
   test, no tag of its files changing, asked of the draft as it is. The
   Write's bar moves file by file. Closing asks once, not twice.
+  Shown so as the draft settles (2026-10-08): staged patches can turn out
+  to change nothing a moment after staging, and an edit since can give an
+  album something to write again; the window looks again whenever the
+  tagger's draft changes what is already tagged so.

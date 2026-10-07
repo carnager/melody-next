@@ -6986,6 +6986,22 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(second->alreadyTagged(again_of(QStringLiteral("Cover"))));
     QVERIFY(!second->alreadyTagged(again_of(QStringLiteral("Third"))));
     QCOMPARE(second->toWrite(), std::vector<std::size_t>{again_of(QStringLiteral("Third"))});
+    // Shown so as it turns out, not once something else redraws the window:
+    // the patches staged can turn out to change nothing a moment later.
+    auto* rows_again = again->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
+    const auto state_shown = [rows_again](const std::size_t album) {
+        for (int row = 0; row < rows_again->topLevelItemCount(); ++row) {
+            if (rows_again->topLevelItem(row)->data(0, Qt::UserRole).toInt() ==
+                static_cast<int>(album)) {
+                return rows_again->topLevelItem(row)->text(2);
+            }
+        }
+        return QString{};
+    };
+    QTRY_COMPARE(state_shown(again_of(QStringLiteral("Band"))),
+                 QStringLiteral("Matched · already tagged so"));
+    QTRY_COMPARE(state_shown(again_of(QStringLiteral("Cover"))),
+                 QStringLiteral("Matched · already tagged so"));
     auto* write_again = again->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
     QTRY_COMPARE(write_again->text(), QStringLiteral("Write 1 album"));
     auto* summary = again->findChild<QLabel*>(QStringLiteral("bench-identify-albums-summary"));
@@ -6993,6 +7009,25 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY2(summary->text().startsWith(QStringLiteral("1 staged")) &&
                  summary->text().endsWith(QStringLiteral("2 already tagged")),
              qPrintable(summary->text()));
+
+    // Edited since in the tag editor -- Band's title -- it has something to
+    // write again, and says so by itself.
+    auto* fields = properties->findChild<QTableView*>(QStringLiteral("bench-metadata-fields"));
+    QVERIFY(fields != nullptr);
+    auto* field_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    QVERIFY(field_model != nullptr);
+    files->selectionModel()->select(
+        QItemSelection{grid_model->index(0, 0), grid_model->index(1, 0)},
+        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_COMPARE(field_model->selectedItemCount(), 2U);
+    QTRY_VERIFY(field_model->summaryReady());
+    const auto title_row = field_model->fieldRow(QStringLiteral("title"));
+    QVERIFY(title_row);
+    QVERIFY(field_model->setData(field_model->index(*title_row, 2), QStringLiteral("Edited"),
+                                 Qt::EditRole));
+    QTRY_VERIFY2(state_shown(again_of(QStringLiteral("Band"))).endsWith(QStringLiteral("· staged")),
+                 qPrintable(state_shown(again_of(QStringLiteral("Band")))));
+    QTRY_COMPARE(write_again->text(), QStringLiteral("Write 2 albums"));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }

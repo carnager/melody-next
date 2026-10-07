@@ -665,10 +665,28 @@ void AlbumBatchSession::undone(
     tagger_->finishWriteElsewhere(std::move(rewritten));
 }
 
+bool AlbumBatchSession::alreadyTagged(const std::size_t album) const {
+    if (album >= albums_.size() || albums_[album].state != State::staged || tagger_.isNull()) {
+        return false;
+    }
+    const auto* draft = tagger_->draft();
+    if (draft == nullptr) {
+        return true;
+    }
+    const auto& items = albums_[album].items;
+    return std::ranges::none_of(draft->patches(), [&items](const auto& patch) {
+        return std::ranges::contains(items, patch.item_index);
+    });
+}
+
 std::vector<std::size_t> AlbumBatchSession::toWrite() const {
+    // Renamed or moved, an album already tagged may still have to go
+    // somewhere; otherwise it has nothing to write.
+    const bool placing = !tagger_.isNull() && (tagger_->renameFiles() || tagger_->moveFiles());
     std::vector<std::size_t> albums;
     for (const auto album : order_) {
-        if (albums_[album].state == State::staged && !albums_[album].excluded) {
+        if (albums_[album].state == State::staged && !albums_[album].excluded &&
+            (placing || !alreadyTagged(album))) {
             albums.push_back(album);
         }
     }

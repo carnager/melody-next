@@ -185,3 +185,10 @@ presets…** opens them.
   and judged as a search's are. With no titles to compare it is seldom a
   clear match, so it waits for a person with its versions to pick from.
   Without AcoustID it is no match, saying how to set AcoustID up.
+- Already tagged (2026-10-07): an album identified again after it was
+  written stages nothing new -- the release is what its files say -- and
+  was counted staged all the same, the Write then finding nothing to do.
+  It now reads "already tagged so", is left out of the Write unless files
+  are renamed or moved, and closing does not ask about it: the Write's own
+  test, no tag of its files changing, asked of the draft as it is. The
+  Write's bar moves file by file. Closing asks once, not twice.

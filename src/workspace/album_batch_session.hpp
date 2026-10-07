@@ -77,6 +77,11 @@ class AlbumBatchSession final : public QObject {
     [[nodiscard]] const std::vector<std::size_t>& order() const { return order_; }
     // Not staged nor written: its grouping can still change.
     [[nodiscard]] bool editable(std::size_t album) const;
+    // Staged, and its files already say so: the release staged is what they
+    // are tagged as -- an album written before, opened again. The Write's
+    // own test: no tag of its files changes. Asked of the tagger's draft as
+    // it is now, so an edit made since counts.
+    [[nodiscard]] bool alreadyTagged(std::size_t album) const;
     [[nodiscard]] std::size_t fileCount() const;
     [[nodiscard]] std::size_t count(State state) const;
     [[nodiscard]] bool started() const { return started_; }

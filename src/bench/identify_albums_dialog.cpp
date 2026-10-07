@@ -399,7 +399,7 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
             session_->stop();
         }
     });
-    connect(close, &QPushButton::clicked, this, &QDialog::close);
+    connect(close, &QPushButton::clicked, this, &IdentifyAlbumsDialog::reject);
 }
 
 void IdentifyAlbumsDialog::begin(MusicBrainzLookupService service) {
@@ -511,7 +511,10 @@ void IdentifyAlbumsDialog::sync() {
             auto* item = new QTreeWidgetItem(list_);
             item->setText(0, name_of(album));
             item->setText(1, detail_of(album));
-            auto state = started ? AlbumBatchSession::stateText(album) : basis_text(album);
+            auto state = !started ? basis_text(album)
+                          : session_->alreadyTagged(index)
+                              ? QStringLiteral("Matched · already tagged so")
+                              : AlbumBatchSession::stateText(album);
             if (album.excluded && album.state == State::staged) {
                 state += QStringLiteral(" · not to be written");
             }
@@ -554,11 +557,16 @@ void IdentifyAlbumsDialog::sync() {
     write_->setDefault(needing == 0U && to_write > 0U);
     review_next_->setDefault(needing > 0U);
     actions_->setEnabled(!busy);
+    // Staged and already tagged so is not something to write.
+    const auto tagged_already = static_cast<std::size_t>(std::ranges::count_if(
+        order, [this](const auto album) { return session_->alreadyTagged(album); }));
     summary_->setText(QStringLiteral("%1 staged · %2 need you · %3 no match · %4 waiting")
-                          .arg(session_->count(State::staged))
+                          .arg(session_->count(State::staged) - tagged_already)
                           .arg(needing + session_->count(State::failed))
                           .arg(session_->count(State::no_match))
-                          .arg(open));
+                          .arg(open) +
+                      (tagged_already > 0U ? QStringLiteral(" · %1 already tagged").arg(tagged_already)
+                                           : QString{}));
     showDetail();
     // The review opens by itself, once, as soon as an album needs a person.
     if (!reviewed_ && pages_->currentIndex() == 0 && !busy) {
@@ -748,8 +756,14 @@ bool IdentifyAlbumsDialog::mayClose() {
         session_->stopWriting();
         return false;
     }
-    // Opened by itself, nothing else holds what is staged.
-    const auto staged = session_->count(State::staged) + session_->count(State::staging);
+    // Opened by itself, nothing else holds what is staged -- what would
+    // change, that is: an album already tagged so loses nothing.
+    std::size_t staged = session_->count(State::staging);
+    for (const auto album : session_->order()) {
+        if (session_->albums()[album].state == State::staged && !session_->alreadyTagged(album)) {
+            ++staged;
+        }
+    }
     if (!owns_tagger_ || staged == 0U) {
         return true;
     }
@@ -762,12 +776,11 @@ bool IdentifyAlbumsDialog::mayClose() {
            QMessageBox::Close;
 }
 
+// Closed from the window's frame: asked once, in reject() -- QDialog's own
+// closeEvent calls reject() too, which asked a second time.
 void IdentifyAlbumsDialog::closeEvent(QCloseEvent* event) {
-    if (!mayClose()) {
-        event->ignore();
-        return;
-    }
-    QDialog::closeEvent(event);
+    event->ignore();
+    reject();
 }
 
 void IdentifyAlbumsDialog::reject() {
@@ -793,7 +806,11 @@ void IdentifyAlbumsDialog::showDetail() {
     html += QStringLiteral("<p>%1 · grouped by %2</p>")
                 .arg(escaped(detail_of(album)), basis_text(album));
     if (session_->started()) {
-        html += QStringLiteral("<p><b>%1</b></p>").arg(escaped(AlbumBatchSession::stateText(album)));
+        html += QStringLiteral("<p><b>%1</b></p>")
+                    .arg(escaped(session_->alreadyTagged(static_cast<std::size_t>(index))
+                                     ? QStringLiteral("Matched · its files are already tagged as "
+                                                      "this release: nothing to write")
+                                     : AlbumBatchSession::stateText(album)));
     }
     if (album.result && !album.result->candidates.empty()) {
         const auto& best = album.result->candidates.front();

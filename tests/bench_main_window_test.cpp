@@ -116,13 +116,13 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPointer>
-#include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
 #include <QScopeGuard>
+#include <QProgressBar>
 #include <QSignalSpy>
 #include <QSlider>
 #include <QSpinBox>
@@ -1593,7 +1593,7 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     std::unique_ptr<QMimeData> mime{tree->model()->mimeData({tree->model()->index(0, 0)})};
     QVERIFY(mime != nullptr);
     auto* viewport = window.up_next_view_->viewport();
-    QDragEnterEvent enter{QPoint{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
@@ -1607,7 +1607,7 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     // And onto the header's Up Next button: queued at the end.
     {
         auto* button = window.up_next_button_;
-        QDragEnterEvent over{QPoint{5, 5}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+        QDragEnterEvent over{QPointF{5, 5}, Qt::CopyAction, mime.get(), Qt::LeftButton,
                              Qt::NoModifier};
         QApplication::sendEvent(button, &over);
         QVERIFY(over.isAccepted());
@@ -2530,7 +2530,7 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     std::unique_ptr<QMimeData> mime{folder_model->mimeData({album})};
     QVERIFY(mime != nullptr);
     auto* viewport = current->view->viewport();
-    QDragEnterEvent enter{QPoint{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
@@ -2655,10 +2655,10 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     QTRY_VERIFY(panel->itemFor(target) != nullptr);
     const auto at = panel->visualItemRect(panel->itemFor(target)).center();
     auto* viewport = panel->viewport();
-    QDragEnterEvent enter{at, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{QPointF(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{at, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragMoveEvent move{QPointF(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
     QApplication::sendEvent(viewport, &move);
     QVERIFY(move.isAccepted());
     QDropEvent drop{QPointF{at}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -6843,9 +6843,14 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     row_of(third)->setCheckState(0, Qt::Unchecked);
     QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
     QTRY_VERIFY(write->isEnabled());
+    // The bar moves file by file, not once an album: the write tells the
+    // dialog as each of Band's two files is written, not only as the album
+    // is measured, starts and ends -- five changes here without them.
+    QSignalSpy told{session, &AlbumBatchSession::changed};
     write->click();
     QTRY_COMPARE_WITH_TIMEOUT(session->albums()[band].state, AlbumBatchSession::State::written,
                               20'000);
+    QVERIFY2(told.count() >= 5 + 2, qPrintable(QString::number(told.count())));
     QTRY_VERIFY(session->writing() == nullptr && !session->measuring());
     const auto band_file = sources[0].source.raw_path;
     const auto band_tags = metadata::read_local_metadata(band_file);
@@ -6955,6 +6960,39 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QCOMPARE(tagger->sharedSelection()->source(4U).raw_path, sources[4].source.raw_path);
     QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
     QVERIFY(!undo->isVisibleTo(dialog));
+
+    // Identified again: Band and Cover are tagged as their releases already,
+    // so staged they have nothing to write -- said so, and not counted for
+    // the Write, which is Third's alone. Renamed or moved they would count.
+    tagger->chooseRename(false);
+    tagger->chooseMove(false);
+    dialog->close();
+    QTRY_VERIFY(!dialog->isVisible());
+    delete dialog;
+    QTRY_VERIFY(open->isEnabled());
+    open->click();
+    auto* again =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    QVERIFY(again != nullptr);
+    auto* second = again->session();
+    QTRY_COMPARE_WITH_TIMEOUT(second->count(AlbumBatchSession::State::staged), std::size_t{3U},
+                              10'000);
+    const auto again_of = [second](const QString& artist) {
+        const auto& albums = second->albums();
+        return static_cast<std::size_t>(std::distance(
+            albums.begin(), std::ranges::find(albums, artist, &AlbumBatchSession::Album::artist)));
+    };
+    QVERIFY(second->alreadyTagged(again_of(QStringLiteral("Band"))));
+    QVERIFY(second->alreadyTagged(again_of(QStringLiteral("Cover"))));
+    QVERIFY(!second->alreadyTagged(again_of(QStringLiteral("Third"))));
+    QCOMPARE(second->toWrite(), std::vector<std::size_t>{again_of(QStringLiteral("Third"))});
+    auto* write_again = again->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
+    QTRY_COMPARE(write_again->text(), QStringLiteral("Write 1 album"));
+    auto* summary = again->findChild<QLabel*>(QStringLiteral("bench-identify-albums-summary"));
+    QVERIFY(summary != nullptr);
+    QVERIFY2(summary->text().startsWith(QStringLiteral("1 staged")) &&
+                 summary->text().endsWith(QStringLiteral("2 already tagged")),
+             qPrintable(summary->text()));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }
@@ -7016,6 +7054,22 @@ void BenchMainWindowTest::identifyAlbumsOpensFromTools() {
     QTRY_VERIFY_WITH_TIMEOUT(chosen->session() != nullptr, 10'000);
     QCOMPARE(chosen->session()->fileCount(), 1U);
     QCOMPARE(chosen->tagger()->itemSource(0U)->raw_path, paths[1]);
+
+    // Closed, it is asked once whether it may: QDialog's own closeEvent
+    // goes through reject() too, which asked a second time.
+    struct CloseCounter final : QObject {
+        int closes = 0;
+        bool eventFilter(QObject* watched, QEvent* event) override {
+            if (event->type() == QEvent::Close) {
+                ++closes;
+            }
+            return QObject::eventFilter(watched, event);
+        }
+    } counter;
+    chosen->installEventFilter(&counter);
+    chosen->close();
+    QTRY_VERIFY(!chosen->isVisible());
+    QCOMPARE(counter.closes, 1);
     delete chosen;
 }
 
@@ -7410,7 +7464,7 @@ void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
             rows->model()->mimeData({rows->model()->index(3, 0)})};
         QVERIFY(mime != nullptr);
         const auto at = tracks->visualItemRect(tracks->topLevelItem(2)).center();
-        QDragEnterEvent enter{at, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{QPointF(at), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QCoreApplication::sendEvent(tracks->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{at}, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -7636,14 +7690,14 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         std::unique_ptr<QMimeData> mime{pairs->model()->mimeData({pairs->model()->index(0, 0)})};
         const auto rect = pairs->visualItemRect(pairs->topLevelItem(1));
         const QPoint position{rect.center().x(), rect.bottom() - 1};
-        QDragEnterEvent enter{position, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{QPointF(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{position}, Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &drop);
         QVERIFY(drop.isAccepted());
-        QDragEnterEvent stale{position, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent stale{QPointF(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &stale);
         QVERIFY(!stale.isAccepted());
         QVERIFY(pairs->topLevelItem(1)->text(0).endsWith(QStringLiteral("2-first.flac")));
@@ -12546,7 +12600,7 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
     QVERIFY(image.save(incoming));
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(incoming)});
-    QDragEnterEvent enter(QPoint(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(thumbnail, &enter);
     QVERIFY(enter.isAccepted());
     QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -13850,7 +13904,7 @@ void BenchMainWindowTest::filesDroppedOnTheTabBarMakeATab() {
     const auto drop_files = [&](const QString& path, const QPoint position) {
         QMimeData mime;
         mime.setUrls({QUrl::fromLocalFile(path)});
-        QDragEnterEvent enter{position, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{QPointF(position), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
         window.handleTabTrackDrop(nullptr, &enter, position);
         if (!enter.isAccepted()) {
             return false;
@@ -13894,8 +13948,8 @@ void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
     // the handler used by the tab-bar event filter.
     const auto send_drop = [&](QTableView* from, const QPoint position,
                                const Qt::KeyboardModifiers modifiers, const bool commit) {
-        QDragEnterEvent enter{position, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton,
-                              modifiers};
+        QDragEnterEvent enter{QPointF(position), Qt::CopyAction | Qt::MoveAction, &mime,
+                              Qt::LeftButton, modifiers};
         window.handleTabTrackDrop(from, &enter, position);
         if (!enter.isAccepted() || !commit)
             return enter.isAccepted();

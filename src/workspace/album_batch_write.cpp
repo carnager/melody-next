@@ -4,6 +4,7 @@
 #include "bench/metadata_dialog_helpers.hpp"
 #include "workspace/preparation_planning.hpp"
 
+#include <QPointer>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -16,6 +17,20 @@ namespace trackknife::bench {
 namespace {
 
 QString issueText(const std::string& message) { return display_utf8(message); }
+
+// A file written, on the worker's thread: said on the window's, so the bar
+// moves file by file -- not once an album, which with a few albums read as
+// standing still.
+void told(const QPointer<AlbumBatchWrite>& self) {
+    QMetaObject::invokeMethod(
+        self,
+        [self] {
+            if (self) {
+                emit self->progressed();
+            }
+        },
+        Qt::QueuedConnection);
+}
 
 } // namespace
 
@@ -360,8 +375,9 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
         (void)QtConcurrent::run([plan, applier = std::move(applier), progress, token, self] {
             auto outcome = std::make_shared<core::Result<operations::FilePublicationApplyResult>>(
                 applier(*plan,
-                        [progress](const operations::FilePublicationApplyProgress& update) {
+                        [progress, self](const operations::FilePublicationApplyProgress& update) {
                             progress->done = update.completed_sources;
+                            told(self);
                         },
                         token));
             QMetaObject::invokeMethod(
@@ -383,8 +399,9 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
         (void)QtConcurrent::run([plan, applier = std::move(applier), progress, token, self] {
             auto outcome = std::make_shared<core::Result<operations::MetadataApplyResult>>(
                 applier(*plan->metadata,
-                        [progress](const operations::MetadataApplyProgress& update) {
+                        [progress, self](const operations::MetadataApplyProgress& update) {
                             progress->done = update.completed_sources;
+                            told(self);
                         },
                         token));
             QMetaObject::invokeMethod(

@@ -6960,6 +6960,39 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QCOMPARE(tagger->sharedSelection()->source(4U).raw_path, sources[4].source.raw_path);
     QTRY_COMPARE(write->text(), QStringLiteral("Write 1 album"));
     QVERIFY(!undo->isVisibleTo(dialog));
+
+    // Identified again: Band and Cover are tagged as their releases already,
+    // so staged they have nothing to write -- said so, and not counted for
+    // the Write, which is Third's alone. Renamed or moved they would count.
+    tagger->chooseRename(false);
+    tagger->chooseMove(false);
+    dialog->close();
+    QTRY_VERIFY(!dialog->isVisible());
+    delete dialog;
+    QTRY_VERIFY(open->isEnabled());
+    open->click();
+    auto* again =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    QVERIFY(again != nullptr);
+    auto* second = again->session();
+    QTRY_COMPARE_WITH_TIMEOUT(second->count(AlbumBatchSession::State::staged), std::size_t{3U},
+                              10'000);
+    const auto again_of = [second](const QString& artist) {
+        const auto& albums = second->albums();
+        return static_cast<std::size_t>(std::distance(
+            albums.begin(), std::ranges::find(albums, artist, &AlbumBatchSession::Album::artist)));
+    };
+    QVERIFY(second->alreadyTagged(again_of(QStringLiteral("Band"))));
+    QVERIFY(second->alreadyTagged(again_of(QStringLiteral("Cover"))));
+    QVERIFY(!second->alreadyTagged(again_of(QStringLiteral("Third"))));
+    QCOMPARE(second->toWrite(), std::vector<std::size_t>{again_of(QStringLiteral("Third"))});
+    auto* write_again = again->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
+    QTRY_COMPARE(write_again->text(), QStringLiteral("Write 1 album"));
+    auto* summary = again->findChild<QLabel*>(QStringLiteral("bench-identify-albums-summary"));
+    QVERIFY(summary != nullptr);
+    QVERIFY2(summary->text().startsWith(QStringLiteral("1 staged")) &&
+                 summary->text().endsWith(QStringLiteral("2 already tagged")),
+             qPrintable(summary->text()));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
 }
@@ -7021,6 +7054,22 @@ void BenchMainWindowTest::identifyAlbumsOpensFromTools() {
     QTRY_VERIFY_WITH_TIMEOUT(chosen->session() != nullptr, 10'000);
     QCOMPARE(chosen->session()->fileCount(), 1U);
     QCOMPARE(chosen->tagger()->itemSource(0U)->raw_path, paths[1]);
+
+    // Closed, it is asked once whether it may: QDialog's own closeEvent
+    // goes through reject() too, which asked a second time.
+    struct CloseCounter final : QObject {
+        int closes = 0;
+        bool eventFilter(QObject* watched, QEvent* event) override {
+            if (event->type() == QEvent::Close) {
+                ++closes;
+            }
+            return QObject::eventFilter(watched, event);
+        }
+    } counter;
+    chosen->installEventFilter(&counter);
+    chosen->close();
+    QTRY_VERIFY(!chosen->isVisible());
+    QCOMPARE(counter.closes, 1);
     delete chosen;
 }
 

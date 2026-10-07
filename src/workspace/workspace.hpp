@@ -839,6 +839,12 @@ class Workspace final : public QObject {
         QString tooltip;
         QString window_title{QStringLiteral("Trackknife")};
         QString cover_entry;
+        // What plays, to rate from the header: its rating and key on the
+        // engine of the list it plays from -- where the row's Rate stores
+        // it. No key: not in a library, nothing to rate.
+        QString rating_hash;
+        EngineKey rating_engine;
+        unsigned rating{0U};
     };
     [[nodiscard]] NowPlaying nowPlaying(const EnginePlayback::State& state);
     // ADR-0226, ADR-0228: where it sounds. Taken from each state -- saying

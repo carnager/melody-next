@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QRect>
 #include <QString>
+#include <QWidget>
 #include <QWidgetAction>
 
 class QPainter;
@@ -25,6 +26,38 @@ void paintRatingOverlay(QPainter* painter, const QRect& cover, unsigned rating);
 // hover band and check mark. Triggering closes the owning menu. Stays a
 // plain QAction for callers: object names, checked state, data(), and
 // triggered() behave as usual.
+// Five stars over a 0-10 rating, clicked to set it, as the phone's and the
+// bar widget's: the left half of a star gives the half, the right half the
+// whole; the rating already set, clicked, clears it. Hovered, the stars show
+// what a click would set.
+class RatingStrip final : public QWidget {
+    Q_OBJECT
+
+  public:
+    explicit RatingStrip(QWidget* parent = nullptr);
+    void setRating(unsigned rating);
+    [[nodiscard]] unsigned rating() const noexcept { return rating_; }
+    [[nodiscard]] QSize sizeHint() const override;
+    // The rating a click at `x` sets: 1-10, or 0 for the rating already set
+    // or a place between stars.
+    [[nodiscard]] unsigned valueAt(qreal x) const;
+
+  signals:
+    void rated(unsigned rating);
+
+  protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+
+  private:
+    [[nodiscard]] unsigned starAt(qreal x) const;
+
+    unsigned rating_{0U};
+    unsigned hovered_{0U};
+};
+
 class RatingMenuAction final : public QWidgetAction {
     Q_OBJECT
 

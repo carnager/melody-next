@@ -11,6 +11,7 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/eliding_label.hpp"
 #include "uicommon/line_slider.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/list_persistence_service.hpp"
 
 #include "uicommon/track_row_roles.hpp"
@@ -276,6 +277,17 @@ void BenchMainWindow::buildTransport() {
     track_display_layout->addWidget(now_playing_context_);
     track_display_layout->addStretch();
     header_layout->addWidget(track_display, 3);
+    // Rated where it plays, as the phone and the bar widget do.
+    now_playing_rating_ = new ui::RatingStrip(header);
+    now_playing_rating_->setObjectName(QStringLiteral("bench-now-playing-rating"));
+    now_playing_rating_->setAccessibleName(QStringLiteral("Rating of what plays"));
+    now_playing_rating_->hide();
+    connect(now_playing_rating_, &ui::RatingStrip::rated, this, [this](const unsigned rating) {
+        if (!header_rating_hash_.isEmpty()) {
+            workspace_.rate(header_rating_engine_, {header_rating_hash_}, false, rating);
+        }
+    });
+    header_layout->addWidget(now_playing_rating_);
     header_layout->addSpacing(6);
 
     // Stop is in the Playback menu: pause does what it did, and the row has
@@ -989,6 +1001,10 @@ void BenchMainWindow::refreshEngineTransport() {
     refreshHeaderCover(shown.cover_entry);
     now_playing_->setToolTip(shown.tooltip);
     now_playing_context_->setToolTip(shown.tooltip);
+    header_rating_hash_ = shown.rating_hash;
+    header_rating_engine_ = shown.rating_engine;
+    now_playing_rating_->setRating(shown.rating);
+    now_playing_rating_->setVisible(!shown.rating_hash.isEmpty());
     workspace_.followEngineState(state);
 
     refreshOutputControls(state);

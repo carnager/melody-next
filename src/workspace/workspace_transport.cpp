@@ -465,6 +465,12 @@ Workspace::NowPlaying Workspace::nowPlaying(const EnginePlayback::State& state) 
     shown.context = context;
     shown.tooltip = state.path;
     shown.cover_entry = state.entry;
+    if (const auto* tab = tabForDocument(playback_.anchors.document);
+        tab != nullptr && row != nullptr && !row->rating_hash.empty()) {
+        shown.rating_hash = QString::fromStdString(row->rating_hash);
+        shown.rating_engine = EngineKey::of(tab->document);
+        shown.rating = row->rating;
+    }
     return shown;
 }
 

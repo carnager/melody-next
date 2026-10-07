@@ -2,6 +2,7 @@
 
 #include "uicommon/rating_stars.hpp"
 
+#include <QApplication>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -130,7 +131,10 @@ class RatingMenuItem final : public QWidget {
 
     void mouseReleaseEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton && action_ != nullptr) {
-            if (auto* menu = qobject_cast<QMenu*>(parentWidget())) {
+            // Every menu open, as a plain entry closes them: the Rate
+            // submenu alone left the menu it came from open, to be rated
+            // from again.
+            while (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
                 menu->close();
             }
             action_->trigger();
@@ -151,6 +155,113 @@ class RatingMenuItem final : public QWidget {
 };
 
 } // namespace
+
+namespace {
+
+constexpr int strip_star = 16;
+constexpr int strip_gap = 3;
+constexpr int strip_margin = 2;
+
+} // namespace
+
+RatingStrip::RatingStrip(QWidget* parent) : QWidget(parent) {
+    setMouseTracking(true);
+    setCursor(Qt::PointingHandCursor);
+    setAccessibleName(QStringLiteral("Rating"));
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+}
+
+void RatingStrip::setRating(const unsigned rating) {
+    const auto clamped = std::min(rating, 10U);
+    if (clamped == rating_) {
+        return;
+    }
+    rating_ = clamped;
+    setToolTip(rating_ == 0U ? QStringLiteral("Not rated")
+                             : QStringLiteral("%1 of 10").arg(rating_));
+    update();
+}
+
+QSize RatingStrip::sizeHint() const {
+    return {2 * strip_margin + 5 * strip_star + 4 * strip_gap, strip_star + 2 * strip_margin};
+}
+
+unsigned RatingStrip::starAt(const qreal x) const {
+    const auto offset = x - strip_margin;
+    if (offset < 0.0) {
+        return 0U;
+    }
+    const auto star = static_cast<int>(offset / (strip_star + strip_gap));
+    const auto within = offset - star * (strip_star + strip_gap);
+    if (star > 4 || within > strip_star) {
+        return 0U;
+    }
+    return static_cast<unsigned>(star + 1) * 2U - (within < strip_star / 2.0 ? 1U : 0U);
+}
+
+unsigned RatingStrip::valueAt(const qreal x) const {
+    const auto value = starAt(x);
+    return value == rating_ ? 0U : value;
+}
+
+void RatingStrip::paintEvent(QPaintEvent*) {
+    QPainter painter{this};
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    // Hovered: what a click would set; else what is set.
+    const auto shown = hovered_ != 0U ? hovered_ : rating_;
+    const auto radius = strip_star / 2.0;
+    const auto center_y = height() / 2.0;
+    auto outline = ratingStarColor();
+    outline.setAlpha(130);
+    auto fill = ratingStarColor();
+    if (hovered_ != 0U) {
+        fill.setAlpha(190);
+    }
+    for (unsigned star = 0U; star < 5U; ++star) {
+        const auto left = static_cast<qreal>(strip_margin) + star * static_cast<qreal>(strip_star + strip_gap);
+        const QPointF center{left + radius, center_y};
+        const auto path = starPath(center, radius);
+        const auto whole = (star + 1U) * 2U;
+        painter.setPen(QPen{outline, 1.2});
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(path);
+        if (shown >= whole - 1U) {
+            painter.save();
+            if (shown == whole - 1U) {
+                painter.setClipRect(QRectF{left, 0.0, radius, static_cast<qreal>(height())});
+            }
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(fill);
+            painter.drawPath(path);
+            painter.restore();
+        }
+    }
+}
+
+void RatingStrip::mouseMoveEvent(QMouseEvent* event) {
+    const auto value = starAt(event->position().x());
+    if (value != hovered_) {
+        hovered_ = value;
+        update();
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void RatingStrip::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && starAt(event->position().x()) != 0U) {
+        const auto value = valueAt(event->position().x());
+        hovered_ = 0U;
+        setRating(value);
+        emit rated(value);
+    }
+    QWidget::mouseReleaseEvent(event);
+}
+
+void RatingStrip::leaveEvent(QEvent* event) {
+    hovered_ = 0U;
+    update();
+    QWidget::leaveEvent(event);
+}
 
 RatingMenuAction::RatingMenuAction(const unsigned rating, QObject* parent)
     : QWidgetAction(parent), rating_(std::min(rating, 10U)) {

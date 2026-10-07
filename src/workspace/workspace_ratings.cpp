@@ -90,6 +90,8 @@ void Workspace::rate(const EngineKey& engine, const QStringList& hashes, const b
                 tab->model->applyRatings(applied);
             }
         }
+        // The header, and whatever else shows that engine's ratings.
+        view_->engineRatingsChanged(engine, applied);
     }
     std::vector<std::string> keys;
     for (const auto& hash : hashes) {

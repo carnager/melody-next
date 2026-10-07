@@ -1142,6 +1142,10 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
 // rules on ratings look again.
 void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
                                            const QHash<QString, unsigned>& ratings) {
+    // What plays, rated here or anywhere else.
+    if (engine == header_rating_engine_ && ratings.contains(header_rating_hash_)) {
+        now_playing_rating_->setRating(ratings.value(header_rating_hash_));
+    }
     if (auto* dialog = findChild<DynamicPlaylistDialog*>(); dialog && dialog->engine() == engine) {
         if (auto* results = qobject_cast<LocalListModel*>(dialog->view()->model())) {
             results->applyRatings(ratings);
@@ -1220,14 +1224,22 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
         target_menu->addAction(stars);
         return stars;
     };
+    // One rating, one mark: the values exclude each other, as a radio
+    // group -- none marked when the selection's ratings differ.
+    auto* rate_group = new QActionGroup(rate_menu);
+    rate_group->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    auto* album_rate_group = new QActionGroup(album_rate_menu);
+    album_rate_group->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
     for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
         auto* rate = make_rating_action(rate_menu, rating);
+        rate_group->addAction(rate);
         rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
         rate->setChecked(ratings_match && common_rating == rating);
         connect(rate, &QAction::triggered, this, [this, engine, track_hashes, rating] {
             workspace_.rate(engine, track_hashes, false, rating);
         });
         auto* album_rate = make_rating_action(album_rate_menu, rating);
+        album_rate_group->addAction(album_rate);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
         album_rate->setChecked(album_ratings_match && common_album_rating == rating);
         connect(album_rate, &QAction::triggered, this, [this, engine, album_hashes, rating] {

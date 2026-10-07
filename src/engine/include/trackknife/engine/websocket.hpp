@@ -20,7 +20,6 @@ namespace trackknife::engine {
 // a close is returned. Ends when either side does, or `running` turns false;
 // closes `inner`, not `client`. `pending` is what the client sent after its
 // handshake, already read.
-void bridge_websocket(int client, int inner, std::string pending,
-                      const std::atomic<bool>& running);
+void bridge_websocket(int client, int inner, std::string pending, const std::atomic<bool>& running);
 
 } // namespace trackknife::engine

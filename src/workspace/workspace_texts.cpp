@@ -37,15 +37,15 @@ Workspace::TabChrome Workspace::tabChrome(const ListTab& tab) const {
     const auto kind = tab.document.kind == persistence::ListKind::scratch
                           ? QStringLiteral("Persistent scratch list")
                           : QStringLiteral("Named Trackknife working list");
-    chrome.tooltip =
-        QStringLiteral("%1%2%3").arg(kind,
-                                     tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
-                                     tab.document.dirty ? QStringLiteral(" · modified") : QString{});
+    chrome.tooltip = QStringLiteral("%1%2%3").arg(
+        kind, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
+        tab.document.dirty ? QStringLiteral(" · modified") : QString{});
     if (chrome.playing) {
         chrome.tooltip += tr(" · Active playback queue");
     }
     if (const auto continuation = continuationOf(tab)) {
-        chrome.continues = continuation->name.isEmpty() ? tr("a dynamic playlist") : continuation->name;
+        chrome.continues =
+            continuation->name.isEmpty() ? tr("a dynamic playlist") : continuation->name;
         chrome.text += QStringLiteral(" ∞");
         chrome.tooltip += tr(" · Continues with %1").arg(chrome.continues);
     }
@@ -122,8 +122,9 @@ Workspace::UpNextHeading Workspace::upNextHeading() const {
     const bool holding =
         !playback_.requests.pending().empty() || playback_.requests.active().has_value();
     const auto* playing_engine = linkOf(transport_);
-    const auto key = holding ? up_next_engine_
-                             : (playing_engine != nullptr ? playing_engine->key : EngineKey::local());
+    const auto key = holding
+                         ? up_next_engine_
+                         : (playing_engine != nullptr ? playing_engine->key : EngineKey::local());
     const auto engine = key.isLocal() ? QStringLiteral("This computer") : engineName(key);
     heading.status =
         QStringLiteral("%1 · %2 waiting").arg(engine).arg(playback_.requests.pending().size());

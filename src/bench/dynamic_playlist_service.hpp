@@ -71,7 +71,8 @@ class DynamicPlaylistService final : public QObject {
     using Result = core::Result<Tracks>;
     using Completion = std::function<void(Result)>;
     // ADR-0258: a library's selection, as its engine makes it.
-    using Search = std::function<void(engine::DynamicSelection, core::CancellationToken, Completion)>;
+    using Search =
+        std::function<void(engine::DynamicSelection, core::CancellationToken, Completion)>;
     DynamicPlaylistService(Search search, QObject* parent = nullptr);
     void refresh(DynamicPlaylistDefinition definition, const QString& lastfm_key);
     void cancel();

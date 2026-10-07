@@ -163,10 +163,9 @@ class EnginePlayback final : public QObject {
         // keeps: the same, as far as the engine tells.
         [[nodiscard]] bool sameAs(const Continuation& kept) const {
             return rule_id == kept.rule_id && name == kept.name && query == kept.query &&
-                   (!kept.selection_told ||
-                    (group_by == kept.group_by && groups == kept.groups &&
-                     per_group == kept.per_group && limit == kept.limit &&
-                     shuffle == kept.shuffle));
+                   (!kept.selection_told || (group_by == kept.group_by && groups == kept.groups &&
+                                             per_group == kept.per_group && limit == kept.limit &&
+                                             shuffle == kept.shuffle));
         }
     };
     [[nodiscard]] const QHash<QString, Continuation>& continuations() const noexcept {
@@ -234,8 +233,7 @@ class EnginePlayback final : public QObject {
     // details), as a row; none when it names no file.
     [[nodiscard]] static std::optional<LocalTrackRow> rowOfEntry(const protocol::Json& entry);
     using Answer = std::function<void(core::Result<protocol::Json>)>;
-    void request(const QString& method, protocol::Json params, Answer answer,
-                 bool settles = false);
+    void request(const QString& method, protocol::Json params, Answer answer, bool settles = false);
 
     // For quitting: stops reconnecting, and never starts the engine again.
     // Its reconnect timer otherwise revives an engine that stopped -- the

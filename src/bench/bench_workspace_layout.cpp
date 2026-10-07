@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/bench_main_window.hpp"
 #include "bench/undo_location_widget.hpp"
 #include "workspace/undo_location_session.hpp"
-#include "bench/bench_main_window.hpp"
 
-#include "workspace/panel_arrangement.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/quick_pick_popup.hpp"
-#include "bench/trackknife_style.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "bench/trackknife_style.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "workspace/panel_arrangement.hpp"
 #include "workspace/sources.hpp"
 #include <QRandomGenerator>
 #include <QStyle>
@@ -957,7 +957,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     // Every engine's music folders, one at a time: the same folders its
     // library's Folders… opens.
     std::function<QWidget*(QWidget*)> library_folders;
-    if (std::ranges::any_of(engines_, [](const auto& engine) { return engine->library != nullptr; })) {
+    if (std::ranges::any_of(engines_,
+                            [](const auto& engine) { return engine->library != nullptr; })) {
         library_folders = [this](QWidget* parent) -> QWidget* {
             auto* widget = new QWidget(parent);
             auto* layout = new QVBoxLayout(widget);
@@ -992,7 +993,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     }
     // ADR-0266: where each engine keeps its undo copies, asked of it.
     std::function<QWidget*(QWidget*)> undo_locations;
-    if (std::ranges::any_of(engines_, [](const auto& engine) { return engine->file_work != nullptr; })) {
+    if (std::ranges::any_of(engines_,
+                            [](const auto& engine) { return engine->file_work != nullptr; })) {
         undo_locations = [this](QWidget* parent) -> QWidget* {
             auto* widget = new QWidget(parent);
             auto* layout = new QVBoxLayout(widget);

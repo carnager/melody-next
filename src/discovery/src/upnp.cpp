@@ -6,6 +6,7 @@
 #include <upnptools.h>
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -14,12 +15,11 @@
 #include <iostream>
 #include <mutex>
 #include <net/if.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <optional>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 
 namespace trackknife::discovery {
@@ -117,9 +117,10 @@ std::vector<NetworkInterface> network_interfaces() {
         constexpr auto wanted = IFF_UP | IFF_RUNNING | IFF_MULTICAST;
         found.push_back(NetworkInterface{
             .name = address->ifa_name,
-            .address = ntohl(reinterpret_cast<const sockaddr_in*>(address->ifa_addr)->sin_addr.s_addr),
-            .usable = (address->ifa_flags & wanted) == wanted &&
-                      (address->ifa_flags & IFF_LOOPBACK) == 0,
+            .address =
+                ntohl(reinterpret_cast<const sockaddr_in*>(address->ifa_addr)->sin_addr.s_addr),
+            .usable =
+                (address->ifa_flags & wanted) == wanted && (address->ifa_flags & IFF_LOOPBACK) == 0,
         });
     }
     return found;

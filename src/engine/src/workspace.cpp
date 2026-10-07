@@ -184,12 +184,10 @@ Workspace::load_engine_list(const core::StableId& id) const {
     return repository_.load_engine_list(id);
 }
 
-core::Result<persistence::EngineListSummary>
-Workspace::save_engine_list(const core::StableId& id, const std::string_view name,
-                         const persistence::EngineListKind kind,
-                         const std::vector<persistence::EngineListItem>& items,
-                         const std::optional<std::uint64_t> expected_revision,
-                         const std::int64_t now_ms) {
+core::Result<persistence::EngineListSummary> Workspace::save_engine_list(
+    const core::StableId& id, const std::string_view name, const persistence::EngineListKind kind,
+    const std::vector<persistence::EngineListItem>& items,
+    const std::optional<std::uint64_t> expected_revision, const std::int64_t now_ms) {
     const std::lock_guard guard{*mutex_};
     return repository_.save_engine_list(id, name, kind, items, expected_revision, now_ms);
 }
@@ -207,14 +205,15 @@ Workspace::edit_engine_list(const core::StableId& id, const std::uint64_t expect
 
 core::Result<persistence::EngineListSummary>
 Workspace::rename_engine_list(const core::StableId& id, const std::string_view name,
-                           const std::optional<std::uint64_t> expected_revision,
-                           const std::int64_t now_ms) {
+                              const std::optional<std::uint64_t> expected_revision,
+                              const std::int64_t now_ms) {
     const std::lock_guard guard{*mutex_};
     return repository_.rename_engine_list(id, name, expected_revision, now_ms);
 }
 
-core::Result<bool> Workspace::delete_engine_list(const core::StableId& id,
-                                              const std::optional<std::uint64_t> expected_revision) {
+core::Result<bool>
+Workspace::delete_engine_list(const core::StableId& id,
+                              const std::optional<std::uint64_t> expected_revision) {
     const std::lock_guard guard{*mutex_};
     return repository_.delete_engine_list(id, expected_revision);
 }

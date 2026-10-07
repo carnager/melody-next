@@ -106,13 +106,12 @@ void Workspace::configurePlaybackBuffer(const QString& profile, const int capaci
     view_->refreshPlaybackBufferChecks();
 
     const bool pending = transport_->state().status != QStringLiteral("stopped");
-    view_->showMessage(
-        QStringLiteral("%1 buffer · %2 ms capacity · %3 ms start%4")
-            .arg(bufferProfileLabel(profile))
-            .arg(capacity_ms)
-            .arg(start_threshold_ms)
-            .arg(pending ? QStringLiteral(" · applies next track") : QString{}),
-        5'000);
+    view_->showMessage(QStringLiteral("%1 buffer · %2 ms capacity · %3 ms start%4")
+                           .arg(bufferProfileLabel(profile))
+                           .arg(capacity_ms)
+                           .arg(start_threshold_ms)
+                           .arg(pending ? QStringLiteral(" · applies next track") : QString{}),
+                       5'000);
 }
 
 void Workspace::reloadPlaybackPreferences() {
@@ -227,15 +226,12 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
     // choice -- and a report from before this window's own change, still on
     // its way, is none.
     const auto reported = state.replay_gain_mode;
-    const bool changed_there =
-        engine_replay_gain_.has_value() && *engine_replay_gain_ != reported;
+    const bool changed_there = engine_replay_gain_.has_value() && *engine_replay_gain_ != reported;
     engine_replay_gain_ = reported;
     if (changed_there && !transport_->settling() && reported != resolvedReplayGain()) {
-        local_replaygain_ = reported == audio::ReplayGainMode::track
-                                ? QStringLiteral("track")
-                            : reported == audio::ReplayGainMode::album
-                                ? QStringLiteral("album")
-                                : QStringLiteral("off");
+        local_replaygain_ = reported == audio::ReplayGainMode::track   ? QStringLiteral("track")
+                            : reported == audio::ReplayGainMode::album ? QStringLiteral("album")
+                                                                       : QStringLiteral("off");
         saveLocalPlaybackModes();
         syncReplayGain();
         view_->refreshLocalPlaybackControls();
@@ -336,7 +332,6 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
         engine_requests_revision_ = state.requests_revision;
         adoptEngineRequests();
     }
-
 }
 
 void Workspace::adoptEngineRequests() {
@@ -346,61 +341,61 @@ void Workspace::adoptEngineRequests() {
     }
     const QPointer self{this};
     const QPointer asked{transport_};
-    transport_->request(
-        QStringLiteral("playback.requests"), protocol::Json{{"details", true}},
-        [self, asked, key = playing->key](core::Result<protocol::Json> answer) {
-            // An engine from before ADR-0269 answers identities only, and is
-            // left as it was: this window states its Up Next to it.
-            if (!self || !answer || asked != self->transport_) {
-                return;
-            }
-            const auto entries = answer->value("entries", protocol::Json::array());
-            if (!entries.empty() && !entries.front().is_object()) {
-                return;
-            }
-            // Rows this window has already keep what it knows of them.
-            std::vector<LocalTrackRow> rows;
-            QString stated;
-            for (const auto& entry : entries) {
-                auto row = EnginePlayback::rowOfEntry(entry);
-                if (!row) {
-                    continue;
-                }
-                const auto& pending = self->playback_.requests.pending();
-                const auto known = std::ranges::find_if(pending, [&row](const auto& held) {
-                    return held.source.entry_id == row->entry_id;
-                });
-                if (known != pending.end()) {
-                    row = known->source;
-                }
-                stated += QString::fromStdString(row->entry_id.to_string());
-                rows.push_back(std::move(*row));
-            }
-            QString shown;
-            for (const auto& held : self->playback_.requests.pending()) {
-                shown += QString::fromStdString(held.source.entry_id.to_string());
-            }
-            const bool first = !self->engine_requests_known_;
-            self->engine_requests_known_ = true;
-            self->engine_requests_ = stated;
-            // Heard for the first time and holding none, while this window
-            // has some -- asked for before the engine answered: they are its
-            // now. Later, an empty Up Next is another client's clearing.
-            if (first && stated.isEmpty() && !shown.isEmpty()) {
-                self->engine_requests_.reset();
-                self->syncEngineRequests();
-                return;
-            }
-            if (shown == stated) {
-                return;
-            }
-            self->playback_.requests.replace(std::move(rows));
-            if (!stated.isEmpty()) {
-                self->up_next_engine_ = key;
-            }
-            self->persistUpNext();
-            self->view_->refreshUpNext();
-        });
+    transport_->request(QStringLiteral("playback.requests"), protocol::Json{{"details", true}},
+                        [self, asked, key = playing->key](core::Result<protocol::Json> answer) {
+                            // An engine from before ADR-0269 answers identities only, and is
+                            // left as it was: this window states its Up Next to it.
+                            if (!self || !answer || asked != self->transport_) {
+                                return;
+                            }
+                            const auto entries = answer->value("entries", protocol::Json::array());
+                            if (!entries.empty() && !entries.front().is_object()) {
+                                return;
+                            }
+                            // Rows this window has already keep what it knows of them.
+                            std::vector<LocalTrackRow> rows;
+                            QString stated;
+                            for (const auto& entry : entries) {
+                                auto row = EnginePlayback::rowOfEntry(entry);
+                                if (!row) {
+                                    continue;
+                                }
+                                const auto& pending = self->playback_.requests.pending();
+                                const auto known =
+                                    std::ranges::find_if(pending, [&row](const auto& held) {
+                                        return held.source.entry_id == row->entry_id;
+                                    });
+                                if (known != pending.end()) {
+                                    row = known->source;
+                                }
+                                stated += QString::fromStdString(row->entry_id.to_string());
+                                rows.push_back(std::move(*row));
+                            }
+                            QString shown;
+                            for (const auto& held : self->playback_.requests.pending()) {
+                                shown += QString::fromStdString(held.source.entry_id.to_string());
+                            }
+                            const bool first = !self->engine_requests_known_;
+                            self->engine_requests_known_ = true;
+                            self->engine_requests_ = stated;
+                            // Heard for the first time and holding none, while this window
+                            // has some -- asked for before the engine answered: they are its
+                            // now. Later, an empty Up Next is another client's clearing.
+                            if (first && stated.isEmpty() && !shown.isEmpty()) {
+                                self->engine_requests_.reset();
+                                self->syncEngineRequests();
+                                return;
+                            }
+                            if (shown == stated) {
+                                return;
+                            }
+                            self->playback_.requests.replace(std::move(rows));
+                            if (!stated.isEmpty()) {
+                                self->up_next_engine_ = key;
+                            }
+                            self->persistUpNext();
+                            self->view_->refreshUpNext();
+                        });
 }
 
 Workspace::NowPlaying Workspace::nowPlaying(const EnginePlayback::State& state) {
@@ -434,7 +429,8 @@ Workspace::NowPlaying Workspace::nowPlaying(const EnginePlayback::State& state) 
         if (!row->album.empty()) {
             auto album = QString::fromStdString(row->album);
             if (row->date.size() >= 4U) {
-                album += QStringLiteral(" (%1)").arg(QString::fromStdString(row->date.substr(0, 4)));
+                album +=
+                    QStringLiteral(" (%1)").arg(QString::fromStdString(row->date.substr(0, 4)));
             }
             parts << album;
         }
@@ -494,8 +490,7 @@ Workspace::OutputSummary Workspace::takeOutputs(const EnginePlayback::State& sta
     }
     if (engine_output_seen_) {
         if (selected_device_available_ && !state.output_available) {
-            view_->showMessage(QStringLiteral("Audio output unavailable · playback paused"),
-                               5'000);
+            view_->showMessage(QStringLiteral("Audio output unavailable · playback paused"), 5'000);
         } else if (!selected_device_available_ && state.output_available &&
                    !state.output_suspended) {
             view_->showMessage(
@@ -516,11 +511,11 @@ Workspace::OutputSummary Workspace::takeOutputs(const EnginePlayback::State& sta
     const auto now = chosen(state.outputs);
     if (engine_output_seen_ && was && now && was->id == now->id && !now->local &&
         was->online != now->online) {
-        view_->showMessage(now->online
-                               ? QStringLiteral("%1 is back").arg(outputLabel(*now))
-                               : QStringLiteral("%1 went away · playback waits for it")
-                                     .arg(outputLabel(*now)),
-                           5'000);
+        view_->showMessage(
+            now->online
+                ? QStringLiteral("%1 is back").arg(outputLabel(*now))
+                : QStringLiteral("%1 went away · playback waits for it").arg(outputLabel(*now)),
+            5'000);
     }
     const auto* playing = linkOf(transport_);
     const auto engine = playing != nullptr ? playing->key : EngineKey::local();
@@ -582,12 +577,11 @@ Workspace::OutputSummary Workspace::takeOutputs(const EnginePlayback::State& sta
     // Where the sound goes, on the button itself: music coming out of another
     // room is not something to have to hover to find out. Named when there is
     // a choice to have made -- an agent, or a device other than the default.
-    const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
-        return !output.local;
-    });
+    const bool agents =
+        std::ranges::any_of(output_choices_, [](const auto& output) { return !output.local; });
     // Nothing chosen yet: the engine's own speakers, by the same name.
-    const auto own = std::ranges::find_if(output_choices_,
-                                          [](const auto& output) { return output.local; });
+    const auto own =
+        std::ranges::find_if(output_choices_, [](const auto& output) { return output.local; });
     const auto engine_name =
         own != output_choices_.end()
             ? outputLabel(*own)
@@ -627,9 +621,8 @@ Workspace::OutputMenu Workspace::outputMenu() const {
     OutputMenu menu;
     // ADR-0228: which of the engine's outputs plays -- shown once there is a
     // choice, which is when an agent has ever registered.
-    menu.speakers_shown = std::ranges::any_of(output_choices_, [](const auto& output) {
-        return !output.local;
-    });
+    menu.speakers_shown =
+        std::ranges::any_of(output_choices_, [](const auto& output) { return !output.local; });
     if (menu.speakers_shown) {
         for (const auto& output : output_choices_) {
             auto label = outputLabel(output);

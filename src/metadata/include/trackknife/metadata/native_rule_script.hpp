@@ -24,7 +24,8 @@ namespace trackknife::metadata {
 // statement only names the typed action it stands for. Picard-style scripts
 // stay the Paste script import (ADR-0065), a separate language.
 [[nodiscard]] MetadataRuleScriptImportResult
-import_native_rule_script(std::string_view source, const MetadataRuleScriptImportLimits& limits = {});
+import_native_rule_script(std::string_view source,
+                          const MetadataRuleScriptImportLimits& limits = {});
 
 [[nodiscard]] core::Result<std::string>
 export_native_rule_script(std::span<const MetadataTransformationAction> actions);

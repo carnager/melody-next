@@ -88,7 +88,6 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     void editCustomBuffer();
     void focusReplayGainPreamp();
 
-
   private:
     void sync();
     void refreshEngines();
@@ -98,8 +97,7 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     void bind(QLineEdit* field, const char* key);
     void bind(QSpinBox* box, const char* key);
     void bind(QDoubleSpinBox* box, const char* key);
-    void bind(QComboBox* box, const std::vector<SettingsSession::Choice>& choices,
-              const char* key);
+    void bind(QComboBox* box, const std::vector<SettingsSession::Choice>& choices, const char* key);
     ShortcutSettings* shortcuts_{};
     SettingsSession* session_{nullptr};
     std::vector<std::function<void()>> syncs_;

@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/bench_main_window.hpp"
 #include "bench/lastfm_service.hpp"
-#include "workspace/lastfm_settings_session.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "workspace/lastfm_settings_session.hpp"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QFormLayout>
-#include <QtConcurrent/QtConcurrentRun>
-#include <QPointer>
 #include <QFutureWatcher>
-#include <QInputDialog>
-#include <QHBoxLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPointer>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -26,6 +25,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
 
 namespace trackknife::bench {
@@ -169,7 +169,8 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     connect(session, &LastFmSettingsSession::enginesChanged, page, sync_engines);
     // Settings shows the reused key too, so its Save cannot overwrite it.
     connect(session, &LastFmSettingsSession::keyReused, page, [parent](const QString& reused) {
-        if (auto* field = parent->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key")))
+        if (auto* field =
+                parent->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key")))
             field->setText(reused);
     });
     connect(key, &QLineEdit::textChanged, session, &LastFmSettingsSession::setKey);
@@ -177,22 +178,21 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     connect(reuse, &QCheckBox::toggled, session, &LastFmSettingsSession::setReuseKey);
     connect(begin, &QPushButton::clicked, session, &LastFmSettingsSession::connectAccount);
     connect(cancel, &QPushButton::clicked, session, &LastFmSettingsSession::stopWaiting);
-    connect(disconnect, &QPushButton::clicked, session,
-            &LastFmSettingsSession::disconnectAccount);
+    connect(disconnect, &QPushButton::clicked, session, &LastFmSettingsSession::disconnectAccount);
     connect(enabled, &QCheckBox::toggled, session, &LastFmSettingsSession::setScrobbling);
     connect(another, &QPushButton::clicked, this, [this, engines, session] {
         bool accepted = false;
-        const auto address = QInputDialog::getText(
-            engines, QStringLiteral("Another engine"),
-            QStringLiteral("Address of the engine (host:port):"), QLineEdit::Normal, {}, &accepted)
-                                 .trimmed();
+        const auto address =
+            QInputDialog::getText(engines, QStringLiteral("Another engine"),
+                                  QStringLiteral("Address of the engine (host:port):"),
+                                  QLineEdit::Normal, {}, &accepted)
+                .trimmed();
         if (!accepted || address.isEmpty()) {
             return;
         }
-        const auto password =
-            QInputDialog::getText(engines, QStringLiteral("Another engine"),
-                                  QStringLiteral("Its password:"),
-                                  QLineEdit::Password, {}, &accepted);
+        const auto password = QInputDialog::getText(engines, QStringLiteral("Another engine"),
+                                                    QStringLiteral("Its password:"),
+                                                    QLineEdit::Password, {}, &accepted);
         if (!accepted) {
             return;
         }

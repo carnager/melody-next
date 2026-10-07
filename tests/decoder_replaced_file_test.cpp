@@ -86,10 +86,11 @@ std::int64_t read_on(formats::AudioDecoder& decoder, std::int64_t next, const st
         CHECK((*chunk)->start_sample == next);
         const auto& samples = (*chunk)->interleaved_samples;
         for (std::size_t index = 0; index < samples.size(); ++index) {
-            const auto expected = static_cast<float>(ramp(next + static_cast<std::int64_t>(index))) / 32768.0F;
+            const auto expected =
+                static_cast<float>(ramp(next + static_cast<std::int64_t>(index))) / 32768.0F;
             if (std::abs(samples[index] - expected) > 1e-4F) {
-                std::cerr << "sample " << next + static_cast<std::int64_t>(index) << " is " << samples[index]
-                          << ", not " << expected << '\n';
+                std::cerr << "sample " << next + static_cast<std::int64_t>(index) << " is "
+                          << samples[index] << ", not " << expected << '\n';
                 ++failures;
                 return -1;
             }

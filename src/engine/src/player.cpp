@@ -506,7 +506,8 @@ bool Player::follow_list(const std::string& list, std::vector<QueueEntry> entrie
         held.insert(entry.entry_id);
     }
     held.insert(fresh.begin(), fresh.end());
-    std::erase_if(entries, [&held](const QueueEntry& entry) { return !held.contains(entry.entry_id); });
+    std::erase_if(entries,
+                  [&held](const QueueEntry& entry) { return !held.contains(entry.entry_id); });
     replace_queue_locked(std::move(entries), list);
     return true;
 }
@@ -766,9 +767,8 @@ core::Result<void> Player::resume() {
         // Stopped: play starts the queue again, from its first entry, as a
         // player's Play does.
         if (queue_.empty()) {
-            return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
-                                               .message = "nothing to play",
-                                               .context = {}});
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::not_found, .message = "nothing to play", .context = {}});
         }
         return start_locked(0U);
     }
@@ -1062,8 +1062,8 @@ Player::State Player::state() const {
         const bool arrived = current.position_ms >= asked_place_->position_ms - 250 &&
                              current.position_ms <= asked_place_->position_ms + since + 500;
         if (asked_place_->output != audition_ ||
-            asked_place_->instance != snapshot.playback_instance || now - asked_place_->at > patience ||
-            arrived) {
+            asked_place_->instance != snapshot.playback_instance ||
+            now - asked_place_->at > patience || arrived) {
             asked_place_.reset();
         } else {
             current.position_ms = asked_place_->position_ms;

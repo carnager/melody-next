@@ -157,8 +157,8 @@ MetadataServices::Throttle MetadataServices::throttle(const long status,
         return {};
     }
     // Unsaid: 2 s, then 4.
-    const auto wait = retry_after_seconds > 0 ? retry_after_seconds
-                                              : std::int64_t{2} << std::min(attempt, 4);
+    const auto wait =
+        retry_after_seconds > 0 ? retry_after_seconds : std::int64_t{2} << std::min(attempt, 4);
     if (attempt >= retries || wait > longest_wait_seconds) {
         return Throttle{.kind = Throttle::Kind::give_up, .seconds = wait};
     }
@@ -222,10 +222,10 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
             break;
         }
         if (next.kind == Throttle::Kind::give_up) {
-            return std::unexpected(service_error(
-                core::ErrorCode::limit_exceeded,
-                "MusicBrainz is busy and asked to wait " + std::to_string(next.seconds) +
-                    " s; try again later"));
+            return std::unexpected(service_error(core::ErrorCode::limit_exceeded,
+                                                 "MusicBrainz is busy and asked to wait " +
+                                                     std::to_string(next.seconds) +
+                                                     " s; try again later"));
         }
         const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{next.seconds};
         while (std::chrono::steady_clock::now() < until) {
@@ -249,9 +249,9 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
         }
     } else if (url.starts_with("https://coverartarchive.org/")) {
         // The archive's other errors are pages, not answers the tagger can show.
-        return std::unexpected(service_error(
-            status == 404 ? core::ErrorCode::not_found : core::ErrorCode::io,
-            "the Cover Art Archive answered " + std::to_string(status)));
+        return std::unexpected(
+            service_error(status == 404 ? core::ErrorCode::not_found : core::ErrorCode::io,
+                          "the Cover Art Archive answered " + std::to_string(status)));
     }
     return body;
 }

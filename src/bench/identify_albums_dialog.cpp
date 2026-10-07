@@ -19,11 +19,11 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QShortcut>
-#include <QTimer>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTextBrowser>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -66,7 +66,8 @@ enum Filter : int { all, needs_you, matched, no_match, waiting };
 }
 
 [[nodiscard]] QString name_of(const Album& album) {
-    return album.artist.isEmpty() ? album.title : album.artist + QStringLiteral(" — ") + album.title;
+    return album.artist.isEmpty() ? album.title
+                                  : album.artist + QStringLiteral(" — ") + album.title;
 }
 
 [[nodiscard]] QString detail_of(const Album& album) {
@@ -139,19 +140,19 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(const std::size_t track_count,
             heading_->setText(loading.isEmpty() ? tagger_->status() : loading);
         }
     });
-    connect(tagger_, &TaggerSession::gridReady, this,
-            [this, service] {
-                pages_->setEnabled(true);
-                bottom_bar_->setEnabled(true);
-                begin(service);
-            },
-            Qt::SingleShotConnection);
+    connect(
+        tagger_, &TaggerSession::gridReady, this,
+        [this, service] {
+            pages_->setEnabled(true);
+            bottom_bar_->setEnabled(true);
+            begin(service);
+        },
+        Qt::SingleShotConnection);
     // What the editor would show: the files a scan could not measure, say.
     connect(tagger_, &TaggerSession::feedbackRequested, this,
             [this](const QString& title, const QString& summary,
-                   std::vector<PreparationFeedbackRow> rows, bool) {
-                createPreparationFeedbackDialog(title, summary, rows, this)->show();
-            });
+                   std::vector<PreparationFeedbackRow> rows,
+                   bool) { createPreparationFeedbackDialog(title, summary, rows, this)->show(); });
     tagger_->start();
 }
 
@@ -186,9 +187,9 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     filter_row->setContentsMargins(0, 0, 0, 0);
     filter_group_ = new QButtonGroup(this);
     filter_group_->setExclusive(true);
-    for (const auto& [id, name] : {std::pair{all, "All"}, std::pair{needs_you, "Needs you"},
-                                   std::pair{matched, "Matched"}, std::pair{no_match, "No match"},
-                                   std::pair{waiting, "Waiting"}}) {
+    for (const auto& [id, name] :
+         {std::pair{all, "All"}, std::pair{needs_you, "Needs you"}, std::pair{matched, "Matched"},
+          std::pair{no_match, "No match"}, std::pair{waiting, "Waiting"}}) {
         auto* button = new QPushButton(filters_);
         button->setCheckable(true);
         button->setObjectName(QStringLiteral("bench-identify-albums-filter-%1").arg(id));
@@ -205,8 +206,8 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     list_ = new QTreeWidget(splitter);
     list_->setObjectName(QStringLiteral("bench-identify-albums-list"));
     list_->setColumnCount(3);
-    list_->setHeaderLabels({QStringLiteral("Album"), QStringLiteral("Files"),
-                            QStringLiteral("State")});
+    list_->setHeaderLabels(
+        {QStringLiteral("Album"), QStringLiteral("Files"), QStringLiteral("State")});
     list_->setRootIsDecorated(false);
     list_->setUniformRowHeights(true);
     list_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -294,9 +295,8 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
     connect(accept_, &QPushButton::clicked, this, &IdentifyAlbumsDialog::accept);
     connect(skip_button, &QPushButton::clicked, this, &IdentifyAlbumsDialog::skip);
     connect(back, &QPushButton::clicked, this, &IdentifyAlbumsDialog::backToList);
-    connect(versions_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
-        showVersion(versions_->indexOfTopLevelItem(item));
-    });
+    connect(versions_, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* item) { showVersion(versions_->indexOfTopLevelItem(item)); });
     layout->addWidget(pages_, 1);
 
     // Write as the tagger's Actions say (ADR-0262).
@@ -357,17 +357,18 @@ IdentifyAlbumsDialog::IdentifyAlbumsDialog(QWidget* parent) : QDialog(parent) {
 
     connect(filter_group_, &QButtonGroup::idClicked, this, &IdentifyAlbumsDialog::sync);
     connect(list_, &QTreeWidget::currentItemChanged, this, &IdentifyAlbumsDialog::showDetail);
-    connect(list_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, const int column) {
-        if (syncing_ || column != 0) {
-            return;
-        }
-        // Later: the list is rebuilt when it changes, and this item with it.
-        const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
-        const auto included = item->checkState(0) == Qt::Checked;
-        QMetaObject::invokeMethod(
-            this, [this, album, included] { session_->setIncluded(album, included); },
-            Qt::QueuedConnection);
-    });
+    connect(list_, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem* item, const int column) {
+                if (syncing_ || column != 0) {
+                    return;
+                }
+                // Later: the list is rebuilt when it changes, and this item with it.
+                const auto album = static_cast<std::size_t>(item->data(0, Qt::UserRole).toInt());
+                const auto included = item->checkState(0) == Qt::Checked;
+                QMetaObject::invokeMethod(
+                    this, [this, album, included] { session_->setIncluded(album, included); },
+                    Qt::QueuedConnection);
+            });
     connect(split_, &QPushButton::clicked, this, [this] {
         if (const auto album = selectedAlbum(); album >= 0) {
             session_->splitByFolder(static_cast<std::size_t>(album));
@@ -424,7 +425,8 @@ int IdentifyAlbumsDialog::selectedAlbum() const {
 }
 
 bool IdentifyAlbumsDialog::shown(const int album) const {
-    return in_filter(session_->albums()[static_cast<std::size_t>(album)], filter_group_->checkedId());
+    return in_filter(session_->albums()[static_cast<std::size_t>(album)],
+                     filter_group_->checkedId());
 }
 
 void IdentifyAlbumsDialog::sync() {
@@ -493,7 +495,8 @@ void IdentifyAlbumsDialog::sync() {
         {waiting, open}};
     for (const auto& [id, count] : counts) {
         auto* button = filter_group_->button(id);
-        button->setText(QStringLiteral("%1 %2").arg(button->property("label").toString()).arg(count));
+        button->setText(
+            QStringLiteral("%1 %2").arg(button->property("label").toString()).arg(count));
     }
 
     // The list, keeping the album looked at. The checkbox: looked up (and
@@ -512,9 +515,9 @@ void IdentifyAlbumsDialog::sync() {
             item->setText(0, name_of(album));
             item->setText(1, detail_of(album));
             auto state = !started ? basis_text(album)
-                          : session_->alreadyTagged(index)
-                              ? QStringLiteral("Matched · already tagged so")
-                              : AlbumBatchSession::stateText(album);
+                         : session_->alreadyTagged(index)
+                             ? QStringLiteral("Matched · already tagged so")
+                             : AlbumBatchSession::stateText(album);
             if (album.excluded && album.state == State::staged) {
                 state += QStringLiteral(" · not to be written");
             }
@@ -565,8 +568,9 @@ void IdentifyAlbumsDialog::sync() {
                           .arg(needing + session_->count(State::failed))
                           .arg(session_->count(State::no_match))
                           .arg(open) +
-                      (tagged_already > 0U ? QStringLiteral(" · %1 already tagged").arg(tagged_already)
-                                           : QString{}));
+                      (tagged_already > 0U
+                           ? QStringLiteral(" · %1 already tagged").arg(tagged_already)
+                           : QString{}));
     showDetail();
     // The review opens by itself, once, as soon as an album needs a person.
     if (!reviewed_ && pages_->currentIndex() == 0 && !busy) {
@@ -591,11 +595,11 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
         place += albums[index].state == State::needs_choice ? 1U : 0U;
     }
     // Why it is back, when it was accepted before and could not be staged.
-    review_heading_->setText(
-        QStringLiteral("<b>%1</b> · %2%3")
-            .arg(escaped(name_of(entry)), escaped(detail_of(entry)),
-                 entry.note.isEmpty() ? QString{}
-                                      : QStringLiteral("<br>%1").arg(escaped(entry.note))));
+    review_heading_->setText(QStringLiteral("<b>%1</b> · %2%3")
+                                 .arg(escaped(name_of(entry)), escaped(detail_of(entry)),
+                                      entry.note.isEmpty()
+                                          ? QString{}
+                                          : QStringLiteral("<br>%1").arg(escaped(entry.note))));
     review_place_->setText(QStringLiteral("%1 of %2 needing you")
                                .arg(place)
                                .arg(session_->count(State::needs_choice)));
@@ -621,11 +625,13 @@ void IdentifyAlbumsDialog::review(const std::size_t album) {
             item->setText(4, QString::fromStdString(release.catalog_number));
             item->setText(5, format_of(release));
             item->setText(6, QString::number(candidate.alignment.release_tracks.size()));
-            item->setText(7, QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0)));
+            item->setText(
+                7, QStringLiteral("%1%").arg(qRound(candidate.alignment.confidence * 100.0)));
             item->setTextAlignment(6, Qt::AlignRight | Qt::AlignVCenter);
             item->setTextAlignment(7, Qt::AlignRight | Qt::AlignVCenter);
-            item->setToolTip(0, QStringLiteral("MusicBrainz release %1")
-                                    .arg(QString::fromStdString(release.id)));
+            item->setToolTip(
+                0,
+                QStringLiteral("MusicBrainz release %1").arg(QString::fromStdString(release.id)));
             // Roomy rows, each cell as wide as its text.
             for (int column = 0; column < versions_->columnCount(); ++column) {
                 item->setSizeHint(
@@ -680,17 +686,18 @@ void IdentifyAlbumsDialog::showVersion(const int version) {
         match_ = nullptr;
     }
     auto files = session_->filesOf(*reviewing_);
-    match_ = new TrackMatchSession(
-        album.result->candidates[static_cast<std::size_t>(version)].release,
-        std::move(files.descriptors), std::move(files.paths), std::move(files.items), this,
-        std::move(files.other_albums));
+    match_ =
+        new TrackMatchSession(album.result->candidates[static_cast<std::size_t>(version)].release,
+                              std::move(files.descriptors), std::move(files.paths),
+                              std::move(files.items), this, std::move(files.other_albums));
     connect(match_, &TrackMatchSession::accepted, this,
             [this](metadata::MetadataProposalSet proposals) {
                 if (reviewing_) {
-                    session_->choose(*reviewing_,
-                                     static_cast<std::size_t>(std::max(
-                                         0, versions_->indexOfTopLevelItem(versions_->currentItem()))),
-                                     std::move(proposals));
+                    session_->choose(
+                        *reviewing_,
+                        static_cast<std::size_t>(
+                            std::max(0, versions_->indexOfTopLevelItem(versions_->currentItem()))),
+                        std::move(proposals));
                     reviewNext();
                 }
             });
@@ -772,8 +779,7 @@ bool IdentifyAlbumsDialog::mayClose() {
                QStringLiteral("%1 %2 staged but not written. Close and drop them?")
                    .arg(staged)
                    .arg(staged == 1U ? QStringLiteral("album is") : QStringLiteral("albums are")),
-               QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel) ==
-           QMessageBox::Close;
+               QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Close;
 }
 
 // Closed from the window's frame: asked once, in reject() -- QDialog's own
@@ -822,22 +828,25 @@ void IdentifyAlbumsDialog::showDetail() {
                          escaped(QString::fromStdString(release.date)),
                          escaped(QString::fromStdString(release.country)))
                     .arg(alignment.release_tracks.size());
-        html += QStringLiteral("<p>Why %1:</p>")
-                    .arg(best.clear ? QStringLiteral("it matched") : QStringLiteral("it needs you"));
+        html +=
+            QStringLiteral("<p>Why %1:</p>")
+                .arg(best.clear ? QStringLiteral("it matched") : QStringLiteral("it needs you"));
         html += check(alignment.release_tracks.size() == album.items.size() &&
                           alignment.matched_count == album.items.size(),
                       QStringLiteral("%1 files, %2 tracks, %3 paired")
                           .arg(album.items.size())
                           .arg(alignment.release_tracks.size())
                           .arg(alignment.matched_count));
-        html += check(alignment.durations_compared == album.items.size() &&
-                          alignment.worst_duration_delta_ms <= rule.maximum_duration_delta_ms,
-                      alignment.durations_compared == 0U
-                          ? QStringLiteral("No lengths to compare")
-                          : QStringLiteral("Lengths within %1 s (%2 of %3 compared)")
-                                .arg(static_cast<double>(alignment.worst_duration_delta_ms) / 1000.0, 0, 'f', 1)
-                                .arg(alignment.durations_compared)
-                                .arg(album.items.size()));
+        html +=
+            check(alignment.durations_compared == album.items.size() &&
+                      alignment.worst_duration_delta_ms <= rule.maximum_duration_delta_ms,
+                  alignment.durations_compared == 0U
+                      ? QStringLiteral("No lengths to compare")
+                      : QStringLiteral("Lengths within %1 s (%2 of %3 compared)")
+                            .arg(static_cast<double>(alignment.worst_duration_delta_ms) / 1000.0, 0,
+                                 'f', 1)
+                            .arg(alignment.durations_compared)
+                            .arg(album.items.size()));
         html += check(alignment.weakest_title >= rule.minimum_title_similarity,
                       QStringLiteral("Titles at least %1% alike")
                           .arg(qRound(alignment.weakest_title * 100.0)));

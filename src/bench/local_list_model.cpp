@@ -1111,7 +1111,8 @@ namespace {
     auto disc = metadata_value(row.metadata, {"discnumber", "disc"});
     disc = disc.substr(0, disc.find('/'));
     const auto first = disc.find_first_not_of(" 0");
-    return first == std::string::npos ? std::string{} : disc.substr(first, disc.find_last_not_of(' ') - first + 1);
+    return first == std::string::npos ? std::string{}
+                                      : disc.substr(first, disc.find_last_not_of(' ') - first + 1);
 }
 
 } // namespace
@@ -1146,7 +1147,8 @@ QString LocalListModel::discStart(const int row) const {
         return {};
     }
     auto label = QStringLiteral("Disc ") + display_utf8(disc);
-    if (const auto subtitle = metadata_value(rows_[at].metadata, {"discsubtitle", "setsubtitle"}); !subtitle.empty()) {
+    if (const auto subtitle = metadata_value(rows_[at].metadata, {"discsubtitle", "setsubtitle"});
+        !subtitle.empty()) {
         label += QStringLiteral(" · ") + display_utf8(subtitle);
     }
     return label;

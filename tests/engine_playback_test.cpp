@@ -29,8 +29,6 @@
 #include "trackknife/protocol/message.hpp"
 #include "uicommon/track_row_roles.hpp"
 
-#include <QSignalSpy>
-#include <QStatusBar>
 #include <QAction>
 #include <QComboBox>
 #include <QDir>
@@ -39,10 +37,12 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
-#include <QTabBar>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QSlider>
 #include <QStandardPaths>
+#include <QStatusBar>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -472,14 +472,13 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
 
     // Changed on the engine by another client: the window takes it, rather
     // than showing -- and one day sending back -- its own old setting.
-    auto other = protocol::Client::connect(protocol::Endpoint{
-        .socket = socket.string(), .host = {}, .port = 0, .token = {}});
+    auto other = protocol::Client::connect(
+        protocol::Endpoint{.socket = socket.string(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
     QVERIFY((*other)
-                ->call("playback.set_replay_gain",
-                       protocol::Json{{"mode", "track"},
-                                      {"preamp_with_gain_db", 0.0},
-                                      {"preamp_without_gain_db", 0.0}})
+                ->call("playback.set_replay_gain", protocol::Json{{"mode", "track"},
+                                                                  {"preamp_with_gain_db", 0.0},
+                                                                  {"preamp_without_gain_db", 0.0}})
                 .has_value());
     auto* track_gain = window.findChild<QAction*>(QStringLiteral("action-local-replaygain-track"));
     QVERIFY(track_gain != nullptr);
@@ -733,8 +732,7 @@ void EnginePlaybackTest::aSameSizeReplacementElsewhereReachesTheList() {
 
     QTRY_VERIFY2_WITH_TIMEOUT(model->rowOfEntry(third.entry_id, -1) >= 0 &&
                                   model->rowOfEntry(fourth.entry_id, -1) >= 0,
-                              "the window still shows the list another client replaced",
-                              10'000);
+                              "the window still shows the list another client replaced", 10'000);
     QCOMPARE(model->rowCount(), 2);
     // What plays of it is marked at once -- not only when the next track
     // starts -- though the entry the window knew as playing is gone.
@@ -872,7 +870,9 @@ void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
     // The tags travel with the sample, not just the path: a scrobble without
     // an artist and a title is not a scrobble.
     const auto credited = [&window, &title] {
-        const auto sample = window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString();
+        const auto sample = window.findChild<trackknife::bench::Workspace*>()
+                                ->property("trackknife-lastfm-sample")
+                                .toString();
         return sample.contains(title) && !sample.startsWith(QLatin1Char('|'));
     };
     QTRY_VERIFY2_WITH_TIMEOUT(credited(), "nothing was credited while the engine played", 5'000);
@@ -1039,8 +1039,8 @@ void EnginePlaybackTest::aNewWindowShowsTheEnginesSavedAsks() {
         QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
         emit view->doubleClicked(model->index(0, 0));
         QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
-        view->selectionModel()->select(
-            model->index(1, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        view->selectionModel()->select(model->index(1, 0), QItemSelectionModel::ClearAndSelect |
+                                                               QItemSelectionModel::Rows);
         auto* queue_next = window.findChild<QAction*>(QStringLiteral("action-queue-next"));
         QVERIFY(queue_next != nullptr);
         queue_next->trigger();
@@ -1348,8 +1348,7 @@ void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
         window.findChild<QMenu*>(QStringLiteral("bench-tab-context-menu"))->hide();
     };
     choose(QStringLiteral("shipped:random-album"));
-    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().at(list).rule_id == "shipped:random-album",
-                             5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().at(list).rule_id == "shipped:random-album", 5'000);
     QCOMPARE(continuation.all().at(list).groups, 1U);
     QCOMPARE(continuation.all().at(list).per_group, 0U);
     QVERIFY(!continuation.all().at(list).group_by.empty());
@@ -1376,8 +1375,7 @@ void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
     remove->click();
     QTRY_VERIFY_WITH_TIMEOUT(continuation.all().empty(), 5'000);
     QTRY_VERIFY2_WITH_TIMEOUT(!tabs->tabText(0).endsWith(QStringLiteral(" ∞")),
-                              qPrintable(tabs->tabText(0) + QLatin1Char('|') +
-                                         tabs->tabToolTip(0)),
+                              qPrintable(tabs->tabText(0) + QLatin1Char('|') + tabs->tabToolTip(0)),
                               5'000);
 
     (*server)->stop();
@@ -1433,4 +1431,3 @@ void EnginePlaybackTest::anEngineOfAnotherProtocolIsNotUsedAndAnOlderOneIsSaidTo
 
 QTEST_MAIN(trackknife::bench::EnginePlaybackTest)
 #include "engine_playback_test.moc"
-

@@ -9,7 +9,6 @@ extern "C" {
 
 #include <attachedpictureframe.h>
 #include <fileref.h>
-#include <tfilestream.h>
 #include <flacfile.h>
 #include <flacpicture.h>
 #include <id3v2tag.h>
@@ -18,6 +17,7 @@ extern "C" {
 #include <mp4item.h>
 #include <mp4tag.h>
 #include <mpegfile.h>
+#include <tfilestream.h>
 
 #include <algorithm>
 #include <array>

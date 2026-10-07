@@ -6,8 +6,8 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/lists_panel.hpp"
-#include "workspace/lists_catalog.hpp"
 #include "bench/playback_tab_widget.hpp"
+#include "workspace/lists_catalog.hpp"
 
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -135,8 +135,8 @@ void BenchMainWindow::presentListsPanel() {
     }
     std::vector<ListsPanel::Group> groups;
     for (const auto& group : lists_catalog_->groups()) {
-        ListsPanel::Group shown{.name = group.name, .engine = group.engine, .lists = {},
-                                .note = group.note};
+        ListsPanel::Group shown{
+            .name = group.name, .engine = group.engine, .lists = {}, .note = group.note};
         for (const auto& list : group.lists) {
             shown.lists.push_back({.id = list.id,
                                    .name = list.name,

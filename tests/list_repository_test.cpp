@@ -2042,11 +2042,12 @@ void engine_lists_are_edited_in_place() {
             "a list to edit");
 
     // Taken from the middle: the rest keep their places.
-    auto removed = repository.edit_engine_list(
-        id, 1U,
-        {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[2].entry_id}, .items = {},
-                  .after = {}}},
-        2);
+    auto removed = repository.edit_engine_list(id, 1U,
+                                               {ListEdit{.kind = ListEdit::Kind::remove,
+                                                         .entries = {items[2].entry_id},
+                                                         .items = {},
+                                                         .after = {}}},
+                                               2);
     const std::vector expected_after_removal{items[0], items[1], items[3], items[4]};
     require(removed && removed->summary.revision == 2U && removed->items == expected_after_removal,
             "a removal answers the list as it is, at the next revision");
@@ -2060,7 +2061,9 @@ void engine_lists_are_edited_in_place() {
     auto changed = repository.edit_engine_list(
         id, 2U,
         {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {fresh}, .after = {}},
-         ListEdit{.kind = ListEdit::Kind::move, .entries = {items[4].entry_id}, .items = {},
+         ListEdit{.kind = ListEdit::Kind::move,
+                  .entries = {items[4].entry_id},
+                  .items = {},
                   .after = fresh.entry_id}},
         3);
     const std::vector expected{fresh, items[4], items[0], items[1], items[3]};
@@ -2069,22 +2072,26 @@ void engine_lists_are_edited_in_place() {
             "inserts and moves apply in order");
     // After a gap left by the removal, positions are still in order: a
     // removal and an insert in the same list read back as written.
-    auto after_gap = repository.edit_engine_list(
-        id, 3U,
-        {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[0].entry_id}, .items = {},
-                  .after = {}},
-         ListEdit{.kind = ListEdit::Kind::move, .entries = {fresh.entry_id}, .items = {},
-                  .after = items[3].entry_id}},
-        4);
+    auto after_gap = repository.edit_engine_list(id, 3U,
+                                                 {ListEdit{.kind = ListEdit::Kind::remove,
+                                                           .entries = {items[0].entry_id},
+                                                           .items = {},
+                                                           .after = {}},
+                                                  ListEdit{.kind = ListEdit::Kind::move,
+                                                           .entries = {fresh.entry_id},
+                                                           .items = {},
+                                                           .after = items[3].entry_id}},
+                                                 4);
     require(after_gap && (*repository.load_engine_list(id))->items ==
                              std::vector{items[4], items[1], items[3], fresh},
             "a mixed edit is stored in its order");
 
-    auto stale = repository.edit_engine_list(
-        id, 2U,
-        {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[1].entry_id}, .items = {},
-                  .after = {}}},
-        5);
+    auto stale = repository.edit_engine_list(id, 2U,
+                                             {ListEdit{.kind = ListEdit::Kind::remove,
+                                                       .entries = {items[1].entry_id},
+                                                       .items = {},
+                                                       .after = {}}},
+                                             5);
     require(!stale && stale.error().code == ErrorCode::conflict,
             "an edit against an old revision is a conflict");
 
@@ -2096,51 +2103,60 @@ void engine_lists_are_edited_in_place() {
     tail_two.raw_path = "/music/tail-2.flac";
     persistence::EngineListItem tail_three;
     tail_three.raw_path = "/music/tail-3.flac";
-    auto appended = repository.edit_engine_list(
-        id, 4U,
-        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_one, tail_two},
-                  .after = fresh.entry_id},
-         ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_three},
-                  .after = tail_two.entry_id}},
-        5);
-    const std::vector after_appends{items[4], items[1], items[3], fresh, tail_one, tail_two,
-                                    tail_three};
+    auto appended = repository.edit_engine_list(id, 4U,
+                                                {ListEdit{.kind = ListEdit::Kind::insert,
+                                                          .entries = {},
+                                                          .items = {tail_one, tail_two},
+                                                          .after = fresh.entry_id},
+                                                 ListEdit{.kind = ListEdit::Kind::insert,
+                                                          .entries = {},
+                                                          .items = {tail_three},
+                                                          .after = tail_two.entry_id}},
+                                                5);
+    const std::vector after_appends{items[4], items[1], items[3],  fresh,
+                                    tail_one, tail_two, tail_three};
     require(appended && appended->items == after_appends &&
                 (*repository.load_engine_list(id))->items == after_appends,
             "appends land at the end");
-    auto quiet = repository.edit_engine_list(
-        id, 5U,
-        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_one},
-                  .after = tail_three.entry_id}},
-        6, std::nullopt, std::nullopt, false);
+    auto quiet = repository.edit_engine_list(id, 5U,
+                                             {ListEdit{.kind = ListEdit::Kind::insert,
+                                                       .entries = {},
+                                                       .items = {tail_one},
+                                                       .after = tail_three.entry_id}},
+                                             6, std::nullopt, std::nullopt, false);
     require(!quiet && (*repository.load_engine_list(id))->items == after_appends,
             "an append of an entry already held is refused, nothing written");
     persistence::EngineListItem tail_four;
     tail_four.raw_path = "/music/tail-4.flac";
-    auto without = repository.edit_engine_list(
-        id, 5U,
-        {ListEdit{.kind = ListEdit::Kind::insert, .entries = {}, .items = {tail_four},
-                  .after = tail_three.entry_id}},
-        6, std::nullopt, std::nullopt, false);
+    auto without = repository.edit_engine_list(id, 5U,
+                                               {ListEdit{.kind = ListEdit::Kind::insert,
+                                                         .entries = {},
+                                                         .items = {tail_four},
+                                                         .after = tail_three.entry_id}},
+                                               6, std::nullopt, std::nullopt, false);
     require(without && without->items.empty() && without->summary.tracks == 8U,
             "without items asked for, only the summary comes back");
     // A move near the end rewrites from there; the order read back is right.
-    auto near_end = repository.edit_engine_list(
-        id, 6U,
-        {ListEdit{.kind = ListEdit::Kind::move, .entries = {tail_four.entry_id}, .items = {},
-                  .after = fresh.entry_id}},
-        7);
-    const std::vector after_move{items[4], items[1], items[3], fresh, tail_four, tail_one,
-                                 tail_two, tail_three};
+    auto near_end = repository.edit_engine_list(id, 6U,
+                                                {ListEdit{.kind = ListEdit::Kind::move,
+                                                          .entries = {tail_four.entry_id},
+                                                          .items = {},
+                                                          .after = fresh.entry_id}},
+                                                7);
+    const std::vector after_move{items[4],  items[1], items[3], fresh,
+                                 tail_four, tail_one, tail_two, tail_three};
     require(near_end && (*repository.load_engine_list(id))->items == after_move,
             "a move keeps the lead in place and writes the rest in order");
-    auto unknown = repository.edit_engine_list(
-        id, 7U,
-        {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[1].entry_id}, .items = {},
-                  .after = {}},
-         ListEdit{.kind = ListEdit::Kind::remove, .entries = {StableId::random()}, .items = {},
-                  .after = {}}},
-        5);
+    auto unknown = repository.edit_engine_list(id, 7U,
+                                               {ListEdit{.kind = ListEdit::Kind::remove,
+                                                         .entries = {items[1].entry_id},
+                                                         .items = {},
+                                                         .after = {}},
+                                                ListEdit{.kind = ListEdit::Kind::remove,
+                                                         .entries = {StableId::random()},
+                                                         .items = {},
+                                                         .after = {}}},
+                                               5);
     require(!unknown && unknown.error().code == ErrorCode::not_found &&
                 (*repository.load_engine_list(id))->items.size() == 8U &&
                 (*repository.load_engine_lists()).front().revision == 7U,
@@ -2262,10 +2278,11 @@ void a_workspace_save_writes_only_what_changed() {
     {
         auto repository = persistence::ListRepository::open(database_path);
         require(repository.has_value(), "the repository opens");
-        require(repository->save_workspace(std::vector<persistence::ListDocumentWrite>{
-                                               {.document = big, .items = true},
-                                               {.document = small, .items = true},
-                                               {.document = gone, .items = true}})
+        require(repository
+                    ->save_workspace(std::vector<persistence::ListDocumentWrite>{
+                        {.document = big, .items = true},
+                        {.document = small, .items = true},
+                        {.document = gone, .items = true}})
                     .has_value(),
                 "a first save writes every list");
 
@@ -2275,15 +2292,14 @@ void a_workspace_save_writes_only_what_changed() {
         header.items.clear();
         header.name = "Big, renamed";
         small.items.push_back(item("/music/b.flac", "B"));
-        require(repository->save_workspace(std::vector<persistence::ListDocumentWrite>{
-                                               {.document = small, .items = true},
-                                               {.document = header, .items = false}})
+        require(repository
+                    ->save_workspace(std::vector<persistence::ListDocumentWrite>{
+                        {.document = small, .items = true}, {.document = header, .items = false}})
                     .has_value(),
                 "a save with one list's header only");
         auto loaded = repository->load_all();
         require(loaded.has_value() && loaded->size() == 2U, "the closed list is gone");
-        require((*loaded)[0].id == small_id && (*loaded)[1].id == big_id,
-                "the lists trade places");
+        require((*loaded)[0].id == small_id && (*loaded)[1].id == big_id, "the lists trade places");
         require((*loaded)[1].name == "Big, renamed", "a header change is written");
         require((*loaded)[1].items.size() == 50U &&
                     (*loaded)[1].items[49].source_reference == "/music/49.flac",
@@ -2343,10 +2359,10 @@ void a_saved_lists_draft_is_saved_into_it() {
     require(repository.draft_engine_list(working_id, StableId::random(), 1'100).error().code ==
                 ErrorCode::invalid_argument,
             "a working list has no draft");
-    require(repository.draft_engine_list(StableId::random(), StableId::random(), 1'100)
-                    .error()
-                    .code == ErrorCode::not_found,
-            "nor does a list that is not there");
+    require(
+        repository.draft_engine_list(StableId::random(), StableId::random(), 1'100).error().code ==
+            ErrorCode::not_found,
+        "nor does a list that is not there");
 
     const auto draft_id = StableId::random();
     auto draft = repository.draft_engine_list(saved_id, draft_id, 1'100);
@@ -2363,11 +2379,13 @@ void a_saved_lists_draft_is_saved_into_it() {
             "and a draft has none");
 
     // Edited, then saved into the list it drafts.
-    require(repository.edit_engine_list(
-                draft_id, 1U,
-                {ListEdit{.kind = ListEdit::Kind::remove, .entries = {items[0].entry_id},
-                          .items = {}, .after = {}}},
-                1'300, std::string_view{"Kept, shorter"})
+    require(repository
+                .edit_engine_list(draft_id, 1U,
+                                  {ListEdit{.kind = ListEdit::Kind::remove,
+                                            .entries = {items[0].entry_id},
+                                            .items = {},
+                                            .after = {}}},
+                                  1'300, std::string_view{"Kept, shorter"})
                 .has_value(),
             "the draft is edited");
     require((*repository.load_engine_list(saved_id))->items == items,

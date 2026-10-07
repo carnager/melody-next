@@ -6,11 +6,11 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
-#include <memory>
-#include <fstream>
-#include <filesystem>
-#include <array>
 #include <algorithm>
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 
 namespace trackknife::formats {
 namespace {
@@ -117,7 +117,7 @@ namespace {
 constexpr std::uintmax_t track_artwork_limit = 16U * 1024U * 1024U;
 
 std::vector<unsigned char> folder_artwork(const std::string& raw_path,
-                                         const core::CancellationToken& cancellation) {
+                                          const core::CancellationToken& cancellation) {
     const auto directory = std::filesystem::path{raw_path}.parent_path();
     static constexpr std::array names{"cover.jpg",  "cover.jpeg",  "cover.png",
                                       "folder.jpg", "folder.jpeg", "folder.png",

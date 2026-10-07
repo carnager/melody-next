@@ -105,7 +105,7 @@ observed(const std::string& path) {
 
 // The same file a copy was made of: as big, as old (copies keep the time).
 [[nodiscard]] bool copy_of(const core::LocalSourceRevision& found,
-                          const core::LocalSourceRevision& kept) {
+                           const core::LocalSourceRevision& kept) {
     return found.size == kept.size &&
            found.modification_time_seconds == kept.modification_time_seconds &&
            found.modification_time_nanoseconds == kept.modification_time_nanoseconds;

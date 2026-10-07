@@ -251,13 +251,13 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
         // Ending in the name of the file read: shown cut in the middle, the
         // end still says whether it was the file or a copy prepared from it.
         const auto slash = raw_path.find_last_of('/');
-        return std::unexpected(error(
-            core::ErrorCode::conflict,
-            "local source changed while metadata was being read (" +
-                core::describe_revision_change(*revision_before, *revision_after) + ") in " +
-                core::display_raw_path(slash == std::string::npos ? raw_path
-                                                                  : raw_path.substr(slash + 1U)),
-            raw_path));
+        return std::unexpected(
+            error(core::ErrorCode::conflict,
+                  "local source changed while metadata was being read (" +
+                      core::describe_revision_change(*revision_before, *revision_after) + ") in " +
+                      core::display_raw_path(
+                          slash == std::string::npos ? raw_path : raw_path.substr(slash + 1U)),
+                  raw_path));
     }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(raw_path));
@@ -350,18 +350,16 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
     return sources;
 }
 
-core::Result<CapturedMetadataSources>
-capture_metadata_sources(std::vector<StagedMetadataSource> sources,
-                         const MetadataFileAccess& access,
-                         const core::CancellationToken& cancellation,
-                         const MetadataCaptureProgress& progress) {
+core::Result<CapturedMetadataSources> capture_metadata_sources(
+    std::vector<StagedMetadataSource> sources, const MetadataFileAccess& access,
+    const core::CancellationToken& cancellation, const MetadataCaptureProgress& progress) {
     // Each file once, however often it is listed.
     std::vector<std::string> wanted;
     {
         std::set<std::string> seen;
         for (const auto& source : sources) {
-            if (source.needs_metadata_capture && !source.source_revision &&
-                !source.logical_track && seen.insert(source.raw_path).second) {
+            if (source.needs_metadata_capture && !source.source_revision && !source.logical_track &&
+                seen.insert(source.raw_path).second) {
                 wanted.push_back(source.raw_path);
             }
         }
@@ -439,8 +437,7 @@ capture_metadata_sources(std::vector<StagedMetadataSource> sources,
             source.baseline = found->second->document;
             source.needs_metadata_capture = false;
             captured.sources.push_back(std::move(source));
-        } else if (const auto revision = tagless.find(source.raw_path);
-                   revision != tagless.end()) {
+        } else if (const auto revision = tagless.find(source.raw_path); revision != tagless.end()) {
             source.source_revision = revision->second;
             source.needs_metadata_capture = false;
             captured.sources.push_back(std::move(source));

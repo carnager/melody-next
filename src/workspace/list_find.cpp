@@ -319,9 +319,8 @@ void ListFind::finish() {
         } else if (result.row >= 0) {
             searching_ = false;
             emit found(result.row);
-            setStatus(wrapped_
-                                 ? tr("Wrapped · Track %1 of %2").arg(result.row + 1).arg(total_)
-                                 : tr("Track %1 of %2").arg(result.row + 1).arg(total_));
+            setStatus(wrapped_ ? tr("Wrapped · Track %1 of %2").arg(result.row + 1).arg(total_)
+                               : tr("Track %1 of %2").arg(result.row + 1).arg(total_));
         } else {
             if (cursor_ < 0 || cursor_ >= total_) {
                 cursor_ = direction_ < 0 ? total_ - 1 : 0;

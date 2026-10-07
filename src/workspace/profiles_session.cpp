@@ -271,13 +271,13 @@ QString ProfilesSession::summary() const {
     for (const auto& held : held_) {
         destinations += held.destinations.size();
     }
-    auto text = QStringLiteral("%1 naming %2 · %3 move %4")
-                    .arg(layouts_.size())
-                    .arg(layouts_.size() == 1U ? QStringLiteral("layout")
-                                               : QStringLiteral("layouts"))
-                    .arg(destinations)
-                    .arg(destinations == 1U ? QStringLiteral("destination")
-                                            : QStringLiteral("destinations"));
+    auto text =
+        QStringLiteral("%1 naming %2 · %3 move %4")
+            .arg(layouts_.size())
+            .arg(layouts_.size() == 1U ? QStringLiteral("layout") : QStringLiteral("layouts"))
+            .arg(destinations)
+            .arg(destinations == 1U ? QStringLiteral("destination")
+                                    : QStringLiteral("destinations"));
     // One place: which one; more: each lists its own.
     if (places_.size() == 1U) {
         text += QStringLiteral(" on %1").arg(places_.front().name);
@@ -311,12 +311,11 @@ void ProfilesSession::selectLayout(const int row) {
     basename_expression_ = displayText(saved.profile.basename_expression);
     const auto policy = displayText(saved.profile.sanitization_policy.name);
     const auto policies = sanitizationPolicies();
-    sanitization_ = std::ranges::any_of(policies,
-                                        [&policy](const Choice& choice) {
-                                            return choice.value.toString() == policy;
-                                        })
-                        ? policy
-                        : QStringLiteral("linux");
+    sanitization_ =
+        std::ranges::any_of(
+            policies, [&policy](const Choice& choice) { return choice.value.toString() == policy; })
+            ? policy
+            : QStringLiteral("linux");
     emit changed();
 }
 

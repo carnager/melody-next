@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "drag_position.hpp"
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
-#include "bench/trackknife_style.hpp"
-#include "bench/widget_color_scheme.hpp"
-#include "workspace/color_scheme.hpp"
-#include "workspace/interface_scale.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -15,20 +10,14 @@
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/engine_folder_dialog.hpp"
+#include "bench/identify_albums_dialog.hpp"
 #include "bench/lastfm_service.hpp"
-#include "workspace/lastfm_settings_session.hpp"
-#include "workspace/settings_session.hpp"
-#include "trackknife/engine/remote_file_work.hpp"
-#include "workspace/tab_store.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_grid_model.hpp"
-#include "bench/identify_albums_dialog.hpp"
-#include "workspace/identify_session.hpp"
-#include "workspace/album_batch_session.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
@@ -39,11 +28,22 @@
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "bench/trackknife_style.hpp"
 #include "bench/up_next_delegate.hpp"
+#include "bench/widget_color_scheme.hpp"
+#include "drag_position.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
 #include "uicommon/local_files_mime_data.hpp"
+#include "workspace/album_batch_session.hpp"
+#include "workspace/color_scheme.hpp"
+#include "workspace/identify_session.hpp"
+#include "workspace/interface_scale.hpp"
+#include "workspace/lastfm_settings_session.hpp"
+#include "workspace/settings_session.hpp"
+#include "workspace/tab_store.hpp"
 
 #include <signal.h>
 
@@ -73,19 +73,19 @@
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include <QClipboard>
-#include <QElapsedTimer>
 #include <QDateTime>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QKeySequenceEdit>
 #include <QLocale>
 #include <QMimeData>
+#include <QProcess>
 #include <QProxyStyle>
 #include <QStyleFactory>
 #include <QSysInfo>
-#include <QProcess>
 #include <QTcpServer>
 
 #include <QAbstractItemModelTester>
@@ -96,6 +96,7 @@
 #include <QComboBox>
 #include <QCompleter>
 #include <QDataStream>
+#include <QDeadlineTimer>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -117,13 +118,14 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QScopeGuard>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
-#include <QScopeGuard>
-#include <QProgressBar>
 #include <QSignalSpy>
 #include <QSlider>
 #include <QSpinBox>
@@ -135,27 +137,25 @@
 #include <QStyleOptionViewItem>
 #include <QStyledItemDelegate>
 #include <QTabBar>
-#include <QRadioButton>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTextBrowser>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
-#include <QTextBrowser>
 #include <QTreeWidget>
-#include <QDeadlineTimer>
 #include <QtTest>
 
 #include <array>
-#include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
-#include <future>
 #include <fstream>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -546,7 +546,8 @@ void BenchMainWindowTest::initTestCase() {
 // then 1 to 15 again. Each disc's first row now names it -- but only in an
 // album of more than one: a single disc says nothing.
 void BenchMainWindowTest::discsOfAnAlbumAreNamed() {
-    const auto track = [](const char* album, const char* disc, const char* subtitle, const char* title) {
+    const auto track = [](const char* album, const char* disc, const char* subtitle,
+                          const char* title) {
         LocalTrackRow row;
         row.raw_path = std::string{"/music/"} + album + "/" + disc + "/" + title + ".flac";
         row.title = title;
@@ -555,9 +556,12 @@ void BenchMainWindowTest::discsOfAnAlbumAreNamed() {
         row.date = "1997";
         const auto field = [&row](const char* name, const char* value) {
             if (*value != 0) {
-                row.metadata.fields.push_back(metadata::MetadataField{
-                    .canonical_name = name, .native_name = QByteArray{name}.toUpper().toStdString(),
-                    .values = {value}, .qualifier = {}, .provenance = metadata::FieldProvenance::embedded});
+                row.metadata.fields.push_back(
+                    metadata::MetadataField{.canonical_name = name,
+                                            .native_name = QByteArray{name}.toUpper().toStdString(),
+                                            .values = {value},
+                                            .qualifier = {},
+                                            .provenance = metadata::FieldProvenance::embedded});
             }
         };
         field("discnumber", disc);
@@ -574,7 +578,9 @@ void BenchMainWindowTest::discsOfAnAlbumAreNamed() {
         track("The Bends", "1", "", "Planet Telex"),
         track("The Bends", "1", "", "The Bends"),
     });
-    const auto disc = [&model](const int row) { return model.index(row, 0).data(ui::track_disc_start_role).toString(); };
+    const auto disc = [&model](const int row) {
+        return model.index(row, 0).data(ui::track_disc_start_role).toString();
+    };
     QCOMPARE(disc(0), QStringLiteral("Disc 1"));
     QCOMPARE(disc(1), QString{});
     QCOMPARE(disc(2), QStringLiteral("Disc 2 · B-sides"));
@@ -968,20 +974,20 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     read.raw_path = "/music/Quicksand/01.flac";
     read.probed = true;
     read.source_revision = core::LocalSourceRevision{.device = 1, .inode = 3};
-    read.metadata.fields.push_back(metadata::MetadataField{
-        .canonical_name = "musicbrainzalbumid",
-        .native_name = "MUSICBRAINZ_ALBUMID",
-        .values = {"dd034d22"},
-        .qualifier = {},
-        .provenance = metadata::FieldProvenance::embedded});
+    read.metadata.fields.push_back(
+        metadata::MetadataField{.canonical_name = "musicbrainzalbumid",
+                                .native_name = "MUSICBRAINZ_ALBUMID",
+                                .values = {"dd034d22"},
+                                .qualifier = {},
+                                .provenance = metadata::FieldProvenance::embedded});
     LocalTrackRow unread = described;
     unread.raw_path = "/music/Other/01.flac";
     unread.source_revision.reset();
     tab->model->replaceRows({described, read, unread});
-    const auto reader = window.selectionSourceReader(
-        tab->model, {QPersistentModelIndex{tab->model->index(0, 0)},
-                     QPersistentModelIndex{tab->model->index(1, 0)},
-                     QPersistentModelIndex{tab->model->index(2, 0)}});
+    const auto reader =
+        window.selectionSourceReader(tab->model, {QPersistentModelIndex{tab->model->index(0, 0)},
+                                                  QPersistentModelIndex{tab->model->index(1, 0)},
+                                                  QPersistentModelIndex{tab->model->index(2, 0)}});
     const auto first = reader(0U);
     const auto second = reader(1U);
     const auto third = reader(2U);
@@ -1011,16 +1017,15 @@ void BenchMainWindowTest::upNextFromAnotherClientShows() {
     const auto entry = core::StableId::random().to_string();
     QVERIFY((*client)
                 ->call("playback.enqueue",
-                       protocol::Json{{"entries",
-                                       protocol::Json::array(
-                                           {protocol::Json{{"entry", entry},
-                                                           {"path", protocol::encode_raw_path(raw)},
-                                                           {"title", "Asked elsewhere"},
-                                                           {"group",
-                                                            {{"album_artist", "Someone"},
-                                                             {"artist", "Someone"},
-                                                             {"album", "Elsewhere"},
-                                                             {"date", "2026"}}}}})}})
+                       protocol::Json{{"entries", protocol::Json::array({protocol::Json{
+                                                      {"entry", entry},
+                                                      {"path", protocol::encode_raw_path(raw)},
+                                                      {"title", "Asked elsewhere"},
+                                                      {"group",
+                                                       {{"album_artist", "Someone"},
+                                                        {"artist", "Someone"},
+                                                        {"album", "Elsewhere"},
+                                                        {"date", "2026"}}}}})}})
                 .has_value());
     QVERIFY((*client)
                 ->call("playback.set_requests",
@@ -1134,11 +1139,10 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
     for (int row = 0; row < pages->count(); ++row) {
         titles << pages->item(row)->text();
     }
-    QCOMPARE(titles.mid(0, 7),
-             (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
-                          QStringLiteral("Library"), QStringLiteral("Engine"),
-                          QStringLiteral("File operations"), QStringLiteral("Ratings"),
-                          QStringLiteral("Covers")}));
+    QCOMPARE(titles.mid(0, 7), (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
+                                            QStringLiteral("Library"), QStringLiteral("Engine"),
+                                            QStringLiteral("File operations"),
+                                            QStringLiteral("Ratings"), QStringLiteral("Covers")}));
     QCOMPARE(titles, SettingsSession::pageTitles().mid(0, titles.size()));
     // A tab of File operations opens that page at the tab.
     auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
@@ -1170,7 +1174,8 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
     // Library: the engine picker, not needed with this computer alone.
     auto* picker = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-library-engine"));
     QVERIFY(picker != nullptr);
-    QCOMPARE(page_of("bench-settings-library-engine"), static_cast<int>(SettingsDialog::Page::library));
+    QCOMPARE(page_of("bench-settings-library-engine"),
+             static_cast<int>(SettingsDialog::Page::library));
     QCOMPARE(picker->count(), 1);
     QVERIFY(!picker->isVisibleTo(dialog));
     dialog->close();
@@ -1295,18 +1300,18 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
     // FFmpeg reports the same tag as "encoder". It is one tag, and must not
     // come back as a second, stream-only field that no edit can touch.
     metadata::MetadataDocument document;
-    document.fields.push_back(metadata::MetadataField{.canonical_name = "encoding",
-                                                      .native_name = "ENCODING",
-                                                      .values = {"Lavf61.5.101"},
-                                                      .qualifier = {},
-                                                      .provenance =
-                                                          metadata::FieldProvenance::embedded});
-    document.fields.push_back(metadata::MetadataField{.canonical_name = "encoder",
-                                                      .native_name = "encoder",
-                                                      .values = {"Lavf61.5.101", "Lavc61.11"},
-                                                      .qualifier = {},
-                                                      .provenance =
-                                                          metadata::FieldProvenance::stream});
+    document.fields.push_back(
+        metadata::MetadataField{.canonical_name = "encoding",
+                                .native_name = "ENCODING",
+                                .values = {"Lavf61.5.101"},
+                                .qualifier = {},
+                                .provenance = metadata::FieldProvenance::embedded});
+    document.fields.push_back(
+        metadata::MetadataField{.canonical_name = "encoder",
+                                .native_name = "encoder",
+                                .values = {"Lavf61.5.101", "Lavc61.11"},
+                                .qualifier = {},
+                                .provenance = metadata::FieldProvenance::stream});
     remove_shadowed_probed_metadata(document);
     QCOMPARE(document.fields.size(), std::size_t{1});
     QCOMPARE(document.fields.front().canonical_name, std::string{"encoding"});
@@ -1362,7 +1367,8 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     // The library panel's Recently added -- a view (ADR-0254): albums, the
     // new one first.
     window.localLibrary()->refreshLibrary();
-    auto* views = window.localLibrary()->findChild<QComboBox*>(QStringLiteral("local-library-view"));
+    auto* views =
+        window.localLibrary()->findChild<QComboBox*>(QStringLiteral("local-library-view"));
     QVERIFY(views != nullptr);
     const auto choose = [views](const QString& id) {
         const auto index = views->findData(id);
@@ -1376,12 +1382,18 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     const auto first = tree->model()->index(0, 0).data(library_entry_role);
     QVERIFY(first.isValid());
     QCOMPARE(first.value<persistence::LibraryEntry>().kind, persistence::LibraryEntryKind::album);
-    QVERIFY(first.value<persistence::LibraryEntry>().added >
-            tree->model()->index(1, 0).data(library_entry_role).value<persistence::LibraryEntry>().added);
+    QVERIFY(first.value<persistence::LibraryEntry>().added > tree->model()
+                                                                 ->index(1, 0)
+                                                                 .data(library_entry_role)
+                                                                 .value<persistence::LibraryEntry>()
+                                                                 .added);
     choose(QStringLiteral("artist-album"));
     QTRY_VERIFY(tree->model()->rowCount() >= 1 &&
-                tree->model()->index(0, 0).data(library_entry_role).value<persistence::LibraryEntry>().kind ==
-                    persistence::LibraryEntryKind::artist);
+                tree->model()
+                        ->index(0, 0)
+                        .data(library_entry_role)
+                        .value<persistence::LibraryEntry>()
+                        .kind == persistence::LibraryEntryKind::artist);
     QSettings{}.remove(QStringLiteral("library/newest-first"));
     QSettings{}.remove(QStringLiteral("library/view"));
 }
@@ -1442,7 +1454,8 @@ void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
     action->trigger();
     QuickPickPopup* popup = nullptr;
     for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
-        if (candidate->isVisible() && candidate->objectName() == QStringLiteral("bench-quick-track")) {
+        if (candidate->isVisible() &&
+            candidate->objectName() == QStringLiteral("bench-quick-track")) {
             popup = candidate;
         }
     }
@@ -1516,8 +1529,9 @@ void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
     QVERIFY(tab != nullptr && EngineKey::of(tab->document).isLocal());
     tab->model->replaceRows({}, true);
     // A word of the album and its year, in any case.
-    const auto words = QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0).toUpper() +
-                       QStringLiteral(" ") + QString::fromStdString(album.date);
+    const auto words =
+        QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0).toUpper() +
+        QStringLiteral(" ") + QString::fromStdString(album.date);
 
     const auto open = [&window]() -> QuickPickPopup* {
         window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
@@ -1584,9 +1598,11 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     window.localLibrary()->refreshLibrary();
     auto* tree = window.localLibrary()->findChild<QTreeView*>();
     QVERIFY(tree != nullptr);
-    QTRY_VERIFY(tree->model()->rowCount() > 0 &&
-                tree->model()->index(0, 0).data(Qt::DisplayRole).toString().contains(
-                    QStringLiteral("Trackknife")));
+    QTRY_VERIFY(tree->model()->rowCount() > 0 && tree->model()
+                                                     ->index(0, 0)
+                                                     .data(Qt::DisplayRole)
+                                                     .toString()
+                                                     .contains(QStringLiteral("Trackknife")));
 
     // Dragged from the library onto Up Next: queued with its tags.
     window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
@@ -1653,10 +1669,10 @@ void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
     QVERIFY(!window.now_playing_cover_->pixmap().isNull());
 
     // Playing: the cover of that entry's album, from the tab that has it.
-    window.refreshHeaderCover(QString::fromStdString(tab->model->rows().front().entry_id.to_string()));
+    window.refreshHeaderCover(
+        QString::fromStdString(tab->model->rows().front().entry_id.to_string()));
     QCOMPARE(window.header_cover_key_, group);
-    QCOMPARE(window.now_playing_cover_->pixmap().deviceIndependentSize().toSize(),
-             QSize(44, 44));
+    QCOMPARE(window.now_playing_cover_->pixmap().deviceIndependentSize().toSize(), QSize(44, 44));
 }
 
 // The desktop -- notifications, media keys -- names what plays as the header
@@ -1762,8 +1778,8 @@ void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
     QVERIFY(at(seek).right() < at(volume).left());
     QVERIFY(at(volume).right() < at(device).left());
     QVERIFY(at(device).right() < at(up_next).left());
-    for (const auto* widget : std::initializer_list<const QWidget*>{cover, transport, volume, device,
-                                                                   up_next}) {
+    for (const auto* widget :
+         std::initializer_list<const QWidget*>{cover, transport, volume, device, up_next}) {
         QVERIFY(std::abs(at(widget).center().y() - at(seek).center().y()) <= 1);
     }
     QVERIFY(header->height() <= 64);
@@ -1926,14 +1942,13 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     QTRY_VERIFY(listed(first).has_value());
     QCOMPARE(listed(first)->value("kind", std::string{}), std::string{"working"});
 
-    auto* tab = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Party",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                            .kind = persistence::ListKind::scratch,
+                                                            .name = "Party",
+                                                            .pinned = false,
+                                                            .dirty = false,
+                                                            .items = {}},
+                                  true);
     const auto id = tab->document.id.to_string();
     tab->model->appendRows(rows(3));
     window.markTabDirty(*tab);
@@ -1959,14 +1974,14 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     QCOMPARE(listed(id)->value("tracks", 0), 3);
 
     // A working list's tab closed: gone from the engine. A saved one stays.
-    auto* scratch = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Scratch",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* scratch =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Scratch",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
     const auto scratch_id = scratch->document.id.to_string();
     scratch->model->appendRows(rows(1));
     window.persistNow(false);
@@ -2000,8 +2015,8 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     QVERIFY(engine.has_value());
     const auto summary = [&engine](const std::string& id) -> protocol::Json {
         auto all = (*engine)->call("list.all");
-        for (const auto& list : all ? all->value("lists", protocol::Json::array())
-                                    : protocol::Json::array()) {
+        for (const auto& list :
+             all ? all->value("lists", protocol::Json::array()) : protocol::Json::array()) {
             if (list.value("id", std::string{}) == id) {
                 return list;
             }
@@ -2011,8 +2026,8 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     const auto entries = [&engine](const std::string& id) {
         std::vector<std::string> found;
         auto got = (*engine)->call("list.get", protocol::Json{{"id", id}});
-        for (const auto& item : got ? got->value("items", protocol::Json::array())
-                                    : protocol::Json::array()) {
+        for (const auto& item :
+             got ? got->value("items", protocol::Json::array()) : protocol::Json::array()) {
             found.push_back(item.value("entry", std::string{}));
         }
         return found;
@@ -2027,14 +2042,13 @@ void BenchMainWindowTest::listsTravelAsEdits() {
 
     // 8,000 tracks, over two megabytes of list: more than the engine takes
     // in one line, so it arrives in batches.
-    auto* tab = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Long",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                            .kind = persistence::ListKind::scratch,
+                                                            .name = "Long",
+                                                            .pinned = false,
+                                                            .dirty = false,
+                                                            .items = {}},
+                                  true);
     const auto id = tab->document.id.to_string();
     std::vector<LocalTrackRow> made;
     for (int index = 0; index < 8'000; ++index) {
@@ -2081,7 +2095,8 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     QVERIFY(queue.has_value());
     const auto& held = queue->at("entries");
     QCOMPARE(held.size(), std::size_t{8'000});
-    QCOMPARE(held.at(10).value("entry", std::string{}), tab->model->rows()[10].entry_id.to_string());
+    QCOMPARE(held.at(10).value("entry", std::string{}),
+             tab->model->rows()[10].entry_id.to_string());
     QCOMPARE(held.at(10).at("group").value("album_artist", std::string{}), std::string{"Someone"});
     QCOMPARE(summary(id).value("revision", std::uint64_t{0}), made_at + 1U);
 
@@ -2135,14 +2150,13 @@ void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
         return got ? got->value("revision", std::uint64_t{0}) : std::uint64_t{0};
     };
 
-    auto* tab = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Shared",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                            .kind = persistence::ListKind::scratch,
+                                                            .name = "Shared",
+                                                            .pinned = false,
+                                                            .dirty = false,
+                                                            .items = {}},
+                                  true);
     const auto id = tab->document.id.to_string();
     const auto qid = QString::fromStdString(id);
     LocalTrackRow row;
@@ -2154,11 +2168,11 @@ void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
     QTRY_VERIFY(!window.list_sync_->busy());
 
     // Changed elsewhere: the tab shows it.
-    QVERIFY((*other)->call("list.save",
-                           protocol::Json{{"id", id},
-                                          {"name", "Shared, renamed"},
-                                          {"items", listItems({"/music/shared/a.flac",
-                                                               "/music/shared/b.flac"})}}));
+    QVERIFY((*other)->call(
+        "list.save",
+        protocol::Json{{"id", id},
+                       {"name", "Shared, renamed"},
+                       {"items", listItems({"/music/shared/a.flac", "/music/shared/b.flac"})}}));
     QTRY_COMPARE(rowPaths(*tab->model),
                  (std::vector<std::string>{"/music/shared/a.flac", "/music/shared/b.flac"}));
     QCOMPARE(displayText(tab->document.name), QStringLiteral("Shared, renamed"));
@@ -2167,8 +2181,9 @@ void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
     // Saved here, then saved elsewhere, then edited here and saved: asked.
     tab->document.kind = persistence::ListKind::saved;
     window.persistNow(false);
-    QTRY_COMPARE((*other)->call("list.get", protocol::Json{{"id", id}})->value("kind", std::string{}),
-                 std::string{"saved"});
+    QTRY_COMPARE(
+        (*other)->call("list.get", protocol::Json{{"id", id}})->value("kind", std::string{}),
+        std::string{"saved"});
     QTRY_VERIFY(!window.list_sync_->busy());
     const auto theirs = revision(id);
     QVERIFY((*other)->call("list.save",
@@ -2231,14 +2246,14 @@ void BenchMainWindowTest::aListChangedWhileClosedIsTakenUpOnOpening() {
         window.show();
         QTRY_VERIFY(window.lists_restored_);
         QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
-        auto* tab = window.addListTab(
-            persistence::ListDocument{.id = core::StableId::random(),
-                                      .kind = persistence::ListKind::saved,
-                                      .name = "Kept",
-                                      .pinned = false,
-                                      .dirty = false,
-                                      .items = {}},
-            true);
+        auto* tab =
+            window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                        .kind = persistence::ListKind::saved,
+                                                        .name = "Kept",
+                                                        .pinned = false,
+                                                        .dirty = false,
+                                                        .items = {}},
+                              true);
         id = tab->document.id.to_string();
         LocalTrackRow row;
         row.raw_path = "/music/kept/old.flac";
@@ -2285,11 +2300,11 @@ void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
-    auto made = (*other)->call(
-        "list.save", protocol::Json{{"name", "From elsewhere"},
-                                    {"kind", "saved"},
-                                    {"items", listItems({"/music/elsewhere/1.flac",
-                                                         "/music/elsewhere/2.flac"})}});
+    auto made = (*other)->call("list.save",
+                               protocol::Json{{"name", "From elsewhere"},
+                                              {"kind", "saved"},
+                                              {"items", listItems({"/music/elsewhere/1.flac",
+                                                                   "/music/elsewhere/2.flac"})}});
     QVERIFY(made.has_value());
     const auto id = made->value("id", std::string{});
 
@@ -2348,14 +2363,15 @@ void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
     auto items = listItems({raw, "/music/not-indexed/outside.flac"});
     items[0]["title"] = "Saved title";
     items[1]["title"] = "Outside";
-    auto made = (*other)->call("list.save", protocol::Json{{"name", "Described"},
-                                                           {"kind", "saved"},
-                                                           {"items", std::move(items)}});
+    auto made = (*other)->call(
+        "list.save",
+        protocol::Json{{"name", "Described"}, {"kind", "saved"}, {"items", std::move(items)}});
     QVERIFY(made.has_value());
-    window.openEngineList(EngineKey::local(), QString::fromStdString(made->value("id", std::string{})));
+    window.openEngineList(EngineKey::local(),
+                          QString::fromStdString(made->value("id", std::string{})));
     auto* tab = static_cast<BenchMainWindow::ListTab*>(nullptr);
-    QTRY_VERIFY((tab = window.tabForDocument(QString::fromStdString(made->value("id", std::string{})))) !=
-                nullptr);
+    QTRY_VERIFY((tab = window.tabForDocument(
+                     QString::fromStdString(made->value("id", std::string{})))) != nullptr);
     QTRY_COMPARE(tab->model->rowCount(), 2);
     const auto& rows = tab->model->rows();
     // The names it was saved with first, then the library's.
@@ -2368,8 +2384,7 @@ void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
     // Named as the library folds them, as a search's rows are.
     QVERIFY2(names.contains(QStringLiteral("musicbrainztrackid")), qPrintable(names.join(u',')));
     QVERIFY(rows[0].source_revision.has_value());
-    QCOMPARE(rows[0].source_revision->size,
-             static_cast<std::uint64_t>(QFileInfo{file}.size()));
+    QCOMPARE(rows[0].source_revision->size, static_cast<std::uint64_t>(QFileInfo{file}.size()));
     QCOMPARE(rows[1].title, std::string{"Outside"});
     QVERIFY(!rows[1].source_revision.has_value());
 
@@ -2380,9 +2395,9 @@ void BenchMainWindowTest::aListFromTheEngineCarriesItsLibraryTags() {
         many.push_back("/music/not-indexed/" + std::to_string(index) + ".flac");
     }
     many.push_back(raw);
-    auto long_list = (*other)->call("list.save", protocol::Json{{"name", "Long"},
-                                                                {"kind", "saved"},
-                                                                {"items", listItems(many)}});
+    auto long_list = (*other)->call(
+        "list.save",
+        protocol::Json{{"name", "Long"}, {"kind", "saved"}, {"items", listItems(many)}});
     QVERIFY(long_list.has_value());
     const auto long_id = QString::fromStdString(long_list->value("id", std::string{}));
     window.openEngineList(EngineKey::local(), long_id);
@@ -2408,17 +2423,17 @@ void BenchMainWindowTest::aMoveIsFollowedInListsNotOpenHere() {
     auto other = connect_other();
     QVERIFY(other.has_value());
     auto made = (*other)->call(
-        "list.save", protocol::Json{{"name", "Not open here"},
-                                    {"kind", "saved"},
-                                    {"items", listItems({"/music/moving/a.flac",
-                                                         "/music/moving/b.flac"})}});
+        "list.save",
+        protocol::Json{{"name", "Not open here"},
+                       {"kind", "saved"},
+                       {"items", listItems({"/music/moving/a.flac", "/music/moving/b.flac"})}});
     QVERIFY(made.has_value());
     const auto id = made->value("id", std::string{});
     const auto paths = [&other, &id] {
         std::vector<std::string> found;
         auto got = (*other)->call("list.get", protocol::Json{{"id", id}});
-        for (const auto& item : got ? got->value("items", protocol::Json::array())
-                                    : protocol::Json::array()) {
+        for (const auto& item :
+             got ? got->value("items", protocol::Json::array()) : protocol::Json::array()) {
             found.push_back(*protocol::decode_raw_path(item.value("path", std::string{})));
         }
         return found;
@@ -2470,14 +2485,13 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     persistence::LibraryScanProgress progress;
     QVERIFY(catalogue->scan({}, progress).has_value());
 
-    auto* chosen = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::saved,
-                                  .name = "Chosen",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        false);
+    auto* chosen = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                               .kind = persistence::ListKind::saved,
+                                                               .name = "Chosen",
+                                                               .pinned = false,
+                                                               .dirty = false,
+                                                               .items = {}},
+                                     false);
     auto* current = window.currentListTab();
     QVERIFY(current != nullptr && current != chosen);
     const auto chosen_id = QString::fromStdString(chosen->document.id.to_string());
@@ -2502,8 +2516,7 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
 
     // Or into a new list, called what it was named.
     const auto tabs_before = window.list_tabs_.size();
-    emit window.localLibrary()->browser().newListRequested(page->entries,
-                                                           QStringLiteral("Picked"));
+    emit window.localLibrary()->browser().newListRequested(page->entries, QStringLiteral("Picked"));
     QTRY_COMPARE(window.list_tabs_.size(), tabs_before + 1U);
     auto* picked = window.list_tabs_.back().get();
     QCOMPARE(picked->document.name, std::string{"Picked"});
@@ -2556,14 +2569,14 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     auto* remote_tab = window.remoteQueueTab();
     QVERIFY(remote_tab != nullptr);
-    auto* local_tab = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Added later",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        false);
+    auto* local_tab =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Added later",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          false);
     auto* bar = window.tabs_->tabBar();
     const auto remote_at = [&] { return window.tabs_->indexOf(remote_tab->view); };
     const auto local_at = [&] { return window.tabs_->indexOf(local_tab->view); };
@@ -2588,9 +2601,10 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     const auto music = music_dir.path();
     QVERIFY(QDir{}.mkpath(music + QStringLiteral("/album")));
     write_wave(music + QStringLiteral("/album/one.wav"), wave_sample_rate);
-    QSettings{}.setValue(QLatin1String(BenchMainWindow::lists_display_key), QStringLiteral("panel"));
-    const auto restore = qScopeGuard(
-        [] { QSettings{}.remove(QLatin1String(BenchMainWindow::lists_display_key)); });
+    QSettings{}.setValue(QLatin1String(BenchMainWindow::lists_display_key),
+                         QStringLiteral("panel"));
+    const auto restore =
+        qScopeGuard([] { QSettings{}.remove(QLatin1String(BenchMainWindow::lists_display_key)); });
     BenchMainWindow window;
     window.resize(1200, 700);
     window.show();
@@ -2604,8 +2618,8 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     QVERIFY(engine.has_value());
     const auto make = [&engine](const std::string& name) {
         const auto made = (*engine)->call(
-            "list.save", protocol::Json{{"name", name}, {"kind", "saved"},
-                                        {"items", protocol::Json::array()}});
+            "list.save",
+            protocol::Json{{"name", name}, {"kind", "saved"}, {"items", protocol::Json::array()}});
         return made ? QString::fromStdString(made->value("id", std::string{})) : QString{};
     };
     const auto elsewhere = make("Elsewhere");
@@ -2656,10 +2670,12 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     QTRY_VERIFY(panel->itemFor(target) != nullptr);
     const auto at = panel->visualItemRect(panel->itemFor(target)).center();
     auto* viewport = panel->viewport();
-    QDragEnterEvent enter{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton,
+                          Qt::NoModifier};
     QApplication::sendEvent(viewport, &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QDragMoveEvent move{dragPosition(at), Qt::CopyAction, mime.get(), Qt::LeftButton,
+                        Qt::NoModifier};
     QApplication::sendEvent(viewport, &move);
     QVERIFY(move.isAccepted());
     QDropEvent drop{QPointF{at}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -2692,14 +2708,14 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
                                               return list.value("id", std::string{}) == id;
                                           });
     };
-    auto* scratch = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Scratch",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* scratch =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Scratch",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
     const auto id = scratch->document.id.to_string();
     LocalTrackRow row;
     row.raw_path = "/music/scratch.flac";
@@ -2711,7 +2727,8 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
     window.closeTabAt(window.tabs_->indexOf(scratch->view));
     window.persistNow(false);
     QTRY_VERIFY(!listed(id));
-    QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    QTRY_VERIFY(
+        QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
 
@@ -2733,14 +2750,14 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
                                               return list.value("id", std::string{}) == id;
                                           });
     };
-    auto* scratch = window.addListTab(
-        persistence::ListDocument{.id = core::StableId::random(),
-                                  .kind = persistence::ListKind::scratch,
-                                  .name = "Scratch",
-                                  .pinned = false,
-                                  .dirty = false,
-                                  .items = {}},
-        true);
+    auto* scratch =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Scratch",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
     const auto id = scratch->document.id.to_string();
     LocalTrackRow row;
     row.raw_path = "/music/one.flac";
@@ -2772,9 +2789,10 @@ void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
-    const auto made = (*engine)->call(
-        "list.save", protocol::Json{{"name", "Closed long ago"}, {"kind", "working"},
-                                    {"items", protocol::Json::array()}});
+    const auto made =
+        (*engine)->call("list.save", protocol::Json{{"name", "Closed long ago"},
+                                                    {"kind", "working"},
+                                                    {"items", protocol::Json::array()}});
     QVERIFY(made.has_value());
     const auto id = made->value("id", std::string{});
     QSettings{}.setValue(QStringLiteral("lists/pending-removals"),
@@ -2791,7 +2809,8 @@ void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     window.show();
     QTRY_VERIFY(window.lists_restored_);
     QTRY_VERIFY(!listed());
-    QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    QTRY_VERIFY(
+        QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
 
@@ -3171,7 +3190,8 @@ void BenchMainWindowTest::aPasswordGivenLaterReachesTheEngine() {
     };
     QTRY_VERIFY2_WITH_TIMEOUT(
         std::ranges::contains(roots(), folder),
-        qPrintable(link.library->findChild<QLabel*>(QStringLiteral("local-library-status"))->text()),
+        qPrintable(
+            link.library->findChild<QLabel*>(QStringLiteral("local-library-status"))->text()),
         5'000);
     saveRemoteEngines({});
     QSettings{}.remove(QLatin1String(SettingsDialog::engine_password_key));
@@ -4519,8 +4539,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     // one edited below.
     QTRY_COMPARE(layout_list->topLevelItemCount(), 1);
     QCOMPARE(layout_list->topLevelItem(0)->text(0), QStringLiteral("Albums"));
-    QVERIFY(layout_list->topLevelItem(0)->text(1).endsWith(
-        QStringLiteral("%tracknumber% - %title%")));
+    QVERIFY(
+        layout_list->topLevelItem(0)->text(1).endsWith(QStringLiteral("%tracknumber% - %title%")));
     QCOMPARE(layout_list->currentItem(), layout_list->topLevelItem(0));
     QVERIFY(layout_remove->isEnabled());
     QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
@@ -4770,7 +4790,8 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     // A note is a line in the status bar, not a window to close first.
     QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
     QCOMPARE(status.count(), 1);
-    QVERIFY(status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
+    QVERIFY(
+        status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
 }
 
 // ADR-0237: a move destination is a folder on one engine's machine; the
@@ -6150,18 +6171,16 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     constexpr auto release_id = "11111111-2222-3333-4444-555555555555";
     const std::vector sources{
         make_source("/music/Band/Alpha/01.flac",
-                    {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}),
-                     field("TITLE", {"One"}), field("TRACKNUMBER", {"1"}),
-                     field("MUSICBRAINZ_ALBUMID", {release_id})},
+                    {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}), field("TITLE", {"One"}),
+                     field("TRACKNUMBER", {"1"}), field("MUSICBRAINZ_ALBUMID", {release_id})},
                     61'500),
         make_source("/music/Other/Beta/01.flac",
                     {field("ALBUM", {"Beta"}), field("ARTIST", {"Other"}),
                      field("TITLE", {"Something else"}), field("TRACKNUMBER", {"1"})},
                     300'000),
         make_source("/music/Band/Alpha/02.flac",
-                    {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}),
-                     field("TITLE", {"Two"}), field("TRACKNUMBER", {"2"}),
-                     field("MUSICBRAINZ_ALBUMID", {release_id})},
+                    {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}), field("TITLE", {"Two"}),
+                     field("TRACKNUMBER", {"2"}), field("MUSICBRAINZ_ALBUMID", {release_id})},
                     58'800),
         make_source("/music/Other/Beta/02.flac",
                     {field("ALBUM", {"Beta"}), field("ARTIST", {"Other"}),
@@ -6199,12 +6218,11 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     std::vector<QString> asked;
     const MusicBrainzLookupService service{
         .fetch =
-            [&asked](const QString& url,
-                     std::function<void(core::Result<QByteArray>)> completion) {
+            [&asked](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
                 asked.push_back(url);
                 QTimer::singleShot(1, [url, completion = std::move(completion)] {
                     completion(QByteArray{url.contains(QStringLiteral("?query=")) ? search_body
-                                                                                 : lookup_body});
+                                                                                  : lookup_body});
                 });
             },
         .fingerprint = {},
@@ -6221,11 +6239,13 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     QTRY_VERIFY((files = properties->fileListView()) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
     QVERIFY(grid_model != nullptr);
-    auto* open = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    auto* open =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
     QVERIFY(open != nullptr);
     QTRY_VERIFY(open->isEnabled());
     open->click();
-    auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* dialog =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     QVERIFY(dialog != nullptr);
     auto* list = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
     auto* detail = dialog->findChild<QTextBrowser*>(QStringLiteral("bench-identify-albums-detail"));
@@ -6236,9 +6256,9 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     QCOMPARE(list->topLevelItemCount(), 3);
     QCOMPARE(list->topLevelItem(0)->text(0), QStringLiteral("Band — Alpha"));
     QCOMPARE(list->topLevelItem(2)->text(0), QStringLiteral("rip-0412"));
-    for (const auto& [row, basis] : {std::pair{0, "grouped by release id"},
-                                     std::pair{1, "grouped by tags"},
-                                     std::pair{2, "grouped by folder"}}) {
+    for (const auto& [row, basis] :
+         {std::pair{0, "grouped by release id"}, std::pair{1, "grouped by tags"},
+          std::pair{2, "grouped by folder"}}) {
         list->setCurrentItem(list->topLevelItem(row));
         QVERIFY2(detail->toPlainText().contains(QLatin1String(basis)),
                  qPrintable(detail->toPlainText()));
@@ -6251,9 +6271,8 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
                               5'000);
     QTRY_COMPARE(session->count(AlbumBatchSession::State::no_match), std::size_t{1U});
     QCOMPARE(session->count(AlbumBatchSession::State::left_out), std::size_t{1U});
-    QCOMPARE(std::ranges::count_if(asked, [](const QString& url) {
-                 return url.contains(QStringLiteral("?query="));
-             }),
+    QCOMPARE(std::ranges::count_if(
+                 asked, [](const QString& url) { return url.contains(QStringLiteral("?query=")); }),
              1);
     QVERIFY(std::ranges::any_of(asked, [](const QString& url) {
         return url.contains(QStringLiteral("release/11111111-2222-3333-4444-555555555555"));
@@ -6284,10 +6303,10 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
         make_source("/music/Band/Alpha/CD 1/01.flac",
                     {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}), field("TITLE", {"One"})},
                     61'000),
-        make_source("/music/Band/Alpha/CD 2/01.flac",
-                    {field("ALBUM", {"Alpha (CD 2)"}), field("ARTIST", {"Band"}),
-                     field("TITLE", {"Two"})},
-                    59'000)};
+        make_source(
+            "/music/Band/Alpha/CD 2/01.flac",
+            {field("ALBUM", {"Alpha (CD 2)"}), field("ARTIST", {"Band"}), field("TITLE", {"Two"})},
+            59'000)};
     auto* split_dialog = new MetadataPropertiesDialog(
         discs.size(),
         [discs](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
@@ -6301,8 +6320,10 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     open_split->click();
     auto* albums_dialog =
         split_dialog->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
-    auto* albums = albums_dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
-    auto* split = albums_dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-split"));
+    auto* albums =
+        albums_dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-list"));
+    auto* split =
+        albums_dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-split"));
     QCOMPARE(albums->topLevelItemCount(), 1);
     QVERIFY(albums->topLevelItem(0)->text(1).contains(QStringLiteral("2 folders")));
     albums->setCurrentItem(albums->topLevelItem(0));
@@ -6331,11 +6352,11 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
 void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
-    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
-        .socket = QFile::encodeName(engine_.socket()).toStdString(),
-        .host = {},
-        .port = 0,
-        .token = {}});
+    const auto work = std::make_shared<engine::RemoteFileWork>(
+        protocol::Endpoint{.socket = QFile::encodeName(engine_.socket()).toStdString(),
+                           .host = {},
+                           .port = 0,
+                           .token = {}});
     const auto path = media.filePath(QStringLiteral("in/one.flac"));
     QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("in"))));
     QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("chosen"))));
@@ -6367,26 +6388,22 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
             .plan_applier_factory = {},
             .apply_observer = {},
             .transformation_store =
-                MetadataTransformationStore{
-                    .load =
-                        [](MetadataTransformationStore::LoadCompletion completion) {
-                            completion({}, {});
-                        },
-                    .save = {},
-                    .remove = {}},
+                MetadataTransformationStore{.load = [](MetadataTransformationStore::LoadCompletion
+                                                           completion) { completion({}, {}); },
+                                            .save = {},
+                                            .remove = {}},
             .output_profile_store =
-                OutputProfileStore{
-                    .load =
-                        [layouts](OutputProfileStore::LoadCompletion completion) {
-                            completion(layouts, {}, {});
-                        },
-                    .save_layout = {},
-                    .remove_layout = {},
-                    .save_destination = {},
-                    .remove_destination = {},
-                    .destinations_on = {},
-                    .destinations_key = QStringLiteral("chosen-folder-test"),
-                    .places = {}},
+                OutputProfileStore{.load =
+                                       [layouts](OutputProfileStore::LoadCompletion completion) {
+                                           completion(layouts, {}, {});
+                                       },
+                                   .save_layout = {},
+                                   .remove_layout = {},
+                                   .save_destination = {},
+                                   .remove_destination = {},
+                                   .destinations_on = {},
+                                   .destinations_key = QStringLiteral("chosen-folder-test"),
+                                   .places = {}},
             .file_plan_applier_factory =
                 [work] {
                     return FilePublicationPlanApplier{
@@ -6421,7 +6438,8 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
     QTRY_VERIFY(tagger->moveFiles() && tagger->canApply());
     properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"))->click();
     QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 10'000);
-    const auto moved = media.filePath(QStringLiteral("chosen/Trackknife Project/Fixture Tone.flac"));
+    const auto moved =
+        media.filePath(QStringLiteral("chosen/Trackknife Project/Fixture Tone.flac"));
     QVERIFY2(QFile::exists(moved), qPrintable(moved));
     QVERIFY(!QFile::exists(path));
     QSettings{}.remove(QStringLiteral("properties/actions"));
@@ -6432,11 +6450,11 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
 void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
-    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
-        .socket = QFile::encodeName(engine_.socket()).toStdString(),
-        .host = {},
-        .port = 0,
-        .token = {}});
+    const auto work = std::make_shared<engine::RemoteFileWork>(
+        protocol::Endpoint{.socket = QFile::encodeName(engine_.socket()).toStdString(),
+                           .host = {},
+                           .port = 0,
+                           .token = {}});
     const auto raw = [](const QString& path) { return QFile::encodeName(path).toStdString(); };
     const auto wav = media.filePath(QStringLiteral("tone.wav"));
     write_sine_wav_fixture(wav, 0.6);
@@ -6445,19 +6463,20 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
     std::vector<MetadataPropertiesSource> sources;
     for (const auto& [name, album, gain] :
          {std::tuple{"a1.flac", "Measured", ""}, std::tuple{"a2.flac", "Measured", ""},
-          std::tuple{"b1.flac", "Has gain", "-3.00 dB"}, std::tuple{"b2.flac", "Has gain", "-3.00 dB"}}) {
+          std::tuple{"b1.flac", "Has gain", "-3.00 dB"},
+          std::tuple{"b2.flac", "Has gain", "-3.00 dB"}}) {
         const auto path = media.filePath(QLatin1String(name));
         convert::AudioConversionRequest request{};
         request.source_raw_path = raw(wav);
         request.preset = *preset;
         request.destination_raw_path = raw(path);
         const auto field = [](const char* native, const char* value) {
-            return metadata::MetadataField{
-                .canonical_name = metadata::canonicalize_field_name(native),
-                .native_name = native,
-                .values = {value},
-                .qualifier = {},
-                .provenance = metadata::FieldProvenance::embedded};
+            return metadata::MetadataField{.canonical_name =
+                                               metadata::canonicalize_field_name(native),
+                                           .native_name = native,
+                                           .values = {value},
+                                           .qualifier = {},
+                                           .provenance = metadata::FieldProvenance::embedded};
         };
         request.metadata.fields = {field("ALBUM", album), field("ARTIST", "Band"),
                                    field("TITLE", name)};
@@ -6517,13 +6536,10 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
                 },
             .apply_observer = {},
             .transformation_store =
-                MetadataTransformationStore{
-                    .load =
-                        [](MetadataTransformationStore::LoadCompletion completion) {
-                            completion({}, {});
-                        },
-                    .save = {},
-                    .remove = {}},
+                MetadataTransformationStore{.load = [](MetadataTransformationStore::LoadCompletion
+                                                           completion) { completion({}, {}); },
+                                            .save = {},
+                                            .remove = {}},
             .output_profile_store = {},
             .file_plan_applier_factory = {},
             .file_apply_observer = {},
@@ -6578,11 +6594,11 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto library = media.filePath(QStringLiteral("library"));
-    const auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
-        .socket = QFile::encodeName(engine_.socket()).toStdString(),
-        .host = {},
-        .port = 0,
-        .token = {}});
+    const auto work = std::make_shared<engine::RemoteFileWork>(
+        protocol::Endpoint{.socket = QFile::encodeName(engine_.socket()).toStdString(),
+                           .host = {},
+                           .port = 0,
+                           .token = {}});
     const auto raw = [](const QString& path) {
         const auto encoded = QFile::encodeName(path);
         return std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
@@ -6640,16 +6656,15 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     }
     std::vector<MetadataPropertiesSource> sources;
     for (const auto* artist : {"Band", "Cover", "Third"}) {
-        const auto folder = QStringLiteral("%1/incoming/%2 - Alpha").arg(library, QLatin1String(artist));
+        const auto folder =
+            QStringLiteral("%1/incoming/%2 - Alpha").arg(library, QLatin1String(artist));
         QVERIFY(QDir{}.mkpath(folder));
         for (const auto& [number, title, length] :
              {std::tuple{"1", "One", 61'000}, std::tuple{"2", "Two", 59'000}}) {
             const auto path = raw(QStringLiteral("%1/0%2.flac").arg(folder, QLatin1String(number)));
             QVERIFY(QFile::copy(tone, QString::fromStdString(path)));
-            std::vector<std::pair<std::string, std::string>> tags{{"ALBUM", "Alpha"},
-                                                                  {"ARTIST", artist},
-                                                                  {"TITLE", title},
-                                                                  {"TRACKNUMBER", number}};
+            std::vector<std::pair<std::string, std::string>> tags{
+                {"ALBUM", "Alpha"}, {"ARTIST", artist}, {"TITLE", title}, {"TRACKNUMBER", number}};
             // Cover has gain already.
             if (std::string_view{artist} == "Cover") {
                 tags.emplace_back("REPLAYGAIN_ALBUM_GAIN", "-1.00 dB");
@@ -6704,9 +6719,8 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                                             .arg(release(artist))
                                             .toUtf8()
                                       : release(artist).toUtf8();
-                QTimer::singleShot(1, [body, completion = std::move(completion)] {
-                    completion(body);
-                });
+                QTimer::singleShot(
+                    1, [body, completion = std::move(completion)] { completion(body); });
             },
         .fingerprint = {},
         .acoustid_lookup = {},
@@ -6714,18 +6728,17 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     const auto layout = [](std::string name, std::string folder, std::string file) {
         return persistence::SavedOutputLayoutProfile{
             .id = core::StableId::random(),
-            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
-                                                       .name = std::move(name),
-                                                       .dialect = {},
-                                                       .relative_directory_expression =
-                                                           std::move(folder),
-                                                       .basename_expression = std::move(file),
-                                                       .sanitization_policy = {"linux", 1U}}};
+            .profile =
+                operations::OutputLayoutProfile{.schema_version = 1U,
+                                                .name = std::move(name),
+                                                .dialect = {},
+                                                .relative_directory_expression = std::move(folder),
+                                                .basename_expression = std::move(file),
+                                                .sanitization_policy = {"linux", 1U}}};
     };
     // The file name of one, the folders of the other.
     const std::vector layouts{
-        layout("By title", "", "%title%"),
-        layout("Artist folders", "%artist%/%album%", "%title%"),
+        layout("By title", "", "%title%"), layout("Artist folders", "%artist%/%album%", "%title%"),
         // As long as one in use: it may not widen the window.
         layout("Albumartist/Date Album/{CD}/Track-Title",
                "$if2(%albumartist%,%artist%)/$if(%date%,$left(%date%,4) ,)%album%$if($or($gt("
@@ -6749,26 +6762,22 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                 },
             .apply_observer = {},
             .transformation_store =
-                MetadataTransformationStore{
-                    .load =
-                        [](MetadataTransformationStore::LoadCompletion completion) {
-                            completion({}, {});
-                        },
-                    .save = {},
-                    .remove = {}},
+                MetadataTransformationStore{.load = [](MetadataTransformationStore::LoadCompletion
+                                                           completion) { completion({}, {}); },
+                                            .save = {},
+                                            .remove = {}},
             .output_profile_store =
-                OutputProfileStore{
-                    .load =
-                        [layouts](OutputProfileStore::LoadCompletion completion) {
-                            completion(layouts, {}, {});
-                        },
-                    .save_layout = {},
-                    .remove_layout = {},
-                    .save_destination = {},
-                    .remove_destination = {},
-                    .destinations_on = {},
-                    .destinations_key = {},
-                    .places = {}},
+                OutputProfileStore{.load =
+                                       [layouts](OutputProfileStore::LoadCompletion completion) {
+                                           completion(layouts, {}, {});
+                                       },
+                                   .save_layout = {},
+                                   .remove_layout = {},
+                                   .save_destination = {},
+                                   .remove_destination = {},
+                                   .destinations_on = {},
+                                   .destinations_key = {},
+                                   .places = {}},
             .file_plan_applier_factory =
                 [work] {
                     return FilePublicationPlanApplier{
@@ -6857,10 +6866,11 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     const auto band_tags = metadata::read_local_metadata(band_file);
     QVERIFY(band_tags.has_value());
     const auto value_of = [](const metadata::MetadataDocument& document, std::string_view name) {
-        const auto found = std::ranges::find(document.fields, metadata::canonicalize_field_name(name),
-                                             &metadata::MetadataField::canonical_name);
+        const auto found =
+            std::ranges::find(document.fields, metadata::canonicalize_field_name(name),
+                              &metadata::MetadataField::canonical_name);
         return found == document.fields.end() || found->values.empty() ? std::string{}
-                                                                        : found->values.front();
+                                                                       : found->values.front();
     };
     QCOMPARE(value_of(band_tags->document, "MUSICBRAINZ_ALBUMID"),
              ids.at(QStringLiteral("Band")).toStdString());
@@ -6904,11 +6914,13 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QVERIFY(retag(sources[4].source.raw_path, {{"COMMENT", "changed elsewhere"}}));
     QTRY_VERIFY(write->isEnabled());
     write->click();
-    QTRY_VERIFY_WITH_TIMEOUT(session->albums()[cover].state == AlbumBatchSession::State::written ||
-                                 session->albums()[cover].note.contains(QStringLiteral("not written")),
-                             20'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        session->albums()[cover].state == AlbumBatchSession::State::written ||
+            session->albums()[cover].note.contains(QStringLiteral("not written")),
+        20'000);
     QVERIFY2(session->albums()[cover].state == AlbumBatchSession::State::written,
-             qPrintable(AlbumBatchSession::stateText(session->albums()[cover]) + QStringLiteral(" | ") +
+             qPrintable(AlbumBatchSession::stateText(session->albums()[cover]) +
+                        QStringLiteral(" | ") +
                         AlbumBatchSession::stateText(session->albums()[third])));
     QTRY_VERIFY(!tagger->writingElsewhere());
     const auto moved = library + QStringLiteral("/Cover/Alpha/One.flac");
@@ -7003,7 +7015,8 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                  QStringLiteral("Matched · already tagged so"));
     QTRY_COMPARE(state_shown(again_of(QStringLiteral("Cover"))),
                  QStringLiteral("Matched · already tagged so"));
-    auto* write_again = again->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
+    auto* write_again =
+        again->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-write"));
     QTRY_COMPARE(write_again->text(), QStringLiteral("Write 1 album"));
     auto* summary = again->findChild<QLabel*>(QStringLiteral("bench-identify-albums-summary"));
     QVERIFY(summary != nullptr);
@@ -7127,14 +7140,15 @@ void BenchMainWindowTest::identifyAlbumsStagesAlongsideAutomaticScripts() {
                 metadata::StagedMetadataSource{
                     .raw_path = std::move(path),
                     .source_revision = std::nullopt,
-                    .baseline = metadata::MetadataDocument{
-                        .fields = {field("ALBUM", {"Alpha"}), field("ARTIST", {artist}),
-                                   field("TITLE", {title}), field("TRACKNUMBER", {number}),
-                                   field("DATE", {"2001-05-05"}),
-                                   // Totals twice, under both their names.
-                                   field("TRACKTOTAL", {"2"}), field("TOTALTRACKS", {"2"}),
-                                   field("DISCTOTAL", {"1"}), field("TOTALDISCS", {"1"})},
-                        .unsupported_native_objects = {}}},
+                    .baseline =
+                        metadata::MetadataDocument{
+                            .fields = {field("ALBUM", {"Alpha"}), field("ARTIST", {artist}),
+                                       field("TITLE", {title}), field("TRACKNUMBER", {number}),
+                                       field("DATE", {"2001-05-05"}),
+                                       // Totals twice, under both their names.
+                                       field("TRACKTOTAL", {"2"}), field("TOTALTRACKS", {"2"}),
+                                       field("DISCTOTAL", {"1"}), field("TOTALDISCS", {"1"})},
+                            .unsupported_native_objects = {}}},
             .track_label = {},
             .duration_ms = length,
         };
@@ -7176,15 +7190,13 @@ void BenchMainWindowTest::identifyAlbumsStagesAlongsideAutomaticScripts() {
                         artist = name;
                     }
                 }
-                const auto body =
-                    url.contains(QStringLiteral("?query="))
-                        ? QStringLiteral(R"({"count": 1, "releases": [%1]})")
-                              .arg(release(artist, ids.at(artist)))
-                              .toUtf8()
-                        : release(artist, ids.at(artist)).toUtf8();
-                QTimer::singleShot(1, [body, completion = std::move(completion)] {
-                    completion(body);
-                });
+                const auto body = url.contains(QStringLiteral("?query="))
+                                      ? QStringLiteral(R"({"count": 1, "releases": [%1]})")
+                                            .arg(release(artist, ids.at(artist)))
+                                            .toUtf8()
+                                      : release(artist, ids.at(artist)).toUtf8();
+                QTimer::singleShot(
+                    1, [body, completion = std::move(completion)] { completion(body); });
             },
         .fingerprint = {},
         .acoustid_lookup = {},
@@ -7202,9 +7214,10 @@ void BenchMainWindowTest::identifyAlbumsStagesAlongsideAutomaticScripts() {
         .automatic = true,
     }};
     const MetadataTransformationStore scripts{
-        .load = [chains](MetadataTransformationStore::LoadCompletion completion) {
-            completion(chains, {});
-        },
+        .load =
+            [chains](MetadataTransformationStore::LoadCompletion completion) {
+                completion(chains, {});
+            },
         .save = {},
         .remove = {},
     };
@@ -7219,10 +7232,12 @@ void BenchMainWindowTest::identifyAlbumsStagesAlongsideAutomaticScripts() {
     QTRY_VERIFY((files = properties->fileListView()) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
     auto* tagger = properties->findChild<TaggerSession*>();
-    auto* open = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    auto* open =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
     QTRY_VERIFY(open->isEnabled());
     open->click();
-    auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* dialog =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     auto* session = dialog->session();
     QTRY_COMPARE_WITH_TIMEOUT(session->count(AlbumBatchSession::State::staged), std::size_t{3U},
                               10'000);
@@ -7310,9 +7325,8 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
                     body = release(url.contains(QString::fromLatin1(second)) ? second : first)
                                .toUtf8();
                 }
-                QTimer::singleShot(1, [body, completion = std::move(completion)] {
-                    completion(body);
-                });
+                QTimer::singleShot(
+                    1, [body, completion = std::move(completion)] { completion(body); });
             },
         .fingerprint = {},
         .acoustid_lookup = {},
@@ -7327,17 +7341,21 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     QTableView* files = nullptr;
     QTRY_VERIFY((files = properties->fileListView()) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
-    auto* open = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    auto* open =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
     QTRY_VERIFY(open->isEnabled());
     open->click();
-    auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* dialog =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     auto* session = dialog->session();
     QCOMPARE(session->albums().size(), 2U);
     auto* review_next =
         dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-next"));
     // Looked up at once; the first album needing a person opens by itself.
-    auto* heading = dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
-    auto* versions = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-versions"));
+    auto* heading =
+        dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
+    auto* versions =
+        dialog->findChild<QTreeWidget*>(QStringLiteral("bench-identify-albums-versions"));
     QTRY_VERIFY_WITH_TIMEOUT(heading->isVisible(), 5'000);
     QVERIFY(heading->text().contains(QStringLiteral("Band — Alpha")));
     QCOMPARE(versions->topLevelItemCount(), 2);
@@ -7356,9 +7374,9 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     auto* accept =
         dialog->findChild<QPushButton*>(QStringLiteral("bench-identify-albums-review-accept"));
     QTRY_VERIFY(accept->isEnabled());
-    QCOMPARE(dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-status"))
-                 ->text(),
-             QStringLiteral("2 of 2 files paired"));
+    QCOMPARE(
+        dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-status"))->text(),
+        QStringLiteral("2 of 2 files paired"));
     // The matcher's own heading and Stage are the window's here.
     QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"))
                  ->isVisible());
@@ -7447,12 +7465,11 @@ void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
                                .arg(release(first))
                                .toUtf8();
                 } else {
-                    body = release(url.contains(QString::fromLatin1(stray)) ? stray : first)
-                               .toUtf8();
+                    body =
+                        release(url.contains(QString::fromLatin1(stray)) ? stray : first).toUtf8();
                 }
-                QTimer::singleShot(1, [body, completion = std::move(completion)] {
-                    completion(body);
-                });
+                QTimer::singleShot(
+                    1, [body, completion = std::move(completion)] { completion(body); });
             },
         .fingerprint = {},
         .acoustid_lookup = {},
@@ -7467,24 +7484,28 @@ void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
     QTableView* files = nullptr;
     QTRY_VERIFY((files = properties->fileListView()) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
-    auto* open = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
+    auto* open =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums"));
     QTRY_VERIFY(open->isEnabled());
     open->click();
-    auto* dialog = properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
+    auto* dialog =
+        properties->findChild<IdentifyAlbumsDialog*>(QStringLiteral("bench-identify-albums"));
     auto* session = dialog->session();
     // Grouped apart by its release id.
     QCOMPARE(session->albums().size(), 2U);
     QCOMPARE(session->albums()[0].items.size(), 2U);
     QCOMPARE(session->albums()[1].items.size(), 1U);
     // Two files for three tracks: the review opens on the first album.
-    auto* heading = dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
+    auto* heading =
+        dialog->findChild<QLabel*>(QStringLiteral("bench-identify-albums-review-heading"));
     QTRY_VERIFY_WITH_TIMEOUT(heading->isVisible(), 5'000);
     TrackMatchSession* match = nullptr;
     QTRY_VERIFY((match = dialog->findChild<TrackMatchSession*>()) != nullptr && match->ready());
     // Its own files on their tracks, a gap for the third, and the other
     // album's file offered below -- not placed, not counted.
     auto* rows = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
-    auto* tracks = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
+    auto* tracks =
+        dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
     QTRY_COMPARE(rows->topLevelItemCount(), 4);
     QCOMPARE(match->fileCount(), 2U);
     QCOMPARE(match->pairedCount(), 2U);
@@ -7496,11 +7517,11 @@ void BenchMainWindowTest::identifyAlbumsTakesAFileGroupedApart() {
     QVERIFY(rows->topLevelItem(3)->font(0).italic());
     // Dragged onto track 3: the gap filled, nothing else moved.
     {
-        std::unique_ptr<QMimeData> mime{
-            rows->model()->mimeData({rows->model()->index(3, 0)})};
+        std::unique_ptr<QMimeData> mime{rows->model()->mimeData({rows->model()->index(3, 0)})};
         QVERIFY(mime != nullptr);
         const auto at = tracks->visualItemRect(tracks->topLevelItem(2)).center();
-        QDragEnterEvent enter{dragPosition(at), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(at), Qt::MoveAction, mime.get(), Qt::LeftButton,
+                              Qt::NoModifier};
         QCoreApplication::sendEvent(tracks->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{at}, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
@@ -7726,14 +7747,16 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         std::unique_ptr<QMimeData> mime{pairs->model()->mimeData({pairs->model()->index(0, 0)})};
         const auto rect = pairs->visualItemRect(pairs->topLevelItem(1));
         const QPoint position{rect.center().x(), rect.bottom() - 1};
-        QDragEnterEvent enter{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton,
+                              Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{position}, Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &drop);
         QVERIFY(drop.isAccepted());
-        QDragEnterEvent stale{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent stale{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton,
+                              Qt::NoModifier};
         QApplication::sendEvent(pairs->viewport(), &stale);
         QVERIFY(!stale.isAccepted());
         QVERIFY(pairs->topLevelItem(1)->text(0).endsWith(QStringLiteral("2-first.flac")));
@@ -8976,14 +8999,14 @@ void BenchMainWindowTest::aNotificationWaitsForItsCover() {
     QVERIFY(other.has_value());
     const auto entry = core::StableId::random().to_string();
     auto entries = protocol::Json::array();
-    entries.push_back(protocol::Json{
-        {"entry", entry},
-        {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
-        {"title", "With a cover"},
-        {"group", protocol::Json{{"album_artist", "Band"},
-                                 {"artist", "Band"},
-                                 {"album", "Covered"},
-                                 {"date", "1992"}}}});
+    entries.push_back(
+        protocol::Json{{"entry", entry},
+                       {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
+                       {"title", "With a cover"},
+                       {"group", protocol::Json{{"album_artist", "Band"},
+                                                {"artist", "Band"},
+                                                {"album", "Covered"},
+                                                {"date", "1992"}}}});
     QVERIFY((*other)
                 ->call("playback.replace_queue", protocol::Json{{"entries", std::move(entries)}})
                 .has_value());
@@ -9069,8 +9092,7 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QVERIFY(held.has_value());
     QCOMPARE(held->at("entries").size(), std::size_t{3});
     for (const auto& entry : held->at("entries")) {
-        QVERIFY2(entry.value("title", std::string{}).starts_with("Track "),
-                 entry.dump().c_str());
+        QVERIFY2(entry.value("title", std::string{}).starts_with("Track "), entry.dump().c_str());
         QCOMPARE(entry.at("group").value("album", std::string{}), std::string{"Record"});
     }
     const auto row = tab->model->rowOfEntry(id(album[0]), -1);
@@ -9231,7 +9253,8 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                 EngineKey::of(window.currentListTab()->document).isLocal() &&
                 window.currentListTab()->model->rowCount() == 1);
     auto* local_tab = window.currentListTab();
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::append);
     QTRY_COMPARE(remote_tab->model->rowCount(), 1);
     QCOMPARE(local_tab->model->rowCount(), 1);
     QVERIFY(!remote_tab->model->rows().front().title.empty());
@@ -9243,13 +9266,14 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
     window.refreshUpNext();
     QVERIFY2(window.up_next_status_->text().startsWith(QSysInfo::machineHostName() +
-                                                        QStringLiteral(" · ")),
+                                                       QStringLiteral(" · ")),
              qPrintable(window.up_next_status_->text()));
     // Adding to the remote tab while it plays: the rows stay as they were
     // added -- tagged, with their own identities -- rather than being traded
     // for the engine's bare paths.
     {
-        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                               LocalLibraryAction::append);
         QTRY_COMPARE(remote_tab->model->rowCount(), 2);
         const auto added = remote_tab->model->rows();
         for (int wait = 0; wait < 40; ++wait) {
@@ -9402,10 +9426,11 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
     // Gone, it stays chosen and says so.
     agent.terminate();
     QVERIFY(agent.waitForFinished(5'000));
-    QTRY_VERIFY_WITH_TIMEOUT(
-        output_action(QStringLiteral("agent:bedside")) != nullptr &&
-            output_action(QStringLiteral("agent:bedside"))->text().contains(QStringLiteral("offline")),
-        10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(output_action(QStringLiteral("agent:bedside")) != nullptr &&
+                                 output_action(QStringLiteral("agent:bedside"))
+                                     ->text()
+                                     .contains(QStringLiteral("offline")),
+                             10'000);
     QVERIFY(output_action(QStringLiteral("agent:bedside"))->isChecked());
 
     // And this computer again, if the engine has audio of its own here.
@@ -9493,11 +9518,14 @@ void BenchMainWindowTest::aKeptSearchOpensAtOnce() {
              window.emptyListTitle(EngineKey::of(tab->document)));
 
     emit browser->searchStarted(QStringLiteral("nothing like it"));
-    auto* empty = window.tabForDocument(
-        qobject_cast<QTableView*>(window.tabs_->currentWidget())->property("bench-document-id").toString());
+    auto* empty = window.tabForDocument(qobject_cast<QTableView*>(window.tabs_->currentWidget())
+                                            ->property("bench-document-id")
+                                            .toString());
     QVERIFY(empty != nullptr && empty != tab);
-    emit browser->searchFailed(QStringLiteral("nothing like it"), QStringLiteral("Nothing matches"));
-    QCOMPARE(static_cast<ui::QueueTableView*>(empty->view)->emptyTitle(), QStringLiteral("Nothing matches"));
+    emit browser->searchFailed(QStringLiteral("nothing like it"),
+                               QStringLiteral("Nothing matches"));
+    QCOMPARE(static_cast<ui::QueueTableView*>(empty->view)->emptyTitle(),
+             QStringLiteral("Nothing matches"));
     QCOMPARE(empty->model->rowCount(), 0);
 }
 
@@ -9599,7 +9627,8 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().album_rating_hash.empty());
     const auto track_hash = tab->model->rows().front().rating_hash;
@@ -9659,7 +9688,8 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().rating_hash.empty());
     const auto hash = tab->model->rows().front().rating_hash;
@@ -9669,8 +9699,9 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
-    QVERIFY((*other)->call("catalogue.set_rating",
-                           protocol::Json{{"hash", hash}, {"rating", 8}}).has_value());
+    QVERIFY((*other)
+                ->call("catalogue.set_rating", protocol::Json{{"hash", hash}, {"rating", 8}})
+                .has_value());
     (*other)->close();
 
     // Shown without anyone asking again.
@@ -9728,9 +9759,8 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     QVERIFY(dialog->engine().isLocal());
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     QTRY_VERIFY(dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->isEnabled());
-    QVERIFY(std::ranges::none_of(dialog->tracks(), [&remote_path](const auto& row) {
-        return row.raw_path == remote_path;
-    }));
+    QVERIFY(std::ranges::none_of(
+        dialog->tracks(), [&remote_path](const auto& row) { return row.raw_path == remote_path; }));
     dialog->close();
 }
 
@@ -9780,7 +9810,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
         const auto page = window.remoteCatalogue()->open()->query(tracks);
         QVERIFY(page && page->entries.size() == 2U);
         emit window.remoteLibrary()->browser().actionRequested({page->entries[0]},
-                                                     LocalLibraryAction::replace);
+                                                               LocalLibraryAction::replace);
         QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
         window.remotePlayback()->setVolume(0);
         std::vector<LocalTrackRow> asked;
@@ -9855,18 +9885,21 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
     QVERIFY(page && page->entries.size() == 1U);
     const auto album_name = QString::fromStdString(page->entries.front().album);
     const auto artist_name = QString::fromStdString(page->entries.front().artist);
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     window.remoteLibrary()->refreshLibrary();
 
     auto* tree = window.remoteLibrary()->findChild<QTreeView*>();
     for (const bool album : {true, false}) {
-        const auto position = tab->view->visualRect(tab->model->index(0, local_title_column)).center();
+        const auto position =
+            tab->view->visualRect(tab->model->index(0, local_title_column)).center();
         QVERIFY(QMetaObject::invokeMethod(tab->view, "customContextMenuRequested",
                                           Qt::DirectConnection, Q_ARG(QPoint, position)));
         auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
-        auto* locate = menu->findChild<QAction*>(album ? QStringLiteral("action-local-locate-album")
-                                                       : QStringLiteral("action-local-locate-artist"));
+        auto* locate =
+            menu->findChild<QAction*>(album ? QStringLiteral("action-local-locate-album")
+                                            : QStringLiteral("action-local-locate-artist"));
         QVERIFY(locate != nullptr);
         QVERIFY2(locate->isEnabled(), "a remote tab's track is located in the remote's library");
         locate->trigger();
@@ -9875,8 +9908,8 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
         QTRY_COMPARE(window.local_source_tabs_->tabData(window.local_source_tabs_->currentIndex())
                          .toString(),
                      window.remoteEngine()->key.text());
-        QTRY_VERIFY(tree->currentIndex().data().toString().contains(album ? album_name
-                                                                          : artist_name));
+        QTRY_VERIFY(
+            tree->currentIndex().data().toString().contains(album ? album_name : artist_name));
     }
     window.remotePlayback()->stop();
     QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
@@ -9911,7 +9944,8 @@ void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
     QVERIFY(page && page->entries.size() == 1U);
     // "Replace list and play" -- from the menu, or Shift+Enter in the quick
     // album popup -- plays, on the remote as it does here.
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(window.remotePlayback()->state().status, QStringLiteral("playing"),
                               10'000);
@@ -9950,7 +9984,8 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                           LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
     QTRY_VERIFY(covered(0));
@@ -10011,8 +10046,8 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     stray.raw_path = QFile::encodeName(download).toStdString();
     stray.entry_id = core::StableId::random();
     local->model->appendRows({stray});
-    QVERIFY(!window.transferRows(local->view, {local->model->rowCount() - 1}, remote_id, false,
-                                 -1));
+    QVERIFY(
+        !window.transferRows(local->view, {local->model->rowCount() - 1}, remote_id, false, -1));
     QCOMPARE(tab->model->rowCount(), remote_rows + 1);
     QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("not in")));
 
@@ -10125,7 +10160,8 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
         albums.kind = persistence::LibraryEntryKind::album;
         const auto page = catalogue->query(albums);
         QVERIFY(page && page->entries.size() == 1U);
-        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries,
+                                                               LocalLibraryAction::append);
         QTRY_VERIFY(covered(remote_tab(window)));
         window.persistNow(false);
         QVERIFY(window.close());
@@ -10188,7 +10224,10 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     playing.duration_ms = 200'000;
     window.lastfm_sample_time_ = -1'000'000;
     window.sampleLastFmFromEngine(playing);
-    QCOMPARE(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
+    QCOMPARE(window.findChild<trackknife::bench::Workspace*>()
+                 ->property("trackknife-lastfm-sample")
+                 .toString(),
+             QStringLiteral("engine"));
     QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
                   QStringLiteral("/lastfm-v1.json"));
 }
@@ -10236,7 +10275,10 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QVERIFY(now_playing != nullptr);
     QTRY_COMPARE(now_playing->text(), QStringLiteral("X"));
     // And it is credited as what it is.
-    QTRY_VERIFY(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
+    QTRY_VERIFY(window.findChild<trackknife::bench::Workspace*>()
+                    ->property("trackknife-lastfm-sample")
+                    .toString()
+                    .contains(QStringLiteral("|X|")));
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == second,
@@ -11431,9 +11473,8 @@ void BenchMainWindowTest::theTaggerOpensOnCachedTagsAndReadsBehind() {
     };
     TaggerServices services;
     const auto local = services.tools.access;
-    services.tools.access.read_many =
-        [local, released](const std::vector<std::string>& paths,
-                          const core::CancellationToken& token)
+    services.tools.access.read_many = [local, released](const std::vector<std::string>& paths,
+                                                        const core::CancellationToken& token)
         -> core::Result<std::vector<core::Result<metadata::LocalMetadataRead>>> {
         released.wait();
         std::vector<core::Result<metadata::LocalMetadataRead>> read;
@@ -11445,7 +11486,8 @@ void BenchMainWindowTest::theTaggerOpensOnCachedTagsAndReadsBehind() {
     MetadataPropertiesDialog properties{
         1,
         [source](std::size_t) -> std::optional<MetadataPropertiesSource> {
-            return MetadataPropertiesSource{.source = source, .track_label = QStringLiteral("Behind")};
+            return MetadataPropertiesSource{.source = source,
+                                            .track_label = QStringLiteral("Behind")};
         },
         {},
         std::move(services)};
@@ -12204,8 +12246,10 @@ void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
         auto* writing =
             dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-ratings-in-tags"));
         auto* copy = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-rating-backup"));
-        auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-rating-backup-tag"));
-        auto* note = dialog->findChild<QLabel*>(QStringLiteral("bench-settings-rating-backup-note"));
+        auto* name =
+            dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-rating-backup-tag"));
+        auto* note =
+            dialog->findChild<QLabel*>(QStringLiteral("bench-settings-rating-backup-note"));
         QVERIFY(writing && copy && name && note);
         QVERIFY(!copy->isEnabled());
         writing->setChecked(true);
@@ -12395,8 +12439,8 @@ void BenchMainWindowTest::upnpSettingRoundTrip() {
     }
     QVERIFY(QSettings{}.value(QStringLiteral("engine/upnp")).toBool());
     SettingsDialog reopened;
-    QVERIFY(reopened.findChild<QCheckBox*>(QStringLiteral("bench-settings-engine-upnp"))
-                ->isChecked());
+    QVERIFY(
+        reopened.findChild<QCheckBox*>(QStringLiteral("bench-settings-engine-upnp"))->isChecked());
     reopened.reject();
     QSettings{}.remove(QStringLiteral("engine/upnp"));
 #else
@@ -12484,7 +12528,6 @@ void BenchMainWindowTest::aSaveWritesOnlyListsThatChanged() {
     reopened.closeTabAt(reopened.tabs_->indexOf(small->view));
     reopened.persistNow(true);
 }
-
 
 void BenchMainWindowTest::coverPolicyRoundTrip() {
     QSettings{}.setValue(QStringLiteral("convert/embed-artwork"), false);
@@ -12636,7 +12679,8 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
     QVERIFY(image.save(incoming));
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(incoming)});
-    QDragEnterEvent enter(dragPosition(QPoint(10, 10)), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent enter(dragPosition(QPoint(10, 10)), Qt::CopyAction, &mime, Qt::LeftButton,
+                          Qt::NoModifier);
     QApplication::sendEvent(thumbnail, &enter);
     QVERIFY(enter.isAccepted());
     QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -13028,7 +13072,8 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     // download stages an addition; Save artwork is the explicit commit.
     QTRY_VERIFY(fetch->isEnabled());
     QTest::mouseClick(fetch, Qt::LeftButton);
-    QVERIFY(chooseInCoverPicker(properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
+    QVERIFY(chooseInCoverPicker(properties, QStringLiteral("Cover Art Archive"),
+                                QStringLiteral("Front")));
     auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(save != nullptr);
     QTRY_VERIFY(save->isEnabled());
@@ -13167,7 +13212,8 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_COMPARE_WITH_TIMEOUT(second_items->model()->rowCount(), 2, 5'000);
     QTRY_VERIFY(second_fetch->isEnabled());
     QTest::mouseClick(second_fetch, Qt::LeftButton);
-    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
+    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"),
+                                QStringLiteral("Front")));
     auto* second_save =
         second_properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(second_save != nullptr);
@@ -13191,7 +13237,8 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QCOMPARE(second_pending->model()->rowCount(), 0);
     QTRY_VERIFY(second_fetch->isEnabled());
     second_fetch->click();
-    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
+    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"),
+                                QStringLiteral("Front")));
     QTRY_VERIFY(second_save->isEnabled());
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
@@ -13258,7 +13305,8 @@ void BenchMainWindowTest::aCoverBesideTheFilesIsOfferedNotShown() {
     properties->setArtworkMutationServices(
         [] {
             return ArtworkWritePlanApplier{
-                [](const metadata::ArtworkWritePlan&, const operations::ArtworkApplyProgressCallback&,
+                [](const metadata::ArtworkWritePlan&,
+                   const operations::ArtworkApplyProgressCallback&,
                    const core::CancellationToken&) -> core::Result<operations::ArtworkApplyResult> {
                     return std::unexpected(core::Error{.code = core::ErrorCode::invariant,
                                                        .message = "not in this test",
@@ -13940,7 +13988,8 @@ void BenchMainWindowTest::filesDroppedOnTheTabBarMakeATab() {
     const auto drop_files = [&](const QString& path, const QPoint position) {
         QMimeData mime;
         mime.setUrls({QUrl::fromLocalFile(path)});
-        QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+        QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, &mime, Qt::LeftButton,
+                              Qt::NoModifier};
         window.handleTabTrackDrop(nullptr, &enter, position);
         if (!enter.isAccepted()) {
             return false;
@@ -14675,11 +14724,12 @@ void BenchMainWindowTest::windowListTabsCloseFromTheirButtons() {
     QVERIFY(close != nullptr && close->isVisible());
     const auto at = window.mapFromGlobal(close->mapToGlobal(close->rect().center()));
     auto* under = window.childAt(at);
-    QVERIFY2(under == close, qPrintable(QStringLiteral("under the button: %1 (%2)")
-                                            .arg(QString::fromLatin1(under != nullptr
-                                                                         ? under->metaObject()->className()
-                                                                         : "nothing"),
-                                                 under != nullptr ? under->objectName() : QString{})));
+    QVERIFY2(
+        under == close,
+        qPrintable(QStringLiteral("under the button: %1 (%2)")
+                       .arg(QString::fromLatin1(under != nullptr ? under->metaObject()->className()
+                                                                 : "nothing"),
+                            under != nullptr ? under->objectName() : QString{})));
     // Asked for, not answered: closing an unsaved list asks first, in a box
     // a test cannot answer.
     QObject::disconnect(tabs, &QTabWidget::tabCloseRequested, &window, nullptr);
@@ -15162,8 +15212,7 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         local_model->setArtwork(local_model->groupKey(2), singleton_cover);
         QCoreApplication::processEvents();
         // Its cover beside its header, in the cover gutter, as any album's.
-        const auto artwork_rect =
-            view->visualRect(local_model->index(2, local_artwork_column));
+        const auto artwork_rect = view->visualRect(local_model->index(2, local_artwork_column));
         const auto shows_cover = [](const QImage& render) {
             for (int y = 0; y < render.height(); ++y) {
                 for (int x = 0; x < render.width(); ++x) {
@@ -15255,8 +15304,9 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
     const auto kept = TabStore::loadState();
     // One per list tab, kept as it was.
     QCOMPARE(kept.tabs.size(), 1U);
-    QCOMPARE(QStringLiteral("local:%1").arg(QString::fromStdString(kept.tabs.front().id.to_string())),
-             binding);
+    QCOMPARE(
+        QStringLiteral("local:%1").arg(QString::fromStdString(kept.tabs.front().id.to_string())),
+        binding);
     QCOMPARE(kept.tabs.front().layout, future_layout);
 }
 
@@ -15288,12 +15338,12 @@ void BenchMainWindowTest::theWindowKeepsItsTabsNotTheLists() {
         item.fields.push_back({.name = "title", .value = "Seeded"});
         const std::vector<persistence::ListDocument> seeded{
             persistence::ListDocument{.id = kept_id,
-                                                             .kind = persistence::ListKind::saved,
-                                                             .name = "Kept",
-                                                             .pinned = true,
-                                                             .dirty = false,
-                                                             .items = {item},
-                                                             .engine = {}},
+                                      .kind = persistence::ListKind::saved,
+                                      .name = "Kept",
+                                      .pinned = true,
+                                      .dirty = false,
+                                      .items = {item},
+                                      .engine = {}},
             persistence::ListDocument{.id = scratch_id,
                                       .kind = persistence::ListKind::scratch,
                                       .name = "Scratch",
@@ -17058,14 +17108,13 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
     // As above, the store is asked until the workspace's write reached it.
     stored.reset();
     const auto ask_track = [&] {
-        panel->requestRatings({track_hash}, [&stored](std::vector<unsigned> values) {
-            stored = std::move(values);
-        });
+        panel->requestRatings(
+            {track_hash}, [&stored](std::vector<unsigned> values) { stored = std::move(values); });
     };
     ask_track();
-    QTRY_VERIFY_WITH_TIMEOUT(
-        (stored.has_value() && *stored == std::vector<unsigned>{0U}) || (ask_track(), false),
-        10'000);
+    QTRY_VERIFY_WITH_TIMEOUT((stored.has_value() && *stored == std::vector<unsigned>{0U}) ||
+                                 (ask_track(), false),
+                             10'000);
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {

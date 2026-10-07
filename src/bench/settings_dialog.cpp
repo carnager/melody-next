@@ -33,8 +33,8 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
-#include <QTabWidget>
 #include <QSysInfo>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -530,8 +530,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     stream_nearby_ = new QComboBox(remote);
     stream_nearby_->setObjectName(QStringLiteral("bench-settings-stream-nearby"));
     bind(stream_nearby_, session_->nearbyRates(), engine_stream_nearby_key);
-    stream_nearby_->setToolTip(
-        QStringLiteral("From an engine on this computer's own network"));
+    stream_nearby_->setToolTip(QStringLiteral("From an engine on this computer's own network"));
     engine_form->addRow(QStringLiteral("Streamed on this network:"), stream_nearby_);
     stream_away_ = new QComboBox(remote);
     stream_away_->setObjectName(QStringLiteral("bench-settings-stream-away"));
@@ -707,7 +706,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     ratings_form->addRow(QStringLiteral("Other players' RATING tags:"), rating_tag_scale_);
     ratings_layout->addWidget(ratings);
 
-
     const auto refresh_backup = [this, backup_label] {
         const auto writing = ratings_in_tags_->isChecked();
         rating_backup_->setEnabled(writing);
@@ -715,8 +713,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
         const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
         rating_backup_note_->setText(note);
-        rating_backup_note_->setVisible(writing && rating_backup_->isChecked() &&
-                                        !note.isEmpty());
+        rating_backup_note_->setVisible(writing && rating_backup_->isChecked() && !note.isEmpty());
     };
     connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
     connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);

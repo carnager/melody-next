@@ -128,7 +128,8 @@ int main() {
         require(discovery::choose_upnp_interface({}, 0xc0a800c8U).empty(),
                 "no interface, none chosen");
     }
-    require(discovery::upnp_xml_escape("A\x01" "B\tC<") == "AB\tC&lt;",
+    require(discovery::upnp_xml_escape("A\x01"
+                                       "B\tC<") == "AB\tC&lt;",
             "control characters XML cannot carry are left out");
     require(parsed->manufacturer == "Sonos, Inc." && parsed->model == "Era 100",
             "description keeps renderer identity needed for compatibility limits");
@@ -321,7 +322,8 @@ int main() {
         require(restored.snapshot().state == audio::LocalAuditionState::paused &&
                     restored.snapshot().position_sample == 5000,
                 "a restored track waits paused where it was");
-        require(restored.play().has_value() && busy->uri == "http://engine/stream?ticket=restored" &&
+        require(restored.play().has_value() &&
+                    busy->uri == "http://engine/stream?ticket=restored" &&
                     busy->position == "0:00:05",
                 "played, it goes to the speaker where it was left");
     }

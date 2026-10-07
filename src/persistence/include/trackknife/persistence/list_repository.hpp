@@ -388,15 +388,16 @@ class ListRepository final {
     // which is Trackknife's workspace and rewritten whole by it.
     [[nodiscard]] core::Result<std::vector<EngineListSummary>> load_engine_lists() const;
     // Empty when there is no such list.
-    [[nodiscard]] core::Result<std::optional<EngineList>> load_engine_list(const core::StableId& id) const;
+    [[nodiscard]] core::Result<std::optional<EngineList>>
+    load_engine_list(const core::StableId& id) const;
     // Creates it, or replaces its name and items. With `expected_revision`
     // the write is refused as a conflict unless the list is still at
     // that revision -- or, for 0, does not exist yet; without, it is written
     // whatever changed meanwhile.
     [[nodiscard]] core::Result<EngineListSummary>
     save_engine_list(const core::StableId& id, std::string_view name, EngineListKind kind,
-                  const std::vector<EngineListItem>& items,
-                  std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+                     const std::vector<EngineListItem>& items,
+                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     // ADR-0256: applies `edits` in order to the list at `expected_revision`,
     // with its name or kind when given -- "Save" is a change of kind -- in
     // one transaction, and answers the list as it is afterwards -- its items
@@ -410,10 +411,10 @@ class ListRepository final {
                      std::optional<EngineListKind> kind = std::nullopt, bool with_items = true);
     [[nodiscard]] core::Result<EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
-                    std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+                       std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     // False when there was no such list. A saved list's draft goes with it.
-    [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
-                                                     std::optional<std::uint64_t> expected_revision);
+    [[nodiscard]] core::Result<bool>
+    delete_engine_list(const core::StableId& id, std::optional<std::uint64_t> expected_revision);
     // ADR-0259: the list's revision and the path of each of `entries`, in
     // that order; nothing for an entry it does not hold. Not found without
     // the list.

@@ -146,38 +146,38 @@ ListPersistenceService::~ListPersistenceService() {
 
 void ListPersistenceService::initialize(WorkspaceCallback callback, const bool lists_too) {
     const QPointer self{this};
-    invokeQueued(worker_, [self, state = state_, callback = std::move(callback),
-                           lists_too]() mutable {
-        PersistedWorkspace snapshot;
-        auto opened = engine::Workspace::open(state->database_path);
-        if (!opened) {
-            state->initialization_error = errorText(opened.error());
-        } else {
-            state->workspace.emplace(std::move(*opened));
-            auto lists = lists_too ? state->workspace->load_all()
-                                   : core::Result<std::vector<persistence::ListDocument>>{};
-            auto profiles = state->workspace->load_profiles();
-            auto presets = state->workspace->load_view_presets();
-            if (!lists) {
-                state->initialization_error = errorText(lists.error());
-            } else if (!profiles) {
-                state->initialization_error = errorText(profiles.error());
-            } else if (!presets) {
-                state->initialization_error = errorText(presets.error());
+    invokeQueued(
+        worker_, [self, state = state_, callback = std::move(callback), lists_too]() mutable {
+            PersistedWorkspace snapshot;
+            auto opened = engine::Workspace::open(state->database_path);
+            if (!opened) {
+                state->initialization_error = errorText(opened.error());
             } else {
-                snapshot.lists = std::move(*lists);
-                snapshot.profiles = std::move(*profiles);
-                snapshot.view_presets = std::move(*presets);
+                state->workspace.emplace(std::move(*opened));
+                auto lists = lists_too ? state->workspace->load_all()
+                                       : core::Result<std::vector<persistence::ListDocument>>{};
+                auto profiles = state->workspace->load_profiles();
+                auto presets = state->workspace->load_view_presets();
+                if (!lists) {
+                    state->initialization_error = errorText(lists.error());
+                } else if (!profiles) {
+                    state->initialization_error = errorText(profiles.error());
+                } else if (!presets) {
+                    state->initialization_error = errorText(presets.error());
+                } else {
+                    snapshot.lists = std::move(*lists);
+                    snapshot.profiles = std::move(*profiles);
+                    snapshot.view_presets = std::move(*presets);
+                }
             }
-        }
-        if (!self) {
-            return;
-        }
-        invokeQueued(self, [callback = std::move(callback), snapshot = std::move(snapshot),
-                            error = state->initialization_error]() mutable {
-            callback(std::move(snapshot), std::move(error));
+            if (!self) {
+                return;
+            }
+            invokeQueued(self, [callback = std::move(callback), snapshot = std::move(snapshot),
+                                error = state->initialization_error]() mutable {
+                callback(std::move(snapshot), std::move(error));
+            });
         });
-    });
 }
 
 void ListPersistenceService::saveWorkspace(std::vector<persistence::ListDocumentWrite> lists,

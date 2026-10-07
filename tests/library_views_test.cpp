@@ -181,8 +181,7 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
 
     // Ordered by value, newest first; digit runs as numbers.
     auto years = catalogue.query(view({{.format = "%date%", .sort = {}, .descending = true}}));
-    require(years.has_value() &&
-                labels(*years) == std::vector<std::string>{"2010", "2005", "1999"},
+    require(years.has_value() && labels(*years) == std::vector<std::string>{"2010", "2005", "1999"},
             say("descending"));
     auto numbered =
         catalogue.query(view({{.format = "Track %tracknumber%", .sort = {}, .descending = false}}));
@@ -219,8 +218,7 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
     folders.folders = true;
     auto roots = catalogue.query(folders);
     require(roots.has_value() && roots->entries.size() == 1U &&
-                roots->entries[0].kind == LibraryEntryKind::group &&
-                roots->entries[0].tracks == 5U,
+                roots->entries[0].kind == LibraryEntryKind::group && roots->entries[0].tracks == 5U,
             say("the library's root, with what it holds"));
     folders.folder = roots->entries[0].view_value;
     auto inside = catalogue.query(folders);
@@ -231,8 +229,8 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
     require(inside.has_value() &&
                 names_inside == std::vector<std::string>{"one", "ten", "three", "two"},
             say("the folders in the root, by name"));
-    require(inside->entries[0].kind == LibraryEntryKind::album &&
-                inside->entries[0].tracks == 2U && !inside->entries[0].rating_hash.empty(),
+    require(inside->entries[0].kind == LibraryEntryKind::album && inside->entries[0].tracks == 2U &&
+                !inside->entries[0].rating_hash.empty(),
             say("a folder of one album is that album"));
     folders.folder = inside->entries[0].view_value;
     auto one = catalogue.query(folders);
@@ -263,7 +261,8 @@ int main(const int argc, char** argv) {
         tagged(fixtures, music / "one", "a-10.flac", {"Alpha", "One", "1999", {"Rock"}, "10"}));
     static_cast<void>(
         tagged(fixtures, music / "two", "b.flac", {"Beta", "Two", "2010", {"Jazz"}, "1"}));
-    static_cast<void>(tagged(fixtures, music / "three", "c.flac", {"Gamma", "Three", "2005", {}, "1"}));
+    static_cast<void>(
+        tagged(fixtures, music / "three", "c.flac", {"Gamma", "Three", "2005", {}, "1"}));
     static_cast<void>(
         tagged(fixtures, music / "ten", "d.flac", {"Beta", "Ten", "2010", {"Rock"}, "1"}));
 
@@ -291,16 +290,14 @@ int main(const int argc, char** argv) {
         {.format = "%albumartist%", .sort = {}, .descending = false},
         {.format = "%album%", .sort = {}, .descending = false}};
     auto before = local.query(view(artists, {"Alpha"}));
-    require(before.has_value() && before->entries.size() == 1U &&
-                before->entries[0].rating == 0U,
+    require(before.has_value() && before->entries.size() == 1U && before->entries[0].rating == 0U,
             "the album is unrated");
-    require(local.set_rating(before->entries[0].rating_hash, true, 8U).has_value(),
-            "it is rated");
+    require(local.set_rating(before->entries[0].rating_hash, true, 8U).has_value(), "it is rated");
     auto after = local.query(view(artists, {"Alpha"}));
     require(after.has_value() && after->entries[0].rating == 8U, "the view shows the rating");
     // A rating as a level reads the same.
-    auto rated = local.query(view({{.format = "$if2(%albumrating%,unrated)", .sort = {},
-                                    .descending = false}}));
+    auto rated = local.query(
+        view({{.format = "$if2(%albumrating%,unrated)", .sort = {}, .descending = false}}));
     require(rated.has_value() && labels(*rated) == std::vector<std::string>{"8", "unrated"},
             "a level can group by rating");
 

@@ -327,7 +327,9 @@ class TaggerSession final : public QObject {
     [[nodiscard]] std::string moveFolderStart() const;
     // The destination Move goes to; none for the library folder each is in.
     [[nodiscard]] std::optional<operations::DestinationProfile> moveDestination() const;
-    [[nodiscard]] bool movesIntoLibraryFolders() const { return move_target_ == MoveTarget::library; }
+    [[nodiscard]] bool movesIntoLibraryFolders() const {
+        return move_target_ == MoveTarget::library;
+    }
     [[nodiscard]] QString outputProfileStatus() const { return output_profile_status_; }
     [[nodiscard]] QString destinationsOn() const {
         return services_.output_profile_store.destinations_on;
@@ -399,8 +401,7 @@ class TaggerSession final : public QObject {
     bool beginWriteElsewhere();
     // `stale`: files found changed since they were read, read again too,
     // their drafts kept, so the next write can take them.
-    void finishWriteElsewhere(std::vector<Rewritten> written,
-                              std::vector<std::size_t> stale = {});
+    void finishWriteElsewhere(std::vector<Rewritten> written, std::vector<std::size_t> stale = {});
 
     // Apply.
     void startWritePlan();

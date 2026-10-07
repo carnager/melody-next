@@ -159,9 +159,9 @@ constexpr int thumbnail_edge = 60;
 constexpr int thumbnail_density = 3;
 
 [[nodiscard]] QImage sharp_thumbnail(const QImage& image) {
-    auto thumbnail = image.scaled(thumbnail_edge * thumbnail_density,
-                                  thumbnail_edge * thumbnail_density, Qt::KeepAspectRatio,
-                                  Qt::SmoothTransformation);
+    auto thumbnail =
+        image.scaled(thumbnail_edge * thumbnail_density, thumbnail_edge * thumbnail_density,
+                     Qt::KeepAspectRatio, Qt::SmoothTransformation);
     thumbnail.setDevicePixelRatio(thumbnail_density);
     return thumbnail;
 }

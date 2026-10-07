@@ -338,11 +338,10 @@ QString ScriptSession::actionText(const metadata::MetadataTransformationAction& 
                     .arg(index + 1U)
                     .arg(field, display_utf8(typed.source_field));
             } else if constexpr (std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
-                const auto scale = typed.scale == metadata::PlainRatingScale::hundred
-                                       ? QStringLiteral("0–100")
-                                   : typed.scale == metadata::PlainRatingScale::ten
-                                       ? QStringLiteral("0–10")
-                                       : QStringLiteral("0–5 stars");
+                const auto scale =
+                    typed.scale == metadata::PlainRatingScale::hundred ? QStringLiteral("0–100")
+                    : typed.scale == metadata::PlainRatingScale::ten   ? QStringLiteral("0–10")
+                                                                     : QStringLiteral("0–5 stars");
                 return QStringLiteral("%1. Convert the rating in %2 (%3) to %4")
                     .arg(index + 1U)
                     .arg(display_utf8(typed.source_field), scale, field);
@@ -1097,8 +1096,7 @@ void ScriptSession::setRawSource(const QString& source) {
     invalidatePreview();
     if (raw_valid_) {
         actions_ = raw_import_.actions;
-        diagnostics.prepend(
-            QStringLiteral("Ready · %1 steps").arg(actions_.size()));
+        diagnostics.prepend(QStringLiteral("Ready · %1 steps").arg(actions_.size()));
         emit stepsChanged(static_cast<int>(actions_.size()) - 1);
     }
     raw_diagnostics_ = diagnostics.join(QChar{'\n'});

@@ -130,10 +130,12 @@ struct Parsed {
     at += 4U;
     std::string payload = buffer.substr(at, static_cast<std::size_t>(size));
     for (std::size_t index = 0; index < payload.size(); ++index) {
-        payload[index] = static_cast<char>(static_cast<std::uint8_t>(payload[index]) ^ mask[index % 4U]);
+        payload[index] =
+            static_cast<char>(static_cast<std::uint8_t>(payload[index]) ^ mask[index % 4U]);
     }
     buffer.erase(0, at + static_cast<std::size_t>(size));
-    return {.frame = Frame{.fin = fin, .opcode = opcode, .payload = std::move(payload)}, .refused = 0};
+    return {.frame = Frame{.fin = fin, .opcode = opcode, .payload = std::move(payload)},
+            .refused = 0};
 }
 
 [[nodiscard]] std::string close_payload(const std::uint16_t code) {
@@ -149,7 +151,8 @@ std::string websocket_accept(const std::string_view key) {
     SHA1(reinterpret_cast<const unsigned char*>(joined.data()), joined.size(), digest.data());
     std::array<unsigned char, 4 * ((SHA_DIGEST_LENGTH + 2) / 3) + 1> encoded{};
     const auto length = EVP_EncodeBlock(encoded.data(), digest.data(), SHA_DIGEST_LENGTH);
-    return std::string{reinterpret_cast<const char*>(encoded.data()), static_cast<std::size_t>(length)};
+    return std::string{reinterpret_cast<const char*>(encoded.data()),
+                       static_cast<std::size_t>(length)};
 }
 
 void bridge_websocket(const int client, const int inner, std::string pending,

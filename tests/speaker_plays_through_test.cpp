@@ -95,7 +95,8 @@ bool eventually(const std::function<bool()>& condition,
 [[nodiscard]] Json report(const bool playing, const std::int64_t position_ms,
                           const std::uint64_t handovers = 0U) {
     audio::LocalAuditionSnapshot snapshot;
-    snapshot.state = playing ? audio::LocalAuditionState::playing : audio::LocalAuditionState::paused;
+    snapshot.state =
+        playing ? audio::LocalAuditionState::playing : audio::LocalAuditionState::paused;
     snapshot.format = trackknife::formats::PcmFormat{};
     snapshot.format->sample_rate = 1'000;
     snapshot.format->channels = 2;
@@ -117,9 +118,13 @@ class Speaker final {
         require(::connect(descriptor_, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0,
                 "the speaker connects");
         reader_ = std::thread{[this] { read(); }};
-        send(Json{{"id", 1}, {"method", "session.authenticate"}, {"params", {{"password", "token"}}}});
-        Json registration{{"name", "phone"}, {"instance", instance}, {"files", false},
-                          {"protocol", 1}, {"stream", {{"format", "original"}}}};
+        send(Json{
+            {"id", 1}, {"method", "session.authenticate"}, {"params", {{"password", "token"}}}});
+        Json registration{{"name", "phone"},
+                          {"instance", instance},
+                          {"files", false},
+                          {"protocol", 1},
+                          {"stream", {{"format", "original"}}}};
         if (holding) {
             registration["report"] = *holding;
         }
@@ -173,7 +178,8 @@ class Speaker final {
                 return;
             }
             pending.append(buffer, static_cast<std::size_t>(received));
-            for (auto end = pending.find('\n'); end != std::string::npos; end = pending.find('\n')) {
+            for (auto end = pending.find('\n'); end != std::string::npos;
+                 end = pending.find('\n')) {
                 const auto message = Json::parse(pending.substr(0, end), nullptr, false);
                 pending.erase(0, end + 1U);
                 if (!message.is_object()) {
@@ -219,12 +225,11 @@ int main() {
     engine::register_playback_methods(dispatcher, *player);
     auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "token");
     require(server.has_value(), "the engine listens");
-    engine::Outputs outputs{*player,
-                            output::AgentPaths{.music_root = directory,
-                                               .stream_port = 1,
-                                               .stream_host = {},
-                                               .stream_token = "stream"},
-                            &*workspace, (*server)->sink()};
+    engine::Outputs outputs{
+        *player,
+        output::AgentPaths{
+            .music_root = directory, .stream_port = 1, .stream_host = {}, .stream_token = "stream"},
+        &*workspace, (*server)->sink()};
     (*server)->on_agent([&outputs](const Json& params, const int descriptor) {
         outputs.admit(params, descriptor);
     });

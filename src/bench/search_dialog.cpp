@@ -11,9 +11,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QPointer>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QSettings>
 #include <QShowEvent>
@@ -184,8 +184,7 @@ SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_acce
                                        const LocalLibraryAction action) {
             auto* entry = menu.addAction(text);
             entry->setObjectName(QString::fromLatin1(name));
-            connect(entry, &QAction::triggered, this,
-                    [this, action] { openSelected(action); });
+            connect(entry, &QAction::triggered, this, [this, action] { openSelected(action); });
         };
         add(QStringLiteral("Add to current tab"), "action-search-append",
             LocalLibraryAction::append);
@@ -244,8 +243,8 @@ void SearchDialog::usePreset(const int preset) {
                                                          value.toInt(), input.minimum,
                                                          input.maximum, input.step, &accepted));
         } else {
-            value = QInputDialog::getText(this, input.title, input.prompt, QLineEdit::Normal,
-                                          value, &accepted);
+            value = QInputDialog::getText(this, input.title, input.prompt, QLineEdit::Normal, value,
+                                          &accepted);
         }
         if (!accepted)
             return;

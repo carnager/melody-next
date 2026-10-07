@@ -358,9 +358,9 @@ void StagedMetadataPatchSet::detach() {
     }
 }
 
-core::Result<CarriedMetadataPatches>
-carry_staged_patches(const StagedMetadataSelection& from, const StagedMetadataPatchSet& patches,
-                     StagedMetadataSelection& onto) {
+core::Result<CarriedMetadataPatches> carry_staged_patches(const StagedMetadataSelection& from,
+                                                          const StagedMetadataPatchSet& patches,
+                                                          StagedMetadataSelection& onto) {
     if (from.item_count() != onto.item_count()) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invariant,
                                            .message = "a selection read anew has other rows",
@@ -378,10 +378,10 @@ carry_staged_patches(const StagedMetadataSelection& from, const StagedMetadataPa
                           ? onto.exact_native_field_index(*field.exact_native_name)
                           : onto.field_index(field.canonical_name);
         if (!target) {
-            auto added = field.exact_native_name
-                             ? onto.ensure_exact_native_field(*field.exact_native_name,
-                                                              field.display_name)
-                             : onto.ensure_missing_field(field.canonical_name, field.display_name);
+            auto added =
+                field.exact_native_name
+                    ? onto.ensure_exact_native_field(*field.exact_native_name, field.display_name)
+                    : onto.ensure_missing_field(field.canonical_name, field.display_name);
             if (!added) {
                 return std::unexpected(std::move(added.error()));
             }

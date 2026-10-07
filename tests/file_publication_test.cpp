@@ -7,9 +7,9 @@
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/undo_copies.hpp"
-#include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -987,8 +987,8 @@ void publicationsKeepTheirSourceForUndo() {
         const auto checked = preflight(source, target);
         const auto committed = operations::commit_destination_artifact_publication(
             checked, 0U, journal,
-            [&](const std::string& prepared, const core::CancellationToken&)
-                -> core::Result<core::LocalSourceRevision> {
+            [&](const std::string& prepared,
+                const core::CancellationToken&) -> core::Result<core::LocalSourceRevision> {
                 write_file(prepared, "changed " + name);
                 return core::observe_local_source_revision(prepared);
             },
@@ -1012,7 +1012,8 @@ void publicationsKeepTheirSourceForUndo() {
             "the replaced source must be kept beside itself");
     std::size_t followed = 0U;
     const auto undone = operations::undo_file_publication(
-        id, journal, [&](const operations::FilePublicationCommitResult& result) -> core::Result<void> {
+        id, journal,
+        [&](const operations::FilePublicationCommitResult& result) -> core::Result<void> {
             ++followed;
             require(result.source_raw_path == target.native() &&
                         result.target_raw_path == source.native(),
@@ -1020,7 +1021,8 @@ void publicationsKeepTheirSourceForUndo() {
             return {};
         });
     require(undone.has_value() && followed == 1U && read_file(source) == "original a" &&
-                !std::filesystem::exists(target) && !std::filesystem::exists(target.parent_path()) &&
+                !std::filesystem::exists(target) &&
+                !std::filesystem::exists(target.parent_path()) &&
                 !std::filesystem::exists(kept_path(source, id)) && state_of(id) == Backup::undone,
             "undo must restore the source and remove the target and the folder it made");
 
@@ -1038,18 +1040,20 @@ void publicationsKeepTheirSourceForUndo() {
     // C: interrupted after the source came back: recovery finishes it.
     const auto [crash_source, crash_target, crash_id] = artifact("c");
     require(journal
-                .transition_backup(crash_id, operations::FilePublicationBackupTransition{
-                                                 .expected_state = Backup::retained,
-                                                 .state = Backup::undoing,
-                                                 .undo_id = core::StableId::random(),
-                                                 .failure = std::nullopt})
+                .transition_backup(
+                    crash_id,
+                    operations::FilePublicationBackupTransition{.expected_state = Backup::retained,
+                                                                .state = Backup::undoing,
+                                                                .undo_id = core::StableId::random(),
+                                                                .failure = std::nullopt})
                 .has_value(),
             "an undo must be able to begin");
     std::filesystem::rename(kept_path(crash_source, crash_id), crash_source);
     const auto recovered =
         operations::recover_publication_undos(journal, successful_dependent_commit);
     require(recovered && recovered->size() == 1U &&
-                recovered->front().outcome == operations::FilePublicationRecoveryOutcome::completed &&
+                recovered->front().outcome ==
+                    operations::FilePublicationRecoveryOutcome::completed &&
                 read_file(crash_source) == "original c" && !std::filesystem::exists(crash_target) &&
                 state_of(crash_id) == Backup::undone,
             "recovery must finish an interrupted undo");
@@ -1088,8 +1092,8 @@ void publicationsKeepTheirSourceForUndo() {
         cross_preflight(cross_source, cross_target), 0U, journal, successful_dependent_commit);
     require(crossed && read_file(kept_path(cross_source, crossed->journal_id)) == "cross original",
             "a move to another filesystem must keep its source");
-    const auto back =
-        operations::undo_file_publication(crossed->journal_id, journal, successful_dependent_commit);
+    const auto back = operations::undo_file_publication(crossed->journal_id, journal,
+                                                        successful_dependent_commit);
     require(back && read_file(cross_source) == "cross original" &&
                 !std::filesystem::exists(cross_target) &&
                 !std::filesystem::exists(elsewhere.path() / "Artist"),
@@ -1111,8 +1115,8 @@ void keptSourcesMoveWhereUndoCopiesAreKept() {
         TemporaryDirectory folder_home{root};
         const auto folder = folder_home.path() / "undo";
         auto journal = open_journal(directory, "kept.sqlite3");
-        auto metadata = persistence::SqliteMetadataOperationJournal::open(
-            directory.path() / "kept.sqlite3");
+        auto metadata =
+            persistence::SqliteMetadataOperationJournal::open(directory.path() / "kept.sqlite3");
         require(metadata.has_value(), "the metadata journal must open");
         const auto artifact = [&](const std::string& name) {
             const auto source = directory.path() / (name + ".flac");
@@ -1120,8 +1124,8 @@ void keptSourcesMoveWhereUndoCopiesAreKept() {
             write_file(source, "original " + name);
             const auto committed = operations::commit_destination_artifact_publication(
                 preflight(source, target), 0U, journal,
-                [&](const std::string& prepared, const core::CancellationToken&)
-                    -> core::Result<core::LocalSourceRevision> {
+                [&](const std::string& prepared,
+                    const core::CancellationToken&) -> core::Result<core::LocalSourceRevision> {
                     write_file(prepared, "changed " + name);
                     return core::observe_local_source_revision(prepared);
                 },
@@ -1141,7 +1145,8 @@ void keptSourcesMoveWhereUndoCopiesAreKept() {
                     read_file(folder / beside.filename()) == "original a",
                 "the kept source must be in the undo folder only");
         const auto backup = journal.load_backup(id);
-        require(backup && *backup && (**backup).kept_raw_path == (folder / beside.filename()).native(),
+        require(backup && *backup &&
+                    (**backup).kept_raw_path == (folder / beside.filename()).native(),
                 "where it is kept must be recorded");
         const auto again = operations::keep_undo_copies_in_place(*metadata, journal);
         require(again && *again == 0U, "kept in place, nothing moves again");

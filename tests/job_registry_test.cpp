@@ -220,12 +220,11 @@ void a_slow_sink_does_not_hold_cancel() {
             }
             return protocol::Json{};
         });
-    (void)registry.submit("reporting",
-                          [](const core::CancellationToken&,
-                             const engine::JobRegistry::Reporter& report) {
-                              report(protocol::Json{{"done", 1}});
-                              return protocol::Json{};
-                          });
+    (void)registry.submit("reporting", [](const core::CancellationToken&,
+                                          const engine::JobRegistry::Reporter& report) {
+        report(protocol::Json{{"done", 1}});
+        return protocol::Json{};
+    });
     while (!stalling.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
@@ -253,9 +252,8 @@ void a_job_finishes_before_its_registry_goes() {
                 }
             }};
             (void)registry.submit(
-                "instant", [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
-                    return protocol::Json{};
-                });
+                "instant", [](const core::CancellationToken&,
+                              const engine::JobRegistry::Reporter&) { return protocol::Json{}; });
             while (!retired.load()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{1});
             }

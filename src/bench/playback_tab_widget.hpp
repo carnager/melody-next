@@ -10,8 +10,8 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QProxyStyle>
-#include <QStyleOptionTab>
 #include <QStyleFactory>
+#include <QStyleOptionTab>
 #include <QStylePainter>
 #include <QTabBar>
 #include <QTabWidget>
@@ -69,8 +69,9 @@ class TabCloseButton final : public QAbstractButton {
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(palette().color(underMouse() ? QPalette::Text : QPalette::PlaceholderText),
-                            1.8, Qt::SolidLine, Qt::RoundCap));
+        painter.setPen(
+            QPen(palette().color(underMouse() ? QPalette::Text : QPalette::PlaceholderText), 1.8,
+                 Qt::SolidLine, Qt::RoundCap));
         const auto centre = QRectF(rect()).center();
         constexpr qreal arm = 3.0;
         painter.drawLine(centre + QPointF(-arm, -arm), centre + QPointF(arm, arm));
@@ -106,8 +107,7 @@ class PlaybackTabBar final : public QTabBar {
         : QTabBar(parent), closable_(closable) {
         // On the style the application uses: a proxy made without one would
         // wrap the desktop's default instead.
-        auto* placement =
-            new ButtonPlacement(ui::createApplicationStyle());
+        auto* placement = new ButtonPlacement(ui::createApplicationStyle());
         placement->setParent(this);
         setStyle(placement);
     }

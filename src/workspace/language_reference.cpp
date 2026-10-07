@@ -103,8 +103,7 @@ constexpr auto style = R"(
                  QStringLiteral("<title>%1</title>%2</head>")
                      .arg(QLatin1String(page.title), QLatin1String(style)));
     QSaveFile target{directory.filePath(QLatin1String(page.page))};
-    if (!target.open(QIODevice::WriteOnly) || target.write(html.toUtf8()) < 0 ||
-        !target.commit()) {
+    if (!target.open(QIODevice::WriteOnly) || target.write(html.toUtf8()) < 0 || !target.commit()) {
         if (error != nullptr) {
             *error = QStringLiteral("Could not write %1: %2")
                          .arg(target.fileName(), target.errorString());
@@ -140,11 +139,11 @@ QString writeLanguageReference(const LanguageReference reference, const QString&
 }
 
 bool openLanguageReference(const LanguageReference reference, QString* error) {
-    const auto page = writeLanguageReference(
-        reference,
-        QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
-            QStringLiteral("/reference"),
-        error);
+    const auto page =
+        writeLanguageReference(reference,
+                               QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+                                   QStringLiteral("/reference"),
+                               error);
     if (page.isEmpty()) {
         return false;
     }

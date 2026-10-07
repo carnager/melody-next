@@ -298,9 +298,8 @@ namespace {
     if (!request.view.empty()) {
         auto levels = Json::array();
         for (const auto& level : request.view) {
-            levels.push_back(Json{{"format", level.format},
-                                  {"sort", level.sort},
-                                  {"descending", level.descending}});
+            levels.push_back(Json{
+                {"format", level.format}, {"sort", level.sort}, {"descending", level.descending}});
         }
         params["view"] = std::move(levels);
         auto path = Json::array();
@@ -390,9 +389,8 @@ template <typename Field>
             }
             auto entry = entry_from([&names, &row](const std::string_view name) -> const Json* {
                 const auto found = std::ranges::find(names, name);
-                return found == names.end()
-                           ? nullptr
-                           : &row[static_cast<std::size_t>(found - names.begin())];
+                return found == names.end() ? nullptr
+                                            : &row[static_cast<std::size_t>(found - names.begin())];
             });
             if (!entry) {
                 return std::unexpected(std::move(entry.error()));
@@ -428,9 +426,8 @@ core::Result<std::vector<Catalogue::FoundTrack>>
 RemoteCatalogue::find(const query::CompiledTkq& compiled, const std::string& format,
                       const std::size_t limit, const core::CancellationToken&) const {
     // Formatted there, where the tags are: only the lines cross.
-    auto answer = client_->call("catalogue.find", Json{{"query", compiled.source},
-                                                       {"format", format},
-                                                       {"limit", limit}});
+    auto answer = client_->call(
+        "catalogue.find", Json{{"query", compiled.source}, {"format", format}, {"limit", limit}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }
@@ -494,7 +491,8 @@ RemoteCatalogue::query(const persistence::LibraryQuery& request,
 
 core::Result<persistence::LibraryFolder>
 RemoteCatalogue::folder(const std::string& raw_path, const core::CancellationToken&) const {
-    auto answer = client_->call("catalogue.folder", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    auto answer =
+        client_->call("catalogue.folder", Json{{"path", protocol::encode_raw_path(raw_path)}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }
@@ -643,8 +641,7 @@ RemoteCatalogue::history_facts(const std::vector<persistence::LibraryHistorySour
         entry["album_hash"] = source.album_hash;
         encoded.push_back(std::move(entry));
     }
-    auto joined =
-        call_in_chunks(*client_, "catalogue.history_facts", "sources", encoded, "facts");
+    auto joined = call_in_chunks(*client_, "catalogue.history_facts", "sources", encoded, "facts");
     if (!joined) {
         return std::unexpected(std::move(joined.error()));
     }

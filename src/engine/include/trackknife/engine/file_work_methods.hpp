@@ -68,7 +68,8 @@ recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalog
 
 // ADR-0263: how long the files a write replaced are kept for undo -- the
 // engine_state document "backups.retention", else the policy's defaults.
-[[nodiscard]] operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& workspace);
+[[nodiscard]] operations::MetadataBackupRetentionPolicy
+backup_retention(const Workspace& workspace);
 
 // ADR-0266: where this engine keeps the files writes replace -- the
 // engine_state document "backups.location": its own folder (`undo` beside

@@ -1494,16 +1494,17 @@ SqliteMetadataOperationJournal::relocate_backup(const core::StableId& id,
     }
     std::scoped_lock lock{implementation_->mutex};
     auto* database = implementation_->database;
-    auto statement = prepare(database,
-                             "UPDATE operation_journal SET backup_path = ?, backup_device = ?, "
-                             "backup_inode = ?, backup_size = ?, backup_mtime_seconds = ?, "
-                             "backup_mtime_nanoseconds = ? WHERE id = ? AND EXISTS ("
-                             "SELECT 1 FROM metadata_operation_backups WHERE journal_id = ? "
-                             "AND state = 0)");
+    auto statement =
+        prepare(database, "UPDATE operation_journal SET backup_path = ?, backup_device = ?, "
+                          "backup_inode = ?, backup_size = ?, backup_mtime_seconds = ?, "
+                          "backup_mtime_nanoseconds = ? WHERE id = ? AND EXISTS ("
+                          "SELECT 1 FROM metadata_operation_backups WHERE journal_id = ? "
+                          "AND state = 0)");
     if (!statement) {
         return std::unexpected(std::move(statement.error()));
     }
-    if (!bind_blob(statement->get(), 1, raw_path) || !bind_revision(statement->get(), 2, revision) ||
+    if (!bind_blob(statement->get(), 1, raw_path) ||
+        !bind_revision(statement->get(), 2, revision) ||
         !bind_blob(statement->get(), 7, id.to_string()) ||
         !bind_blob(statement->get(), 8, id.to_string())) {
         return std::unexpected(database_error(database, "Could not bind moved backup"));

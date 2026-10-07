@@ -72,8 +72,10 @@ void add_issue(MetadataWritePlanSource& source, const MetadataWritePlanIssueKind
     const auto quoted = "\u201c" + name + "\u201d ";
     const auto& field = selection.field(field_index);
     if (selection.source(intent.item_index).logical_track &&
-        (field.canonical_name.starts_with("replaygain") || field.canonical_name.starts_with("r128"))) {
-        return quoted + "belongs to one track inside a larger file, which has nowhere to keep it yet";
+        (field.canonical_name.starts_with("replaygain") ||
+         field.canonical_name.starts_with("r128"))) {
+        return quoted +
+               "belongs to one track inside a larger file, which has nowhere to keep it yet";
     }
     const auto* cell = selection.cell(intent.item_index, field_index);
     switch (cell != nullptr ? cell->provenance : FieldProvenance::embedded) {
@@ -733,10 +735,10 @@ build_metadata_write_plan(const StagedMetadataSelection& selection,
                 const auto& name =
                     change.display_name.empty() ? change.canonical_name : change.display_name;
                 add_issue(source, MetadataWritePlanIssueKind::unresolved_non_embedded_target,
-                          planner_error(core::ErrorCode::unsupported,
-                                        non_embedded_reason(selection, *blocked,
-                                                            change.field_index, name),
-                                        source.raw_path),
+                          planner_error(
+                              core::ErrorCode::unsupported,
+                              non_embedded_reason(selection, *blocked, change.field_index, name),
+                              source.raw_path),
                           change.field_index, std::move(intent_items));
             }
         }

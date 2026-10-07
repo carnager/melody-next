@@ -30,9 +30,8 @@ constexpr int wait_ms = 3'000;
 } // namespace
 
 SingleInstance::SingleInstance(QString key, QObject* parent) : QObject(parent) {
-    const auto hash = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256)
-                          .toHex()
-                          .left(16);
+    const auto hash =
+        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(16);
     name_ = QStringLiteral("trackknife-%1").arg(QString::fromLatin1(hash));
     auto folder = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     if (folder.isEmpty()) {

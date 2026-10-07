@@ -554,7 +554,8 @@ class Evaluator final {
             }
         }
         if (*divisor == 0) {
-            return std::unexpected(error(core::ErrorCode::invalid_argument, "division by zero", id));
+            return std::unexpected(
+                error(core::ErrorCode::invalid_argument, "division by zero", id));
         }
         if (*places < 0 || *places > 9) {
             return std::unexpected(error(core::ErrorCode::invalid_argument,

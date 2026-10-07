@@ -71,7 +71,8 @@ void clone(const std::filesystem::path& database, const std::size_t tracks) {
     execute(db, "BEGIN");
     execute(db, "CREATE TEMP TABLE seed AS SELECT * FROM local_library_tracks LIMIT 1");
     const auto insert = "INSERT INTO local_library_tracks(raw_path,album_key,album,artist,track,"
-                        "title" + list + ") SELECT ?1,?2,?3,?4,?5,?6" + list + " FROM seed";
+                        "title" +
+                        list + ") SELECT ?1,?2,?3,?4,?5,?6" + list + " FROM seed";
     sqlite3_stmt* row = nullptr;
     require(sqlite3_prepare_v2(db, insert.c_str(), -1, &row, nullptr) == SQLITE_OK,
             "the clone statement prepares");
@@ -94,8 +95,8 @@ void clone(const std::filesystem::path& database, const std::size_t tracks) {
         const auto album = index / 10U;
         const auto artist = "Artist " + std::to_string(album % 400U);
         const auto album_name = "Album " + std::to_string(album);
-        const auto path = "/synthetic/" + std::to_string(album) + "/" + std::to_string(index) +
-                          ".flac";
+        const auto path =
+            "/synthetic/" + std::to_string(album) + "/" + std::to_string(index) + ".flac";
         const auto key = "album:" + std::to_string(album);
         const auto title = "Track " + std::to_string(index);
         sqlite3_reset(row);

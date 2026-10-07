@@ -42,9 +42,8 @@ class TestEngine final {
         QDir{}.mkpath(state);
         socket_ = runtime_.filePath(QStringLiteral("melodyd.sock"));
         process_.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
-        process_.setArguments(
-            {QStringLiteral("--socket"), socket_, QStringLiteral("--state"), state,
-             QStringLiteral("--local-only")});
+        process_.setArguments({QStringLiteral("--socket"), socket_, QStringLiteral("--state"),
+                               state, QStringLiteral("--local-only")});
         process_.setProcessChannelMode(QProcess::MergedChannels);
         process_.start();
         if (!process_.waitForStarted()) {

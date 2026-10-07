@@ -85,7 +85,8 @@ std::vector<AlbumGroup> group_albums(const std::span<const AlbumGroupInput> file
             key = "mbid:" + folded(file.release_id);
         } else if (!trimmed(file.album).empty()) {
             basis = AlbumGroupBasis::tags;
-            const auto& artist = trimmed(file.album_artist).empty() ? file.artist : file.album_artist;
+            const auto& artist =
+                trimmed(file.album_artist).empty() ? file.artist : file.album_artist;
             key = "tag:" + folded(artist) + '\x1F' +
                   folded(loudness::strip_disc_designator(trimmed(file.album))) + '\x1F' +
                   year_of(file.date);

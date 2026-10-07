@@ -13,15 +13,15 @@
 #include <taglib/tpropertymap.h>
 
 #include <cstddef>
-#include <filesystem>
 #include <ctime>
-#include <utime.h>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utime.h>
 #include <vector>
 
 namespace {
@@ -151,7 +151,8 @@ int main(const int argc, char** argv) {
         CHECK(first.has_value());
         bool dated_by_file = false;
         for (const auto& entry : first->entries) {
-            dated_by_file = dated_by_file || (entry.album == "Kind of Blue" && entry.added == long_ago);
+            dated_by_file =
+                dated_by_file || (entry.album == "Kind of Blue" && entry.added == long_ago);
         }
         CHECK(dated_by_file);
     }
@@ -251,7 +252,8 @@ int main(const int argc, char** argv) {
     // A result is a whole track row on both paths, as a query row is: its
     // title, date, length and rating keys, not only a label.
     {
-        const auto jazz_entry = [&](const std::string& source) -> std::optional<persistence::LibraryEntry> {
+        const auto jazz_entry =
+            [&](const std::string& source) -> std::optional<persistence::LibraryEntry> {
             auto compiled = query::compile_tkq(source);
             CHECK(compiled.has_value());
             if (!compiled) {
@@ -361,8 +363,9 @@ int main(const int argc, char** argv) {
     // An album is as new as its newest track: "Kind of Blue" gained one
     // above, found by a later scan.
     CHECK(added_of("Kind of Blue") > long_ago);
-    const auto fresh = fixture(fixtures, root, "e.flac",
-                               {{"TITLE", "Epsilon"}, {"ARTIST", "Newcomer"}, {"ALBUM", "Arrival"}});
+    const auto fresh =
+        fixture(fixtures, root, "e.flac",
+                {{"TITLE", "Epsilon"}, {"ARTIST", "Newcomer"}, {"ALBUM", "Arrival"}});
     {
         const utimbuf times{.actime = long_ago, .modtime = long_ago};
         // Copied in with its old date kept (cp -p): still new to the library.
@@ -429,9 +432,12 @@ int main(const int argc, char** argv) {
             }
             return tracks;
         };
-        const auto sensual = album("a", "The Sensual World", "1989", "00000000-0000-0000-0000-000000000001");
-        const auto hounds = album("b", "Hounds of Love", "1985", "33333333-3333-3333-3333-333333333333");
-        const auto kick = album("c", "The Kick Inside", "1978", "ffffffff-ffff-ffff-ffff-ffffffffffff");
+        const auto sensual =
+            album("a", "The Sensual World", "1989", "00000000-0000-0000-0000-000000000001");
+        const auto hounds =
+            album("b", "Hounds of Love", "1985", "33333333-3333-3333-3333-333333333333");
+        const auto kick =
+            album("c", "The Kick Inside", "1978", "ffffffff-ffff-ffff-ffff-ffffffffffff");
         CHECK(library->add_root(kate.native()).has_value());
         CHECK(library->scan({}, progress).has_value());
         persistence::LibraryQuery artist;
@@ -439,7 +445,8 @@ int main(const int argc, char** argv) {
         artist.artist = "Kate Bush";
         const auto added = library->paths(artist);
         CHECK(added.has_value());
-        const std::vector<std::string> by_year{kick[0], kick[1], hounds[0], hounds[1], sensual[0], sensual[1]};
+        const std::vector<std::string> by_year{kick[0],   kick[1],    hounds[0],
+                                               hounds[1], sensual[0], sensual[1]};
         CHECK(added && *added == by_year);
         // And her tracks listed, and found by a query, the same way.
         const auto listed = library->query(artist);
@@ -449,8 +456,9 @@ int main(const int argc, char** argv) {
 
         // A folder as the library holds it: the folders below it that hold
         // music, and the tracks in it -- not those further down.
-        const auto loose = fixture(fixtures, kate, "loose.flac",
-                                   {{"TITLE", "Loose"}, {"ARTIST", "Someone"}, {"ALBUM", "Single"}});
+        const auto loose =
+            fixture(fixtures, kate, "loose.flac",
+                    {{"TITLE", "Loose"}, {"ARTIST", "Someone"}, {"ALBUM", "Single"}});
         CHECK(library->scan({}, progress).has_value());
         const auto top = library->folder(kate.native());
         CHECK(top.has_value());
@@ -460,7 +468,8 @@ int main(const int argc, char** argv) {
         const auto hounds_folder = library->folder((kate / "b").native());
         CHECK(hounds_folder && hounds_folder->folders.empty());
         CHECK(hounds_folder && hounds_folder->tracks.size() == 2U &&
-              hounds_folder->tracks[0].key == hounds[0] && hounds_folder->tracks[1].key == hounds[1]);
+              hounds_folder->tracks[0].key == hounds[0] &&
+              hounds_folder->tracks[1].key == hounds[1]);
         CHECK(hounds_folder && hounds_folder->tracks[0].title == "Hounds of Love 1" &&
               hounds_folder->tracks[0].duration_ms > 0);
         // A trailing slash names the same folder; a folder without music

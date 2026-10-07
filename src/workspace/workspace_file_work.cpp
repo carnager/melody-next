@@ -168,11 +168,11 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
     auto mounted = std::make_shared<MountedMoves>();
     const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
     TaggerOpening opening{
-        .services =
-            TaggerServices{
-                .plan_applier_factory = engineMetadataPlanApplierFactory(work),
-                .apply_observer = metadataApplyObserver(),
-                .transformation_store = MetadataTransformationStore{
+        .services = TaggerServices{
+            .plan_applier_factory = engineMetadataPlanApplierFactory(work),
+            .apply_observer = metadataApplyObserver(),
+            .transformation_store =
+                MetadataTransformationStore{
                     .load =
                         [persistence_service,
                          unavailable](MetadataTransformationStore::LoadCompletion completion) {
@@ -205,47 +205,48 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                                 id, std::move(completion));
                         },
                 },
-                .output_profile_store = buildOutputProfileStore(work_engine),
-                .file_plan_applier_factory =
-                    enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted),
-                .file_apply_observer =
-                    [this, elsewhere, work_engine,
-                     mounted](const operations::FilePublicationApplyResult& result) {
-                        auto committed = false;
-                        for (const auto& source : result.sources) {
-                            if (source.metadata_commit) {
-                                applyCommittedMetadata(*source.metadata_commit);
-                                committed = true;
-                            }
-                            if (source.commit && elsewhere) {
-                                const auto here = std::ranges::find(
-                                    *mounted, source.commit->journal_id,
-                                    &operations::FilePublicationCommitResult::journal_id);
-                                applyEngineRelocation(work_engine, *source.commit,
-                                                      here == mounted->end() ? nullptr : &*here);
-                                if (source.published_metadata) {
-                                    applyCommittedPublicationMetadata(*source.commit,
-                                                                      *source.published_metadata);
-                                    if (here != mounted->end()) {
-                                        applyCommittedPublicationMetadata(
-                                            *here, *source.published_metadata);
-                                    }
-                                }
-                                committed = true;
-                            } else if (source.commit) {
-                                applyCommittedRelocation(*source.commit);
-                                if (source.published_metadata) {
-                                    applyCommittedPublicationMetadata(*source.commit,
+            .output_profile_store = buildOutputProfileStore(work_engine),
+            .file_plan_applier_factory =
+                enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted),
+            .file_apply_observer =
+                [this, elsewhere, work_engine,
+                 mounted](const operations::FilePublicationApplyResult& result) {
+                    auto committed = false;
+                    for (const auto& source : result.sources) {
+                        if (source.metadata_commit) {
+                            applyCommittedMetadata(*source.metadata_commit);
+                            committed = true;
+                        }
+                        if (source.commit && elsewhere) {
+                            const auto here = std::ranges::find(
+                                *mounted, source.commit->journal_id,
+                                &operations::FilePublicationCommitResult::journal_id);
+                            applyEngineRelocation(work_engine, *source.commit,
+                                                  here == mounted->end() ? nullptr : &*here);
+                            if (source.published_metadata) {
+                                applyCommittedPublicationMetadata(*source.commit,
+                                                                  *source.published_metadata);
+                                if (here != mounted->end()) {
+                                    applyCommittedPublicationMetadata(*here,
                                                                       *source.published_metadata);
                                 }
-                                committed = true;
                             }
+                            committed = true;
+                        } else if (source.commit) {
+                            applyCommittedRelocation(*source.commit);
+                            if (source.published_metadata) {
+                                applyCommittedPublicationMetadata(*source.commit,
+                                                                  *source.published_metadata);
+                            }
+                            committed = true;
                         }
-                        if (committed) {
-                            schedulePersist();
-                        }
-                    },
-                .layout_store = MetadataDialogLayoutStore{
+                    }
+                    if (committed) {
+                        schedulePersist();
+                    }
+                },
+            .layout_store =
+                MetadataDialogLayoutStore{
                     .load =
                         [persistence_service, unavailable](
                             QString key, MetadataDialogLayoutStore::LoadCompletion completion) {
@@ -269,26 +270,23 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                                                              std::move(completion));
                         },
                 },
-                .musicbrainz = engineLookupService(work, this),
-                .tools = engineFileWorkTools(work),
-                .library_roots =
-                    [browser = work_link != nullptr ? work_link->browser
-                                                    : QPointer<LibraryBrowser>{}] {
-                        return browser ? browser->rootPaths() : std::vector<std::string>{};
-                    },
-                .undo =
-                    [work](std::vector<operations::UndoRequest> requests,
+            .musicbrainz = engineLookupService(work, this),
+            .tools = engineFileWorkTools(work),
+            .library_roots =
+                [browser = work_link != nullptr ? work_link->browser : QPointer<LibraryBrowser>{}] {
+                    return browser ? browser->rootPaths() : std::vector<std::string>{};
+                },
+            .undo = [work](std::vector<operations::UndoRequest> requests,
                            const core::CancellationToken& cancellation)
-                    -> core::Result<std::vector<operations::UndoOutcome>> {
-                        if (!work) {
-                            return std::unexpected(core::Error{
-                                .code = core::ErrorCode::unsupported,
-                                .message = "No engine to undo the write",
-                                .context = {}});
-                        }
-                        return work->undo(requests, {}, cancellation);
-                    },
+                -> core::Result<std::vector<operations::UndoOutcome>> {
+                if (!work) {
+                    return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                                       .message = "No engine to undo the write",
+                                                       .context = {}});
+                }
+                return work->undo(requests, {}, cancellation);
             },
+        },
         .artwork_applier = engineArtworkPlanApplierFactory(work),
         .artwork_observer =
             [this](const operations::ArtworkApplyResult& result) {
@@ -481,15 +479,16 @@ MetadataApplyObserver Workspace::metadataApplyObserver() {
 ArtworkWritePlanApplierFactory
 Workspace::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
     return [work = std::move(work)] {
-        return ArtworkWritePlanApplier{[work](const metadata::ArtworkWritePlan& plan,
-                                              const operations::ArtworkApplyProgressCallback& progress,
-                                              const core::CancellationToken& cancellation)
-                                           -> core::Result<operations::ArtworkApplyResult> {
-            // ADR-0237: the engine writes the pictures and journals them; the
-            // open tabs follow from what it answers (ADR-0259: there is no
-            // copy of the lists here to follow too).
-            return work->artwork_apply(plan, progress, cancellation);
-        }};
+        return ArtworkWritePlanApplier{
+            [work](const metadata::ArtworkWritePlan& plan,
+                   const operations::ArtworkApplyProgressCallback& progress,
+                   const core::CancellationToken& cancellation)
+                -> core::Result<operations::ArtworkApplyResult> {
+                // ADR-0237: the engine writes the pictures and journals them; the
+                // open tabs follow from what it answers (ADR-0259: there is no
+                // copy of the lists here to follow too).
+                return work->artwork_apply(plan, progress, cancellation);
+            }};
     };
 }
 

@@ -422,9 +422,9 @@ void clearMatchesNeedNoOne() {
     const auto too_long = align_release_tracks(far, release);
     CHECK(too_long.worst_duration_delta_ms == 11'000);
     CHECK(!is_clear_match(too_long, far.size()));
-    CHECK(is_clear_match(too_long, far.size(),
-                         ClearMatchRule{.maximum_duration_delta_ms = 12'000,
-                                        .minimum_title_similarity = 0.8}));
+    CHECK(is_clear_match(
+        too_long, far.size(),
+        ClearMatchRule{.maximum_duration_delta_ms = 12'000, .minimum_title_similarity = 0.8}));
 
     const std::vector unknown{file("One", 1U, 61'000), file("Two", 2U, {})};
     const auto no_length = align_release_tracks(unknown, release);
@@ -485,8 +485,8 @@ void selectionsGroupIntoAlbums() {
 
     CHECK(is_disc_folder("CD 2") && is_disc_folder("disc1") && is_disc_folder("Disk_03") &&
           is_disc_folder("cd-12"));
-    CHECK(!is_disc_folder("CD") && !is_disc_folder("Discography") && !is_disc_folder("CD 2 bonus") &&
-          !is_disc_folder("2"));
+    CHECK(!is_disc_folder("CD") && !is_disc_folder("Discography") &&
+          !is_disc_folder("CD 2 bonus") && !is_disc_folder("2"));
 }
 
 // ADR-0261: which releases of a search are looked up, and what the lookups
@@ -500,11 +500,11 @@ void albumsAreLookedUpAndJudged() {
                                     .disc_number = {},
                                     .duration_ms = length};
     };
-    const AlbumQuery query{.release_id = {},
-                           .artist = "Band",
-                           .album = "Alpha",
-                           .tracks = {file("One", 1U, 61'000), file("Two", 2U, 59'000),
-                                      file("Three", 3U, 63'000)}};
+    const AlbumQuery query{
+        .release_id = {},
+        .artist = "Band",
+        .album = "Alpha",
+        .tracks = {file("One", 1U, 61'000), file("Two", 2U, 59'000), file("Three", 3U, 63'000)}};
     ReleaseSearchResult found;
     const auto listed = [](std::string id, int score, std::size_t tracks) {
         auto release = two_disc_release();
@@ -514,7 +514,7 @@ void albumsAreLookedUpAndJudged() {
         return release;
     };
     found.releases = {listed("a", 100, 12U), listed("b", 90, 3U), listed("c", 95, 3U),
-                      listed("d", 80, 4U), listed("e", 70, 3U), listed("c", 60, 3U)};
+                      listed("d", 80, 4U),   listed("e", 70, 3U), listed("c", 60, 3U)};
     CHECK(releases_to_examine(query, found) == (std::vector<std::string>{"c", "b", "e"}));
     CHECK(releases_to_examine(query, found, 5U) ==
           (std::vector<std::string>{"c", "b", "e", "a", "d"}));

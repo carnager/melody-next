@@ -78,8 +78,8 @@ int main(int argc, char** argv) {
     require(fits(*narrow, 4) && !fits(*narrow, 3), "to the size asked on its longer side");
 
     // Not an image: said, not sent on as though it were one.
-    const std::vector<std::uint8_t> nonsense{'n', 'o', 't', ' ', 'a', 'n', ' ', 'i', 'm', 'a',
-                                             'g', 'e'};
+    const std::vector<std::uint8_t> nonsense{'n', 'o', 't', ' ', 'a', 'n',
+                                             ' ', 'i', 'm', 'a', 'g', 'e'};
     require(!engine::fit_cover(nonsense, 16).has_value(), "bytes that are no image are refused");
 
     std::cout << "cover fitting: ok\n";

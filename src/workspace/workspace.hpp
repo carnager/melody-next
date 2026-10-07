@@ -13,8 +13,8 @@
 #include "bench/local_playback_service.hpp"
 #include "bench/mpris_service.hpp"
 #include "bench/output_profile_store.hpp"
-#include "bench/remote_mount.hpp"
 #include "bench/remote_engines.hpp"
+#include "bench/remote_mount.hpp"
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
@@ -39,9 +39,9 @@
 
 #include <cstdint>
 #include <deque>
-#include <map>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -74,7 +74,6 @@ class WorkspaceView;
     return parsed ? *parsed : core::StableId{};
 }
 
-
 // ADR-0220: the workspace a window shows -- the engines it reaches, the lists
 // open from them, what plays and waits to, and the work under way -- without
 // any of the window, so each behaviour is written once, apart from how it is
@@ -94,7 +93,6 @@ class Workspace final : public QObject {
     // The window drawing it; set once, before anything is asked.
     void setView(WorkspaceView* view) { view_ = view; }
     [[nodiscard]] WorkspaceView* view() const { return view_; }
-
 
     struct ListTab {
         persistence::ListDocument document;
@@ -351,6 +349,7 @@ class Workspace final : public QObject {
     void rememberContinuationRules();
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
+
   public:
     // Opens the workspace: this computer's engine connected, the saved lists
     // restored and the remote engines connected; then the window is told.
@@ -566,7 +565,8 @@ class Workspace final : public QObject {
     // the same entry of the same file keeps what is already known of it.
     void adoptEngineList(const persistence::ListDocument& document);
     // The open lists of one engine, in the order shown, by id and name.
-    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(const EngineKey& engine) const;
+    [[nodiscard]] std::vector<std::pair<QString, QString>>
+    listTargets(const EngineKey& engine) const;
     // An engine's list opened here -- or shown, when it already is -- and
     // then whatever is to be done with it.
     void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {});
@@ -970,7 +970,6 @@ class Workspace final : public QObject {
     void finishArtworkLoad();
 
     WorkspaceView* view_{nullptr};
-
 };
 
 } // namespace trackknife::bench

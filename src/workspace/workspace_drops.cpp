@@ -79,7 +79,8 @@ bool Workspace::dropOnList(Dragged dragged, ListTab& target, const int insertion
         if (!self || (anchored && !anchor.isValid())) {
             return;
         }
-        self->addDroppedPaths(id, engine, std::move(paths), anchored ? anchor.row() : insertion_row);
+        self->addDroppedPaths(id, engine, std::move(paths),
+                              anchored ? anchor.row() : insertion_row);
     });
     return true;
 }
@@ -173,16 +174,15 @@ bool Workspace::dropOnEngineList(Dragged dragged, const EngineKey& engine, const
     const QPointer self{this};
     if (dragged.isRows()) {
         const QPointer<LocalListModel> model{dragged.from_model};
-        const auto from_id = dragged.from_tab != nullptr
-                                 ? document_text(dragged.from_tab->document.id)
-                                 : QString{};
+        const auto from_id =
+            dragged.from_tab != nullptr ? document_text(dragged.from_tab->document.id) : QString{};
         openEngineList(engine, id, [self, model, from_id, dragged, id] {
             if (!self || !model) {
                 return;
             }
             static_cast<void>(self->transferRows(
-                from_id.isEmpty() ? nullptr : self->tabForDocument(from_id), model,
-                dragged.engine, dragged.dynamic, dragged.rows, id, false, -1));
+                from_id.isEmpty() ? nullptr : self->tabForDocument(from_id), model, dragged.engine,
+                dragged.dynamic, dragged.rows, id, false, -1));
         });
         return true;
     }

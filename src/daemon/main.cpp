@@ -14,7 +14,6 @@
 #if TRACKKNIFE_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
 #endif
-#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -36,6 +35,7 @@
 #include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/formats/probe.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/protocol/client.hpp"
 #include "trackknife/protocol/version.hpp"
 
@@ -345,13 +345,15 @@ int main(int argc, char** argv) {
             agent_music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for-music-root") {
             play_for_option().music_root = std::filesystem::path{value()};
-        } else if (argument == "--play-for-bitrate-nearby" || argument == "--play-for-bitrate-away" ||
-                   argument == "--agent-bitrate-nearby" || argument == "--agent-bitrate-away") {
+        } else if (argument == "--play-for-bitrate-nearby" ||
+                   argument == "--play-for-bitrate-away" || argument == "--agent-bitrate-nearby" ||
+                   argument == "--agent-bitrate-away") {
             const auto text = value();
             const auto kbps = trackknife::agent::parse_kbps(text);
             if (!kbps) {
                 std::cerr << "melodyd: " << argument
-                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text << "\n";
+                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text
+                          << "\n";
                 return EXIT_FAILURE;
             }
             if (argument == "--play-for-bitrate-nearby") {
@@ -653,7 +655,8 @@ int main(int argc, char** argv) {
     std::optional<trackknife::engine::PlaybackStore> playback_store;
     {
         watcher.emplace(*player, sink);
-        watcher->set_tick([&continuation, &player] { static_cast<void>(continuation.tick(*player)); });
+        watcher->set_tick(
+            [&continuation, &player] { static_cast<void>(continuation.tick(*player)); });
         watcher->start();
         recorder.emplace(*player, *workspace);
         recorder->start();
@@ -795,9 +798,8 @@ int main(int argc, char** argv) {
                                                  ? request.selection.stream_index
                                                  : probe->best_audio_stream;
                 if (selected_stream && *selected_stream >= 0) {
-                    const auto chosen =
-                        std::ranges::find(probe->audio_streams, *selected_stream,
-                                          &formats::AudioStreamInfo::stream_index);
+                    const auto chosen = std::ranges::find(probe->audio_streams, *selected_stream,
+                                                          &formats::AudioStreamInfo::stream_index);
                     if (chosen != probe->audio_streams.end()) {
                         source_sample_rate = chosen->sample_rate;
                     }
@@ -823,7 +825,8 @@ int main(int argc, char** argv) {
                 // Long enough to play the track and pause a while; the output
                 // prepares it again before a resume or seek past this.
                 const auto lifetime = std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::hours{6} + std::chrono::milliseconds{std::max<std::int64_t>(0, duration)});
+                    std::chrono::hours{6} +
+                    std::chrono::milliseconds{std::max<std::int64_t>(0, duration)});
                 const auto expires = std::chrono::system_clock::now() + lifetime;
                 // Distinct URLs also distinguish two consecutive occurrences of the same song.
                 const auto url = base + media->ticket(delivery, lifetime) +
@@ -890,8 +893,8 @@ int main(int argc, char** argv) {
                                            .name = engine_name,
                                            .music_root = target.music_root,
                                            .stream_only = !target.music_root.has_value(),
-                                           .stream = stream_choice(target.nearby_kbps,
-                                                                   target.away_kbps)},
+                                           .stream =
+                                               stream_choice(target.nearby_kbps, target.away_kbps)},
             std::move(*audition));
         if (!made) {
             std::cerr << "melodyd: cannot play for " << target.address << ": "

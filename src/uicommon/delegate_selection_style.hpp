@@ -37,8 +37,7 @@ class DelegateSelectionStyle final : public QProxyStyle {
     // On the style the application uses: a proxy made without one would
     // wrap the desktop's default instead.
     static void install(QWidget* view) {
-        auto* style =
-            new DelegateSelectionStyle(createApplicationStyle());
+        auto* style = new DelegateSelectionStyle(createApplicationStyle());
         style->setParent(view);
         view->setStyle(style);
     }

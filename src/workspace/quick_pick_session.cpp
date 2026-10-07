@@ -141,7 +141,8 @@ void QuickPickSession::showResults() {
         if (found.newest && entry.added > 0) {
             details << added_ago(entry.added);
         }
-        const auto name = text(albums ? entry.album : (entry.title.empty() ? entry.label : entry.title));
+        const auto name =
+            text(albums ? entry.album : (entry.title.empty() ? entry.label : entry.title));
         rows_.push_back({name, details.join(QStringLiteral(" · "))});
     }
     const auto count = entries_.size();
@@ -150,10 +151,10 @@ void QuickPickSession::showResults() {
                       : (n == 1U ? tr("1 track") : tr("%1 tracks").arg(n));
     };
     if (found.newest) {
-        status_ = count == 0U ? idleText()
-                              : tr("Recently added — type to search the whole library");
+        status_ =
+            count == 0U ? idleText() : tr("Recently added — type to search the whole library");
     } else {
-        status_ = count == 0U ? (albums ? tr("No albums match.") : tr("No tracks match."))
+        status_ = count == 0U  ? (albums ? tr("No albums match.") : tr("No tracks match."))
                   : found.more ? tr("First %1 — type more to narrow them.").arg(noun(count))
                                : noun(count);
     }
@@ -175,10 +176,10 @@ void QuickPickSession::choose(const int row, const LocalLibraryAction action) {
 LocalLibraryAction QuickPickSession::actionFor(Qt::KeyboardModifiers modifiers) {
     modifiers &= ~Qt::KeypadModifier;
     return modifiers == (Qt::ControlModifier | Qt::ShiftModifier) ? LocalLibraryAction::request_end
-           : modifiers == Qt::ControlModifier                    ? LocalLibraryAction::request_next
-           : modifiers == Qt::ShiftModifier                      ? LocalLibraryAction::replace
-           : modifiers == Qt::AltModifier                        ? LocalLibraryAction::new_list
-                                                                 : LocalLibraryAction::append;
+           : modifiers == Qt::ControlModifier                     ? LocalLibraryAction::request_next
+           : modifiers == Qt::ShiftModifier                       ? LocalLibraryAction::replace
+           : modifiers == Qt::AltModifier                         ? LocalLibraryAction::new_list
+                                                                  : LocalLibraryAction::append;
 }
 
 } // namespace trackknife::bench

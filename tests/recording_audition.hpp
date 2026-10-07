@@ -130,8 +130,7 @@ class RecordingAudition final : public audio::Audition {
         return {};
     }
     [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
-    [[nodiscard]] core::Result<void>
-    set_output_target(std::optional<std::string> target) override {
+    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target) override {
         const std::lock_guard guard{mutex_};
         target_ = std::move(target);
         return {};
@@ -168,8 +167,8 @@ class RecordingAudition final : public audio::Audition {
         position_ms_ = 0;
         if (failing_) {
             loaded_.clear();
-            error_ = core::Error{
-                .code = core::ErrorCode::backend, .message = *failing_, .context = {}};
+            error_ =
+                core::Error{.code = core::ErrorCode::backend, .message = *failing_, .context = {}};
             state_ = audio::LocalAuditionState::failed;
             return;
         }

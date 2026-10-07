@@ -229,7 +229,8 @@ int main(int argc, char** argv) {
                 const auto ratio = image.devicePixelRatio();
                 for (auto* candidate : QApplication::topLevelWidgets()) {
                     if (candidate->isVisible() && candidate->windowFlags().testFlag(Qt::Popup)) {
-                        const auto at = candidate->mapToGlobal(QPoint{}) - window.mapToGlobal(QPoint{});
+                        const auto at =
+                            candidate->mapToGlobal(QPoint{}) - window.mapToGlobal(QPoint{});
                         painter.drawImage(QRectF{QPointF{at}, QSizeF{candidate->size()}},
                                           candidate->grab().toImage());
                         static_cast<void>(ratio);

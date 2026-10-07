@@ -449,7 +449,9 @@ struct ExpectedItem {
         return std::unexpected(cancelled(format, source_plan.raw_media_path, prepared_raw_path));
     }
 
-    if (auto settled = text_writer_detail::settle_prepared(prepared_raw_path, source_plan.raw_media_path); !settled) {
+    if (auto settled =
+            text_writer_detail::settle_prepared(prepared_raw_path, source_plan.raw_media_path);
+        !settled) {
         return std::unexpected(std::move(settled.error()));
     }
     auto after_document = read_local_metadata(prepared_raw_path, cancellation);

@@ -94,10 +94,8 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
 // where the access has it), progress told after each, and a file that cannot
 // be read kept unread rather than failing the rest. Fails only when cancelled,
 // or when the engine cannot be reached at all. Run on a worker.
-[[nodiscard]] core::Result<CapturedMetadataSources>
-capture_metadata_sources(std::vector<StagedMetadataSource> sources,
-                         const MetadataFileAccess& access,
-                         const core::CancellationToken& cancellation = {},
-                         const MetadataCaptureProgress& progress = {});
+[[nodiscard]] core::Result<CapturedMetadataSources> capture_metadata_sources(
+    std::vector<StagedMetadataSource> sources, const MetadataFileAccess& access,
+    const core::CancellationToken& cancellation = {}, const MetadataCaptureProgress& progress = {});
 
 } // namespace trackknife::metadata

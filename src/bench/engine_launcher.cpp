@@ -143,12 +143,11 @@ LocalEngineSharing localEngineSharing() {
                            .value(QLatin1String(SettingsKeys::engine_stream_port_key),
                                   SettingsKeys::engine_stream_port_default)
                            .toInt(),
-        .password = settings.value(QLatin1String(SettingsKeys::engine_password_key), QString{})
-                        .toString(),
-        .music_root =
-            settings.value(QLatin1String(SettingsKeys::engine_music_root_key), QString{})
-                .toString()
-                .trimmed(),
+        .password =
+            settings.value(QLatin1String(SettingsKeys::engine_password_key), QString{}).toString(),
+        .music_root = settings.value(QLatin1String(SettingsKeys::engine_music_root_key), QString{})
+                          .toString()
+                          .trimmed(),
         .play_for =
             [&settings] {
                 std::vector<LocalEngineSharing::PlayFor> targets;
@@ -171,8 +170,7 @@ LocalEngineSharing localEngineSharing() {
                 return targets;
             }(),
         .play_for_found =
-            settings.value(QLatin1String(SettingsKeys::engine_play_for_remote_key), true)
-                .toBool(),
+            settings.value(QLatin1String(SettingsKeys::engine_play_for_remote_key), true).toBool(),
         .found_nearby_kbps = streamNearbyKbps(settings),
         .found_away_kbps = streamAwayKbps(settings),
         .upnp = TRACKKNIFE_ENABLE_UPNP &&

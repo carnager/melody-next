@@ -164,8 +164,7 @@ void AlbumLookupQueueTest::oneThingAtATimeInTurn() {
         queue.add(id, album(id % 2U == 0U ? std::string{known_id} : std::string{}));
     }
     QCOMPARE(queue.waiting(), 3U);
-    QCOMPARE(queue.requestsLeft(),
-             2U * 1U + 2U * (1U + AlbumLookupQueue::releases_per_search));
+    QCOMPARE(queue.requestsLeft(), 2U * 1U + 2U * (1U + AlbumLookupQueue::releases_per_search));
     QTRY_COMPARE(idle.count(), 1);
     QCOMPARE(found.count(), 4);
     QCOMPARE(musicbrainz.most_in_flight, 1);
@@ -195,34 +194,34 @@ void AlbumLookupQueueTest::untaggedAlbumsAreHeard() {
     auto service = musicbrainz.service();
     std::vector<QString> fingerprinted;
     int acoustid_asked = 0;
-    service.fingerprint = [&fingerprinted](const QString& path,
-                                           std::function<void(core::Result<AcoustIdFingerprint>)>
-                                               then) {
-        fingerprinted.push_back(path);
-        QTimer::singleShot(1, [path, then = std::move(then)] {
-            // One file cannot be heard: the others still count.
-            if (path.endsWith(QStringLiteral("broken.flac"))) {
-                then(std::unexpected(core::Error{.code = core::ErrorCode::io,
-                                                 .message = "unreadable",
-                                                 .context = {}}));
-                return;
-            }
-            then(AcoustIdFingerprint{.duration_seconds = 60U, .fingerprint = path});
-        });
-    };
-    service.acoustid_lookup = [&acoustid_asked](const AcoustIdFingerprint&,
-                                                std::function<void(core::Result<QByteArray>)> then) {
-        ++acoustid_asked;
-        QTimer::singleShot(1, [then = std::move(then)] {
-            then(QByteArray{R"json({"status": "ok", "results": [
+    service.fingerprint =
+        [&fingerprinted](const QString& path,
+                         std::function<void(core::Result<AcoustIdFingerprint>)> then) {
+            fingerprinted.push_back(path);
+            QTimer::singleShot(1, [path, then = std::move(then)] {
+                // One file cannot be heard: the others still count.
+                if (path.endsWith(QStringLiteral("broken.flac"))) {
+                    then(std::unexpected(core::Error{
+                        .code = core::ErrorCode::io, .message = "unreadable", .context = {}}));
+                    return;
+                }
+                then(AcoustIdFingerprint{.duration_seconds = 60U, .fingerprint = path});
+            });
+        };
+    service.acoustid_lookup =
+        [&acoustid_asked](const AcoustIdFingerprint&,
+                          std::function<void(core::Result<QByteArray>)> then) {
+            ++acoustid_asked;
+            QTimer::singleShot(1, [then = std::move(then)] {
+                then(QByteArray{R"json({"status": "ok", "results": [
                 {"id": "x", "score": 0.95, "recordings": [
                   {"id": "bbbb1111-0000-0000-0000-000000000001",
                    "releases": [{"id": "11111111-2222-3333-4444-555555555555"}]}]},
                 {"id": "y", "score": 0.2, "recordings": [
                   {"id": "bbbb1111-0000-0000-0000-000000000009",
                    "releases": [{"id": "22222222-2222-3333-4444-555555555555"}]}]}]})json"});
-        });
-    };
+            });
+        };
     AlbumLookupQueue queue{service};
     QSignalSpy found{&queue, &AlbumLookupQueue::lookedUp};
     auto untagged = album({}, {}, {});

@@ -42,8 +42,8 @@ bool beginsTrackGroup(const QAbstractItemModel& model, const int row,
             cached.isValid()) {
             return cached.toBool();
         }
-        return row == 0 || trackGroupKey(model, row, columns) !=
-                               trackGroupKey(model, row - 1, columns);
+        return row == 0 ||
+               trackGroupKey(model, row, columns) != trackGroupKey(model, row - 1, columns);
     }
     const auto key = trackGroupKey(model, row, columns);
     return (row == 0 || key != trackGroupKey(model, row - 1, columns)) &&
@@ -197,9 +197,9 @@ TrackCell trackCell(const QAbstractItemModel& model, const int row, const int co
     // A lone track's number means nothing without its album, so its cover
     // takes the number's place, just before the title. With no number
     // column, it keeps to the cover column.
-    cell.inline_cover = context.side_artwork && !cell.in_group &&
-                        (!hidden(context.number) ? column == context.number
-                                                 : column == context.artwork);
+    cell.inline_cover =
+        context.side_artwork && !cell.in_group &&
+        (!hidden(context.number) ? column == context.number : column == context.artwork);
     if (cell.inline_cover && !cell.artwork_cell) {
         cell.text.clear();
     }

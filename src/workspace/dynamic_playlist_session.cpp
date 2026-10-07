@@ -109,9 +109,8 @@ QString DynamicPlaylistSession::shuffleTip() const {
 
 DynamicPlaylistDefinition DynamicPlaylistSession::definition() const {
     auto definition = draft_;
-    definition.id = catalog_index_ > 0
-                        ? definitions_[static_cast<qsizetype>(catalog_index_ - 1)].id
-                        : QString{};
+    definition.id = catalog_index_ > 0 ? definitions_[static_cast<qsizetype>(catalog_index_ - 1)].id
+                                       : QString{};
     definition.name = draft_.name.trimmed();
     definition.profile = profile_;
     return definition;
@@ -272,10 +271,10 @@ void DynamicPlaylistSession::save() {
         return;
     }
     definitions_ = std::move(next);
-    const auto found = std::ranges::find(definitions_, saved_definition.id,
-                                         &DynamicPlaylistDefinition::id);
-    catalog_index_ = found == definitions_.end() ? 0
-                                                 : static_cast<int>(found - definitions_.begin()) + 1;
+    const auto found =
+        std::ranges::find(definitions_, saved_definition.id, &DynamicPlaylistDefinition::id);
+    catalog_index_ =
+        found == definitions_.end() ? 0 : static_cast<int>(found - definitions_.begin()) + 1;
     status_ = QStringLiteral("Definition saved");
     emit definitionsSaved();
     emit catalogChanged();
@@ -377,12 +376,12 @@ void DynamicPlaylistSession::finished(const DynamicPlaylistService::Tracks& trac
     tracks_ = tracks;
     emit resultsAboutToChange();
     const auto& previous = results_->rows();
-    const bool unchanged = tracks_.size() == previous.size() &&
-                           std::equal(tracks_.begin(), tracks_.end(), previous.begin(),
-                                      [](const auto& a, const auto& b) {
-                                          return a == b && a.rating == b.rating &&
-                                                 a.album_rating == b.album_rating;
-                                      });
+    const bool unchanged =
+        tracks_.size() == previous.size() &&
+        std::equal(tracks_.begin(), tracks_.end(), previous.begin(),
+                   [](const auto& a, const auto& b) {
+                       return a == b && a.rating == b.rating && a.album_rating == b.album_rating;
+                   });
     if (!unchanged)
         results_->replaceRows(tracks_);
     emit resultsChanged();

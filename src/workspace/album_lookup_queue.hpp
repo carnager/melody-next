@@ -10,8 +10,8 @@
 #include <cstddef>
 #include <deque>
 #include <map>
-#include <set>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace trackknife::bench {

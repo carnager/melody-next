@@ -104,8 +104,7 @@ struct CompiledTkq {
 // The source of `query` narrowed to what `condition` also matches, keeping
 // its SORT: `ALL` becomes the condition, bare words a `* HAS` predicate, and
 // anything else `(query) AND (condition)`. Fails as either would compile.
-[[nodiscard]] core::Result<std::string> narrow_tkq_source(std::string_view query,
-                                                          std::string_view condition,
-                                                          const TkqLimits& limits = {});
+[[nodiscard]] core::Result<std::string>
+narrow_tkq_source(std::string_view query, std::string_view condition, const TkqLimits& limits = {});
 
 } // namespace trackknife::query

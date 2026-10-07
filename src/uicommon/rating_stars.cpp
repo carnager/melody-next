@@ -218,7 +218,8 @@ void RatingStrip::paintEvent(QPaintEvent*) {
         fill.setAlpha(190);
     }
     for (unsigned star = 0U; star < 5U; ++star) {
-        const auto left = static_cast<qreal>(strip_margin) + star * static_cast<qreal>(strip_star + strip_gap);
+        const auto left =
+            static_cast<qreal>(strip_margin) + star * static_cast<qreal>(strip_star + strip_gap);
         const QPointF center{left + radius, center_y};
         const auto path = starPath(center, radius);
         const auto whole = (star + 1U) * 2U;

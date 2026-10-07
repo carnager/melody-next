@@ -211,9 +211,7 @@ class TrackMatchWidget final : public QWidget {
         rows_->setObjectName(QStringLiteral("bench-musicbrainz-match-files"));
         rows_->setHeaderLabels({tr("Local filename"), tr("Length"), tr("Pairing")});
         auto* tracks = new ReleaseTrackDropView(splitter, rows_);
-        tracks->placeOn = [this](std::size_t from, std::size_t to) {
-            session_->placeOn(from, to);
-        };
+        tracks->placeOn = [this](std::size_t from, std::size_t to) { session_->placeOn(from, to); };
         tracks_ = tracks;
         tracks_->setObjectName(QStringLiteral("bench-musicbrainz-match-tracks"));
         tracks_->setHeaderLabels({tr("MusicBrainz track"), tr("Length")});

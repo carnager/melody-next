@@ -42,10 +42,10 @@ constexpr std::string_view store_key = "list-continuation.v1";
 
 // A rule as it is stored, told and set: {rule|id, name, query, ...}.
 [[nodiscard]] Json rule_json(const ContinuationRule& rule) {
-    return Json{{"rule", rule.rule_id},     {"name", rule.name},
-                {"query", rule.query},      {"group_by", rule.group_by},
-                {"groups", rule.groups},    {"per_group", rule.per_group},
-                {"limit", rule.limit},      {"shuffle", rule.shuffle}};
+    return Json{{"rule", rule.rule_id},  {"name", rule.name},
+                {"query", rule.query},   {"group_by", rule.group_by},
+                {"groups", rule.groups}, {"per_group", rule.per_group},
+                {"limit", rule.limit},   {"shuffle", rule.shuffle}};
 }
 
 [[nodiscard]] ContinuationRule rule_from(const Json& value, const char* id_key) {
@@ -193,13 +193,12 @@ std::size_t ListContinuation::continue_if_ending(Player& player) {
     const bool grouped = rule.groups > 0U && !rule.group_by.empty();
     std::vector<std::string> candidates;
     for (const auto& source : {without_recent(rule.query, recent_days), rule.query}) {
-        const DynamicSelection selection{
-            .query = source,
-            .limit = grouped ? rule.limit : batch_size,
-            .shuffle = grouped ? rule.shuffle : true,
-            .group_by = grouped ? rule.group_by : std::string{},
-            .groups = grouped ? rule.groups : 0U,
-            .per_group = grouped ? rule.per_group : 0U};
+        const DynamicSelection selection{.query = source,
+                                         .limit = grouped ? rule.limit : batch_size,
+                                         .shuffle = grouped ? rule.shuffle : true,
+                                         .group_by = grouped ? rule.group_by : std::string{},
+                                         .groups = grouped ? rule.groups : 0U,
+                                         .per_group = grouped ? rule.per_group : 0U};
         core::Result<DynamicSelected> selected = std::unexpected(core::Error{});
         {
             std::mt19937 random;

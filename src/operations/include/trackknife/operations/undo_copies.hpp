@@ -36,7 +36,7 @@ class FilePublicationJournal;
 // now: renamed on one filesystem, else copied, verified, recorded, and only
 // then removed. A copy a crash left in both places is found by its name and
 // removed from the old one. How many moved.
-[[nodiscard]] core::Result<std::size_t> keep_undo_copies_in_place(MetadataOperationJournal& metadata,
-                                                                  FilePublicationJournal& files);
+[[nodiscard]] core::Result<std::size_t>
+keep_undo_copies_in_place(MetadataOperationJournal& metadata, FilePublicationJournal& files);
 
 } // namespace trackknife::operations

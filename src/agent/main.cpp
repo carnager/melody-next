@@ -89,7 +89,8 @@ int main(int argc, char** argv) {
             const auto kbps = trackknife::agent::parse_kbps(text);
             if (!kbps) {
                 std::cerr << "melody-agent: " << argument
-                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text << "\n";
+                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text
+                          << "\n";
                 return EXIT_FAILURE;
             }
             (argument == "--bitrate-nearby" ? config.stream.nearby : config.stream.away) =

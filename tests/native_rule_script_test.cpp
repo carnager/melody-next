@@ -32,9 +32,8 @@ void everyStepRoundTrips() {
         MetadataRemoveFieldAction{.target_field = "ENCODER"},
         MetadataRemoveFieldAction{.target_field = "iTunNORM",
                                   .match_mode = MetadataFieldMatchMode::exact_native},
-        MetadataRemoveFieldIfAction{.target_field = "DISCNUMBER",
-                                    .dialect = {},
-                                    .condition = "$eq(%totaldiscs%,1)"},
+        MetadataRemoveFieldIfAction{
+            .target_field = "DISCNUMBER", .dialect = {}, .condition = "$eq(%totaldiscs%,1)"},
         MetadataRemoveFieldIfAction{.target_field = "TOTALDISCS",
                                     .dialect = {},
                                     .condition = "$eq(%totaldiscs%,1)",
@@ -48,10 +47,10 @@ void everyStepRoundTrips() {
         MetadataSplitValuesAction{.target_field = "ARTIST", .separator = ", "},
         MetadataJoinValuesAction{.target_field = "ARTIST", .separator = ""},
         MetadataRemoveMatchingValuesAction{.target_field = "GENRE", .match = "Other)"},
-        MetadataReplaceMatchingValuesAction{.target_field = "GENRE",
-                                            .match = "Rock",
-                                            .replacement_values = {"Rock", "Pop,Rock"}},
-        MetadataNumberSelectedItemsAction{.target_field = "TRACKNUMBER", .start = 1U, .padding = 2U},
+        MetadataReplaceMatchingValuesAction{
+            .target_field = "GENRE", .match = "Rock", .replacement_values = {"Rock", "Pop,Rock"}},
+        MetadataNumberSelectedItemsAction{
+            .target_field = "TRACKNUMBER", .start = 1U, .padding = 2U},
         MetadataNumberGroupedItemsAction{.target_field = "TRACKNUMBER",
                                          .dialect = {},
                                          .group_expression = "%album%, %discnumber%",

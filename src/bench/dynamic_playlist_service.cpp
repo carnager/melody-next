@@ -101,8 +101,7 @@ QVector<DynamicPlaylistDefinition> shippedDynamicPlaylists(const QString& profil
         rule("recently-added", "Recently added",
              "dayssinceadded LESS 31 SORT BY $num($info(dayssinceadded),6)", 100, false),
         rule("not-heard-in-a-year", "Not heard in a year",
-             "HISTORY(dayssinceplayed) GREATER 365 OR HISTORY(dayssinceplayed) MISSING", 100,
-             true),
+             "HISTORY(dayssinceplayed) GREATER 365 OR HISTORY(dayssinceplayed) MISSING", 100, true),
     };
 }
 
@@ -134,9 +133,8 @@ void adoptDynamicPlaylists(const QString& profile) {
         if (!found)
             continue;
         for (auto definition : *found) {
-            if (std::ranges::any_of(*kept, [&definition](const auto& known) {
-                    return known.id == definition.id;
-                }))
+            if (std::ranges::any_of(
+                    *kept, [&definition](const auto& known) { return known.id == definition.id; }))
                 continue;
             definition.profile = profile;
             kept->push_back(std::move(definition));

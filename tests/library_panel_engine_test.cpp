@@ -14,25 +14,25 @@
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/protocol/client.hpp"
-#include "workspace/library_browser.hpp"
 #include "uicommon/local_artwork.hpp"
+#include "workspace/library_browser.hpp"
 
 #include <sqlite3.h>
 
 #include <QAbstractButton>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
-#include <QFile>
 #include <QSettings>
-#include <QTreeView>
 #include <QStandardPaths>
+#include <QTreeView>
 #include <QtTest>
 #include <atomic>
 
-#include <filesystem>
 #include <QDir>
-#include <optional>
+#include <filesystem>
 #include <mutex>
+#include <optional>
 
 namespace trackknife::bench {
 
@@ -174,7 +174,8 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
     QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
     QVERIFY(fixture.open(QIODevice::ReadOnly));
     QFile track{music + QStringLiteral("/art.flac")};
-    QVERIFY(track.open(QIODevice::WriteOnly) && track.write(QByteArray::fromBase64(fixture.readAll())) > 0);
+    QVERIFY(track.open(QIODevice::WriteOnly) &&
+            track.write(QByteArray::fromBase64(fixture.readAll())) > 0);
     track.close();
     const std::filesystem::path database{
         (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
@@ -319,9 +320,8 @@ void LibraryPanelEngineTest::aChangeSaysWhichAlbumsItTouched() {
     QCOMPARE(*protocol::decode_raw_path(change["paths"][0].get<std::string>()), second);
     QCOMPARE(change["albums"].size(), 1U);
     const auto touched = *protocol::decode_raw_path(change["albums"][0].get<std::string>());
-    const auto gone = std::ranges::find_if(listed->entries, [&](const auto& entry) {
-        return entry.key == touched;
-    });
+    const auto gone = std::ranges::find_if(listed->entries,
+                                           [&](const auto& entry) { return entry.key == touched; });
     QVERIFY(gone != listed->entries.end());
     const auto deleted_album = touched;
     heard.clear();
@@ -341,8 +341,7 @@ void LibraryPanelEngineTest::aChangeSaysWhichAlbumsItTouched() {
                              5'000);
     held.lock();
     QCOMPARE(heard.front()["albums"].size(), 1U);
-    const auto covered =
-        *protocol::decode_raw_path(heard.front()["albums"][0].get<std::string>());
+    const auto covered = *protocol::decode_raw_path(heard.front()["albums"][0].get<std::string>());
     QVERIFY(covered != deleted_album);
     QVERIFY(std::ranges::any_of(listed->entries,
                                 [&](const auto& entry) { return entry.key == covered; }));
@@ -379,9 +378,8 @@ void LibraryPanelEngineTest::theTreeFollowsAChangeInPlace() {
     panel.show();
     auto& browser = panel.browser();
     auto* model = browser.model();
-    QTRY_VERIFY_WITH_TIMEOUT(model->rowCount() == 1 &&
-                                 model->index(0, 0).data(library_entry_role).isValid(),
-                             5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        model->rowCount() == 1 && model->index(0, 0).data(library_entry_role).isValid(), 5'000);
     auto* artist = model->item(0);
     browser.noteExpanded(artist->index(), true);
     QTRY_COMPARE_WITH_TIMEOUT(artist->rowCount(), 2, 5'000);
@@ -421,14 +419,15 @@ void LibraryPanelEngineTest::anEmptyLibrarySaysWhy() {
     const auto top_line = [](LocalLibraryPanel& panel) {
         auto* tree = panel.findChild<QTreeView*>();
         return tree && tree->model()->rowCount() > 0 ? tree->model()->index(0, 0).data().toString()
-                                                      : QString{};
+                                                     : QString{};
     };
     {
         CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
                                    CatalogueSource::Role::remote};
         LocalLibraryPanel panel{catalogues};
         panel.show();
-        QTRY_COMPARE(top_line(panel), QStringLiteral("No music folders yet — choose Folders… to add one"));
+        QTRY_COMPARE(top_line(panel),
+                     QStringLiteral("No music folders yet — choose Folders… to add one"));
     }
     const auto music = directory.path() + QStringLiteral("/music");
     QVERIFY(QDir{}.mkpath(music));

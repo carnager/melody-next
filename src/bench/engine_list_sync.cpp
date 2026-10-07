@@ -14,10 +14,10 @@
 namespace trackknife::bench {
 namespace {
 
-using protocol::Json;
 using persistence::EngineListItem;
 using persistence::ListEdit;
 using persistence::ListEntryPrint;
+using protocol::Json;
 
 [[nodiscard]] Json optional_number(const std::optional<double>& value) {
     return value ? Json(*value) : Json(nullptr);
@@ -100,10 +100,11 @@ Json EngineListSync::itemJson(const EngineListItem& item) {
         rendered["duration_ms"] = *item.duration_ms;
     }
     if (item.replay_gain) {
-        rendered["replay_gain"] = Json{{"track_gain_db", optional_number(item.replay_gain->track_gain_db)},
-                                       {"track_peak", optional_number(item.replay_gain->track_peak)},
-                                       {"album_gain_db", optional_number(item.replay_gain->album_gain_db)},
-                                       {"album_peak", optional_number(item.replay_gain->album_peak)}};
+        rendered["replay_gain"] =
+            Json{{"track_gain_db", optional_number(item.replay_gain->track_gain_db)},
+                 {"track_peak", optional_number(item.replay_gain->track_peak)},
+                 {"album_gain_db", optional_number(item.replay_gain->album_gain_db)},
+                 {"album_peak", optional_number(item.replay_gain->album_peak)}};
     }
     return rendered;
 }
@@ -120,12 +121,14 @@ std::optional<EngineListItem> EngineListSync::itemFromJson(const Json& value) {
     EngineListItem item;
     item.entry_id = *entry;
     item.raw_path = std::move(*path);
-    if (const auto logical = value.find("logical"); logical != value.end() && logical->is_string()) {
+    if (const auto logical = value.find("logical");
+        logical != value.end() && logical->is_string()) {
         if (auto decoded = protocol::decode_raw_path(logical->get<std::string>())) {
             item.logical_reference = std::move(*decoded);
         }
     }
-    if (const auto segment = value.find("segment"); segment != value.end() && segment->is_object()) {
+    if (const auto segment = value.find("segment");
+        segment != value.end() && segment->is_object()) {
         const auto end = segment->find("end_sample");
         item.segment = persistence::ListItemSegment{
             .start_sample = segment->value("start_sample", std::int64_t{0}),
@@ -142,9 +145,9 @@ std::optional<EngineListItem> EngineListSync::itemFromJson(const Json& value) {
             item.source_selection = chosen;
         }
     }
-    if (const auto duration = value.find("duration_ms");
-        duration != value.end() && duration->is_number_integer() &&
-        duration->get<std::int64_t>() >= 0) {
+    if (const auto duration = value.find("duration_ms"); duration != value.end() &&
+                                                         duration->is_number_integer() &&
+                                                         duration->get<std::int64_t>() >= 0) {
         item.duration_ms = duration->get<std::int64_t>();
     }
     const auto text = [&value](const char* key) {
@@ -179,8 +182,8 @@ std::size_t EngineListSync::fingerprint(const EngineListItem& item) {
     // together. Text the wire cannot carry as it is reads back changed from
     // the engine, and is then sent once more as an update -- once.
     std::string text;
-    text.reserve(item.raw_path.size() + item.title.size() + item.artist.size() +
-                 item.album.size() + 96U);
+    text.reserve(item.raw_path.size() + item.title.size() + item.artist.size() + item.album.size() +
+                 96U);
     const auto add = [&text](const std::string_view part) {
         text += part;
         text += '\0';
@@ -368,7 +371,8 @@ void EngineListSync::take(const persistence::ListDocumentWrite& write, const Ite
 
 bool EngineListSync::inStep(const Known& known) {
     return known.acked && known.local && !known.overwrite && known.acked->name == known.name &&
-           known.acked->working == known.working && same_entries(known.acked->entries, *known.local);
+           known.acked->working == known.working &&
+           same_entries(known.acked->entries, *known.local);
 }
 
 void EngineListSync::settle(Known& known, const bool ready) {
@@ -532,25 +536,25 @@ void EngineListSync::create(const std::string& id, Known& known,
     ++in_flight_;
     const QPointer self{this};
     engineFor(known.engine)
-        ->request(QStringLiteral("list.save"), std::move(params),
-                  [self, id, sent = prints_of(sent), name = known.name,
-                   working = known.working](core::Result<Json> answer) {
-                      if (!self) {
-                          return;
-                      }
-                      // As it was sent: a save while this was on its way
-                      // changed the window's, not what the engine has.
-                      self->written(id, answer,
-                                    [&sent, &name, working](Known& list, const Json& summary) {
-                                        list.acked = Acked{
-                                            .revision = summary.value("revision", std::uint64_t{0}),
-                                            .name = name,
-                                            .working = working,
-                                            .entries = sent};
-                                        list.missing = false;
-                                    });
-                  },
-                  true);
+        ->request(
+            QStringLiteral("list.save"), std::move(params),
+            [self, id, sent = prints_of(sent), name = known.name,
+             working = known.working](core::Result<Json> answer) {
+                if (!self) {
+                    return;
+                }
+                // As it was sent: a save while this was on its way
+                // changed the window's, not what the engine has.
+                self->written(
+                    id, answer, [&sent, &name, working](Known& list, const Json& summary) {
+                        list.acked = Acked{.revision = summary.value("revision", std::uint64_t{0}),
+                                           .name = name,
+                                           .working = working,
+                                           .entries = sent};
+                        list.missing = false;
+                    });
+            },
+            true);
 }
 
 void EngineListSync::edit(const std::string& id, Known& known,
@@ -648,38 +652,39 @@ void EngineListSync::edit(const std::string& id, Known& known,
     ++in_flight_;
     const QPointer self{this};
     engineFor(known.engine)
-        ->request(QStringLiteral("list.edit"), std::move(params),
-                  [self, id, sent = std::move(sent), name = known.name,
-                   working = known.working](core::Result<Json> answer) {
-                      if (!self) {
-                          return;
-                      }
-                      self->written(id, answer, [&sent, &name, working](Known& list,
-                                                                        const Json& summary) {
-                          if (!list.acked) {
-                              return;
-                          }
-                          auto applied = persistence::apply_list_edits(
-                              list.acked->entries, sent,
-                              [](const ListEntryPrint& entry) { return entry.entry; },
-                              [](const EngineListItem& item) {
-                                  return ListEntryPrint{.entry = item.entry_id,
-                                                        .print = fingerprint(item)};
-                              });
-                          if (!applied) {
-                              // The engine took what this window cannot
-                              // follow: what it holds is read again.
-                              list.acked.reset();
-                              return;
-                          }
-                          // The name and kind as sent with it: a save on the
-                          // way since is the next edit's.
-                          list.acked->revision = summary.value("revision", std::uint64_t{0});
-                          list.acked->name = name;
-                          list.acked->working = working;
-                      });
-                  },
-                  true);
+        ->request(
+            QStringLiteral("list.edit"), std::move(params),
+            [self, id, sent = std::move(sent), name = known.name,
+             working = known.working](core::Result<Json> answer) {
+                if (!self) {
+                    return;
+                }
+                self->written(
+                    id, answer, [&sent, &name, working](Known& list, const Json& summary) {
+                        if (!list.acked) {
+                            return;
+                        }
+                        auto applied = persistence::apply_list_edits(
+                            list.acked->entries, sent,
+                            [](const ListEntryPrint& entry) { return entry.entry; },
+                            [](const EngineListItem& item) {
+                                return ListEntryPrint{.entry = item.entry_id,
+                                                      .print = fingerprint(item)};
+                            });
+                        if (!applied) {
+                            // The engine took what this window cannot
+                            // follow: what it holds is read again.
+                            list.acked.reset();
+                            return;
+                        }
+                        // The name and kind as sent with it: a save on the
+                        // way since is the next edit's.
+                        list.acked->revision = summary.value("revision", std::uint64_t{0});
+                        list.acked->name = name;
+                        list.acked->working = working;
+                    });
+            },
+            true);
 }
 
 void EngineListSync::sendWhole(const std::string& id, Known& known,
@@ -713,23 +718,23 @@ void EngineListSync::sendWhole(const std::string& id, Known& known,
     ++in_flight_;
     const QPointer self{this};
     engineFor(known.engine)
-        ->request(QStringLiteral("list.save"), std::move(params),
-                  [self, id, sent = prints_of(items), name = known.name,
-                   working = known.working](core::Result<Json> answer) {
-                      if (!self) {
-                          return;
-                      }
-                      self->written(id, answer,
-                                    [&sent, &name, working](Known& list, const Json& summary) {
-                                        list.acked = Acked{
-                                            .revision = summary.value("revision", std::uint64_t{0}),
-                                            .name = name,
-                                            .working = working,
-                                            .entries = sent};
-                                        list.missing = false;
-                                    });
-                  },
-                  true);
+        ->request(
+            QStringLiteral("list.save"), std::move(params),
+            [self, id, sent = prints_of(items), name = known.name,
+             working = known.working](core::Result<Json> answer) {
+                if (!self) {
+                    return;
+                }
+                self->written(
+                    id, answer, [&sent, &name, working](Known& list, const Json& summary) {
+                        list.acked = Acked{.revision = summary.value("revision", std::uint64_t{0}),
+                                           .name = name,
+                                           .working = working,
+                                           .entries = sent};
+                        list.missing = false;
+                    });
+            },
+            true);
 }
 
 void EngineListSync::written(const std::string& id, const core::Result<Json>& answer,
@@ -813,43 +818,42 @@ void EngineListSync::compare(const EngineKey& key) {
     state.comparing = true;
     ++in_flight_;
     const QPointer self{this};
-    engine->request(QStringLiteral("list.all"), Json::object(),
-                    [self, key](core::Result<Json> answer) {
-                        if (!self) {
-                            return;
-                        }
-                        --self->in_flight_;
-                        std::unordered_map<std::string, std::uint64_t> listed;
-                        if (answer) {
-                            for (const auto& list : answer->value("lists", Json::array())) {
-                                listed.emplace(id_text(list),
-                                               list.value("revision", std::uint64_t{0}));
-                            }
-                        }
-                        // At the revision acknowledged: in step, nothing to
-                        // read. Another: read and compared. Not there: made.
-                        std::vector<std::string> wanted;
-                        for (auto& [id, known] : self->known_) {
-                            if (known.engine != key) {
-                                continue;
-                            }
-                            const auto there = listed.find(id);
-                            if (there == listed.end()) {
-                                if (answer) {
-                                    known.acked.reset();
-                                    known.missing = true;
-                                }
-                                continue;
-                            }
-                            if (!known.acked || known.acked->revision != there->second) {
-                                wanted.push_back(id);
-                            }
-                        }
-                        for (const auto& id : wanted) {
-                            self->fetch(id, key, Fetch::compare);
-                        }
-                        self->compared(key);
-                    });
+    engine->request(
+        QStringLiteral("list.all"), Json::object(), [self, key](core::Result<Json> answer) {
+            if (!self) {
+                return;
+            }
+            --self->in_flight_;
+            std::unordered_map<std::string, std::uint64_t> listed;
+            if (answer) {
+                for (const auto& list : answer->value("lists", Json::array())) {
+                    listed.emplace(id_text(list), list.value("revision", std::uint64_t{0}));
+                }
+            }
+            // At the revision acknowledged: in step, nothing to
+            // read. Another: read and compared. Not there: made.
+            std::vector<std::string> wanted;
+            for (auto& [id, known] : self->known_) {
+                if (known.engine != key) {
+                    continue;
+                }
+                const auto there = listed.find(id);
+                if (there == listed.end()) {
+                    if (answer) {
+                        known.acked.reset();
+                        known.missing = true;
+                    }
+                    continue;
+                }
+                if (!known.acked || known.acked->revision != there->second) {
+                    wanted.push_back(id);
+                }
+            }
+            for (const auto& id : wanted) {
+                self->fetch(id, key, Fetch::compare);
+            }
+            self->compared(key);
+        });
 }
 
 void EngineListSync::compared(const EngineKey& key) {
@@ -919,10 +923,11 @@ void EngineListSync::fetch(const std::string& id, const EngineKey& key, const Fe
                         }
                         auto entries = prints_of(items_of_answer(*answer));
                         const bool same = known.local && same_entries(*known.local, entries);
-                        known.acked = Acked{.revision = answer->value("revision", std::uint64_t{0}),
-                                            .name = answer->value("name", std::string{}),
-                                            .working = answer->value("kind", std::string{}) != "saved",
-                                            .entries = std::move(entries)};
+                        known.acked =
+                            Acked{.revision = answer->value("revision", std::uint64_t{0}),
+                                  .name = answer->value("name", std::string{}),
+                                  .working = answer->value("kind", std::string{}) != "saved",
+                                  .entries = std::move(entries)};
                         known.missing = false;
                         if (why == Fetch::rewrite || same) {
                             // This window's version goes on from what the

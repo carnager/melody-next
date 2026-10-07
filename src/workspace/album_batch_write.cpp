@@ -114,9 +114,9 @@ void AlbumBatchWrite::start() {
         if (operations_.move_files && options_.destination) {
             root = options_.destination->root_raw_path;
         } else if (operations_.move_files) {
-            root = album.items.empty() ? std::nullopt
-                                       : libraryFolderOf(selection->source(album.items.front()).raw_path,
-                                                        roots);
+            root = album.items.empty()
+                       ? std::nullopt
+                       : libraryFolderOf(selection->source(album.items.front()).raw_path, roots);
             if (!root) {
                 outcome.outcome = Outcome::left_out;
                 outcome.note = QStringLiteral("Not in a library folder, so not moved");
@@ -131,11 +131,10 @@ void AlbumBatchWrite::start() {
                    (!root || candidate.destination->root_raw_path == *root);
         });
         if (group == groups_.end()) {
-            groups_.push_back(Group{
-                .destination = options_.destination ? options_.destination
-                               : root               ? std::optional{folderDestination(*root)}
-                                                    : std::nullopt,
-                .albums = {}});
+            groups_.push_back(Group{.destination = options_.destination ? options_.destination
+                                                   : root ? std::optional{folderDestination(*root)}
+                                                          : std::nullopt,
+                                    .albums = {}});
             group = std::prev(groups_.end());
         }
         group->albums.push_back(album);
@@ -240,13 +239,19 @@ void AlbumBatchWrite::planGroup() {
     };
     progress_->done = 0U;
     const QPointer self{this};
-    (void)QtConcurrent::run([request = std::move(request), token = cancellation_.token(),
-                             self]() mutable {
-        auto result = std::make_shared<core::Result<operations::PreparationPlan>>(
-            planPreparation(std::move(request), token));
-        QMetaObject::invokeMethod(
-            self, [self, result] { if (self) { self->planned(result); } }, Qt::QueuedConnection);
-    });
+    (void)QtConcurrent::run(
+        [request = std::move(request), token = cancellation_.token(), self]() mutable {
+            auto result = std::make_shared<core::Result<operations::PreparationPlan>>(
+                planPreparation(std::move(request), token));
+            QMetaObject::invokeMethod(
+                self,
+                [self, result] {
+                    if (self) {
+                        self->planned(result);
+                    }
+                },
+                Qt::QueuedConnection);
+        });
 }
 
 void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::PreparationPlan>> result) {
@@ -279,8 +284,9 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
             // The files whose tags and path were planned from other revisions
             // -- one changed between the two looks.
             for (const auto& source : plan->metadata->sources) {
-                const auto path = std::ranges::find(plan->output_paths->sources, source.raw_path,
-                                                    &operations::PlannedOutputPathSource::source_raw_path);
+                const auto path =
+                    std::ranges::find(plan->output_paths->sources, source.raw_path,
+                                      &operations::PlannedOutputPathSource::source_raw_path);
                 if (path == plan->output_paths->sources.end() || !source.expected_revision ||
                     !source.observed_revision ||
                     *source.expected_revision != *source.observed_revision ||
@@ -373,13 +379,14 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
             return;
         }
         (void)QtConcurrent::run([plan, applier = std::move(applier), progress, token, self] {
-            auto outcome = std::make_shared<core::Result<operations::FilePublicationApplyResult>>(
-                applier(*plan,
-                        [progress, self](const operations::FilePublicationApplyProgress& update) {
-                            progress->done = update.completed_sources;
-                            told(self);
-                        },
-                        token));
+            auto outcome =
+                std::make_shared<core::Result<operations::FilePublicationApplyResult>>(applier(
+                    *plan,
+                    [progress, self](const operations::FilePublicationApplyProgress& update) {
+                        progress->done = update.completed_sources;
+                        told(self);
+                    },
+                    token));
             QMetaObject::invokeMethod(
                 self,
                 [self, plan, outcome] {
@@ -390,20 +397,20 @@ void AlbumBatchWrite::planned(std::shared_ptr<core::Result<operations::Preparati
                 Qt::QueuedConnection);
         });
     } else {
-        auto applier =
-            services.plan_applier_factory ? services.plan_applier_factory() : MetadataWritePlanApplier{};
+        auto applier = services.plan_applier_factory ? services.plan_applier_factory()
+                                                     : MetadataWritePlanApplier{};
         if (!applier || !plan->metadata) {
             failGroup(QStringLiteral("Saving tags is unavailable"));
             return;
         }
         (void)QtConcurrent::run([plan, applier = std::move(applier), progress, token, self] {
-            auto outcome = std::make_shared<core::Result<operations::MetadataApplyResult>>(
-                applier(*plan->metadata,
-                        [progress, self](const operations::MetadataApplyProgress& update) {
-                            progress->done = update.completed_sources;
-                            told(self);
-                        },
-                        token));
+            auto outcome = std::make_shared<core::Result<operations::MetadataApplyResult>>(applier(
+                *plan->metadata,
+                [progress, self](const operations::MetadataApplyProgress& update) {
+                    progress->done = update.completed_sources;
+                    told(self);
+                },
+                token));
             QMetaObject::invokeMethod(
                 self,
                 [self, plan, outcome] {
@@ -470,10 +477,9 @@ void AlbumBatchWrite::applied(
             for (const auto item : itemsAt(source.source_raw_path)) {
                 if (done) {
                     written.insert(item);
-                    rewritten_.push_back(
-                        {.item = item,
-                         .raw_path = source.commit ? source.commit->target_raw_path
-                                                   : source.source_raw_path});
+                    rewritten_.push_back({.item = item,
+                                          .raw_path = source.commit ? source.commit->target_raw_path
+                                                                    : source.source_raw_path});
                 } else {
                     failed.emplace(item, source.issue ? issueText(source.issue->message)
                                                       : QStringLiteral("Not written"));
@@ -501,9 +507,8 @@ void AlbumBatchWrite::applied(
         });
         outcome.written += static_cast<std::size_t>(untouched);
         outcome.outcome = outcome.written == outcome.files ? Outcome::written
-                          : outcome.written == 0U
-                              ? (stopping_ ? Outcome::stopped : Outcome::failed)
-                              : Outcome::partly_written;
+                          : outcome.written == 0U ? (stopping_ ? Outcome::stopped : Outcome::failed)
+                                                  : Outcome::partly_written;
         if (outcome.outcome == Outcome::stopped && outcome.note.isEmpty()) {
             outcome.note = QStringLiteral("Stopped before it was written");
         }
@@ -534,12 +539,13 @@ void AlbumBatchWrite::finish() {
         emit finished();
         return;
     }
-    connect(tagger_, &TaggerSession::writtenElsewhere, this,
-            [this] {
-                running_ = false;
-                emit finished();
-            },
-            Qt::SingleShotConnection);
+    connect(
+        tagger_, &TaggerSession::writtenElsewhere, this,
+        [this] {
+            running_ = false;
+            emit finished();
+        },
+        Qt::SingleShotConnection);
     tagger_->finishWriteElsewhere(std::move(rewritten_), std::move(changed_));
 }
 

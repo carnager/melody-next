@@ -571,10 +571,9 @@ core::Result<std::string> narrow_tkq_source(const std::string_view query,
             break;
         }
     }
-    const auto sort =
-        expression_end < tokens->size()
-            ? " " + std::string{query.substr((*tokens)[expression_end].begin)}
-            : std::string{};
+    const auto sort = expression_end < tokens->size()
+                          ? " " + std::string{query.substr((*tokens)[expression_end].begin)}
+                          : std::string{};
     std::string narrowed;
     if (compiled->match_all) {
         narrowed = "(" + std::string{condition} + ")";
@@ -586,8 +585,7 @@ core::Result<std::string> narrow_tkq_source(const std::string_view query,
             });
         std::string expression;
         if (structured) {
-            expression = std::string{query.substr(
-                0U, (*tokens)[expression_end - 1U].end)};
+            expression = std::string{query.substr(0U, (*tokens)[expression_end - 1U].end)};
         } else {
             // Bare words hold no quote, so they quote as they are.
             expression = "* HAS \"";

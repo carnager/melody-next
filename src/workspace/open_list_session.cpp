@@ -10,18 +10,17 @@
 
 namespace trackknife::bench {
 
-OpenListSession::OpenListSession(Workspace& work, QObject* parent)
-    : QObject(parent), work_(work) {
+OpenListSession::OpenListSession(Workspace& work, QObject* parent) : QObject(parent), work_(work) {
     for (const auto& engine : work_.engines_) {
         if (engine->playback == nullptr || !engine->playback->active()) {
             continue;
         }
-        groups_.push_back({.name = engine->key.isLocal() ? tr("This computer")
-                                                         : engine->catalogue->name(),
-                           .engine = engine->key,
-                           .lists = {},
-                           .note = {},
-                           .answered = false});
+        groups_.push_back(
+            {.name = engine->key.isLocal() ? tr("This computer") : engine->catalogue->name(),
+             .engine = engine->key,
+             .lists = {},
+             .note = {},
+             .answered = false});
     }
     for (std::size_t group = 0; group < groups_.size(); ++group) {
         const QPointer self{this};
@@ -40,7 +39,8 @@ OpenListSession::OpenListSession(Workspace& work, QObject* parent)
                           });
                           shown.lists.clear();
                           for (const auto& list : lists) {
-                              auto label = QString::fromStdString(list.value("name", std::string{}));
+                              auto label =
+                                  QString::fromStdString(list.value("name", std::string{}));
                               if (list.value("kind", std::string{}) != "saved") {
                                   label += tr(" (working)");
                               }
@@ -49,11 +49,11 @@ OpenListSession::OpenListSession(Workspace& work, QObject* parent)
                                    .label = label,
                                    .tracks = list.value("tracks", 0)});
                           }
-                          shown.note = !lists.empty() ? QString{}
-                                       : answer
-                                           ? tr("No lists")
-                                           : tr("Cannot say: %1")
-                                                 .arg(QString::fromStdString(answer.error().message));
+                          shown.note =
+                              !lists.empty() ? QString{}
+                              : answer       ? tr("No lists")
+                                             : tr("Cannot say: %1")
+                                             .arg(QString::fromStdString(answer.error().message));
                           shown.answered = true;
                           emit self->changed();
                       });

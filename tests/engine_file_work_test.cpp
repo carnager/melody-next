@@ -25,13 +25,13 @@
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
-#include "trackknife/operations/undo.hpp"
-#include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/musicbrainz_cache.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -142,16 +142,16 @@ void encodings_are_exact() {
     // ADR-0263: undo requests and outcomes as they travel.
     {
         namespace operations = trackknife::operations;
-        const std::array requests{
-            operations::UndoRequest{.kind = operations::UndoKind::publication,
-                                    .journal_id = core::StableId::random()},
-            operations::UndoRequest{.kind = operations::UndoKind::metadata,
-                                    .journal_id = core::StableId::random()}};
+        const std::array requests{operations::UndoRequest{.kind = operations::UndoKind::publication,
+                                                          .journal_id = core::StableId::random()},
+                                  operations::UndoRequest{.kind = operations::UndoKind::metadata,
+                                                          .journal_id = core::StableId::random()}};
         const auto decoded = wire::decode_undo_requests(wire::encode(requests));
         require(decoded && *decoded == std::vector(requests.begin(), requests.end()),
                 "undo requests travel exactly");
         const std::array outcomes{
-            operations::UndoOutcome{.request = requests[0], .issue = std::nullopt,
+            operations::UndoOutcome{.request = requests[0],
+                                    .issue = std::nullopt,
                                     .from_raw_path = std::string{"/a/\xff.flac"},
                                     .to_raw_path = "/b/c.flac",
                                     .restored = std::nullopt,
@@ -161,8 +161,10 @@ void encodings_are_exact() {
                                     .issue = core::Error{.code = core::ErrorCode::conflict,
                                                          .message = "changed",
                                                          .context = {}},
-                                    .from_raw_path = {}, .to_raw_path = {},
-                                    .restored = std::nullopt, .moved_back = std::nullopt,
+                                    .from_raw_path = {},
+                                    .to_raw_path = {},
+                                    .restored = std::nullopt,
+                                    .moved_back = std::nullopt,
                                     .published_metadata = std::nullopt}};
         const auto answered = wire::decode_undo_outcomes(wire::encode(outcomes));
         require(answered && *answered == std::vector(outcomes.begin(), outcomes.end()),
@@ -963,8 +965,9 @@ void ratings_are_copied_into_a_backup_tag(const std::filesystem::path& directory
                 .value_or(false),
             "a FLAC is rated, with a copy");
     const auto read = metadata::read_local_metadata(flac);
-    require(read && read->document.first_effective_value("FMPS_RATING") ==
-                        std::optional<std::string>{"0.8"} &&
+    require(read &&
+                read->document.first_effective_value("FMPS_RATING") ==
+                    std::optional<std::string>{"0.8"} &&
                 read->document.first_effective_value("TRACKKNIFE_RATING") ==
                     std::optional<std::string>{"8"},
             "the rating, and its copy as 0-10");
@@ -972,9 +975,9 @@ void ratings_are_copied_into_a_backup_tag(const std::filesystem::path& directory
                  .value_or(true),
             "nothing to write when both are there");
     // Named after the rating was already written: only the copy is added.
-    require(engine::RatingTags::write(database, catalogue, flac, 8, {}, "RATING_COPY")
-                .value_or(false),
-            "a new name gets the copy");
+    require(
+        engine::RatingTags::write(database, catalogue, flac, 8, {}, "RATING_COPY").value_or(false),
+        "a new name gets the copy");
     require(metadata::read_local_metadata(flac)->document.first_effective_value("RATING_COPY") ==
                 std::optional<std::string>{"8"},
             "under it");
@@ -1271,8 +1274,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     // each file for itself, the missing one failing alone.
     const auto absent = (directory / "absent.flac").string();
     const auto many = access.read_many({flac, absent, flac}, {});
-    require(many && many->size() == 3U && (*many)[0] && *(*many)[0] == *here &&
-                !(*many)[1] && (*many)[2] && *(*many)[2] == *here,
+    require(many && many->size() == 3U && (*many)[0] && *(*many)[0] == *here && !(*many)[1] &&
+                (*many)[2] && *(*many)[2] == *here,
             "a batch read through the engine is each file read here, in order");
     const auto probed_there = remote.probe(flac, {});
     const auto probed_here = engine::probe_local_technicals(flac, {});
@@ -1311,21 +1314,20 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         }
         remote.limitJobs(900U);
         std::size_t last_completed = 0;
-        const auto split = remote.scan(
-            several, {.measure_true_peak = false, .maximum_parallelism = 1},
-            [&last_completed](const loudness::LoudnessScanProgress& step) {
-                last_completed = std::max(last_completed, step.completed_items);
-            },
-            {});
+        const auto split =
+            remote.scan(several, {.measure_true_peak = false, .maximum_parallelism = 1},
+                        [&last_completed](const loudness::LoudnessScanProgress& step) {
+                            last_completed = std::max(last_completed, step.completed_items);
+                        },
+                        {});
         const auto whole = loudness::scan_loudness(
             several, {.measure_true_peak = false, .maximum_parallelism = 1});
         require(split && whole, "a scan in several jobs runs");
         require_same(*whole, *split, "and measures what one scan does, albums included");
         require(last_completed == several.size(), "counting its progress across the jobs");
         remote.limitJobs(100U);
-        const auto too_big = remote.scan(several, {.measure_true_peak = false,
-                                                   .maximum_parallelism = 1},
-                                         {}, {});
+        const auto too_big =
+            remote.scan(several, {.measure_true_peak = false, .maximum_parallelism = 1}, {}, {});
         require(!too_big && too_big.error().code == core::ErrorCode::limit_exceeded,
                 "an album too large for one job is refused, not cut in two");
         remote.limitJobs(engine::remote_job_bytes);
@@ -1399,7 +1401,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         std::vector<metadata::StagedMetadataSource> sources;
         for (int index = 0; index < 3; ++index) {
             const auto copy = (directory / ("part-" + std::to_string(index) + ".flac")).string();
-            std::filesystem::copy_file(flac, copy, std::filesystem::copy_options::overwrite_existing);
+            std::filesystem::copy_file(flac, copy,
+                                       std::filesystem::copy_options::overwrite_existing);
             const auto read = access.read(copy, {});
             require(read.has_value(), "a copy is read through the engine");
             copies.push_back(copy);
@@ -1486,9 +1489,10 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
             std::string large{std::istreambuf_iterator<char>{input},
                               std::istreambuf_iterator<char>{}};
             large.append(1'200'000U, '\0');
-            const auto staged = remote.stage(std::span{
-                reinterpret_cast<const unsigned char*>(large.data()), large.size()});
-            require(staged && staged->byte_size == large.size() && staged->mime_type == "image/jpeg",
+            const auto staged = remote.stage(
+                std::span{reinterpret_cast<const unsigned char*>(large.data()), large.size()});
+            require(staged && staged->byte_size == large.size() &&
+                        staged->mime_type == "image/jpeg",
                     "a large image is staged in parts, whole");
             std::ifstream kept{staged->raw_path, std::ios::binary};
             const std::string back{std::istreambuf_iterator<char>{kept},
@@ -1604,8 +1608,7 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
                 "throttled without a word: 2 s, then 4");
         require(decide(429, 7, 0) == Throttle{.kind = Throttle::Kind::wait, .seconds = 7},
                 "or as long as it asks");
-        require(decide(429, 7, 2).kind == Throttle::Kind::give_up,
-                "and not a third time");
+        require(decide(429, 7, 2).kind == Throttle::Kind::give_up, "and not a third time");
         require(decide(503, 120, 0) == Throttle{.kind = Throttle::Kind::give_up, .seconds = 120},
                 "nor after a wait too long to sit through");
     }
@@ -1652,8 +1655,7 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
         require(cache->store(listing, "<!doctype html><title>404 Not Found</title>", now,
                              14LL * 24 * 60 * 60, 100U)
                         .has_value() &&
-                    cache->store(image, "\xff\xd8\xff", now, 14LL * 24 * 60 * 60, 100U)
-                        .has_value(),
+                    cache->store(image, "\xff\xd8\xff", now, 14LL * 24 * 60 * 60, 100U).has_value(),
                 "a kept error page and a kept image");
         core::CancellationSource stop;
         stop.request_cancellation();
@@ -1764,7 +1766,8 @@ void backups_are_kept_as_long_as_asked(const std::filesystem::path& directory,
             "a limit below 0 is refused");
 
     // A write keeps the file it replaced...
-    const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "retention.flac").string();
+    const auto flac =
+        materialize(fixtures, "tagged-tone-flac", directory / "retention.flac").string();
     const auto read = metadata::read_local_metadata(flac);
     require(read.has_value(), "the file is read");
     auto selection = metadata::StagedMetadataSelection::create({metadata::StagedMetadataSource{

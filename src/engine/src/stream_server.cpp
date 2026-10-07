@@ -215,9 +215,9 @@ struct StreamServer::Transfer final {
     std::thread worker;
 };
 
-core::Result<std::unique_ptr<StreamServer>>
-StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve resolve,
-                     Connect connect) {
+core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::string& host,
+                                                                 const std::uint16_t port,
+                                                                 Resolve resolve, Connect connect) {
     if (!resolve) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::invalid_argument,
@@ -279,9 +279,8 @@ StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve 
         ::close(listener);
         return std::unexpected(failed);
     }
-    return std::unique_ptr<StreamServer>{
-        new StreamServer{listener, wakeup[0], wakeup[1], bound_port, std::move(resolve),
-                         std::move(connect)}};
+    return std::unique_ptr<StreamServer>{new StreamServer{
+        listener, wakeup[0], wakeup[1], bound_port, std::move(resolve), std::move(connect)}};
 }
 
 StreamServer::StreamServer(const int listener, const int wakeup_read, const int wakeup_write,
@@ -441,8 +440,8 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
                                      "Connection: Upgrade\r\nSec-WebSocket-Accept: " +
                                      websocket_accept(*key) + "\r\n\r\n";
         if (send_all(descriptor, response)) {
-            bridge_websocket(descriptor, inner, std::string{text.substr(text.find("\r\n\r\n") + 4U)},
-                             running_);
+            bridge_websocket(descriptor, inner,
+                             std::string{text.substr(text.find("\r\n\r\n") + 4U)}, running_);
         } else {
             ::close(inner);
         }

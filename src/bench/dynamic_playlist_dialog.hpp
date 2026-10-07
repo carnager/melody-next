@@ -5,8 +5,8 @@
 
 #include "bench/dynamic_playlist_service.hpp"
 #include "workspace/dynamic_playlist_session.hpp"
-#include <QSet>
 #include <QDialog>
+#include <QSet>
 #include <vector>
 
 class QComboBox;

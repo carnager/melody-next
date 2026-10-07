@@ -132,7 +132,9 @@ using Scaler = std::unique_ptr<SwsContext, ScalerDeleter>;
 
 core::Result<std::vector<std::uint8_t>> fit_cover(std::span<const std::uint8_t> image,
                                                   const int longest_edge) {
-    const auto original = [&image] { return std::vector<std::uint8_t>(image.begin(), image.end()); };
+    const auto original = [&image] {
+        return std::vector<std::uint8_t>(image.begin(), image.end());
+    };
     if (longest_edge <= 0 || image.empty()) {
         return original();
     }
@@ -154,7 +156,8 @@ core::Result<std::vector<std::uint8_t>> fit_cover(std::span<const std::uint8_t> 
     }
     // Aspect kept; each side at least a pixel, and even, which 4:2:0 wants.
     const auto scaled = [&](int side) {
-        const auto value = static_cast<int>(static_cast<std::int64_t>(side) * longest_edge / longest);
+        const auto value =
+            static_cast<int>(static_cast<std::int64_t>(side) * longest_edge / longest);
         return std::max(2, value & ~1);
     };
     const auto width = scaled(source.width);

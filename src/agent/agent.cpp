@@ -206,8 +206,9 @@ core::Result<int> Agent::register_with_engine() {
     if (config_.stream_only) {
         const auto route = route_of(descriptor);
         const auto& format = config_.stream.on(route.route);
-        registration["stream"] = format ? Json{{"format", "opus"}, {"bitrate", format->bitrate_kbps}}
-                                        : Json{{"format", "original"}};
+        registration["stream"] = format
+                                     ? Json{{"format", "opus"}, {"bitrate", format->bitrate_kbps}}
+                                     : Json{{"format", "original"}};
         stream_note_ = " (" + route.why + ": " + describe(format) + ")";
     }
     auto registered = ask(descriptor, 2, "agent.register", registration);

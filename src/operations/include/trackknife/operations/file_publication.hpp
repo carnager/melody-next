@@ -126,17 +126,17 @@ recover_cross_filesystem_publications(
 // lifecycle: undoing, then undone, resumed by recover_publication_undos after
 // a crash. The result is the reverse publication: from the target back to
 // the source.
-[[nodiscard]] core::Result<FilePublicationCommitResult> undo_retained_publication(
-    const core::StableId& journal_id, FilePublicationJournal& journal,
-    const FilePublicationDependentStateCommitter& dependent_state_committer,
-    const core::CancellationToken& cancellation = {});
+[[nodiscard]] core::Result<FilePublicationCommitResult>
+undo_retained_publication(const core::StableId& journal_id, FilePublicationJournal& journal,
+                          const FilePublicationDependentStateCommitter& dependent_state_committer,
+                          const core::CancellationToken& cancellation = {});
 
 // Any completed publication undone as its kind is: a same-filesystem rename
 // renamed back, a retained source restored.
-[[nodiscard]] core::Result<FilePublicationCommitResult> undo_file_publication(
-    const core::StableId& journal_id, FilePublicationJournal& journal,
-    const FilePublicationDependentStateCommitter& dependent_state_committer,
-    const core::CancellationToken& cancellation = {});
+[[nodiscard]] core::Result<FilePublicationCommitResult>
+undo_file_publication(const core::StableId& journal_id, FilePublicationJournal& journal,
+                      const FilePublicationDependentStateCommitter& dependent_state_committer,
+                      const core::CancellationToken& cancellation = {});
 
 // Removes one verified retained source; one already gone is released.
 [[nodiscard]] core::Result<void>

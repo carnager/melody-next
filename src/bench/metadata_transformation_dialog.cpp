@@ -282,9 +282,9 @@ class MetadataTransformationDialog final : public QDialog {
         // What can be written here, in the browser.
         auto* reference_row = new QHBoxLayout;
         reference_row->addStretch(1);
-        const auto reference = [this, raw_page, reference_row](
-                                   const QString& name, const QString& text, const QString& tip,
-                                   const LanguageReference which) {
+        const auto reference = [this, raw_page,
+                                reference_row](const QString& name, const QString& text,
+                                               const QString& tip, const LanguageReference which) {
             auto* button = new QPushButton(text, raw_page);
             button->setObjectName(name);
             button->setFlat(true);

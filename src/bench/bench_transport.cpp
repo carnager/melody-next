@@ -7,12 +7,12 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/themed_icon.hpp"
-#include "workspace/color_scheme.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/eliding_label.hpp"
 #include "uicommon/line_slider.hpp"
-#include "uicommon/rating_stars.hpp"
 #include "uicommon/list_persistence_service.hpp"
+#include "uicommon/rating_stars.hpp"
+#include "workspace/color_scheme.hpp"
 
 #include "uicommon/track_row_roles.hpp"
 #include "workspace/language_reference.hpp"
@@ -31,9 +31,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
-#include <QPainter>
-#include <QWidgetAction>
 #include <QMenuBar>
+#include <QPainter>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
@@ -47,6 +46,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QWidgetAction>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -147,8 +147,8 @@ void BenchMainWindow::setUpNextCount(const int count) {
     }
     up_next_badge_->setText(QString::number(count));
     up_next_badge_->setVisible(count > 0);
-    up_next_button_->setAccessibleName(
-        count > 0 ? QStringLiteral("Up Next, %1 waiting").arg(count) : QStringLiteral("Up Next"));
+    up_next_button_->setAccessibleName(count > 0 ? QStringLiteral("Up Next, %1 waiting").arg(count)
+                                                 : QStringLiteral("Up Next"));
     up_next_button_->setToolTip(up_next_button_->accessibleName());
     up_next_button_->layout()->activate();
     up_next_button_->setFixedWidth(up_next_button_->layout()->sizeHint().width());
@@ -219,15 +219,13 @@ void BenchMainWindow::buildTransport() {
     previous_action_ = new QAction(themedIcon(u"media-skip-backward|sp:SP_MediaSkipBackward"),
                                    QStringLiteral("Previous"), this);
     connect(previous_action_, &QAction::triggered, &workspace_, &Workspace::previous);
-    play_pause_action_ =
-        new QAction(themedIcon(u"media-playback-start|sp:SP_MediaPlay"), QStringLiteral("Play"),
-                    this);
+    play_pause_action_ = new QAction(themedIcon(u"media-playback-start|sp:SP_MediaPlay"),
+                                     QStringLiteral("Play"), this);
     play_pause_action_->setShortcut(Qt::Key_Space);
     play_pause_action_->setShortcutContext(Qt::ApplicationShortcut);
     connect(play_pause_action_, &QAction::triggered, this, &BenchMainWindow::togglePlayPause);
-    stop_action_ =
-        new QAction(themedIcon(u"media-playback-stop|sp:SP_MediaStop"), QStringLiteral("Stop"),
-                    this);
+    stop_action_ = new QAction(themedIcon(u"media-playback-stop|sp:SP_MediaStop"),
+                               QStringLiteral("Stop"), this);
     connect(stop_action_, &QAction::triggered, &workspace_, &Workspace::stop);
     next_action_ = new QAction(themedIcon(u"media-skip-forward|sp:SP_MediaSkipForward"),
                                QStringLiteral("Next"), this);
@@ -387,10 +385,10 @@ void BenchMainWindow::buildTransport() {
     device_button_ = new QToolButton(header);
     device_button_->setObjectName(QStringLiteral("bench-device"));
     // The outline symbol, as the other header icons are drawn.
-    device_button_->setIcon(QIcon::fromTheme(
-        QStringLiteral("audio-speakers-symbolic"),
-        QIcon::fromTheme(QStringLiteral("audio-speakers"),
-                         style()->standardIcon(QStyle::SP_ComputerIcon))));
+    device_button_->setIcon(
+        QIcon::fromTheme(QStringLiteral("audio-speakers-symbolic"),
+                         QIcon::fromTheme(QStringLiteral("audio-speakers"),
+                                          style()->standardIcon(QStyle::SP_ComputerIcon))));
     device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     device_button_->setFixedSize(34, 26);
     device_button_->setIconSize(QSize{14, 14});
@@ -747,13 +745,12 @@ void BenchMainWindow::styleHeader() {
     // places to click rather than as more labels: background at 6 % toward
     // the text, a 1 px edge at 16 %, the accent edge under the pointer.
     const auto pill =
-        QStringLiteral(
-            "QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
-            " padding: 0 10px; }"
-            "QToolButton[chevron=\"true\"] { padding-right: 24px; }"
-            "QToolButton:hover { border-color: palette(highlight); }"
-            "QToolButton:pressed, QToolButton:checked { background: %2; }"
-            "QToolButton::menu-indicator { image: none; width: 0; }")
+        QStringLiteral("QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
+                       " padding: 0 10px; }"
+                       "QToolButton[chevron=\"true\"] { padding-right: 24px; }"
+                       "QToolButton:hover { border-color: palette(highlight); }"
+                       "QToolButton:pressed, QToolButton:checked { background: %2; }"
+                       "QToolButton::menu-indicator { image: none; width: 0; }")
             .arg(shade(0.06), shade(0.16));
     if (device_button_ != nullptr) {
         device_button_->setStyleSheet(pill);
@@ -862,7 +859,6 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     local_replaygain_button_->style()->polish(local_replaygain_button_);
     local_replaygain_button_->setToolTip(texts.replaygain_tooltip);
 }
-
 
 void BenchMainWindow::buildShortcuts() {
     const auto bind = [this](QAction* action, const QString& name, const QString& keys) {

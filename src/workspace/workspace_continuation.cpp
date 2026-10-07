@@ -30,16 +30,15 @@ const QString definitions_profile = QStringLiteral("local");
     for (const auto& definition : *definitions) {
         if (continuable(definition)) {
             const auto selection = definition.selection();
-            rules.insert(definition.id,
-                         EnginePlayback::Continuation{
-                             .rule_id = definition.id,
-                             .name = definition.name,
-                             .query = definition.query,
-                             .group_by = QString::fromStdString(selection.group_by),
-                             .groups = static_cast<int>(selection.groups),
-                             .per_group = static_cast<int>(selection.per_group),
-                             .limit = static_cast<int>(selection.limit),
-                             .shuffle = selection.shuffle});
+            rules.insert(definition.id, EnginePlayback::Continuation{
+                                            .rule_id = definition.id,
+                                            .name = definition.name,
+                                            .query = definition.query,
+                                            .group_by = QString::fromStdString(selection.group_by),
+                                            .groups = static_cast<int>(selection.groups),
+                                            .per_group = static_cast<int>(selection.per_group),
+                                            .limit = static_cast<int>(selection.limit),
+                                            .shuffle = selection.shuffle});
         }
     }
     return rules;

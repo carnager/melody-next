@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(
     Trackknife
-    VERSION 0.0.1
+    VERSION 0.2.0
     DESCRIPTION "A fast native Linux and macOS audio player and library multitool"
     LANGUAGES CXX
 )

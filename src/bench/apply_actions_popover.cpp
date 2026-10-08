@@ -45,8 +45,8 @@ void chooseMoveFolder(QWidget* parent, TaggerSession& session) {
     }
     const auto start = session.moveFolderStart();
     if (auto lister = session.moveFolderLister()) {
-        auto* chooser = new EngineFolderDialog(session.destinationsOn(), std::move(lister), start,
-                                               parent);
+        auto* chooser =
+            new EngineFolderDialog(session.destinationsOn(), std::move(lister), start, parent);
         QObject::connect(chooser, &EngineFolderDialog::folderChosen, parent, chosen);
         chooser->show();
         return;
@@ -70,8 +70,8 @@ ApplyActionsPopover::ApplyActionsPopover(TaggerSession& session, Links links, QW
     grid->setHorizontalSpacing(12);
     grid->setVerticalSpacing(8);
     const auto link = [this](const QString& text, const QString& object_name, auto&& activated) {
-        auto* label = new QLabel(QStringLiteral("<a href=\"#\">%1</a>").arg(text.toHtmlEscaped()),
-                                 this);
+        auto* label =
+            new QLabel(QStringLiteral("<a href=\"#\">%1</a>").arg(text.toHtmlEscaped()), this);
         label->setObjectName(object_name);
         label->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
         connect(label, &QLabel::linkActivated, this,
@@ -125,11 +125,9 @@ ApplyActionsPopover::ApplyActionsPopover(TaggerSession& session, Links links, QW
     grid->addWidget(destination_, row++, 1);
     auto* manage = new QHBoxLayout;
     manage->setSpacing(16);
-    manage->addWidget(link(QStringLiteral("Manage naming layouts…"),
-                           QStringLiteral("bench-actions-manage-layouts"), [this] {
-                               emit session_->openSettingsRequested(
-                                   TaggerSession::SettingsPage::naming);
-                           }));
+    manage->addWidget(link(
+        QStringLiteral("Manage naming layouts…"), QStringLiteral("bench-actions-manage-layouts"),
+        [this] { emit session_->openSettingsRequested(TaggerSession::SettingsPage::naming); }));
     manage->addWidget(link(QStringLiteral("Manage move destinations…"),
                            QStringLiteral("bench-actions-manage-destinations"),
                            [this] { emit session_->openDestinationsRequested(); }));
@@ -148,10 +146,10 @@ ApplyActionsPopover::ApplyActionsPopover(TaggerSession& session, Links links, QW
         session_->setReplayGainGrouping(index);
         if (index == 4) {
             bool accepted = false;
-            const auto expression = QInputDialog::getText(
-                parentWidget(), QStringLiteral("Group by expression"),
-                QStringLiteral("tkfmt-1 expression:"), QLineEdit::Normal,
-                session_->replayGainExpression(), &accepted);
+            const auto expression =
+                QInputDialog::getText(parentWidget(), QStringLiteral("Group by expression"),
+                                      QStringLiteral("tkfmt-1 expression:"), QLineEdit::Normal,
+                                      session_->replayGainExpression(), &accepted);
             if (accepted && session_) {
                 session_->setReplayGainExpression(expression);
             }
@@ -171,9 +169,9 @@ ApplyActionsPopover::ApplyActionsPopover(TaggerSession& session, Links links, QW
     auto* replaygain_links = new QHBoxLayout;
     replaygain_links->setSpacing(16);
     if (links.loudness_sources) {
-        auto* sources = link(QStringLiteral("Loudness sources…"),
-                             QStringLiteral("bench-actions-loudness-sources"),
-                             links.loudness_sources);
+        auto* sources =
+            link(QStringLiteral("Loudness sources…"),
+                 QStringLiteral("bench-actions-loudness-sources"), links.loudness_sources);
         sources->setEnabled(session.canShowProvenance());
         replaygain_links->addWidget(sources);
     }
@@ -227,9 +225,8 @@ void ApplyActionsPopover::fillLists() {
         }
         destination_->addItem(QStringLiteral("Choose folder…"), chooseFolderItem());
         const auto engine = session_->destinationsOn();
-        destination_->setToolTip(engine.isEmpty()
-                                     ? QString{}
-                                     : QStringLiteral("Move destinations on %1").arg(engine));
+        destination_->setToolTip(
+            engine.isEmpty() ? QString{} : QStringLiteral("Move destinations on %1").arg(engine));
     }
     sync();
 }
@@ -239,10 +236,10 @@ void ApplyActionsPopover::sync() {
         return;
     }
     const auto& session = *session_;
-    const QSignalBlocker blockers[]{QSignalBlocker{save_tags_}, QSignalBlocker{rename_},
-                                    QSignalBlocker{move_},      QSignalBlocker{layout_},
+    const QSignalBlocker blockers[]{QSignalBlocker{save_tags_},   QSignalBlocker{rename_},
+                                    QSignalBlocker{move_},        QSignalBlocker{layout_},
                                     QSignalBlocker{destination_}, QSignalBlocker{replaygain_},
-                                    QSignalBlocker{grouping_},  QSignalBlocker{skip_gain_}};
+                                    QSignalBlocker{grouping_},    QSignalBlocker{skip_gain_}};
     save_tags_->setChecked(session.saveTags());
     rename_->setChecked(session.renameFiles());
     rename_->setEnabled(session.renameAvailable());
@@ -272,7 +269,8 @@ void ApplyActionsPopover::showAt(QWidget* anchor) {
         if (at.y() < area.top()) {
             at.setY(anchor->mapToGlobal(QPoint{0, anchor->height()}).y());
         }
-        at.setX(std::clamp(at.x(), area.left(), std::max(area.left(), area.right() - size.width())));
+        at.setX(
+            std::clamp(at.x(), area.left(), std::max(area.left(), area.right() - size.width())));
     }
     move(at);
     show();

@@ -211,9 +211,8 @@ QMimeData* LocalFolderTreeModel::mimeData(const QModelIndexList& indexes) const 
     }
     // Nothing is walked while dragging: the paths are handed over as they
     // are, folders included, when the drop asks.
-    return new LocalFilesMimeData{[paths = std::move(paths)](LocalFilesMimeData::Completion done) {
-        done(paths);
-    }};
+    return new LocalFilesMimeData{
+        [paths = std::move(paths)](LocalFilesMimeData::Completion done) { done(paths); }};
 }
 
 bool LocalFolderTreeModel::hasChildren(const QModelIndex& parent_index) const {

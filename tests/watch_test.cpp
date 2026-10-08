@@ -148,9 +148,10 @@ void a_tree_is_watched_as_it_changes(const std::filesystem::path& base) {
     std::vector<watch::Change> after;
     write_file(outside / "New" / "CD1" / "03.flac");
     static_cast<void>(reported(watcher, file(outside / "New" / "CD1" / "03.flac"), &after));
-    require(std::ranges::none_of(after, [&](const auto& change) {
-                return change.path.find("03.flac") != std::string::npos;
-            }),
+    require(std::ranges::none_of(after,
+                                 [&](const auto& change) {
+                                     return change.path.find("03.flac") != std::string::npos;
+                                 }),
             "what happens to it outside is not the tree's business");
 
     // Moved back in under another name: its files, by their new paths.
@@ -162,12 +163,12 @@ void a_tree_is_watched_as_it_changes(const std::filesystem::path& base) {
     require(reported(watcher, file(root / "Existing" / "01.flac")), "a file deleted is reported");
 
     const auto present = watch::present_files({.local = root.native(), .engine = "/engine"});
-    require(present.size() == 3U &&
-                std::ranges::any_of(present,
-                                    [](const auto& entry) {
-                                        return entry.path == "/engine/Back/CD1/03.flac" &&
-                                               entry.size == 5U;
-                                    }),
+    require(present.size() == 3U && std::ranges::any_of(present,
+                                                        [](const auto& entry) {
+                                                            return entry.path ==
+                                                                       "/engine/Back/CD1/03.flac" &&
+                                                                   entry.size == 5U;
+                                                        }),
             "the files here, named for the engine, with their sizes");
 }
 

@@ -44,9 +44,9 @@ using MetadataDependentStateCommitter =
 // success is part of commit; failure rolls the source back before returning.
 [[nodiscard]] core::Result<MetadataCommitResult>
 commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
-                            MetadataOperationJournal& journal,
-                            const MetadataDependentStateCommitter& dependent_state_committer,
-                            const core::CancellationToken& cancellation = {});
+                       MetadataOperationJournal& journal,
+                       const MetadataDependentStateCommitter& dependent_state_committer,
+                       const core::CancellationToken& cancellation = {});
 
 // Executes one ready native-FLAC embedded-artwork plan through the same
 // unchanged-path publication, undo, and restart-recovery lifecycle as text
@@ -100,8 +100,8 @@ recover_metadata_operations(MetadataOperationJournal& journal,
 // resumes the restore or leaves explicit reconciliation evidence.
 [[nodiscard]] core::Result<MetadataCommitResult>
 undo_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
-                             const MetadataDependentStateCommitter& dependent_state_committer,
-                             const core::CancellationToken& cancellation = {});
+                        const MetadataDependentStateCommitter& dependent_state_committer,
+                        const core::CancellationToken& cancellation = {});
 
 // Removes one verified retained backup without changing the published source.
 // Missing executor-owned paths are treated as an idempotent completed release;

@@ -23,9 +23,9 @@ namespace trackknife::bench {
 // ADR-0261, Apply: the albums chosen of those staged, written in one go from
 // the tagger's draft -- their tags, and renamed or moved by a naming preset
 // when chosen. Moved below a destination, or, without one, one plan per
-// library folder, each album going under the library folder it is in. An album with a file that cannot be
-// written as planned -- changed since it was read, say -- is left out,
-// saying why, and the rest written.
+// library folder, each album going under the library folder it is in. An album with a file that
+// cannot be written as planned -- changed since it was read, say -- is left out, saying why, and
+// the rest written.
 class AlbumBatchWrite final : public QObject {
     Q_OBJECT
   public:
@@ -41,7 +41,14 @@ class AlbumBatchWrite final : public QObject {
         std::size_t album{0U};
         std::vector<std::size_t> items;
     };
-    enum class Outcome : std::uint8_t { pending, written, partly_written, left_out, failed, stopped };
+    enum class Outcome : std::uint8_t {
+        pending,
+        written,
+        partly_written,
+        left_out,
+        failed,
+        stopped
+    };
     struct AlbumOutcome {
         std::size_t album{0U};
         Outcome outcome{Outcome::pending};

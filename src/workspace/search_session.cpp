@@ -56,10 +56,9 @@ constexpr std::size_t grouped_track_limit = 200U;
 
 // The same line, formatted by a library from what it holds of a track: the
 // first artist or "Unknown artist", the first track number, the title.
-constexpr auto result_format =
-    "$if2($getmulti(artist,0),Unknown artist) — "
-    "$if($if2($getmulti(tracknumber,0),$getmulti(track,0)),"
-    "$if2($getmulti(tracknumber,0),$getmulti(track,0)). ,)%title%";
+constexpr auto result_format = "$if2($getmulti(artist,0),Unknown artist) — "
+                               "$if($if2($getmulti(tracknumber,0),$getmulti(track,0)),"
+                               "$if2($getmulti(tracknumber,0),$getmulti(track,0)). ,)%title%";
 
 [[nodiscard]] std::string result_label(const LocalTrackRow& row) {
     auto label = row.artist.empty() ? std::string{"Unknown artist"} : row.artist;
@@ -196,13 +195,13 @@ QStringList SearchSession::savedNames() const {
 QStringList SearchSession::savedTooltips() const {
     QStringList tips{QString{}};
     for (const auto& search : catalog_) {
-        tips.append(QStringLiteral("%1 · %2\n%3")
-                        .arg(search.scope == persistence::SavedSearchScope::current_tab
-                                 ? QStringLiteral("Current tab")
-                                 : QStringLiteral("Library database"))
-                        .arg(search.dialect == "tkq-1" ? QStringLiteral("Query")
-                                                       : QStringLiteral("Words"))
-                        .arg(displayText(search.expression)));
+        tips.append(
+            QStringLiteral("%1 · %2\n%3")
+                .arg(search.scope == persistence::SavedSearchScope::current_tab
+                         ? QStringLiteral("Current tab")
+                         : QStringLiteral("Library database"))
+                .arg(search.dialect == "tkq-1" ? QStringLiteral("Query") : QStringLiteral("Words"))
+                .arg(displayText(search.expression)));
     }
     return tips;
 }
@@ -405,9 +404,8 @@ void SearchSession::usePreset(const int index, const QString& value) {
         return;
     }
     const auto& preset = presets[static_cast<std::size_t>(index)];
-    const auto given = preset.input == query::PresetInput::none
-                           ? displayText(std::string{preset.example})
-                           : value;
+    const auto given =
+        preset.input == query::PresetInput::none ? displayText(std::string{preset.example}) : value;
     const auto source = query::preset_query(preset, utf8Bytes(given));
     if (!source) {
         error_ = displayText(source.error().message);
@@ -487,8 +485,7 @@ void SearchSession::startSearch() {
             outcome.grouped = true;
             auto handle = catalogues->open();
             auto& catalogue = *handle;
-            const auto find = [&](const persistence::LibraryEntryKind kind,
-                                  const std::size_t limit)
+            const auto find = [&](const persistence::LibraryEntryKind kind, const std::size_t limit)
                 -> std::optional<std::vector<persistence::LibraryEntry>> {
                 persistence::LibraryQuery request;
                 request.kind = kind;
@@ -502,8 +499,8 @@ void SearchSession::startSearch() {
                 return std::move(page->entries);
             };
             auto artists = find(persistence::LibraryEntryKind::artist, grouped_limit);
-            auto albums = artists ? find(persistence::LibraryEntryKind::album, grouped_limit)
-                                  : std::nullopt;
+            auto albums =
+                artists ? find(persistence::LibraryEntryKind::album, grouped_limit) : std::nullopt;
             auto tracks = albums ? find(persistence::LibraryEntryKind::track, grouped_track_limit)
                                  : std::nullopt;
             if (!tracks) {
@@ -768,8 +765,8 @@ void SearchSession::finishSearch() {
             add_heading(heading(QStringLiteral("Albums"), result_albums_.size(), grouped_limit));
             for (std::size_t index = 0U; index < result_albums_.size(); ++index) {
                 const auto& album = result_albums_[index];
-                add_item(QStringLiteral("%1 — %2")
-                             .arg(displayText(album.artist), displayText(album.label)),
+                add_item(QStringLiteral("%1 — %2").arg(displayText(album.artist),
+                                                       displayText(album.label)),
                          persistence::LibraryEntryKind::album, index);
             }
         }
@@ -794,8 +791,9 @@ void SearchSession::finishSearch() {
                          .arg(total)
                          .arg(total == 1U ? QString{} : QStringLiteral("s"));
     } else {
-        text = QStringLiteral("%1 match%2").arg(total).arg(total == 1U ? QString{}
-                                                                        : QStringLiteral("es"));
+        text = QStringLiteral("%1 match%2")
+                   .arg(total)
+                   .arg(total == 1U ? QString{} : QStringLiteral("es"));
         if (total > shown) {
             text += QStringLiteral(" · showing first %1").arg(shown);
         }
@@ -810,7 +808,9 @@ void SearchSession::finishSearch() {
     emit changed();
 }
 
-QString SearchSession::resultName() const { return QStringLiteral("Search: %1").arg(result_query_); }
+QString SearchSession::resultName() const {
+    return QStringLiteral("Search: %1").arg(result_query_);
+}
 
 void SearchSession::openAll(const LocalLibraryAction action) {
     if (!result_rows_.empty()) {
@@ -886,37 +886,36 @@ void SearchSession::resolveTracks(std::vector<std::string> paths,
                     emit rowsRequested(name, std::move(resolved), action, engine);
                 }
             });
-    watcher->setFuture(QtConcurrent::run([catalogues = scopeCatalogues(),
-                                          entries = std::move(entries),
-                                          paths = std::move(paths)] {
-        std::vector<LocalTrackRow> found;
-        auto handle = catalogues->open();
-        const auto read = [&handle, &found](const std::vector<std::string>& files) {
-            auto cached = handle->cached_tracks(files);
-            if (!cached) {
-                return;
+    watcher->setFuture(QtConcurrent::run(
+        [catalogues = scopeCatalogues(), entries = std::move(entries), paths = std::move(paths)] {
+            std::vector<LocalTrackRow> found;
+            auto handle = catalogues->open();
+            const auto read = [&handle, &found](const std::vector<std::string>& files) {
+                auto cached = handle->cached_tracks(files);
+                if (!cached) {
+                    return;
+                }
+                for (auto& track : *cached) {
+                    found.push_back(cached_library_row(std::move(track)));
+                }
+            };
+            for (const auto& entry : entries) {
+                persistence::LibraryQuery request;
+                request.kind = persistence::LibraryEntryKind::track;
+                if (entry.kind == persistence::LibraryEntryKind::artist) {
+                    request.artist = entry.key;
+                } else {
+                    request.album_key = entry.key;
+                }
+                if (auto files = handle->paths(request)) {
+                    read(*files);
+                }
             }
-            for (auto& track : *cached) {
-                found.push_back(cached_library_row(std::move(track)));
+            if (!paths.empty()) {
+                read(paths);
             }
-        };
-        for (const auto& entry : entries) {
-            persistence::LibraryQuery request;
-            request.kind = persistence::LibraryEntryKind::track;
-            if (entry.kind == persistence::LibraryEntryKind::artist) {
-                request.artist = entry.key;
-            } else {
-                request.album_key = entry.key;
-            }
-            if (auto files = handle->paths(request)) {
-                read(*files);
-            }
-        }
-        if (!paths.empty()) {
-            read(paths);
-        }
-        return found;
-    }));
+            return found;
+        }));
 }
 
 } // namespace trackknife::bench

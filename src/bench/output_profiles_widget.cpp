@@ -12,13 +12,13 @@
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QGroupBox>
-#include <QHeaderView>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
-#include <QSignalBlocker>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -201,12 +201,11 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
     destinations_row->addWidget(destinations_status_);
     sections->addTab(destinations_box, QStringLiteral("Move destinations"));
 
-    connect(layout_list_, &QTreeWidget::currentItemChanged, this,
-            [this](QTreeWidgetItem* item) {
-                if (!syncing_ && item != nullptr) {
-                    session_->selectLayout(layout_list_->indexOfTopLevelItem(item));
-                }
-            });
+    connect(layout_list_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
+        if (!syncing_ && item != nullptr) {
+            session_->selectLayout(layout_list_->indexOfTopLevelItem(item));
+        }
+    });
     connect(destination_list_, &QTreeWidget::currentItemChanged, this,
             [this](QTreeWidgetItem* item) {
                 if (!syncing_ && item != nullptr && item->data(0, place_role).isValid()) {
@@ -246,8 +245,7 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
             session_->setSanitization(sanitization_policy_->currentData().toString());
         }
     });
-    connect(destination_copy_, &QPushButton::clicked, session_,
-            &ProfilesSession::copyDestinations);
+    connect(destination_copy_, &QPushButton::clicked, session_, &ProfilesSession::copyDestinations);
     connect(destination_browse_, &QPushButton::clicked, this, [this] {
         const auto& start = session_->destinationRootRawPath();
         if (const auto folders = session_->folders()) {
@@ -255,16 +253,16 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
                 new EngineFolderDialog(session_->placeName(), folders, start, destinations_page_);
             connect(chooser, &EngineFolderDialog::folderChosen, session_,
                     [this](const QByteArray& chosen) {
-                        session_->chooseRoot(
-                            std::string{chosen.constData(), static_cast<std::size_t>(chosen.size())});
+                        session_->chooseRoot(std::string{chosen.constData(),
+                                                         static_cast<std::size_t>(chosen.size())});
                     });
             chooser->show();
             return;
         }
         const auto initial =
-            start.empty() ? QString{}
-                          : QFile::decodeName(QByteArray{start.data(),
-                                                         static_cast<qsizetype>(start.size())});
+            start.empty()
+                ? QString{}
+                : QFile::decodeName(QByteArray{start.data(), static_cast<qsizetype>(start.size())});
         const auto selected = QFileDialog::getExistingDirectory(
             destinations_page_, QStringLiteral("Choose move destination"), initial,
             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
@@ -276,8 +274,7 @@ OutputProfilesManager::OutputProfilesManager(OutputProfileStore store, QTabWidge
             std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
     });
     connect(session_, &ProfilesSession::changed, this, &OutputProfilesManager::sync);
-    connect(session_, &ProfilesSession::listsChanged, this,
-            &OutputProfilesManager::rebuildLists);
+    connect(session_, &ProfilesSession::listsChanged, this, &OutputProfilesManager::rebuildLists);
     connect(session_, &ProfilesSession::profilesChanged, this,
             &OutputProfilesManager::profilesChanged);
     rebuildLists();
@@ -299,8 +296,8 @@ void OutputProfilesManager::rebuildLists() {
     layout_list_->clear();
     const auto layout_names = session_->layoutNames();
     for (int row = 0; row < layout_names.size(); ++row) {
-        auto* item =
-            new QTreeWidgetItem(layout_list_, {layout_names.at(row), session_->layoutPatternOn(row)});
+        auto* item = new QTreeWidgetItem(layout_list_,
+                                         {layout_names.at(row), session_->layoutPatternOn(row)});
         item->setToolTip(1, item->text(1));
     }
     destination_list_->clear();
@@ -392,9 +389,9 @@ void OutputProfilesManager::sync() {
 
 void OutputProfilesManager::updateButtons() {
     const auto available = session_->available();
-    for (auto* widget : std::initializer_list<QWidget*>{
-             layout_list_, layout_name_, directory_expression_, basename_expression_,
-             sanitization_policy_, destination_list_}) {
+    for (auto* widget : std::initializer_list<QWidget*>{layout_list_, layout_name_,
+                                                        directory_expression_, basename_expression_,
+                                                        sanitization_policy_, destination_list_}) {
         widget->setEnabled(available);
     }
     for (auto* widget : std::initializer_list<QWidget*>{destination_name_, destination_root_}) {

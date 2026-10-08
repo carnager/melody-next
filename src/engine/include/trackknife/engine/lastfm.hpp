@@ -86,9 +86,9 @@ class LastFm final {
     [[nodiscard]] std::optional<Track> playing_track(const Player::State& state);
     void sample_locked(std::int64_t now_ms, std::int64_t wall_s);
     void flush(std::int64_t now_ms);
-    [[nodiscard]] core::Result<protocol::Json> call(const std::string& method,
-                                                    std::vector<std::pair<std::string, std::string>> params,
-                                                    const Session& session);
+    [[nodiscard]] core::Result<protocol::Json>
+    call(const std::string& method, std::vector<std::pair<std::string, std::string>> params,
+         const Session& session);
 
     Player* player_;
     Catalogue* catalogue_;
@@ -100,8 +100,8 @@ class LastFm final {
     bool enabled_{false};
     std::deque<Pending> pending_;
     std::string message_;
-    bool blocked_{false};      // the state file could not be read; never overwrite it
-    bool auth_failed_{false};  // the session was refused; wait for a new one
+    bool blocked_{false};     // the state file could not be read; never overwrite it
+    bool auth_failed_{false}; // the session was refused; wait for a new one
     core::ListenAccounting listen_;
     std::string listen_identity_;
     std::optional<Track> listen_track_;

@@ -2,6 +2,35 @@
 
 find_package(Threads REQUIRED)
 
+# Asked of the Qt at hand, not guessed from its version: whether QTRY_ keeps
+# its types under the project's warnings. Where it does not, the tests are
+# built without the conversion warning (qtry_narrowing.hpp).
+if(TARGET Qt6::Test)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES Qt6::Test)
+    set(CMAKE_REQUIRED_FLAGS "-Wconversion -Werror")
+    check_cxx_source_compiles(
+        [=[
+#include <QtTest>
+// As in a test: QTRY_ returns from a void function when it fails.
+void tried() {
+    QTRY_VERIFY(true);
+    QTRY_COMPARE(1, 1);
+}
+int main() {
+    tried();
+    return 0;
+}
+]=]
+        TRACKKNIFE_QTRY_KEEPS_ITS_TYPES
+    )
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT TRACKKNIFE_QTRY_KEEPS_ITS_TYPES)
+        add_compile_options(-include "${CMAKE_CURRENT_SOURCE_DIR}/qtry_narrowing.hpp")
+    endif()
+endif()
+
 add_executable(trackknife_core_tests core_primitives_test.cpp)
 target_link_libraries(
     trackknife_core_tests

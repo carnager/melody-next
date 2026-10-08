@@ -324,13 +324,13 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
                 position_matches(local_tracks[local_index], release_track, media_count));
             ++alignment.matched_count;
             const auto& local = local_tracks[local_index];
-            alignment.weakest_title = std::min(
-                alignment.weakest_title, similarity(local.title, release_track.track.title));
+            alignment.weakest_title = std::min(alignment.weakest_title,
+                                               similarity(local.title, release_track.track.title));
             if (local.duration_ms && release_track.track.length_ms) {
                 ++alignment.durations_compared;
-                alignment.worst_duration_delta_ms =
-                    std::max<std::int64_t>(alignment.worst_duration_delta_ms,
-                             std::llabs(*local.duration_ms - *release_track.track.length_ms));
+                alignment.worst_duration_delta_ms = std::max<std::int64_t>(
+                    alignment.worst_duration_delta_ms,
+                    std::llabs(*local.duration_ms - *release_track.track.length_ms));
             }
         }
         total += track.confidence;

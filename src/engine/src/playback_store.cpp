@@ -142,7 +142,8 @@ bool PlaybackStore::restore() {
         state.modes = modes_from_json(*modes);
     }
     // Absent from an engine that kept no gain setting: off, as it was.
-    if (const auto gain = document.find("replay_gain"); gain != document.end() && gain->is_object()) {
+    if (const auto gain = document.find("replay_gain");
+        gain != document.end() && gain->is_object()) {
         const auto mode = gain->value("mode", std::string{"off"});
         state.replay_gain_mode = mode == "album"   ? audio::ReplayGainMode::album
                                  : mode == "track" ? audio::ReplayGainMode::track
@@ -218,12 +219,12 @@ void PlaybackStore::persist() {
         }
         document["requests"] = std::move(asks);
         document["modes"] = to_json(state.modes);
-        document["replay_gain"] = Json{
-            {"mode", state.replay_gain_mode == audio::ReplayGainMode::album   ? "album"
-                     : state.replay_gain_mode == audio::ReplayGainMode::track ? "track"
-                                                                              : "off"},
-            {"preamp_with_gain_db", state.replay_gain_preamps.with_gain_db},
-            {"preamp_without_gain_db", state.replay_gain_preamps.without_gain_db}};
+        document["replay_gain"] =
+            Json{{"mode", state.replay_gain_mode == audio::ReplayGainMode::album   ? "album"
+                          : state.replay_gain_mode == audio::ReplayGainMode::track ? "track"
+                                                                                   : "off"},
+                 {"preamp_with_gain_db", state.replay_gain_preamps.with_gain_db},
+                 {"preamp_without_gain_db", state.replay_gain_preamps.without_gain_db}};
         if (workspace_->save_engine_state(queue_key, document.dump(), now_ms())) {
             written_revision_ = revision;
             written_anything_ = true;

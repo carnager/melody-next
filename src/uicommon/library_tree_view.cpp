@@ -258,9 +258,9 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
         const auto base = item.palette.color(QPalette::Base);
         const auto accent = item.palette.color(QPalette::Highlight);
         const auto mix = [](const int a, const int b) { return (a * 68 + b * 32) / 100; };
-        item.backgroundBrush = QColor::fromRgb(mix(base.red(), accent.red()),
-                                               mix(base.green(), accent.green()),
-                                               mix(base.blue(), accent.blue()));
+        item.backgroundBrush =
+            QColor::fromRgb(mix(base.red(), accent.red()), mix(base.green(), accent.green()),
+                            mix(base.blue(), accent.blue()));
     }
     item.state &= ~QStyle::State_HasFocus;
     const auto* widget = item.widget;

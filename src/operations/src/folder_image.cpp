@@ -144,8 +144,8 @@ bool read_all(int fd, std::vector<char>& bytes) {
 }
 // ADR-0248: the backup as a verified copy where the filesystem refuses the
 // hard link, with the original's permissions and time.
-core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& name,
-                                                    int backup_fd, const std::string& backup) {
+core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& name, int backup_fd,
+                                                    const std::string& backup) {
     constexpr off_t limit = 256 * 1024 * 1024;
     Descriptor source{::openat(fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
     struct stat status{};
@@ -156,8 +156,8 @@ core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& n
     std::vector<char> original(static_cast<std::size_t>(status.st_size));
     if (!read_all(source.fd, original))
         return std::unexpected(error("Folder image changed while backed up"));
-    Descriptor copy{
-        ::openat(backup_fd, backup.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
+    Descriptor copy{::openat(backup_fd, backup.c_str(),
+                             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
     if (copy.fd < 0)
         return std::unexpected(io_error());
     const auto discard = [&](core::Error issue) -> core::Result<core::LocalSourceRevision> {
@@ -476,7 +476,7 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
             return fail(io_error());
         const bool exchanged =
             !without_links && core::rename_with_flags(directory.fd, prepared.c_str(), directory.fd,
-                                          name.c_str(), RENAME_EXCHANGE) == 0;
+                                                      name.c_str(), RENAME_EXCHANGE) == 0;
         if (exchanged) {
             auto displaced = revision(directory.fd, prepared);
             if (!displaced || *displaced != *current) {

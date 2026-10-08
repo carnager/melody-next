@@ -32,9 +32,9 @@ Catalogue::find(const query::CompiledTkq& compiled, const std::string& format,
     found.reserve(snapshots->size());
     for (auto& snapshot : *snapshots) {
         name_by_file(snapshot.facts, snapshot.raw_path);
-        auto text = persistence::tkq_format(*program, snapshot.facts,
-                                            track_fields(snapshot.facts, snapshot.raw_path),
-                                            cancellation);
+        auto text =
+            persistence::tkq_format(*program, snapshot.facts,
+                                    track_fields(snapshot.facts, snapshot.raw_path), cancellation);
         if (!text) {
             return std::unexpected(std::move(text.error()));
         }
@@ -42,7 +42,6 @@ Catalogue::find(const query::CompiledTkq& compiled, const std::string& format,
     }
     return found;
 }
-
 
 core::Result<DynamicSelected> Catalogue::select(const DynamicSelection& selection,
                                                 const std::set<std::string>& exclude,
@@ -94,7 +93,8 @@ LocalCatalogue::inventory(const std::string& folder, const std::string& after,
 }
 
 core::Result<persistence::LibraryFolder>
-LocalCatalogue::folder(const std::string& raw_path, const core::CancellationToken& cancellation) const {
+LocalCatalogue::folder(const std::string& raw_path,
+                       const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -110,8 +110,8 @@ core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>
     }
     // The albums before -- one a write moved to another key, or a folder
     // deleted -- and after.
-    auto before = observer_ ? library->albums_touching(raw_paths)
-                            : core::Result<std::vector<std::string>>{};
+    auto before =
+        observer_ ? library->albums_touching(raw_paths) : core::Result<std::vector<std::string>>{};
     auto refreshed = library->refresh(raw_paths, cancellation);
     if (refreshed && observer_) {
         // After, for what is there: a track that moved to another album, a

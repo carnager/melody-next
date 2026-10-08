@@ -14,8 +14,7 @@ constexpr auto settings_key = "workspace/panel-layout-v1";
 
 } // namespace
 
-PanelArrangement::PanelArrangement(QObject* parent)
-    : QObject(parent), layout_(defaultLayout()) {}
+PanelArrangement::PanelArrangement(QObject* parent) : QObject(parent), layout_(defaultLayout()) {}
 
 ui::PanelLayout PanelArrangement::defaultLayout() {
     std::vector<ui::PanelLayoutNode> children;
@@ -87,8 +86,8 @@ void PanelArrangement::arrange(const ui::PanelLayoutNodeKind kind,
     } else {
         auto active = root.kind == ui::PanelLayoutNodeKind::tabs ? root.active_child : 0;
         if (root.kind != ui::PanelLayoutNodeKind::tabs) {
-            const auto track_lists = std::ranges::find(
-                children, QString::fromLatin1(tracks_panel), &ui::PanelLayoutNode::panel_id);
+            const auto track_lists = std::ranges::find(children, QString::fromLatin1(tracks_panel),
+                                                       &ui::PanelLayoutNode::panel_id);
             if (track_lists != children.end()) {
                 active = static_cast<int>(std::distance(children.begin(), track_lists));
             }
@@ -114,8 +113,8 @@ void PanelArrangement::swap() {
         root.active_child = static_cast<int>(root.children.size()) - 1 - root.active_child;
     }
     protected_ = false;
-    layout_ = ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                              .root = std::move(root)};
+    layout_ =
+        ui::PanelLayout{.schema_version = ui::panel_layout_schema_version, .root = std::move(root)};
     persist();
     emit changed();
 }

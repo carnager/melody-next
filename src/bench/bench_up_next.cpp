@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
-#include "bench/up_next_delegate.hpp"
-#include "uicommon/local_files_mime_data.hpp"
-#include "bench/local_library_panel.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/local_library_panel.hpp"
 #include "bench/settings_dialog.hpp"
+#include "bench/up_next_delegate.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/list_persistence_service.hpp"
+#include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include <QDockWidget>
+#include <QFrame>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QFrame>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -244,10 +244,11 @@ void BenchMainWindow::refreshUpNext() {
     up_next_status_->setToolTip(heading.status_tooltip);
     if (resume != nullptr) {
         // Elided to what is left beside the edit buttons.
-        const auto* toolbar = up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
-        const auto room = std::max(48, up_next_dock_->width() -
-                                           (toolbar ? toolbar->sizeHint().width() : 0) -
-                                           resume->iconSize().width() - 36);
+        const auto* toolbar =
+            up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
+        const auto room =
+            std::max(48, up_next_dock_->width() - (toolbar ? toolbar->sizeHint().width() : 0) -
+                             resume->iconSize().width() - 36);
         resume->setText(resume->fontMetrics().elidedText(heading.back, Qt::ElideRight, room));
         resume->setToolTip(heading.back_tooltip);
         resume->setEnabled(heading.back_enabled);

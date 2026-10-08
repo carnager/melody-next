@@ -101,7 +101,8 @@ validateSerializedTextBudget(const metadata::MetadataTransformationChain& chain)
                     }
                     return add(typed.source);
                 } else if constexpr (std::is_same_v<Action, metadata::MetadataCopyFieldAction> ||
-                                     std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
+                                     std::is_same_v<Action,
+                                                    metadata::MetadataConvertRatingAction>) {
                     return add(typed.source_field);
                 } else if constexpr (std::is_same_v<Action, metadata::MetadataSplitValuesAction> ||
                                      std::is_same_v<Action, metadata::MetadataJoinValuesAction>) {
@@ -534,8 +535,8 @@ readAction(const QJsonValue& value, const std::size_t index) {
         if (!top) {
             return std::unexpected(top.error());
         }
-        const auto scale = *top == 5U    ? metadata::PlainRatingScale::five
-                           : *top == 10U ? metadata::PlainRatingScale::ten
+        const auto scale = *top == 5U     ? metadata::PlainRatingScale::five
+                           : *top == 10U  ? metadata::PlainRatingScale::ten
                            : *top == 100U ? metadata::PlainRatingScale::hundred
                                           : metadata::PlainRatingScale::off;
         if (scale == metadata::PlainRatingScale::off) {
@@ -543,9 +544,8 @@ readAction(const QJsonValue& value, const std::size_t index) {
                                                     "A rating conversion's scale is 5, 10 or 100",
                                                     location));
         }
-        return metadata::MetadataConvertRatingAction{.target_field = std::move(*target),
-                                                     .source_field = std::move(*source),
-                                                     .scale = scale};
+        return metadata::MetadataConvertRatingAction{
+            .target_field = std::move(*target), .source_field = std::move(*source), .scale = scale};
     }
     if (*kind == "blocklist_fields" || *kind == "allowlist_fields") {
         if (auto keys = requireExactKeys(object, {"fields", "kind"}, location); !keys) {

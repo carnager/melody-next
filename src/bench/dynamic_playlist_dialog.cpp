@@ -41,9 +41,8 @@ QList<QByteArray> resultKeys(QAbstractItemModel* model) {
 } // namespace
 DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Library> libraries,
                                              LibrarySearch search, QWidget* parent)
-    : QDialog(parent),
-      session_(new DynamicPlaylistSession(std::move(profile), std::move(libraries),
-                                          std::move(search), this)) {
+    : QDialog(parent), session_(new DynamicPlaylistSession(std::move(profile), std::move(libraries),
+                                                           std::move(search), this)) {
     setObjectName(QStringLiteral("bench-dynamic-playlists"));
     setWindowTitle(QStringLiteral("Dynamic playlists"));
     setAttribute(Qt::WA_DeleteOnClose);
@@ -110,9 +109,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     // as any other, whatever its size.
     group_by_ = line(QStringLiteral("Pick groups by:"), QStringLiteral("dynamic-group-by"));
     group_by_->setPlaceholderText(QStringLiteral("%albumartist%"));
-    group_by_->setToolTip(QStringLiteral(
-        "A formatting expression; tracks giving the same text form a group. "
-        "Example: %albumartist% — %album% for albums"));
+    group_by_->setToolTip(
+        QStringLiteral("A formatting expression; tracks giving the same text form a group. "
+                       "Example: %albumartist% — %album% for albums"));
     groups_ = new QSpinBox(this);
     groups_->setObjectName(QStringLiteral("dynamic-groups"));
     groups_->setRange(0, 500);

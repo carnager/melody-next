@@ -220,17 +220,18 @@ void LastFmSettingsSession::received(const QString& op, const QJsonObject& state
     if (op == QStringLiteral("begin")) {
         secret_.clear();
     }
-    status_ = QStringLiteral("%1 · %2 pending\n%3")
-                  .arg(connected_ ? QStringLiteral("Connected as %1")
-                                        .arg(state.value("user").toString())
-                                  : QStringLiteral("Not connected"))
-                  .arg(state.value("pending").toInt())
-                  .arg(state.value("message").toString());
+    status_ =
+        QStringLiteral("%1 · %2 pending\n%3")
+            .arg(connected_ ? QStringLiteral("Connected as %1").arg(state.value("user").toString())
+                            : QStringLiteral("Not connected"))
+            .arg(state.value("pending").toInt())
+            .arg(state.value("message").toString());
     if (op == QStringLiteral("begin")) {
         status_ = QStringLiteral("Waiting for browser approval…");
         poll_.start();
         const QUrl url(state.value("url").toString());
-        if (url.scheme() == QStringLiteral("https") && url.host() == QStringLiteral("www.last.fm")) {
+        if (url.scheme() == QStringLiteral("https") &&
+            url.host() == QStringLiteral("www.last.fm")) {
             QDesktopServices::openUrl(url);
         }
     }
@@ -265,8 +266,8 @@ void LastFmSettingsSession::ask(const int row) {
         if (!client) {
             return {QStringLiteral("Not reachable"), {}};
         }
-        auto answer = (*client)->call("lastfm.status", protocol::Json::object(),
-                                      std::chrono::seconds{3});
+        auto answer =
+            (*client)->call("lastfm.status", protocol::Json::object(), std::chrono::seconds{3});
         (*client)->close();
         if (!answer) {
             return {QStringLiteral("Cannot scrobble (engine too old)"), {}};
@@ -292,53 +293,53 @@ void LastFmSettingsSession::useAccount(const int row) {
     setEngineState(id, QStringLiteral("Handing over…"), {}, false);
     // The session, from this window's own sign-in, then to the engine.
     auto connection = std::make_shared<QMetaObject::Connection>();
-    *connection = connect(
-        work_.lastfm_, &LastFmService::completed, this,
-        [this, endpoint, id, connection](const QString& op, const QJsonObject& session,
-                                         const QString& error) {
-            if (op != QStringLiteral("session")) {
-                return;
-            }
-            disconnect(*connection);
-            if (!error.isEmpty()) {
-                setEngineState(id, error, {}, false);
-                return;
-            }
-            const protocol::Json params{
-                {"api_key", session.value("api_key").toString().toStdString()},
-                {"secret", session.value("secret").toString().toStdString()},
-                {"session_key", session.value("session_key").toString().toStdString()},
-                {"user", session.value("user").toString().toStdString()}};
-            auto* watcher = new QFutureWatcher<QString>(this);
-            connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, id] {
-                watcher->deleteLater();
-                const auto said = watcher->result();
-                const bool handed = said.startsWith(QStringLiteral("Scrobbling as "));
-                setEngineState(id, said, work_.lastfm_user_, handed);
-                // The engines this window plays on may scrobble now: it
-                // stops crediting them itself.
-                for (const auto& engine : work_.engines_) {
-                    if (engine->playback != nullptr) {
-                        engine->playback->refreshScrobbling();
+    *connection =
+        connect(work_.lastfm_, &LastFmService::completed, this,
+                [this, endpoint, id, connection](const QString& op, const QJsonObject& session,
+                                                 const QString& error) {
+                    if (op != QStringLiteral("session")) {
+                        return;
                     }
-                }
-            });
-            watcher->setFuture(QtConcurrent::run([endpoint, params] {
-                auto client = protocol::Client::connect(endpoint);
-                if (!client) {
-                    return QStringLiteral("Not reachable: %1")
-                        .arg(QString::fromStdString(client.error().message));
-                }
-                auto answer = (*client)->call("lastfm.set_session", params);
-                (*client)->close();
-                if (!answer) {
-                    return QStringLiteral("Not handed over: %1")
-                        .arg(QString::fromStdString(answer.error().message));
-                }
-                return QStringLiteral("Scrobbling as %1")
-                    .arg(QString::fromStdString(answer->value("user", std::string{})));
-            }));
-        });
+                    disconnect(*connection);
+                    if (!error.isEmpty()) {
+                        setEngineState(id, error, {}, false);
+                        return;
+                    }
+                    const protocol::Json params{
+                        {"api_key", session.value("api_key").toString().toStdString()},
+                        {"secret", session.value("secret").toString().toStdString()},
+                        {"session_key", session.value("session_key").toString().toStdString()},
+                        {"user", session.value("user").toString().toStdString()}};
+                    auto* watcher = new QFutureWatcher<QString>(this);
+                    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, id] {
+                        watcher->deleteLater();
+                        const auto said = watcher->result();
+                        const bool handed = said.startsWith(QStringLiteral("Scrobbling as "));
+                        setEngineState(id, said, work_.lastfm_user_, handed);
+                        // The engines this window plays on may scrobble now: it
+                        // stops crediting them itself.
+                        for (const auto& engine : work_.engines_) {
+                            if (engine->playback != nullptr) {
+                                engine->playback->refreshScrobbling();
+                            }
+                        }
+                    });
+                    watcher->setFuture(QtConcurrent::run([endpoint, params] {
+                        auto client = protocol::Client::connect(endpoint);
+                        if (!client) {
+                            return QStringLiteral("Not reachable: %1")
+                                .arg(QString::fromStdString(client.error().message));
+                        }
+                        auto answer = (*client)->call("lastfm.set_session", params);
+                        (*client)->close();
+                        if (!answer) {
+                            return QStringLiteral("Not handed over: %1")
+                                .arg(QString::fromStdString(answer.error().message));
+                        }
+                        return QStringLiteral("Scrobbling as %1")
+                            .arg(QString::fromStdString(answer->value("user", std::string{})));
+                    }));
+                });
     work_.lastfm_->execute(QStringLiteral("session"));
 }
 

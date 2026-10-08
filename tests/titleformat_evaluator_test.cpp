@@ -178,14 +178,14 @@ void integerFunctionsAreStrictBoundedAndDocumented() {
           divide_by_zero.error().code == trackknife::core::ErrorCode::invalid_argument);
 
     // $decimal: the one fraction, strict at its edges as $div is.
-    const auto decimals = evaluateScript(
-        "$decimal(3,5,1)|$decimal(-85,100,1)|$decimal(-1,100,1)|$decimal(1,3,0)|"
-        "$decimal(-9223372036854775808,1,0)|$decimal(7,2,9)",
-        context);
+    const auto decimals =
+        evaluateScript("$decimal(3,5,1)|$decimal(-85,100,1)|$decimal(-1,100,1)|$decimal(1,3,0)|"
+                       "$decimal(-9223372036854775808,1,0)|$decimal(7,2,9)",
+                       context);
     CHECK(decimals && decimals->text == "0.6|-0.9|0.0|0|-9223372036854775808|3.500000000");
     const auto decimal_by_zero = evaluateScript("$decimal(7,0,1)", context);
-    CHECK(!decimal_by_zero && decimal_by_zero.error().code ==
-                                  trackknife::core::ErrorCode::invalid_argument);
+    CHECK(!decimal_by_zero &&
+          decimal_by_zero.error().code == trackknife::core::ErrorCode::invalid_argument);
     CHECK(!evaluateScript("$decimal(1,2,-1)", context));
     CHECK(!evaluateScript("$decimal(1,2,10)", context));
     // Scaling past the integer range is an error, never a wrapped number.

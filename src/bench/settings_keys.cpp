@@ -24,8 +24,9 @@ std::string SettingsKeys::ratingBackupTag() {
     if (!settings.value(QLatin1String(rating_backup_key), false).toBool()) {
         return {};
     }
-    const auto tag = settings.value(QLatin1String(rating_backup_tag_key),
-                                    QString::fromLatin1(metadata::default_rating_backup_tag))
+    const auto tag = settings
+                         .value(QLatin1String(rating_backup_tag_key),
+                                QString::fromLatin1(metadata::default_rating_backup_tag))
                          .toString()
                          .trimmed()
                          .toStdString();

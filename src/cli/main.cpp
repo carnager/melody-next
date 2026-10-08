@@ -13,8 +13,8 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -194,8 +194,8 @@ look_around(const std::string& wanted = {}) {
         // said so.
         if (auto info = (*client)->call("engine.info")) {
             const auto peer = trackknife::protocol::peer_version(*info);
-            const auto said =
-                trackknife::protocol::compatibility_message(peer, text_of(*info, "name"), "melody-cli");
+            const auto said = trackknife::protocol::compatibility_message(
+                peer, text_of(*info, "name"), "melody-cli");
             if (trackknife::protocol::compatibility(peer) ==
                 trackknife::protocol::Compatibility::incompatible) {
                 fail(said);
@@ -1199,10 +1199,9 @@ int run(const Options& options) {
             error != std::errc{} || rest != end_of || rating < 0 || rating > 10) {
             fail(command + " wants a whole number from 0 to 10 (0 clears it)");
         }
-        static_cast<void>(call(*client, "catalogue.set_rating",
-                               Json{{"hash", text_of(track, hash_field)},
-                                    {"album", album},
-                                    {"rating", rating}}));
+        static_cast<void>(
+            call(*client, "catalogue.set_rating",
+                 Json{{"hash", text_of(track, hash_field)}, {"album", album}, {"rating", rating}}));
         if (!options.json) {
             const auto what = album ? text_of(track, "album") : describe_track(track);
             std::cout << (rating == 0 ? std::string{"cleared: "}

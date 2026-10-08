@@ -32,10 +32,10 @@ class Workspace;
 // A summary is {id, name, kind: "working"|"saved", revision, tracks,
 // modified_ms, draft_of, draft_base}: a draft is a working list holding the
 // unsaved edits of the saved list `draft_of`, begun at its revision
-// `draft_base`; one to a saved list, deleted with it. An item is a queue entry's fields -- entry, path, segment,
-// selection, duration_ms -- plus logical, title, artist and album. A write
-// with `revision` is refused as a conflict when the list has moved on since;
-// for a new list, `revision` 0 refuses if the id is taken.
+// `draft_base`; one to a saved list, deleted with it. An item is a queue entry's fields -- entry,
+// path, segment, selection, duration_ms -- plus logical, title, artist and album. A write with
+// `revision` is refused as a conflict when the list has moved on since; for a new list, `revision`
+// 0 refuses if the id is taken.
 //
 // ADR-0256: `edits` are applied in order, all or none, and the queue played
 // from the list follows them: {"remove": [entry]}, {"insert": [item],

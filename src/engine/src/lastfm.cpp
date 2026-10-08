@@ -23,7 +23,8 @@ constexpr std::size_t response_limit = 1024U * 1024U;
 constexpr long request_timeout_ms = 8'000;
 
 [[nodiscard]] core::Error lastfm_error(std::string message) {
-    return core::Error{.code = core::ErrorCode::backend, .message = std::move(message), .context = {}};
+    return core::Error{
+        .code = core::ErrorCode::backend, .message = std::move(message), .context = {}};
 }
 
 // Last.fm's request signature: every parameter but the format, sorted by
@@ -137,12 +138,11 @@ void LastFm::load() {
     if (const auto pending = document.find("pending");
         pending != document.end() && pending->is_array()) {
         for (const auto& item : *pending) {
-            pending_.push_back(Pending{
-                .track = Track{.artist = item.value("artist", std::string{}),
-                               .title = item.value("title", std::string{}),
-                               .album = item.value("album", std::string{}),
-                               .duration = item.value("duration", 0.0)},
-                .timestamp = item.value("timestamp", std::int64_t{0})});
+            pending_.push_back(Pending{.track = Track{.artist = item.value("artist", std::string{}),
+                                                      .title = item.value("title", std::string{}),
+                                                      .album = item.value("album", std::string{}),
+                                                      .duration = item.value("duration", 0.0)},
+                                       .timestamp = item.value("timestamp", std::int64_t{0})});
         }
     }
 }
@@ -162,8 +162,8 @@ bool LastFm::save_locked() {
     }
     auto pending = Json::array();
     for (const auto& item : pending_) {
-        auto rendered = track_json(item.track.artist, item.track.title, item.track.album,
-                                   item.track.duration);
+        auto rendered =
+            track_json(item.track.artist, item.track.title, item.track.album, item.track.duration);
         rendered["timestamp"] = item.timestamp;
         pending.push_back(std::move(rendered));
     }
@@ -172,7 +172,8 @@ bool LastFm::save_locked() {
     std::error_code ignored;
     std::filesystem::create_directories(state_file_.parent_path(), ignored);
     const auto temporary = state_file_.string() + ".new";
-    const auto descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    const auto descriptor =
+        ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (descriptor < 0) {
         return false;
     }
@@ -266,11 +267,11 @@ std::optional<LastFm::Track> LastFm::playing_track(const Player::State& state) {
         }
     }
     if (const auto entry = player_->entry(state.entry); entry && !entry->title.empty()) {
-        cached_track_ = Track{
-            .artist = entry->group.artist.empty() ? entry->group.album_artist : entry->group.artist,
-            .title = entry->title,
-            .album = entry->group.album,
-            .duration = duration};
+        cached_track_ = Track{.artist = entry->group.artist.empty() ? entry->group.album_artist
+                                                                    : entry->group.artist,
+                              .title = entry->title,
+                              .album = entry->group.album,
+                              .duration = duration};
     }
     return cached_track_;
 }
@@ -348,8 +349,8 @@ void LastFm::flush(const std::int64_t now_ms) {
     if (!now_playing) {
         params.emplace_back("timestamp", std::to_string(timestamp));
     }
-    auto answer = call(now_playing ? "track.updateNowPlaying" : "track.scrobble",
-                       std::move(params), session);
+    auto answer =
+        call(now_playing ? "track.updateNowPlaying" : "track.scrobble", std::move(params), session);
     if (now_playing) {
         return; // Best effort: a missed "now playing" is not worth a retry.
     }
@@ -381,7 +382,8 @@ void LastFm::flush(const std::int64_t now_ms) {
         static_cast<void>(save_locked());
         return;
     }
-    const auto attributes = answer->value("scrobbles", Json::object()).value("@attr", Json::object());
+    const auto attributes =
+        answer->value("scrobbles", Json::object()).value("@attr", Json::object());
     const auto count = [&attributes](const char* key) {
         const auto value = attributes.find(key);
         if (value == attributes.end()) {
@@ -424,7 +426,8 @@ core::Result<Json> LastFm::call(const std::string& method,
         if (!body.empty()) {
             body += '&';
         }
-        auto* escaped_name = curl_easy_escape(curl.get(), name.c_str(), static_cast<int>(name.size()));
+        auto* escaped_name =
+            curl_easy_escape(curl.get(), name.c_str(), static_cast<int>(name.size()));
         auto* escaped_value =
             curl_easy_escape(curl.get(), value.c_str(), static_cast<int>(value.size()));
         body += escaped_name;
@@ -457,10 +460,10 @@ core::Result<Json> LastFm::call(const std::string& method,
         code = -1;
     }
     if (code != 0) {
-        return std::unexpected(core::Error{
-            .code = code == -1 ? core::ErrorCode::io : core::ErrorCode::backend,
-            .message = "Last.fm request failed (code " + std::to_string(code) + ")",
-            .context = {{.key = "code", .value = std::to_string(code)}}});
+        return std::unexpected(
+            core::Error{.code = code == -1 ? core::ErrorCode::io : core::ErrorCode::backend,
+                        .message = "Last.fm request failed (code " + std::to_string(code) + ")",
+                        .context = {{.key = "code", .value = std::to_string(code)}}});
     }
     return parsed;
 }
@@ -505,18 +508,18 @@ void register_lastfm_methods(protocol::Dispatcher& dispatcher, LastFm& lastfm) {
                     {"message", status.message}};
     };
     // Write-only: the session goes in and never comes back out.
-    dispatcher.on("lastfm.set_session", [&lastfm, status_json](const Json& params)
-                                            -> core::Result<Json> {
-        auto set = lastfm.set_session(
-            LastFm::Session{.api_key = params.value("api_key", std::string{}),
-                            .secret = params.value("secret", std::string{}),
-                            .session_key = params.value("session_key", std::string{}),
-                            .user = params.value("user", std::string{})});
-        if (!set) {
-            return std::unexpected(std::move(set.error()));
-        }
-        return status_json();
-    });
+    dispatcher.on("lastfm.set_session",
+                  [&lastfm, status_json](const Json& params) -> core::Result<Json> {
+                      auto set = lastfm.set_session(
+                          LastFm::Session{.api_key = params.value("api_key", std::string{}),
+                                          .secret = params.value("secret", std::string{}),
+                                          .session_key = params.value("session_key", std::string{}),
+                                          .user = params.value("user", std::string{})});
+                      if (!set) {
+                          return std::unexpected(std::move(set.error()));
+                      }
+                      return status_json();
+                  });
     dispatcher.on("lastfm.clear", [&lastfm, status_json](const Json&) -> core::Result<Json> {
         if (auto cleared = lastfm.clear(); !cleared) {
             return std::unexpected(std::move(cleared.error()));

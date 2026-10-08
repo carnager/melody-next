@@ -3,8 +3,8 @@
 
 #include <QDataStream>
 #include <QDir>
-#include <QFileInfo>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -151,12 +151,12 @@ void writeItem(QDataStream& out, const persistence::ListItem& item) {
         qint64 seconds = 0;
         qint64 nanoseconds = 0;
         in >> device >> inode >> size >> seconds >> nanoseconds;
-        item.source_revision = core::LocalSourceRevision{.device = device,
-                                                         .inode = inode,
-                                                         .size = size,
-                                                         .modification_time_seconds = seconds,
-                                                         .modification_time_nanoseconds =
-                                                             nanoseconds};
+        item.source_revision =
+            core::LocalSourceRevision{.device = device,
+                                      .inode = inode,
+                                      .size = size,
+                                      .modification_time_seconds = seconds,
+                                      .modification_time_nanoseconds = nanoseconds};
     }
     quint32 fields = 0;
     in >> fields;
@@ -206,7 +206,8 @@ TabStore::State TabStore::loadState() {
     const auto root = document.object();
     for (const auto& value : root.value(QStringLiteral("tabs")).toArray()) {
         const auto tab = value.toObject();
-        const auto id = core::StableId::parse(tab.value(QStringLiteral("id")).toString().toStdString());
+        const auto id =
+            core::StableId::parse(tab.value(QStringLiteral("id")).toString().toStdString());
         if (!id) {
             continue;
         }
@@ -214,16 +215,18 @@ TabStore::State TabStore::loadState() {
         state.tabs.push_back(Tab{
             .id = *id,
             .engine = tab.value(QStringLiteral("engine")).toString().toStdString(),
-            .name = text(QByteArray::fromBase64(tab.value(QStringLiteral("name")).toString().toLatin1())),
+            .name = text(
+                QByteArray::fromBase64(tab.value(QStringLiteral("name")).toString().toLatin1())),
             .kind = kind == QStringLiteral("saved") ? persistence::ListKind::saved
                                                     : persistence::ListKind::scratch,
             .pinned = tab.value(QStringLiteral("pinned")).toBool(),
             .dirty = tab.value(QStringLiteral("dirty")).toBool(),
-            .layout = QByteArray::fromBase64(tab.value(QStringLiteral("layout")).toString().toLatin1()),
+            .layout =
+                QByteArray::fromBase64(tab.value(QStringLiteral("layout")).toString().toLatin1()),
         });
     }
-    if (const auto active = core::StableId::parse(
-            root.value(QStringLiteral("active")).toString().toStdString())) {
+    if (const auto active =
+            core::StableId::parse(root.value(QStringLiteral("active")).toString().toStdString())) {
         state.active = *active;
     }
     return state;
@@ -248,7 +251,8 @@ void TabStore::saveState(const State& state) {
     if (state.active) {
         root.insert(QStringLiteral("active"), QString::fromStdString(state.active->to_string()));
     }
-    QSettings{}.setValue(QLatin1String(state_key), QJsonDocument{root}.toJson(QJsonDocument::Compact));
+    QSettings{}.setValue(QLatin1String(state_key),
+                         QJsonDocument{root}.toJson(QJsonDocument::Compact));
 }
 
 QString TabStore::pathOf(const core::StableId& id) const {

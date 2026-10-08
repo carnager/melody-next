@@ -112,8 +112,8 @@ LibraryViewsDialog::LibraryViewsDialog(const CatalogueSource& catalogues, Engine
                       QStringLiteral("list-add|sp:SP_FileDialogNewFolder"), tr("Add level"));
     remove_level_ = tool(QStringLiteral("library-view-remove-level"),
                          QStringLiteral("list-remove|sp:SP_TrashIcon"), tr("Remove level"));
-    level_up_ = tool(QStringLiteral("library-view-level-up"),
-                     QStringLiteral("go-up|sp:SP_ArrowUp"), tr("Up"));
+    level_up_ = tool(QStringLiteral("library-view-level-up"), QStringLiteral("go-up|sp:SP_ArrowUp"),
+                     tr("Up"));
     level_down_ = tool(QStringLiteral("library-view-level-down"),
                        QStringLiteral("go-down|sp:SP_ArrowDown"), tr("Down"));
     for (auto* button : {add_level_, remove_level_, level_up_, level_down_}) {

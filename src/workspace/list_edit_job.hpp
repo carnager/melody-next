@@ -46,9 +46,7 @@ class ListEditJob final : public QObject {
     [[nodiscard]] bool sorting() const noexcept { return request_.kind == lists::EditKind::sort; }
     [[nodiscard]] const lists::EditRequest& request() const noexcept { return request_; }
     [[nodiscard]] QString status() const { return status_; }
-    [[nodiscard]] QString expression() const {
-        return QString::fromStdString(request_.expression);
-    }
+    [[nodiscard]] QString expression() const { return QString::fromStdString(request_.expression); }
     [[nodiscard]] bool descending() const { return request_.descending; }
     // What the Edit menu offers: sorting by an expression (Ascending or
     // Descending), reversing, shuffling albums, removing duplicates.

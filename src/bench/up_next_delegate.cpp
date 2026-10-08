@@ -27,8 +27,7 @@ namespace {
 UpNextDelegate::UpNextDelegate(const int artist_column, const int length_column, QObject* parent)
     : QStyledItemDelegate(parent), artist_column_(artist_column), length_column_(length_column) {}
 
-QSize UpNextDelegate::sizeHint(const QStyleOptionViewItem& option,
-                               const QModelIndex& index) const {
+QSize UpNextDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
     auto size = QStyledItemDelegate::sizeHint(option, index);
     size.setHeight(row_height);
     return size;

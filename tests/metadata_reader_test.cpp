@@ -266,26 +266,27 @@ void readsWavPackAndRawBytePath(const std::filesystem::path& fixture_directory) 
         metadata::MetadataFileAccess access{
             .read = [](const std::string&, const trackknife::core::CancellationToken&)
                 -> trackknife::core::Result<metadata::LocalMetadataRead> {
-                return std::unexpected(trackknife::core::Error{
-                    .code = trackknife::core::ErrorCode::invariant,
-                    .message = "read file by file",
-                    .context = {}});
+                return std::unexpected(
+                    trackknife::core::Error{.code = trackknife::core::ErrorCode::invariant,
+                                            .message = "read file by file",
+                                            .context = {}});
             },
-            .revision = [](const std::string&) -> trackknife::core::Result<trackknife::core::LocalSourceRevision> {
+            .revision = [](const std::string&)
+                -> trackknife::core::Result<trackknife::core::LocalSourceRevision> {
                 return trackknife::core::LocalSourceRevision{};
             },
-            .read_many =
-                [&](const std::vector<std::string>& paths, const trackknife::core::CancellationToken&)
+            .read_many = [&](const std::vector<std::string>& paths,
+                             const trackknife::core::CancellationToken&)
                 -> trackknife::core::Result<
                     std::vector<trackknife::core::Result<metadata::LocalMetadataRead>>> {
                 batches.push_back(paths.size());
                 std::vector<trackknife::core::Result<metadata::LocalMetadataRead>> results;
                 for (const auto& path : paths) {
                     if (path == bad) {
-                        results.emplace_back(std::unexpected(trackknife::core::Error{
-                            .code = trackknife::core::ErrorCode::io,
-                            .message = "unreadable",
-                            .context = {}}));
+                        results.emplace_back(std::unexpected(
+                            trackknife::core::Error{.code = trackknife::core::ErrorCode::io,
+                                                    .message = "unreadable",
+                                                    .context = {}}));
                         continue;
                     }
                     auto read = *raw_read;
@@ -295,15 +296,16 @@ void readsWavPackAndRawBytePath(const std::filesystem::path& fixture_directory) 
                 return results;
             }};
         auto captured = metadata::capture_metadata_sources(
-            many, access, {},
-            [&told](const std::size_t read, const std::size_t total) { told.emplace_back(read, total); });
+            many, access, {}, [&told](const std::size_t read, const std::size_t total) {
+                told.emplace_back(read, total);
+            });
         CHECK(captured.has_value());
         CHECK(batches == (std::vector<std::size_t>{256U, 256U, 78U}));
         CHECK(told.front() == (std::pair<std::size_t, std::size_t>{0U, 590U}) &&
               told.back() == (std::pair<std::size_t, std::size_t>{590U, 590U}) &&
               told.size() == 4U);
-        CHECK(captured && captured->sources.size() == 600U &&
-              captured->unreadable.size() == 1U && captured->unreadable.front().first == bad);
+        CHECK(captured && captured->sources.size() == 600U && captured->unreadable.size() == 1U &&
+              captured->unreadable.front().first == bad);
         CHECK(captured && captured->sources[7].raw_path == bad &&
               !captured->sources[7].source_revision &&
               !captured->sources[7].needs_metadata_capture);

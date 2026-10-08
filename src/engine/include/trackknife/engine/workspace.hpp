@@ -99,14 +99,15 @@ class Workspace final {
     load_engine_state(std::string_view key) const;
 
     // ADR-0233: lists, the engine's own -- working and saved.
-    [[nodiscard]] core::Result<std::vector<persistence::EngineListSummary>> load_engine_lists() const;
+    [[nodiscard]] core::Result<std::vector<persistence::EngineListSummary>>
+    load_engine_lists() const;
     [[nodiscard]] core::Result<std::optional<persistence::EngineList>>
     load_engine_list(const core::StableId& id) const;
     [[nodiscard]] core::Result<persistence::EngineListSummary>
     save_engine_list(const core::StableId& id, std::string_view name,
-                  persistence::EngineListKind kind,
-                  const std::vector<persistence::EngineListItem>& items,
-                  std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+                     persistence::EngineListKind kind,
+                     const std::vector<persistence::EngineListItem>& items,
+                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     // ADR-0256: see ListRepository::edit_engine_list.
     [[nodiscard]] core::Result<persistence::EngineList>
     edit_engine_list(const core::StableId& id, std::uint64_t expected_revision,
@@ -116,9 +117,9 @@ class Workspace final {
                      bool with_items = true);
     [[nodiscard]] core::Result<persistence::EngineListSummary>
     rename_engine_list(const core::StableId& id, std::string_view name,
-                    std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
-    [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
-                                                     std::optional<std::uint64_t> expected_revision);
+                       std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    [[nodiscard]] core::Result<bool>
+    delete_engine_list(const core::StableId& id, std::optional<std::uint64_t> expected_revision);
     // ADR-0259: see ListRepository::engine_list_entry_paths.
     [[nodiscard]] core::Result<std::pair<std::uint64_t, std::vector<std::optional<std::string>>>>
     engine_list_entry_paths(const core::StableId& id,

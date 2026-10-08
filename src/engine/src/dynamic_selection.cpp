@@ -13,10 +13,10 @@ namespace trackknife::engine {
 
 std::vector<std::string> pick_dynamic(std::vector<DynamicMatch> matches,
                                       const DynamicSelection& selection,
-                                      const std::set<std::string>& exclude,
-                                      std::mt19937& random) {
-    std::erase_if(matches,
-                  [&exclude](const DynamicMatch& match) { return exclude.contains(match.raw_path); });
+                                      const std::set<std::string>& exclude, std::mt19937& random) {
+    std::erase_if(matches, [&exclude](const DynamicMatch& match) {
+        return exclude.contains(match.raw_path);
+    });
     const auto limit = std::min(selection.limit, dynamic_selection_limit);
     std::vector<std::string> chosen;
     if (selection.groups > 0U) {
@@ -101,7 +101,8 @@ core::Result<DynamicSelected> select_dynamic(const Catalogue& catalogue,
         }
         matches.reserve(found->size());
         for (auto& track : *found) {
-            matches.push_back({.raw_path = std::move(track.raw_path), .group = std::move(track.text)});
+            matches.push_back(
+                {.raw_path = std::move(track.raw_path), .group = std::move(track.text)});
         }
     } else {
         auto paths = catalogue.filter_paths(*compiled, cancellation);

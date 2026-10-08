@@ -8,7 +8,6 @@
 
 #include <QWidget>
 
-
 class QLabel;
 class QLineEdit;
 class QComboBox;

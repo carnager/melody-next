@@ -29,7 +29,7 @@ QJsonArray continuationIdentity(const LocalTrackRow& row) {
 } // namespace
 
 void Workspace::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position,
-                                           const EngineKey& engine) {
+                                     const EngineKey& engine) {
     const auto count = rows.size();
     // ADR-0227: an ask is a file on one engine's machine, and a queue cannot
     // play files from two. Up Next is one engine's until it is empty again.
@@ -37,9 +37,9 @@ void Workspace::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int positi
         !playback_.requests.pending().empty() || playback_.requests.active().has_value();
     if (holding && engine != up_next_engine_) {
         view_->showMessage(QStringLiteral("Up Next holds tracks from %1; finish or clear it "
-                                                "before adding tracks from %2")
-                                     .arg(engineName(up_next_engine_), engineName(engine)),
-                                 6000);
+                                          "before adding tracks from %2")
+                               .arg(engineName(up_next_engine_), engineName(engine)),
+                           6000);
         return;
     }
     if (!holding) {
@@ -63,7 +63,6 @@ void Workspace::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int positi
     view_->refreshUpNext();
     view_->showMessage(QStringLiteral("Added %1 to Up Next").arg(count), 3000);
 }
-
 
 // operation: remove, move up, move down, or drag to an insertion boundary.
 void Workspace::editUpNextRows(std::vector<bool> selected, int operation, int destination) {
@@ -115,7 +114,6 @@ void Workspace::editUpNextRows(std::vector<bool> selected, int operation, int de
     }
 }
 
-
 void Workspace::editUpNext(int operation, int row, int destination) {
     if (operation == 0)
         playback_.requests.clear();
@@ -135,19 +133,19 @@ void Workspace::editUpNext(int operation, int row, int destination) {
     view_->refreshUpNext();
 }
 
-
 void Workspace::persistUpNext() {
     if (!persistence_ || !up_next_restored_)
         return;
     QJsonArray rows;
     const auto append = [&](const LocalTrackRow& row) {
-        QJsonObject item{{QStringLiteral("path"),
-                          QString::fromLatin1(QByteArray::fromStdString(row.raw_path).toBase64())},
-                         {QStringLiteral("title"), QString::fromStdString(row.title)},
-                         {QStringLiteral("artist"), QString::fromStdString(row.artist)},
-                         // The identity the engine holds it by: kept, so after a
-                         // restart both still name the same entry.
-                         {QStringLiteral("entry"), QString::fromStdString(row.entry_id.to_string())}};
+        QJsonObject item{
+            {QStringLiteral("path"),
+             QString::fromLatin1(QByteArray::fromStdString(row.raw_path).toBase64())},
+            {QStringLiteral("title"), QString::fromStdString(row.title)},
+            {QStringLiteral("artist"), QString::fromStdString(row.artist)},
+            // The identity the engine holds it by: kept, so after a
+            // restart both still name the same entry.
+            {QStringLiteral("entry"), QString::fromStdString(row.entry_id.to_string())}};
         if (row.selection.stream_index)
             item[QStringLiteral("stream")] = *row.selection.stream_index;
         if (row.selection.subsong_index)
@@ -212,11 +210,10 @@ void Workspace::persistUpNext() {
         QStringLiteral("playback/up-next/v1"), QJsonDocument(state).toJson(QJsonDocument::Compact),
         [this](QString error) {
             if (!error.isEmpty())
-                view_->showMessage(
-                    QStringLiteral("Up Next could not be saved: %1").arg(error), 8000);
+                view_->showMessage(QStringLiteral("Up Next could not be saved: %1").arg(error),
+                                   8000);
         });
 }
-
 
 void Workspace::restoreUpNext() {
     if (!persistence_)
@@ -373,8 +370,8 @@ bool Workspace::syncUpNextModel() {
         if (up_next_local_model_->hasArtwork(key)) {
             continue;
         }
-        if (const auto cover = coverFor(
-                up_next_local_model_->rows()[static_cast<std::size_t>(row)], up_next_engine_);
+        if (const auto cover = coverFor(up_next_local_model_->rows()[static_cast<std::size_t>(row)],
+                                        up_next_engine_);
             !cover.isNull()) {
             up_next_local_model_->setArtwork(key, cover);
         }

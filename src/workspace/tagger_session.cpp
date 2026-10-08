@@ -527,10 +527,10 @@ void TaggerSession::startSelection() {
         return source.needs_metadata_capture && !source.source_revision && !source.logical_track;
     });
     const QPointer<TaggerSession> self{this};
-    selection_watcher_.setFuture(QtConcurrent::run(
-        [sources = std::move(sources_), preferred = preferred_fields_,
-         access = services_.tools.access, token = technical_cancellation_.token(),
-         reading = reading_, unread, self]() mutable {
+    selection_watcher_.setFuture(
+        QtConcurrent::run([sources = std::move(sources_), preferred = preferred_fields_,
+                           access = services_.tools.access, token = technical_cancellation_.token(),
+                           reading = reading_, unread, self]() mutable {
             std::vector<std::string_view> cached_views;
             for (const auto& field : preferred) {
                 cached_views.emplace_back(field);
@@ -538,8 +538,8 @@ void TaggerSession::startSelection() {
             if (unread) {
                 auto cached = metadata::StagedMetadataSelection::create(sources, cached_views);
                 if (cached) {
-                    auto shared = std::make_shared<metadata::StagedMetadataSelection>(
-                        std::move(*cached));
+                    auto shared =
+                        std::make_shared<metadata::StagedMetadataSelection>(std::move(*cached));
                     QMetaObject::invokeMethod(
                         self,
                         [self, shared] {
@@ -565,9 +565,8 @@ void TaggerSession::startSelection() {
             for (const auto& field : preferred) {
                 preferred_views.emplace_back(field);
             }
-            return std::make_shared<SelectionResult>(
-                metadata::StagedMetadataSelection::create(std::move(captured->sources),
-                                                          preferred_views));
+            return std::make_shared<SelectionResult>(metadata::StagedMetadataSelection::create(
+                std::move(captured->sources), preferred_views));
         }));
 }
 
@@ -714,17 +713,17 @@ void TaggerSession::reportUnreadable() {
         QStringList named;
         for (std::size_t index = 0; index < unreadable.size() && index < 20U; ++index) {
             named << QStringLiteral("%1: %2").arg(
-                         display_utf8(core::display_raw_path(unreadable[index].first)),
-                         display_utf8(unreadable[index].second.message));
+                display_utf8(core::display_raw_path(unreadable[index].first)),
+                display_utf8(unreadable[index].second.message));
         }
         if (unreadable.size() > 20U) {
             named << QStringLiteral("… and %L1 more").arg(unreadable.size() - 20U);
         }
-        sticky_status_ = QStringLiteral("%L1 %2 could not be read; shown as cached, and not "
-                                        "written")
-                             .arg(unreadable.size())
-                             .arg(unreadable.size() == 1U ? QStringLiteral("file")
-                                                          : QStringLiteral("files"));
+        sticky_status_ =
+            QStringLiteral("%L1 %2 could not be read; shown as cached, and not "
+                           "written")
+                .arg(unreadable.size())
+                .arg(unreadable.size() == 1U ? QStringLiteral("file") : QStringLiteral("files"));
         unreadable_details_ = named.join(QLatin1Char('\n'));
         setStatus(sticky_status_);
         emit changed();
@@ -1028,10 +1027,9 @@ bool TaggerSession::canEditValues() const {
 
 bool TaggerSession::canTransform() const {
     return !provisional_ && !writing_elsewhere_ && !transformation_dialog_open_ &&
-           grid_model_ != nullptr &&
-           selectionReady() &&
-           !exact_values_dialog_open_ && !field_name_dialog_open_ && !write_plan_running_ &&
-           !apply_running_ && !artwork_operation_running_;
+           grid_model_ != nullptr && selectionReady() && !exact_values_dialog_open_ &&
+           !field_name_dialog_open_ && !write_plan_running_ && !apply_running_ &&
+           !artwork_operation_running_;
 }
 
 bool TaggerSession::canIdentify() const {
@@ -1051,7 +1049,8 @@ bool TaggerSession::canApply() const {
 }
 
 bool TaggerSession::fileListEnabled() const {
-    return !writing_elsewhere_ && !artwork_operation_running_ && (artwork_ == nullptr || !artwork_->hasPendingChanges());
+    return !writing_elsewhere_ && !artwork_operation_running_ &&
+           (artwork_ == nullptr || !artwork_->hasPendingChanges());
 }
 
 void TaggerSession::setFieldSelection(const bool has_selected_fields,
@@ -2183,8 +2182,9 @@ std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
                                  .name = QStringLiteral("The library folder each is in")});
     }
     if (move_folder_) {
-        choices.push_back(Choice{.id = QStringLiteral("folder"),
-                                 .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
+        choices.push_back(
+            Choice{.id = QStringLiteral("folder"),
+                   .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
     }
     return choices;
 }
@@ -2261,7 +2261,8 @@ void TaggerSession::chooseMoveFolder(std::string raw_path) {
 
 EngineFolderLister TaggerSession::moveFolderLister() const {
     const auto& store = services_.output_profile_store;
-    const auto place = std::ranges::find(store.places, store.destinations_key, &DestinationPlace::key);
+    const auto place =
+        std::ranges::find(store.places, store.destinations_key, &DestinationPlace::key);
     return place == store.places.end() ? EngineFolderLister{} : place->folders;
 }
 
@@ -2384,8 +2385,9 @@ void TaggerSession::rememberActionChoices() const {
                       : move_target_ == MoveTarget::folder ? QStringLiteral("folder")
                                                            : QStringLiteral("saved"));
     if (move_folder_) {
-        settings.setValue(QLatin1String(remembered_move_folder_prefix) + engine,
-                          QByteArray{move_folder_->data(), static_cast<qsizetype>(move_folder_->size())});
+        settings.setValue(
+            QLatin1String(remembered_move_folder_prefix) + engine,
+            QByteArray{move_folder_->data(), static_cast<qsizetype>(move_folder_->size())});
     }
     if (editing_destination_id_) {
         settings.setValue(QLatin1String(remembered_destination_prefix) +
@@ -2462,8 +2464,8 @@ void TaggerSession::startWritePlan() {
         output_layout = layout->profile;
         if (operation_selection.move_files && move_target_ == MoveTarget::library) {
             // One plan has one destination: the files' one library folder.
-            const auto roots = services_.library_roots ? services_.library_roots()
-                                                       : std::vector<std::string>{};
+            const auto roots =
+                services_.library_roots ? services_.library_roots() : std::vector<std::string>{};
             std::optional<std::string> root;
             const auto& selection = grid_model_->selection();
             for (std::size_t item = 0U; item < selection.item_count(); ++item) {
@@ -2523,12 +2525,11 @@ void TaggerSession::startWritePlan() {
     }
     setStatus(QStringLiteral("Checking files…"));
     emit changed();
-    write_plan_watcher_.setFuture(
-        QtConcurrent::run([request = std::move(request), cancellation]() mutable {
-            // WYSIWYG apply: the plan writes exactly the staged draft.
-            return std::make_shared<WritePlanResult>(
-                planPreparation(std::move(request), cancellation));
-        }));
+    write_plan_watcher_.setFuture(QtConcurrent::run([request = std::move(request),
+                                                     cancellation]() mutable {
+        // WYSIWYG apply: the plan writes exactly the staged draft.
+        return std::make_shared<WritePlanResult>(planPreparation(std::move(request), cancellation));
+    }));
 }
 
 void TaggerSession::finishWritePlan() {

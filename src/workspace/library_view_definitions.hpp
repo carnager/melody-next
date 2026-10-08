@@ -41,8 +41,8 @@ inline const QString folders_library_view_id = QStringLiteral("folders");
 [[nodiscard]] core::Result<std::vector<LibraryViewDefinition>> customLibraryViews();
 // Replaces the user's views. Each must have a name and at least one level,
 // and every level must compile as a tree-level tkfmt-1 expression.
-[[nodiscard]] core::Result<void> saveCustomLibraryViews(
-    const std::vector<LibraryViewDefinition>& views);
+[[nodiscard]] core::Result<void>
+saveCustomLibraryViews(const std::vector<LibraryViewDefinition>& views);
 // Why a level does not compile, or empty when it does.
 [[nodiscard]] QString libraryViewLevelError(const QString& source);
 

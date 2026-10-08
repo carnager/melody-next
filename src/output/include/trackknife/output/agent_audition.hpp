@@ -8,10 +8,10 @@
 #include "trackknife/output/stream_query.hpp"
 #include "trackknife/protocol/client.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -136,9 +136,9 @@ class AgentAudition final : public audio::Audition {
                const std::optional<formats::SampleRange>& segment) const;
     // A load or arm; one naming a file the agent cannot open is sent again
     // as a stream.
-    [[nodiscard]] core::Result<protocol::Json>
-    call_with_fallback(const std::string& method, protocol::Json params,
-                       const std::string& raw_path);
+    [[nodiscard]] core::Result<protocol::Json> call_with_fallback(const std::string& method,
+                                                                  protocol::Json params,
+                                                                  const std::string& raw_path);
     // The engine's path, as this agent can play it.
     [[nodiscard]] core::Result<Source>
     source_for(const std::string& raw_path, formats::AudioSourceSelection selection,

@@ -2,8 +2,8 @@
 
 #include "agent/guests.hpp"
 
-#include <netdb.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/socket.h>
 
 #include <algorithm>
@@ -48,8 +48,8 @@ Guests::Guests(Config config, SpeakerArbiter& arbiter)
 Guests::~Guests() { stop(); }
 
 bool Guests::start() {
-    auto browser =
-        discovery::Browser::start([this](const std::vector<discovery::Found>& found) { update(found); });
+    auto browser = discovery::Browser::start(
+        [this](const std::vector<discovery::Found>& found) { update(found); });
     if (!browser) {
         std::cerr << "melody: cannot look for engines: " << browser.error().message << "\n";
         return false;
@@ -98,8 +98,7 @@ void Guests::update(const std::vector<discovery::Found>& found) {
         }
         const bool wants_password = engine.txt.contains("auth") && engine.txt.at("auth") == "1";
         if (wants_password && config_.password.empty()) {
-            std::cerr << "melody: " << engine.instance
-                      << " wants a password; not playing for it\n";
+            std::cerr << "melody: " << engine.instance << " wants a password; not playing for it\n";
             continue;
         }
         auto audition = audio::LocalAuditionService::create();
@@ -128,7 +127,8 @@ void Guests::update(const std::vector<discovery::Found>& found) {
         (*agent)->start();
         arbiter_->add_guest(engine.instance, **agent);
         std::cerr << "melody: playing for " << engine.instance << " at " << where << "\n";
-        guests_.emplace(identity, Guest{.name = engine.instance, .where = where, .agent = std::move(*agent)});
+        guests_.emplace(identity,
+                        Guest{.name = engine.instance, .where = where, .agent = std::move(*agent)});
     }
     for (auto guest = guests_.begin(); guest != guests_.end();) {
         if (present.contains(guest->first)) {

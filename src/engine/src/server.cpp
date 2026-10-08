@@ -646,10 +646,10 @@ void Server::serve(Connection& connection_ref) {
             return;
         }
         protocol::Response answer{.id = call->first, .result = std::nullopt, .error = std::nullopt};
-        answer.error = protocol::to_protocol_error(core::Error{
-            .code = core::ErrorCode::limit_exceeded,
-            .message = message,
-            .context = {{.key = "method", .value = method}}});
+        answer.error = protocol::to_protocol_error(
+            core::Error{.code = core::ErrorCode::limit_exceeded,
+                        .message = message,
+                        .context = {{.key = "method", .value = method}}});
         connection->write_line(encode_answer(std::move(answer)));
     };
     while (connection->open.load()) {

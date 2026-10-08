@@ -528,11 +528,11 @@ remove_descriptor_entry(const Descriptor& descriptor, const Descriptor& parent,
 // ADR-0263: the source a publication replaces is kept, renamed beside
 // itself, never removed; retention releases it later, or undo restores it.
 [[nodiscard]] core::Result<void>
-retain_source_entry(const Descriptor& descriptor, const Descriptor& parent,
-                    const std::string& name, const core::LocalSourceRevision& expected_revision,
+retain_source_entry(const Descriptor& descriptor, const Descriptor& parent, const std::string& name,
+                    const core::LocalSourceRevision& expected_revision,
                     const FilePublicationJournalRecord& record) {
-    if (auto current = require_descriptor_entry(descriptor, parent, name, expected_revision,
-                                                record, "publication source");
+    if (auto current = require_descriptor_entry(descriptor, parent, name, expected_revision, record,
+                                                "publication source");
         !current) {
         return current;
     }
@@ -542,8 +542,8 @@ retain_source_entry(const Descriptor& descriptor, const Descriptor& parent,
         return renamed;
     }
     if (::fsync(parent.get()) != 0) {
-        return std::unexpected(system_error("Syncing the retained publication source failed",
-                                            errno, record.source_raw_path, record.target_raw_path,
+        return std::unexpected(system_error("Syncing the retained publication source failed", errno,
+                                            record.source_raw_path, record.target_raw_path,
                                             record.id));
     }
     return {};
@@ -2880,10 +2880,11 @@ namespace {
 
 using BackupState = MetadataOperationBackupState;
 
-[[nodiscard]] core::Result<void>
-mark_backup(FilePublicationJournal& journal, const core::StableId& id, const BackupState from,
-            const BackupState to, std::optional<core::StableId> undo_id = std::nullopt,
-            std::optional<core::Error> failure = std::nullopt) {
+[[nodiscard]] core::Result<void> mark_backup(FilePublicationJournal& journal,
+                                             const core::StableId& id, const BackupState from,
+                                             const BackupState to,
+                                             std::optional<core::StableId> undo_id = std::nullopt,
+                                             std::optional<core::Error> failure = std::nullopt) {
     return journal.transition_backup(id, FilePublicationBackupTransition{
                                              .expected_state = from,
                                              .state = to,
@@ -2898,8 +2899,8 @@ mark_backup(FilePublicationJournal& journal, const core::StableId& id, const Bac
                                                  const FilePublicationJournalRecord& record,
                                                  const core::CancellationToken& cancellation,
                                                  const std::string_view description) {
-    auto locked = open_locked_source(raw_path, expected, cancellation, record.target_raw_path,
-                                     record.id);
+    auto locked =
+        open_locked_source(raw_path, expected, cancellation, record.target_raw_path, record.id);
     if (!locked) {
         return std::unexpected(std::move(locked.error()));
     }
@@ -2917,7 +2918,8 @@ mark_backup(FilePublicationJournal& journal, const core::StableId& id, const Bac
                : std::filesystem::path{backup.kept_raw_path};
 }
 
-[[nodiscard]] core::LocalSourceRevision kept_identity_of(const FilePublicationBackupRecord& backup) {
+[[nodiscard]] core::LocalSourceRevision
+kept_identity_of(const FilePublicationBackupRecord& backup) {
     return backup.kept_revision.value_or(backup.publication.expected_source_revision);
 }
 
@@ -2978,9 +2980,9 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
             return std::unexpected(cancelled(record.source_raw_path, record.target_raw_path));
         }
         const std::filesystem::path source_path{record.source_raw_path};
-        auto source_parent = walk_directory(source_path.parent_path().native(), false,
-                                            record.source_raw_path, record.target_raw_path,
-                                            record.id);
+        auto source_parent =
+            walk_directory(source_path.parent_path().native(), false, record.source_raw_path,
+                           record.target_raw_path, record.id);
         if (!source_parent) {
             return std::unexpected(std::move(source_parent.error()));
         }
@@ -3075,9 +3077,8 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
         return std::unexpected(std::move(dependent.error()));
     }
     if (copied_back) {
-        if (auto removed =
-                remove_verified(retained.native(), kept_identity, record, cancellation,
-                                "retained source");
+        if (auto removed = remove_verified(retained.native(), kept_identity, record, cancellation,
+                                           "retained source");
             !removed) {
             return reconcile(removed.error());
         }
@@ -3092,10 +3093,10 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
 
 } // namespace
 
-core::Result<FilePublicationCommitResult> undo_retained_publication(
-    const core::StableId& journal_id, FilePublicationJournal& journal,
-    const FilePublicationDependentStateCommitter& dependent_state_committer,
-    const core::CancellationToken& cancellation) {
+core::Result<FilePublicationCommitResult>
+undo_retained_publication(const core::StableId& journal_id, FilePublicationJournal& journal,
+                          const FilePublicationDependentStateCommitter& dependent_state_committer,
+                          const core::CancellationToken& cancellation) {
     if (journal_id.is_nil() || !dependent_state_committer) {
         return std::unexpected(publication_error(
             core::ErrorCode::invalid_argument,
@@ -3157,10 +3158,10 @@ core::Result<FilePublicationCommitResult> undo_retained_publication(
     return finish_publication_undo(backup, journal, dependent_state_committer, cancellation);
 }
 
-core::Result<FilePublicationCommitResult> undo_file_publication(
-    const core::StableId& journal_id, FilePublicationJournal& journal,
-    const FilePublicationDependentStateCommitter& dependent_state_committer,
-    const core::CancellationToken& cancellation) {
+core::Result<FilePublicationCommitResult>
+undo_file_publication(const core::StableId& journal_id, FilePublicationJournal& journal,
+                      const FilePublicationDependentStateCommitter& dependent_state_committer,
+                      const core::CancellationToken& cancellation) {
     auto loaded = journal.load(journal_id);
     if (!loaded) {
         return std::unexpected(std::move(loaded.error()));
@@ -3204,8 +3205,8 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
         return std::unexpected(marked ? std::move(issue) : std::move(marked.error()));
     }
     if (*kept) {
-        if (auto removed = remove_verified(retained.native(), **kept, record, cancellation,
-                                           "retained source");
+        if (auto removed =
+                remove_verified(retained.native(), **kept, record, cancellation, "retained source");
             !removed) {
             return std::unexpected(std::move(removed.error()));
         }
@@ -3213,11 +3214,9 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
     return mark_backup(journal, record.id, BackupState::retained, BackupState::released);
 }
 
-core::Result<std::vector<MetadataBackupMaintenanceResult>>
-maintain_publication_backups(FilePublicationJournal& journal,
-                             const MetadataBackupRetentionPolicy& policy,
-                             const std::int64_t now_unix_seconds,
-                             const core::CancellationToken& cancellation) {
+core::Result<std::vector<MetadataBackupMaintenanceResult>> maintain_publication_backups(
+    FilePublicationJournal& journal, const MetadataBackupRetentionPolicy& policy,
+    const std::int64_t now_unix_seconds, const core::CancellationToken& cancellation) {
     auto backups = journal.load_backups();
     if (!backups) {
         return std::unexpected(std::move(backups.error()));
@@ -3247,8 +3246,9 @@ maintain_publication_backups(FilePublicationJournal& journal,
         }
         auto released = release_publication_backup(backup.publication.id, journal, cancellation);
         results.push_back({.journal_id = backup.publication.id,
-                           .outcome = released ? MetadataBackupMaintenanceOutcome::released
-                                               : MetadataBackupMaintenanceOutcome::needs_reconciliation,
+                           .outcome = released
+                                          ? MetadataBackupMaintenanceOutcome::released
+                                          : MetadataBackupMaintenanceOutcome::needs_reconciliation,
                            .issue = released ? std::nullopt : std::optional{released.error()}});
     }
     return results;
@@ -3274,8 +3274,9 @@ recover_publication_undos(FilePublicationJournal& journal,
             return std::unexpected(std::move(finished.error()));
         }
         results.push_back({.journal_id = backup.publication.id,
-                           .outcome = finished ? FilePublicationRecoveryOutcome::completed
-                                               : FilePublicationRecoveryOutcome::needs_reconciliation,
+                           .outcome = finished
+                                          ? FilePublicationRecoveryOutcome::completed
+                                          : FilePublicationRecoveryOutcome::needs_reconciliation,
                            .issue = finished ? std::nullopt : std::optional{finished.error()}});
     }
     return results;

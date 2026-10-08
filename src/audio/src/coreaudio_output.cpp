@@ -294,8 +294,8 @@ struct DeviceInventory {
     const auto device_frames = frames(kAudioDevicePropertyBufferFrameSize) * 2.0 +
                                frames(kAudioDevicePropertyLatency) +
                                frames(kAudioDevicePropertySafetyOffset);
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>{
-        std::max(0.0, unit_latency) + device_frames / device_rate});
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{std::max(0.0, unit_latency) + device_frames / device_rate});
 }
 
 } // namespace
@@ -436,8 +436,8 @@ core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
     output->state.store(PipeWireOutputState::connecting, std::memory_order_release);
     AudioComponentDescription description{
         .componentType = kAudioUnitType_Output,
-        .componentSubType = follows_default ? kAudioUnitSubType_DefaultOutput
-                                            : kAudioUnitSubType_HALOutput,
+        .componentSubType =
+            follows_default ? kAudioUnitSubType_DefaultOutput : kAudioUnitSubType_HALOutput,
         .componentManufacturer = kAudioUnitManufacturer_Apple,
         .componentFlags = 0U,
         .componentFlagsMask = 0U,

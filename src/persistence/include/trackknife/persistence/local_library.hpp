@@ -281,8 +281,7 @@ class LocalLibrary final {
     // ADR-0232: what is indexed under `folder`, in path order, the page after
     // the path `after` (empty for the first). No filesystem access.
     core::Result<LibraryInventoryPage> inventory(const std::string& folder,
-                                                 const std::string& after,
-                                                 std::size_t limit) const;
+                                                 const std::string& after, std::size_t limit) const;
 
   private:
     struct Impl;

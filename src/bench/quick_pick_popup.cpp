@@ -70,7 +70,8 @@ QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
     : QFrame(parent, Qt::Popup),
       session_(new QuickPickSession(kind, std::move(catalogue), scope, this)) {
     const bool albums = kind == QuickPickKind::album;
-    setObjectName(albums ? QStringLiteral("bench-quick-album") : QStringLiteral("bench-quick-track"));
+    setObjectName(albums ? QStringLiteral("bench-quick-album")
+                         : QStringLiteral("bench-quick-track"));
     setAttribute(Qt::WA_DeleteOnClose);
     setFrameShape(QFrame::StyledPanel);
     auto* layout = new QVBoxLayout(this);
@@ -179,8 +180,7 @@ bool QuickPickPopup::eventFilter(QObject* watched, QEvent* event) {
         if (results_->count() == 0) {
             return true;
         }
-        results_->setCurrentRow(
-            std::clamp(results_->currentRow() + by, 0, results_->count() - 1));
+        results_->setCurrentRow(std::clamp(results_->currentRow() + by, 0, results_->count() - 1));
         return true;
     };
     switch (key->key()) {

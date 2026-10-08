@@ -10,8 +10,8 @@
 #include "trackknife/query/tkq.hpp"
 
 #include <array>
-#include <filesystem>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -120,8 +120,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             const auto raw = kind->get<int>();
             if (raw < 0 || raw > 3) {
-                return std::unexpected(
-                    bad_params("kind is artist, album, track or group", "kind"));
+                return std::unexpected(bad_params("kind is artist, album, track or group", "kind"));
             }
             request.kind = static_cast<persistence::LibraryEntryKind>(raw);
         }
@@ -230,7 +229,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             {"title", [](const Entry& e) { return Json(protocol::displayable_text(e.title)); }},
             {"added", [](const Entry& e) { return Json(e.added); }},
             {"duration_ms", [](const Entry& e) { return Json(e.duration_ms); }},
-            {"view_value", [](const Entry& e) { return Json(protocol::encode_raw_path(e.view_value)); }},
+            {"view_value",
+             [](const Entry& e) { return Json(protocol::encode_raw_path(e.view_value)); }},
         }};
         std::vector<std::string> wanted;
         if (const auto fields = params.find("fields");
@@ -261,7 +261,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 }
                 rows.push_back(std::move(row));
             }
-            Json answer{{"columns", std::move(names)}, {"rows", std::move(rows)}, {"more", page.more}};
+            Json answer{
+                {"columns", std::move(names)}, {"rows", std::move(rows)}, {"more", page.more}};
             if (page.located) {
                 answer["located"] = true;
             }
@@ -365,7 +366,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         const auto count = [&params](const char* key, const std::size_t fallback) {
             const auto found = params.find(key);
             return found != params.end() && found->is_number_unsigned() ? found->get<std::size_t>()
-                                                                         : fallback;
+                                                                        : fallback;
         };
         DynamicSelection selection{.query = *source,
                                    .limit = std::min(count("limit", 100U), dynamic_selection_limit),
@@ -517,41 +518,40 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{{"ratings", *ratings}};
     });
 
-    dispatcher.on(
-        "catalogue.set_rating",
-        [&catalogue, events = std::move(events),
-         rated = std::move(rated)](const Json& params) -> core::Result<Json> {
-            auto hash = required_string(params, "hash");
-            if (!hash) {
-                return std::unexpected(std::move(hash.error()));
-            }
-            const auto album = params.value("album", false);
-            // Not is_number_unsigned(): a JSON 7 arrives as a signed integer
-            // unless the sender went out of its way, and requiring unsignedness
-            // would reject every ordinary client for no benefit. The range check
-            // is what actually matters.
-            const auto rating = params.find("rating");
-            if (rating == params.end() || !rating->is_number_integer() ||
-                rating->get<std::int64_t>() < 0) {
-                return std::unexpected(
-                    bad_params("rating must be a non-negative integer", "rating"));
-            }
-            const auto value = static_cast<unsigned>(rating->get<std::int64_t>());
-            auto stored = catalogue.set_rating(*hash, album, value);
-            if (!stored) {
-                return std::unexpected(std::move(stored.error()));
-            }
-            if (events) {
-                events(protocol::Event{
-                    .name = "catalogue.rating_changed",
-                    .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
-            }
-            if (rated) {
-                rated(*hash, album, value);
-            }
-            // A void operation still answers, so the caller learns it completed.
-            return Json{};
-        });
+    dispatcher.on("catalogue.set_rating",
+                  [&catalogue, events = std::move(events),
+                   rated = std::move(rated)](const Json& params) -> core::Result<Json> {
+                      auto hash = required_string(params, "hash");
+                      if (!hash) {
+                          return std::unexpected(std::move(hash.error()));
+                      }
+                      const auto album = params.value("album", false);
+                      // Not is_number_unsigned(): a JSON 7 arrives as a signed integer
+                      // unless the sender went out of its way, and requiring unsignedness
+                      // would reject every ordinary client for no benefit. The range check
+                      // is what actually matters.
+                      const auto rating = params.find("rating");
+                      if (rating == params.end() || !rating->is_number_integer() ||
+                          rating->get<std::int64_t>() < 0) {
+                          return std::unexpected(
+                              bad_params("rating must be a non-negative integer", "rating"));
+                      }
+                      const auto value = static_cast<unsigned>(rating->get<std::int64_t>());
+                      auto stored = catalogue.set_rating(*hash, album, value);
+                      if (!stored) {
+                          return std::unexpected(std::move(stored.error()));
+                      }
+                      if (events) {
+                          events(protocol::Event{
+                              .name = "catalogue.rating_changed",
+                              .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
+                      }
+                      if (rated) {
+                          rated(*hash, album, value);
+                      }
+                      // A void operation still answers, so the caller learns it completed.
+                      return Json{};
+                  });
 
     // Play counts and timestamps. Only the fields the lookup keys on cross the
     // wire -- path, revision, decoder selection, span and the album hash --
@@ -654,57 +654,62 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     //   name}], tracks: [entry]}
     // Without a path it is the library's own folders, with no parent; a
     // library folder's parent is null too, which is the way back to them.
-    dispatcher.on("catalogue.folder", [&catalogue, render_page](const Json& params) -> core::Result<Json> {
-        const auto roots = catalogue.roots();
-        if (!roots) {
-            return std::unexpected(std::move(roots.error()));
-        }
-        const auto given = params.find("path");
-        if (given == params.end() || given->is_null()) {
-            auto listed = Json::array();
-            for (const auto& root : *roots) {
-                listed.push_back(Json{{"path", protocol::encode_raw_path(root.raw_path)},
-                                      {"name", protocol::displayable_text(root.raw_path)}});
+    dispatcher.on(
+        "catalogue.folder", [&catalogue, render_page](const Json& params) -> core::Result<Json> {
+            const auto roots = catalogue.roots();
+            if (!roots) {
+                return std::unexpected(std::move(roots.error()));
             }
-            return Json{{"path", nullptr},
-                        {"name", ""},
-                        {"parent", nullptr},
+            const auto given = params.find("path");
+            if (given == params.end() || given->is_null()) {
+                auto listed = Json::array();
+                for (const auto& root : *roots) {
+                    listed.push_back(Json{{"path", protocol::encode_raw_path(root.raw_path)},
+                                          {"name", protocol::displayable_text(root.raw_path)}});
+                }
+                return Json{{"path", nullptr},
+                            {"name", ""},
+                            {"parent", nullptr},
+                            {"folders", std::move(listed)},
+                            {"tracks", Json::array()}};
+            }
+            if (!given->is_string()) {
+                return std::unexpected(bad_params("path is an encoded path", "path"));
+            }
+            auto decoded = protocol::decode_raw_path(given->get<std::string>());
+            if (!decoded || decoded->empty()) {
+                return std::unexpected(bad_params("path is an encoded path", "path"));
+            }
+            auto here = std::filesystem::path{*decoded}.lexically_normal();
+            if (here.native().size() > 1U && here.native().back() == '/') {
+                here = here.parent_path();
+            }
+            auto folder = catalogue.folder(here.native());
+            if (!folder) {
+                return std::unexpected(std::move(folder.error()));
+            }
+            auto listed = Json::array();
+            for (const auto& name : folder->folders) {
+                listed.push_back(Json{{"path", protocol::encode_raw_path((here / name).native())},
+                                      {"name", protocol::displayable_text(name)}});
+            }
+            const auto is_root =
+                std::ranges::any_of(*roots, [&here](const persistence::LibraryRoot& root) {
+                    return std::filesystem::path{root.raw_path}.lexically_normal() == here;
+                });
+            const auto parent = here.parent_path();
+            const auto page = render_page(
+                persistence::LibraryPage{.entries = std::move(folder->tracks), .more = false},
+                Json::object());
+            return Json{{"path", protocol::encode_raw_path(here.native())},
+                        {"name", protocol::displayable_text(is_root ? here.native()
+                                                                    : here.filename().native())},
+                        {"parent", is_root || parent == here
+                                       ? Json(nullptr)
+                                       : Json(protocol::encode_raw_path(parent.native()))},
                         {"folders", std::move(listed)},
-                        {"tracks", Json::array()}};
-        }
-        if (!given->is_string()) {
-            return std::unexpected(bad_params("path is an encoded path", "path"));
-        }
-        auto decoded = protocol::decode_raw_path(given->get<std::string>());
-        if (!decoded || decoded->empty()) {
-            return std::unexpected(bad_params("path is an encoded path", "path"));
-        }
-        auto here = std::filesystem::path{*decoded}.lexically_normal();
-        if (here.native().size() > 1U && here.native().back() == '/') {
-            here = here.parent_path();
-        }
-        auto folder = catalogue.folder(here.native());
-        if (!folder) {
-            return std::unexpected(std::move(folder.error()));
-        }
-        auto listed = Json::array();
-        for (const auto& name : folder->folders) {
-            listed.push_back(Json{{"path", protocol::encode_raw_path((here / name).native())},
-                                  {"name", protocol::displayable_text(name)}});
-        }
-        const auto is_root = std::ranges::any_of(*roots, [&here](const persistence::LibraryRoot& root) {
-            return std::filesystem::path{root.raw_path}.lexically_normal() == here;
+                        {"tracks", page.value("entries", Json::array())}};
         });
-        const auto parent = here.parent_path();
-        const auto page = render_page(persistence::LibraryPage{.entries = std::move(folder->tracks), .more = false},
-                                      Json::object());
-        return Json{{"path", protocol::encode_raw_path(here.native())},
-                    {"name", protocol::displayable_text(is_root ? here.native() : here.filename().native())},
-                    {"parent", is_root || parent == here ? Json(nullptr)
-                                                         : Json(protocol::encode_raw_path(parent.native()))},
-                    {"folders", std::move(listed)},
-                    {"tracks", page.value("entries", Json::array())}};
-    });
 
     // ADR-0232: what is indexed under a folder, for melody-watch to compare
     // with what the folder holds on its own machine. Paged by path:
@@ -744,62 +749,64 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
 
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
-    dispatcher.on("catalogue.artwork", [&catalogue, holds = std::move(holds)](
-                                           const Json& params) -> core::Result<Json> {
-        // By a track, or by an album: a grid of albums knows their keys, not
-        // their files, and asking for a file first would double the trips.
-        std::string raw_path;
-        if (const auto album = params.find("album_key");
-            album != params.end() && album->is_string()) {
-            auto key = protocol::decode_raw_path(album->get<std::string>());
-            if (!key) {
-                return std::unexpected(bad_params("album_key is not an encoded key", "album_key"));
+    dispatcher.on(
+        "catalogue.artwork",
+        [&catalogue, holds = std::move(holds)](const Json& params) -> core::Result<Json> {
+            // By a track, or by an album: a grid of albums knows their keys, not
+            // their files, and asking for a file first would double the trips.
+            std::string raw_path;
+            if (const auto album = params.find("album_key");
+                album != params.end() && album->is_string()) {
+                auto key = protocol::decode_raw_path(album->get<std::string>());
+                if (!key) {
+                    return std::unexpected(
+                        bad_params("album_key is not an encoded key", "album_key"));
+                }
+                auto source = catalogue.artwork_source(*key);
+                if (!source) {
+                    return std::unexpected(std::move(source.error()));
+                }
+                if (!*source) {
+                    Json none = Json::object();
+                    none["image"] = Json(nullptr);
+                    return none;
+                }
+                raw_path = std::move(**source);
+            } else {
+                auto encoded = required_string(params, "path");
+                if (!encoded) {
+                    return std::unexpected(std::move(encoded.error()));
+                }
+                auto decoded = protocol::decode_raw_path(*encoded);
+                if (!decoded) {
+                    return std::unexpected(bad_params("path is not an encoded path", "path"));
+                }
+                raw_path = std::move(*decoded);
             }
-            auto source = catalogue.artwork_source(*key);
-            if (!source) {
-                return std::unexpected(std::move(source.error()));
+            // Held to play: streamed to an agent whether indexed or not, so its
+            // cover is no secret either.
+            auto image = holds && holds(raw_path) ? formats::load_track_artwork(raw_path)
+                                                  : catalogue.artwork(raw_path);
+            if (!image) {
+                return std::unexpected(std::move(image.error()));
             }
-            if (!*source) {
-                Json none = Json::object();
-                none["image"] = Json(nullptr);
-                return none;
+            // A client showing it small asks for it small: a phone's grid of
+            // covers is otherwise megabytes over mobile data. Scaled here, where
+            // the original is, so only the thumbnail travels.
+            if (const auto size = params.value("size", 0); size > 0 && !image->empty()) {
+                auto fitted = fit_cover(*image, size);
+                if (!fitted) {
+                    return std::unexpected(std::move(fitted.error()));
+                }
+                *image = std::move(*fitted);
             }
-            raw_path = std::move(**source);
-        } else {
-            auto encoded = required_string(params, "path");
-            if (!encoded) {
-                return std::unexpected(std::move(encoded.error()));
-            }
-            auto decoded = protocol::decode_raw_path(*encoded);
-            if (!decoded) {
-                return std::unexpected(bad_params("path is not an encoded path", "path"));
-            }
-            raw_path = std::move(*decoded);
-        }
-        // Held to play: streamed to an agent whether indexed or not, so its
-        // cover is no secret either.
-        auto image = holds && holds(raw_path) ? formats::load_track_artwork(raw_path)
-                                               : catalogue.artwork(raw_path);
-        if (!image) {
-            return std::unexpected(std::move(image.error()));
-        }
-        // A client showing it small asks for it small: a phone's grid of
-        // covers is otherwise megabytes over mobile data. Scaled here, where
-        // the original is, so only the thumbnail travels.
-        if (const auto size = params.value("size", 0); size > 0 && !image->empty()) {
-            auto fitted = fit_cover(*image, size);
-            if (!fitted) {
-                return std::unexpected(std::move(fitted.error()));
-            }
-            *image = std::move(*fitted);
-        }
-        Json answer = Json::object();
-        answer["image"] = image->empty()
-                              ? Json(nullptr)
-                              : Json(protocol::encode_raw_path(std::string_view{
-                                    reinterpret_cast<const char*>(image->data()), image->size()}));
-        return answer;
-    });
+            Json answer = Json::object();
+            answer["image"] =
+                image->empty() ? Json(nullptr)
+                               : Json(protocol::encode_raw_path(std::string_view{
+                                     reinterpret_cast<const char*>(image->data()), image->size()}));
+            return answer;
+        });
 
     dispatcher.on(
         "catalogue.artwork_source", [&catalogue](const Json& params) -> core::Result<Json> {

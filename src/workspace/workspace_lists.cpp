@@ -5,9 +5,9 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/engine/track_description.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
+#include "uicommon/debug_log.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
-#include "uicommon/debug_log.hpp"
 #include "workspace/tab_store.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -99,7 +99,8 @@ std::vector<LocalTrackRow> rowsOfDocument(const persistence::ListDocument& docum
         for (std::size_t index = 0; index < parts.size(); ++index) {
             pool.start([&parts, items, index, part] {
                 const auto first = index * part;
-                parts[index] = rowsOfItems(items.subspan(first, std::min(part, items.size() - first)));
+                parts[index] =
+                    rowsOfItems(items.subspan(first, std::min(part, items.size() - first)));
             });
         }
         pool.waitForDone();
@@ -126,7 +127,6 @@ Workspace::prepareLists(std::vector<persistence::ListDocument> documents) {
     }
     return prepared;
 }
-
 
 Workspace::ListTab* Workspace::addList(persistence::ListDocument document, const bool select) {
     auto rows = rowsOfDocument(document);
@@ -264,9 +264,9 @@ void Workspace::describeEngineRowsFrom(const QString& document_id,
                 }
                 auto row = cached_library_row(*track);
                 row.source_revision = track->revision;
-                described = target->model->describeRow(at->second, current.entry_id,
-                                                       std::move(row)) ||
-                            described;
+                described =
+                    target->model->describeRow(at->second, current.entry_id, std::move(row)) ||
+                    described;
             }
             if (described) {
                 syncArtwork(*target);
@@ -275,9 +275,7 @@ void Workspace::describeEngineRowsFrom(const QString& document_id,
         });
 }
 
-
-std::vector<std::pair<QString, QString>>
-Workspace::listTargets(const EngineKey& engine) const {
+std::vector<std::pair<QString, QString>> Workspace::listTargets(const EngineKey& engine) const {
     std::vector<std::pair<QString, QString>> targets;
     for (auto* tab : view_->listsInOrder()) {
         if (EngineKey::of(tab->document) == engine) {
@@ -288,9 +286,8 @@ Workspace::listTargets(const EngineKey& engine) const {
     return targets;
 }
 
-
 void Workspace::openEngineList(const EngineKey& key, const QString& id,
-                                     std::function<void()> then) {
+                               std::function<void()> then) {
     // Already open here: shown, not opened twice.
     if (auto* tab = tabForDocument(id); tab != nullptr) {
         view_->showList(*tab);
@@ -308,8 +305,8 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
         [this, key, then = std::move(then)](const core::Result<protocol::Json>& answer) {
             if (!answer) {
                 view_->showMessage(QStringLiteral("Could not open the list: %1")
-                                             .arg(QString::fromStdString(answer.error().message)),
-                                         5'000);
+                                       .arg(QString::fromStdString(answer.error().message)),
+                                   5'000);
                 return;
             }
             auto document = EngineListSync::documentFromAnswer(*answer, key);
@@ -330,7 +327,6 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
             }
         });
 }
-
 
 persistence::ListDocument Workspace::headerOf(const ListTab& tab) {
     // Field by field: the tab's document can still hold the items it was
@@ -450,7 +446,6 @@ std::vector<persistence::ListDocumentWrite> Workspace::collectWrites() {
     return writes;
 }
 
-
 std::vector<persistence::TrackViewPreset> Workspace::collectTrackViewLayouts() {
     std::vector<persistence::TrackViewPreset> layouts;
     layouts.reserve(list_tabs_.size());
@@ -466,7 +461,6 @@ std::vector<persistence::TrackViewPreset> Workspace::collectTrackViewLayouts() {
     }
     return layouts;
 }
-
 
 void Workspace::persistNow(const bool wait) {
     if (tab_store_ == nullptr || !lists_restored_) {
@@ -485,13 +479,14 @@ void Workspace::persistNow(const bool wait) {
     if (list_sync_ != nullptr) {
         list_sync_->update(writes, engineItems());
     }
-    const auto settle = [this](const std::vector<std::pair<core::StableId, ListTab::Saved>>& states) {
-        for (const auto& [id, state] : states) {
-            if (auto* tab = tabForDocument(id); tab != nullptr) {
-                tab->saved = state;
+    const auto settle =
+        [this](const std::vector<std::pair<core::StableId, ListTab::Saved>>& states) {
+            for (const auto& [id, state] : states) {
+                if (auto* tab = tabForDocument(id); tab != nullptr) {
+                    tab->saved = state;
+                }
             }
-        }
-    };
+        };
     // ADR-0259: the window keeps its tabs -- which, in what order, how shown
     // -- and a cache of the rows of each that changed; the lists are their
     // engines'.
@@ -537,7 +532,6 @@ void Workspace::persistNow(const bool wait) {
     }
     settle(written);
 }
-
 
 void Workspace::restoreLists(std::vector<PreparedList> documents) {
     lists_restored_ = true;
@@ -585,7 +579,6 @@ void Workspace::restoreLists(std::vector<PreparedList> documents) {
     flushEngineRelocations();
 }
 
-
 void Workspace::openLocalPaths(std::vector<std::string> raw_paths) {
     if (raw_paths.empty()) {
         return;
@@ -607,18 +600,17 @@ void Workspace::openLocalPaths(std::vector<std::string> raw_paths) {
         tab = local != list_tabs_.end()
                   ? local->get()
                   : addList(persistence::ListDocument{.id = core::StableId::random(),
-                                                         .kind = persistence::ListKind::scratch,
-                                                         .name = untitled_list_name,
-                                                         .pinned = false,
-                                                         .dirty = false,
-                                                         .items = {},
-                                                         .engine = {}},
-                               true);
+                                                      .kind = persistence::ListKind::scratch,
+                                                      .name = untitled_list_name,
+                                                      .pinned = false,
+                                                      .dirty = false,
+                                                      .items = {},
+                                                      .engine = {}},
+                            true);
         view_->showList(*tab);
     }
     startDiscovery(std::move(raw_paths), QString::fromStdString(tab->document.id.to_string()), -1);
 }
-
 
 bool Workspace::transferRows(ListTab* source_tab, LocalListModel* source_model,
                              const EngineKey& from, const bool dynamic, std::vector<int> rows,
@@ -682,7 +674,6 @@ bool Workspace::transferRows(ListTab* source_tab, LocalListModel* source_model,
     return true;
 }
 
-
 bool Workspace::canReplayCrossTabMove(const bool undo) {
     if (!cross_tab_move_edit_ || cross_tab_move_edit_->applied != undo) {
         return false;
@@ -701,7 +692,6 @@ bool Workspace::canReplayCrossTabMove(const bool undo) {
            target->model->rows() ==
                (undo ? cross_tab_move_edit_->target_after : cross_tab_move_edit_->target_before);
 }
-
 
 bool Workspace::replayCrossTabMove(const bool undo) {
     if (!canReplayCrossTabMove(undo)) {
@@ -723,13 +713,11 @@ bool Workspace::replayCrossTabMove(const bool undo) {
     return true;
 }
 
-
 void Workspace::takeEngineChange(ListTab& tab) {
     tab.document.dirty = true;
     view_->refreshTabChrome(tab);
     schedulePersist();
 }
-
 
 void Workspace::markTabDirty(ListTab& tab) {
     takeEngineChange(tab);
@@ -741,7 +729,6 @@ void Workspace::markTabDirty(ListTab& tab) {
     }
 }
 
-
 void Workspace::setActiveLocalList(const QString& id) {
     if (active_local_list_id_ == id)
         return;
@@ -749,7 +736,6 @@ void Workspace::setActiveLocalList(const QString& id) {
     for (const auto& tab : list_tabs_)
         view_->refreshTabChrome(*tab);
 }
-
 
 void Workspace::closeList(ListTab& tab) {
     if (playback_.requests.active() && tab.document.id == playback_.anchors.document) {
@@ -776,7 +762,8 @@ void Workspace::closeList(ListTab& tab) {
     schedulePersist();
 }
 
-ui::TrackViewLayout Workspace::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) {
+ui::TrackViewLayout
+Workspace::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) {
     std::vector<ui::TrackViewColumnLayout> columns;
     columns.reserve(track_column_specs.size());
     for (const auto& spec : track_column_specs) {
@@ -858,10 +845,10 @@ Workspace::HistoryTexts Workspace::historyTexts(const ListTab* tab) {
     HistoryTexts texts;
     texts.can_undo = cross_tab_undo || (model != nullptr && model->canUndo());
     texts.can_redo = cross_tab_redo || (model != nullptr && model->canRedo());
-    texts.undo = cross_tab_undo                        ? tr("Undo Move tracks between tabs")
+    texts.undo = cross_tab_undo                         ? tr("Undo Move tracks between tabs")
                  : model != nullptr && model->canUndo() ? tr("Undo %1").arg(model->undoLabel())
                                                         : tr("Undo list edit");
-    texts.redo = cross_tab_redo                        ? tr("Redo Move tracks between tabs")
+    texts.redo = cross_tab_redo                         ? tr("Redo Move tracks between tabs")
                  : model != nullptr && model->canRedo() ? tr("Redo %1").arg(model->redoLabel())
                                                         : tr("Redo list edit");
     // Sorting, reversing, shuffling and removing duplicates need two rows.
@@ -955,10 +942,10 @@ void Workspace::setTrackViewLayout(ListTab& tab, ui::TrackViewLayout layout) {
 }
 
 Workspace::ListTab* Workspace::transferRowsToNewList(ListTab* source_tab,
-                                                    LocalListModel* source_model,
-                                                    const EngineKey& from, const bool dynamic,
-                                                    std::vector<int> rows, const bool move,
-                                                    const QString& name) {
+                                                     LocalListModel* source_model,
+                                                     const EngineKey& from, const bool dynamic,
+                                                     std::vector<int> rows, const bool move,
+                                                     const QString& name) {
     if (source_model == nullptr || (!dynamic && source_tab == nullptr) || (dynamic && move) ||
         rows.empty() || std::ranges::any_of(rows, [source_model](const int row) {
             return row < 0 || row >= source_model->rowCount();
@@ -982,8 +969,8 @@ Workspace::ListTab* Workspace::transferRowsToNewList(ListTab* source_tab,
 }
 
 Workspace::ListTab* Workspace::openDynamicResult(const QString& name,
-                                                std::vector<LocalTrackRow> rows,
-                                                const EngineKey& engine, const bool show) {
+                                                 std::vector<LocalTrackRow> rows,
+                                                 const EngineKey& engine, const bool show) {
     auto* destination = addList(persistence::ListDocument{.id = core::StableId::random(),
                                                           .kind = persistence::ListKind::scratch,
                                                           .name = utf8Bytes(name),
@@ -1041,13 +1028,15 @@ void Workspace::backupWorkspace(const QString& path) {
     const auto settings_path = path + QStringLiteral(".settings.ini");
     if (QFile::exists(settings_path)) {
         view_->showMessage(
-            QStringLiteral("Workspace backup failed: %1 already exists").arg(settings_path), 10'000);
+            QStringLiteral("Workspace backup failed: %1 already exists").arg(settings_path),
+            10'000);
         return;
     }
     const auto temporary_settings = settings_path + QStringLiteral(".partial");
     if (QFile::exists(temporary_settings)) {
         view_->showMessage(
-            QStringLiteral("Workspace backup failed: stale temporary settings file exists"), 10'000);
+            QStringLiteral("Workspace backup failed: stale temporary settings file exists"),
+            10'000);
         return;
     }
     QSettings current;
@@ -1067,19 +1056,19 @@ void Workspace::backupWorkspace(const QString& path) {
         std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
     persistNow(false);
     view_->showMessage(QStringLiteral("Backing up workspace database…"), 0);
-    persistence_->backupDatabase(destination, [this, path, settings_path,
-                                               temporary_settings](QString error) {
-        if (error.isEmpty() && !QFile::rename(temporary_settings, settings_path)) {
-            error = QStringLiteral("database saved, but settings could not be published");
-        } else if (!error.isEmpty()) {
-            QFile::remove(temporary_settings);
-        }
-        view_->showMessage(
-            error.isEmpty()
-                ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
-                : QStringLiteral("Workspace backup failed: %1").arg(error),
-            error.isEmpty() ? 7'000 : 10'000);
-    });
+    persistence_->backupDatabase(
+        destination, [this, path, settings_path, temporary_settings](QString error) {
+            if (error.isEmpty() && !QFile::rename(temporary_settings, settings_path)) {
+                error = QStringLiteral("database saved, but settings could not be published");
+            } else if (!error.isEmpty()) {
+                QFile::remove(temporary_settings);
+            }
+            view_->showMessage(
+                error.isEmpty()
+                    ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
+                    : QStringLiteral("Workspace backup failed: %1").arg(error),
+                error.isEmpty() ? 7'000 : 10'000);
+        });
 }
 
 void Workspace::scheduleWorkspaceRestore(const QString& path) {

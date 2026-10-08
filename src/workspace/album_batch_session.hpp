@@ -2,10 +2,10 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
-#include "workspace/album_batch_write.hpp"
-#include "trackknife/musicbrainz/album_groups.hpp"
 #include "trackknife/metadata/proposal.hpp"
+#include "trackknife/musicbrainz/album_groups.hpp"
 #include "trackknife/musicbrainz/album_lookup.hpp"
+#include "workspace/album_batch_write.hpp"
 
 #include <QObject>
 #include <QPointer>

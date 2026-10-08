@@ -187,8 +187,8 @@ void ratingsConvertIntoTheRatingTag() {
         return StagedMetadataSource{
             .raw_path = std::move(path),
             .source_revision = std::nullopt,
-            .baseline = MetadataDocument{.fields = std::move(fields),
-                                         .unsupported_native_objects = {}},
+            .baseline =
+                MetadataDocument{.fields = std::move(fields), .unsupported_native_objects = {}},
         };
     };
     auto created = StagedMetadataSelection::create(
@@ -299,8 +299,7 @@ void copyReadsAFreeformSource() {
     CHECK(preview.has_value() && preview->cells.size() == 1U);
     if (preview && preview->cells.size() == 1U) {
         CHECK(preview->cells[0].canonical_field == "comment");
-        CHECK(preview->cells[0].after ==
-              (std::optional<std::vector<std::string>>{{"4", "extra"}}));
+        CHECK(preview->cells[0].after == (std::optional<std::vector<std::string>>{{"4", "extra"}}));
     }
 }
 

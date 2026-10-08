@@ -20,9 +20,9 @@
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
-#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/operations/undo_copies.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
@@ -491,7 +491,8 @@ void rolls_back_dependent_and_journal_failures(const std::filesystem::path& fixt
             });
         });
     if (failed || failed.error().code != core::ErrorCode::database) {
-        std::cerr << "rollback: " << (failed ? std::string{"succeeded"} : failed.error().message) << '\n';
+        std::cerr << "rollback: " << (failed ? std::string{"succeeded"} : failed.error().message)
+                  << '\n';
     }
     CHECK(!failed && failed.error().code == core::ErrorCode::database);
     CHECK(read_bytes(dependent_source) == dependent_original);
@@ -513,8 +514,8 @@ void rolls_back_dependent_and_journal_failures(const std::filesystem::path& fixt
         return;
     }
     FailingPublishedTransitionJournal injected{*journal_store};
-    const auto journal_failed = operations::commit_metadata_source(
-        *journal_plan, injected, successful_dependent_commit);
+    const auto journal_failed =
+        operations::commit_metadata_source(*journal_plan, injected, successful_dependent_commit);
     CHECK(!journal_failed && journal_failed.error().code == core::ErrorCode::database);
     CHECK(read_bytes(journal_source) == journal_original);
     CHECK(injected.created_id.has_value());
@@ -793,7 +794,7 @@ void commits_with_copied_backup_where_links_are_refused(
             CHECK(result.published_revision == *backup);
             return {};
         });
-    {  // ADR-0266: undo works without an exchange
+    { // ADR-0266: undo works without an exchange
         if (!undone) {
             std::cerr << undone.error().message << '\n';
         }
@@ -1108,8 +1109,8 @@ void script_written_rating_verifies_over_an_existing_one(
         if (!plan || !plan->ready() || plan->sources.size() != 1U) {
             return;
         }
-        const auto committed = operations::commit_metadata_source(
-            plan->sources.front(), *journal, successful_dependent_commit);
+        const auto committed = operations::commit_metadata_source(plan->sources.front(), *journal,
+                                                                  successful_dependent_commit);
         if (!committed) {
             std::cerr << name << ": " << committed.error().message << '\n';
         }
@@ -1531,11 +1532,12 @@ void undoes_text_edits_in_every_writable_container(const std::filesystem::path& 
     if (!journal) {
         return;
     }
-    for (const auto& [fixture, name] :
-         {std::pair{"tagged-tone-flac.b64", "tone.flac"}, std::pair{"tagged-tone-mp3.b64", "tone.mp3"},
-          std::pair{"tagged-tone-m4a.b64", "tone.m4a"}, std::pair{"tagged-tone-vorbis.b64", "tone.ogg"},
-          std::pair{"tagged-tone-opus.b64", "tone.opus"},
-          std::pair{"tagged-tone-wavpack.b64", "tone.wv"}}) {
+    for (const auto& [fixture, name] : {std::pair{"tagged-tone-flac.b64", "tone.flac"},
+                                        std::pair{"tagged-tone-mp3.b64", "tone.mp3"},
+                                        std::pair{"tagged-tone-m4a.b64", "tone.m4a"},
+                                        std::pair{"tagged-tone-vorbis.b64", "tone.ogg"},
+                                        std::pair{"tagged-tone-opus.b64", "tone.opus"},
+                                        std::pair{"tagged-tone-wavpack.b64", "tone.wv"}}) {
         const auto source = materialize(fixture_directory, fixture, directory.path() / name);
         const auto original_bytes = read_bytes(source);
         const auto original = metadata::read_local_metadata(source.native());
@@ -1553,8 +1555,8 @@ void undoes_text_edits_in_every_writable_container(const std::filesystem::path& 
             continue;
         }
         const auto written = metadata::read_local_metadata(source.native());
-        CHECK(written && written->document.effective_values("title") ==
-                             std::vector<std::string>{"Undo me"});
+        CHECK(written &&
+              written->document.effective_values("title") == std::vector<std::string>{"Undo me"});
         const auto undone = operations::undo_metadata_operation(
             committed->journal_id, *journal,
             [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
@@ -1626,8 +1628,8 @@ void undoes_completed_metadata_and_recovers_interrupted_undo(
     if (!recovery_plan) {
         return;
     }
-    auto recovery_commit = operations::commit_metadata_source(*recovery_plan, *journal,
-                                                                   successful_dependent_commit);
+    auto recovery_commit =
+        operations::commit_metadata_source(*recovery_plan, *journal, successful_dependent_commit);
     CHECK(recovery_commit.has_value());
     if (!recovery_commit) {
         return;
@@ -1765,8 +1767,8 @@ void keeps_undo_copies_where_asked(const std::filesystem::path& fixture_director
             auto again = title_plan(source, "Undo stopped early");
             CHECK(again.has_value());
             if (again) {
-                auto committed_again =
-                    operations::commit_metadata_source(*again, *journal, successful_dependent_commit);
+                auto committed_again = operations::commit_metadata_source(
+                    *again, *journal, successful_dependent_commit);
                 CHECK(committed_again.has_value());
                 if (committed_again) {
                     CHECK(journal
@@ -1818,8 +1820,8 @@ void moves_backups_kept_beside_files(const std::filesystem::path& fixture_direct
         const auto original_bytes = read_bytes(source);
         auto plan = title_plan(source, "Kept beside, then moved");
         auto journal = open_journal(directory, "moved.sqlite3");
-        auto files = persistence::SqliteFilePublicationJournal::open(directory.path() /
-                                                                     "moved.sqlite3");
+        auto files =
+            persistence::SqliteFilePublicationJournal::open(directory.path() / "moved.sqlite3");
         CHECK(plan && journal && files);
         if (!plan || !journal || !files) {
             continue;
@@ -1907,7 +1909,7 @@ void undo_conflicts_become_visible_reconciliation_evidence(
         CHECK(changed.good());
     }
     const auto undone = operations::undo_metadata_operation(committed->journal_id, *journal,
-                                                                 successful_dependent_commit);
+                                                            successful_dependent_commit);
     CHECK(!undone && undone.error().code == core::ErrorCode::conflict);
     CHECK(std::filesystem::exists(committed->backup_raw_path));
     const auto lifecycle = journal->load_backup(committed->journal_id);
@@ -1937,8 +1939,8 @@ void retention_releases_older_verified_backup_for_the_same_source(
     if (!second_plan) {
         return;
     }
-    auto second = operations::commit_metadata_source(*second_plan, *journal,
-                                                          successful_dependent_commit);
+    auto second =
+        operations::commit_metadata_source(*second_plan, *journal, successful_dependent_commit);
     CHECK(second.has_value());
     if (!second) {
         return;
@@ -3433,8 +3435,8 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
     const auto for_source = journal->load_incomplete_for_source(old.native());
     CHECK(for_source && for_source->size() == 1U);
     auto blocked = title_plan(old, "Must not save");
-    CHECK(blocked && !operations::commit_metadata_source(*blocked, *journal,
-                                                              successful_dependent_commit));
+    CHECK(blocked &&
+          !operations::commit_metadata_source(*blocked, *journal, successful_dependent_commit));
     const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / "new.flac");
     const auto donor =
         materialize(fixtures, "external-blue-jpeg.b64", directory.path() / "donor.jpg");
@@ -3605,7 +3607,7 @@ void folder_cover_policy_publication_and_recovery(const std::filesystem::path& f
         auto record = journal->load(*interrupted.created_id);
         CHECK(record && *record && read_bytes((**record).backup_raw_path) == read_bytes(donor));
         CHECK(operations::undo_metadata_operation(*interrupted.created_id, *journal,
-                                                       successful_dependent_commit)
+                                                  successful_dependent_commit)
                   .has_value());
         CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
     }
@@ -3737,8 +3739,8 @@ void folder_cover_without_hard_links(const std::filesystem::path& fixtures) {
         CHECK(blue_revision && copy && copy->inode != blue_revision->inode);
         CHECK(read_bytes(replaced->backup_raw_path) == read_bytes(donor));
         const auto undone = operations::undo_metadata_operation(replaced->journal_id, *journal,
-                                                                     successful_dependent_commit);
-        {  // ADR-0266: undo works without an exchange
+                                                                successful_dependent_commit);
+        { // ADR-0266: undo works without an exchange
             CHECK(undone.has_value());
             CHECK(read_bytes(cover) == read_bytes(donor));
         }

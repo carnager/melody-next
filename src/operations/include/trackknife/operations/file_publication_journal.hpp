@@ -136,7 +136,8 @@ class FilePublicationJournal {
     [[nodiscard]] virtual core::Result<std::vector<FilePublicationBackupRecord>>
     load_backups() const = 0;
     [[nodiscard]] virtual core::Result<void>
-    transition_backup(const core::StableId& id, const FilePublicationBackupTransition& transition) = 0;
+    transition_backup(const core::StableId& id,
+                      const FilePublicationBackupTransition& transition) = 0;
     // ADR-0266: a retained source moved where undo copies are kept.
     [[nodiscard]] virtual core::Result<void>
     relocate_kept(const core::StableId& id, const std::string& raw_path,

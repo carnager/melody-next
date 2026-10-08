@@ -914,12 +914,10 @@ using detail::hard_link_refused;
 // set -- modification time, so a restore brings the file back as it was. It
 // is read back and compared before it counts; its own identity is returned
 // for the journal, since a copy is never the original inode.
-[[nodiscard]] core::Result<core::LocalSourceRevision>
-copy_file_verified(const MetadataOperationJournalRecord& record, const Descriptor& source,
-                   const struct stat& source_status,
-                   const ExtendedAttributeListing& source_attributes,
-                   const std::string& target_raw_path,
-                   const core::CancellationToken& cancellation) {
+[[nodiscard]] core::Result<core::LocalSourceRevision> copy_file_verified(
+    const MetadataOperationJournalRecord& record, const Descriptor& source,
+    const struct stat& source_status, const ExtendedAttributeListing& source_attributes,
+    const std::string& target_raw_path, const core::CancellationToken& cancellation) {
     Descriptor backup{::open(target_raw_path.c_str(),
                              O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600)};
     if (!backup.valid()) {
@@ -927,7 +925,8 @@ copy_file_verified(const MetadataOperationJournalRecord& record, const Descripto
                                             record.source_raw_path, record.id));
     }
     // Created exclusively above, so whatever stands at the path is this copy.
-    const auto discard = [&record, &target_raw_path](core::Error issue) -> core::Result<core::LocalSourceRevision> {
+    const auto discard =
+        [&record, &target_raw_path](core::Error issue) -> core::Result<core::LocalSourceRevision> {
         static_cast<void>(::unlink(target_raw_path.c_str()));
         static_cast<void>(fsync_parent(target_raw_path, record.source_raw_path, record.id));
         return std::unexpected(std::move(issue));
@@ -1023,9 +1022,9 @@ copy_metadata_backup(const MetadataOperationJournalRecord& record, const Descrip
 
 // Removes `raw_path` when it is the file `expected` was, perhaps renumbered
 // by a rename (ADR-0249).
-[[nodiscard]] core::Result<void> unlink_if_renamed_from(const std::string& raw_path,
-                                                        const core::LocalSourceRevision& expected,
-                                                        const MetadataOperationJournalRecord& record) {
+[[nodiscard]] core::Result<void>
+unlink_if_renamed_from(const std::string& raw_path, const core::LocalSourceRevision& expected,
+                       const MetadataOperationJournalRecord& record) {
     auto observed = optional_revision(raw_path);
     if (!observed) {
         return std::unexpected(std::move(observed.error()));
@@ -1090,8 +1089,7 @@ copy_metadata_backup(const MetadataOperationJournalRecord& record, const Descrip
     if (!attributes) {
         return std::unexpected(std::move(attributes.error()));
     }
-    auto copied =
-        copy_file_verified(record, kept, kept_status, *attributes, restore, cancellation);
+    auto copied = copy_file_verified(record, kept, kept_status, *attributes, restore, cancellation);
     if (!copied) {
         return std::unexpected(std::move(copied.error()));
     }
@@ -1606,16 +1604,14 @@ verify_original_content(const MetadataOperationJournalRecord& record,
                         const core::LocalSourceRevision& restored,
                         const core::CancellationToken& cancellation = {}) {
     if (record.content_kind == MetadataOperationContentKind::cue_replay_gain) {
-        auto verified =
-            verify_cue_carrier(record, restored, CarrierEvidenceSide::original);
+        auto verified = verify_cue_carrier(record, restored, CarrierEvidenceSide::original);
         if (!verified) {
             return std::unexpected(std::move(verified.error()));
         }
         return metadata::MetadataDocument{};
     }
     if (record.content_kind == MetadataOperationContentKind::loudness_sidecar) {
-        auto verified =
-            verify_sidecar_carrier(record, restored, CarrierEvidenceSide::original);
+        auto verified = verify_sidecar_carrier(record, restored, CarrierEvidenceSide::original);
         if (!verified) {
             return std::unexpected(std::move(verified.error()));
         }
@@ -1624,8 +1620,7 @@ verify_original_content(const MetadataOperationJournalRecord& record,
     if (record.content_kind == MetadataOperationContentKind::folder_image) {
         auto image = metadata::read_artwork_image_file(record.source_raw_path, 16U * 1024U * 1024U,
                                                        cancellation);
-        if (!image || image->source_revision != restored ||
-            record.changes.size() != 1 ||
+        if (!image || image->source_revision != restored || record.changes.size() != 1 ||
             record.changes.front().original_values !=
                 std::vector<std::string>{
                     metadata::artwork_fingerprint_hex(image->content_fingerprint)})
@@ -1770,10 +1765,10 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     const bool half_done = !*source_revision && set_aside(*aside_revision) && staged;
     const bool put_back = *source_revision && set_aside(*aside_revision);
     if (!not_begun && !half_done && !put_back) {
-        return reconcile(operation_error(
-            core::ErrorCode::conflict,
-            "metadata undo has ambiguous source or retained-backup identities",
-            record.source_raw_path, record.id));
+        return reconcile(
+            operation_error(core::ErrorCode::conflict,
+                            "metadata undo has ambiguous source or retained-backup identities",
+                            record.source_raw_path, record.id));
     }
     if (not_begun) {
         auto source_descriptor = open_and_lock_file(record.source_raw_path, cancellation,
@@ -1787,9 +1782,9 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
             }
             return reconcile(std::move(issue));
         }
-        if (auto verified = verify_direct_single_link(record.source_raw_path, *source_descriptor,
-                                                      **source_revision, record,
-                                                      "metadata undo source");
+        if (auto verified =
+                verify_direct_single_link(record.source_raw_path, *source_descriptor,
+                                          **source_revision, record, "metadata undo source");
             !verified) {
             return reconcile(verified.error());
         }
@@ -2278,9 +2273,9 @@ write_prepared_carrier_bytes(const MetadataOperationJournalRecord& record, const
 
 core::Result<MetadataCommitResult>
 commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
-                            MetadataOperationJournal& journal,
-                            const MetadataDependentStateCommitter& dependent_state_committer,
-                            const core::CancellationToken& cancellation) {
+                       MetadataOperationJournal& journal,
+                       const MetadataDependentStateCommitter& dependent_state_committer,
+                       const core::CancellationToken& cancellation) {
     if (source_plan.artwork && source_plan.artwork->folder_image) {
         if (!dependent_state_committer || !source_plan.ready() || !source_plan.observed_revision ||
             source_plan.expected_revision != source_plan.observed_revision ||
@@ -2451,8 +2446,8 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
                                                source_plan.occurrence_indexes.size()});
         if (!combined)
             return std::unexpected(combined.error());
-        return commit_metadata_source(combined->sources.front(), journal,
-                                           dependent_state_committer, cancellation);
+        return commit_metadata_source(combined->sources.front(), journal, dependent_state_committer,
+                                      cancellation);
     }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(source_plan.raw_media_path));
@@ -3084,18 +3079,19 @@ recover_metadata_operations(MetadataOperationJournal& journal,
                 }
             }
             if (!issue) {
-                if (auto removed = unlink_if_matches(record.backup_raw_path, backup_identity(record),
-                                                     record.source_raw_path, record.id);
+                if (auto removed =
+                        unlink_if_matches(record.backup_raw_path, backup_identity(record),
+                                          record.source_raw_path, record.id);
                     !removed) {
                     issue = std::move(removed.error());
                 }
             }
             const bool restored = !issue;
-            const auto failure =
-                restored ? operation_error(core::ErrorCode::cancelled,
-                                           "interrupted metadata rollback was finished",
-                                           record.source_raw_path, record.id)
-                         : *issue;
+            const auto failure = restored
+                                     ? operation_error(core::ErrorCode::cancelled,
+                                                       "interrupted metadata rollback was finished",
+                                                       record.source_raw_path, record.id)
+                                     : *issue;
             auto terminal =
                 record_terminal_failure(journal, record, record.state, record.prepared_revision,
                                         record.published_revision, failure, restored);
@@ -3336,8 +3332,8 @@ void use_copied_metadata_backups_for_testing(const bool enabled) noexcept {
 
 core::Result<MetadataCommitResult>
 undo_metadata_operation(const core::StableId& journal_id, MetadataOperationJournal& journal,
-                             const MetadataDependentStateCommitter& dependent_state_committer,
-                             const core::CancellationToken& cancellation) {
+                        const MetadataDependentStateCommitter& dependent_state_committer,
+                        const core::CancellationToken& cancellation) {
     if (journal_id.is_nil() || !dependent_state_committer) {
         return std::unexpected(operation_error(core::ErrorCode::invalid_argument,
                                                "metadata undo requires an operation and state "

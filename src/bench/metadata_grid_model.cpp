@@ -5,11 +5,11 @@
 #include "bench/metadata_dialog_helpers.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 
-#include <QGuiApplication>
 #include <QBrush>
 #include <QColor>
 #include <QFont>
 #include <QFutureWatcher>
+#include <QGuiApplication>
 #include <QPalette>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
@@ -828,10 +828,10 @@ MetadataGridModel::adoptReadSelection(metadata::StagedMetadataSelection read,
     history_cursor_ = 0U;
     history_text_bytes_ = 0U;
     endResetModel();
-    emit draftStateChanged(static_cast<int>(std::min(
-                               patches_.patch_count(),
-                               static_cast<std::size_t>(std::numeric_limits<int>::max()))),
-                           false, false);
+    emit draftStateChanged(
+        static_cast<int>(std::min(patches_.patch_count(),
+                                  static_cast<std::size_t>(std::numeric_limits<int>::max()))),
+        false, false);
     return std::pair{carried->carried, carried->dropped};
 }
 

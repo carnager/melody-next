@@ -283,12 +283,12 @@ void draftsCarryOntoTheTagsRead() {
     auto other = StagedMetadataSelection::create(
         {StagedMetadataSource{.raw_path = "/music/else.flac",
                               .source_revision = std::nullopt,
-                              .baseline = MetadataDocument{.fields = {},
-                                                           .unsupported_native_objects = {}}},
-         StagedMetadataSource{.raw_path = "/music/two.flac",
-                              .source_revision = std::nullopt,
-                              .baseline = MetadataDocument{.fields = {},
-                                                           .unsupported_native_objects = {}}}},
+                              .baseline =
+                                  MetadataDocument{.fields = {}, .unsupported_native_objects = {}}},
+         StagedMetadataSource{
+             .raw_path = "/music/two.flac",
+             .source_revision = std::nullopt,
+             .baseline = MetadataDocument{.fields = {}, .unsupported_native_objects = {}}}},
         preferred);
     CHECK(other.has_value());
     if (other) {

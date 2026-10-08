@@ -3,7 +3,6 @@
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
-#include "workspace/workspace_view.hpp"
 #include "trackknife/formats/cue_sheet.hpp"
 #include "trackknife/formats/probe.hpp"
 #include "trackknife/loudness/replaygain.hpp"
@@ -11,6 +10,7 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/loudness_sidecar.hpp"
 #include "uicommon/local_artwork.hpp"
+#include "workspace/workspace_view.hpp"
 
 #include <QSettings>
 #include <QTimer>
@@ -505,7 +505,7 @@ void Workspace::enrichRemoteRows(ListTab& tab) {
 }
 
 void Workspace::insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths,
-                                        const int insertion_row) {
+                                  const int insertion_row) {
     std::vector<LocalTrackRow> rows;
     rows.reserve(raw_paths.size());
     for (auto& raw_path : raw_paths) {
@@ -611,7 +611,7 @@ void Workspace::finishProbeBatch() {
     }
     if (logical_track_limit_hit) {
         view_->showMessage(QStringLiteral("Logical-track expansion hit the local row limit"),
-                                 5'000);
+                           5'000);
     }
     for (const auto& document_id : touched_documents) {
         if (auto* tab = tabForDocument(document_id); tab != nullptr) {
@@ -680,7 +680,8 @@ QImage Workspace::coverFor(const LocalTrackRow& track, const EngineKey& engine_k
     }
     if (!artwork_pending_.contains(key)) {
         artwork_pending_.insert(key);
-        artwork_queue_.push_back(ArtworkJob{.key = key, .raw_path = track.raw_path, .engine = engine});
+        artwork_queue_.push_back(
+            ArtworkJob{.key = key, .raw_path = track.raw_path, .engine = engine});
         pumpArtworkQueue();
     }
     return {};
@@ -719,14 +720,13 @@ void Workspace::pumpArtworkQueue() {
     auto job = std::move(artwork_queue_.front());
     artwork_queue_.pop_front();
     artwork_running_ = true;
-    connect(&artwork_watcher_, &QFutureWatcher<void>::finished, this,
-            &Workspace::finishArtworkLoad, Qt::SingleShotConnection);
+    connect(&artwork_watcher_, &QFutureWatcher<void>::finished, this, &Workspace::finishArtworkLoad,
+            Qt::SingleShotConnection);
     artwork_outcome_ =
         std::make_shared<ArtworkOutcome>(ArtworkOutcome{.key = std::move(job.key), .image = {}});
     artwork_watcher_.setFuture(
         QtConcurrent::run([raw_path = std::move(job.raw_path), engine = std::move(job.engine),
-                           outcome = artwork_outcome_,
-                           cancellation = probe_cancellation_.token()] {
+                           outcome = artwork_outcome_, cancellation = probe_cancellation_.token()] {
             if (engine) {
                 const auto bytes = engine->artwork(raw_path, cancellation);
                 outcome->image = bytes ? ui::artworkThumbnail(*bytes) : QImage{};
@@ -791,7 +791,7 @@ void Workspace::finishArtworkLoad() {
 }
 
 void Workspace::startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
-                                     const int insertion_row, const bool replace_and_play) {
+                               const int insertion_row, const bool replace_and_play) {
     if (discovery_running_) {
         view_->showMessage(QStringLiteral("A folder scan is already running"), 3'000);
         return;

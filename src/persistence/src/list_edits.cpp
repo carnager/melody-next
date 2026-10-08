@@ -67,8 +67,8 @@ std::vector<PlannedListEdit> plan_list_edits(const std::vector<ListEntryPrint>& 
     std::vector<std::size_t> tails;
     std::vector<std::size_t> previous(places.size(), places.size());
     for (std::size_t index = 0; index < places.size(); ++index) {
-        const auto slot = std::ranges::lower_bound(tails, places[index], {},
-                                                   [&places](std::size_t at) { return places[at]; });
+        const auto slot = std::ranges::lower_bound(
+            tails, places[index], {}, [&places](std::size_t at) { return places[at]; });
         const auto length = static_cast<std::size_t>(slot - tails.begin());
         if (length > 0U) {
             previous[index] = tails[length - 1U];

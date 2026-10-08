@@ -72,8 +72,8 @@ core::StableId JobRegistry::submit(std::string name, Work work) {
     const std::lock_guard guard{mutex_};
     auto& running = running_[job_id];
     running.cancellation = cancellation;
-    running.worker = std::thread{[this, job_id, identity, name = std::move(name), work = std::move(work),
-                        token, reporter]() mutable {
+    running.worker = std::thread{[this, job_id, identity, name = std::move(name),
+                                  work = std::move(work), token, reporter]() mutable {
         protocol::Json data = protocol::Json::object();
         data["job_id"] = identity;
         data["job"] = name;

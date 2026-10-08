@@ -9,9 +9,9 @@
 #include "workspace/workspace_view.hpp"
 
 #include <QCursor>
+#include <QGuiApplication>
 #include <QSettings>
 #include <QtConcurrent/QtConcurrentRun>
-#include <QGuiApplication>
 
 #include <optional>
 #include <string>
@@ -28,7 +28,6 @@ QString Workspace::engineName(const EngineKey& engine) const {
     return catalogue != nullptr ? catalogue->name() : tr("the remote");
 }
 
-
 RemoteMount Workspace::mountOf(const EngineLink& engine) const {
     for (const auto& setting : loadRemoteEngines()) {
         if (setting.address == engine.setting.address) {
@@ -37,7 +36,6 @@ RemoteMount Workspace::mountOf(const EngineLink& engine) const {
     }
     return engine.setting.mount();
 }
-
 
 std::vector<std::string> Workspace::rootsOf(const EngineLink& engine) const {
     // Asked now, not remembered: a folder added to its library since it was
@@ -54,14 +52,13 @@ std::vector<std::string> Workspace::rootsOf(const EngineLink& engine) const {
     return roots;
 }
 
-
 // ADR-0234: a path as one engine has it, as another has it. This computer
 // reaches a remote's music through its mount (RemoteMount); between two
 // remotes the way is through this computer's view of both. Empty when the
 // file is not reachable there.
 std::optional<std::string> Workspace::crossEnginePath(const std::string& path,
-                                                            const EngineKey& from,
-                                                            const EngineKey& to) const {
+                                                      const EngineKey& from,
+                                                      const EngineKey& to) const {
     if (from == to) {
         return path;
     }
@@ -82,10 +79,8 @@ std::optional<std::string> Workspace::crossEnginePath(const std::string& path,
     return mountOf(*target).to_remote(*here, rootsOf(*target));
 }
 
-
 std::vector<std::string> Workspace::crossEnginePaths(std::vector<std::string> paths,
-                                                           const EngineKey& from,
-                                                           const EngineKey& to) {
+                                                     const EngineKey& from, const EngineKey& to) {
     std::vector<std::string> crossed;
     crossed.reserve(paths.size());
     for (const auto& path : paths) {
@@ -111,10 +106,8 @@ std::vector<std::string> Workspace::crossEnginePaths(std::vector<std::string> pa
     return crossed;
 }
 
-
 std::vector<LocalTrackRow> Workspace::crossEngineRows(std::vector<LocalTrackRow> rows,
-                                                            const EngineKey& from,
-                                                            const EngineKey& to) {
+                                                      const EngineKey& from, const EngineKey& to) {
     std::vector<std::string> paths;
     paths.reserve(rows.size());
     for (const auto& row : rows) {
@@ -141,7 +134,6 @@ std::vector<LocalTrackRow> Workspace::crossEngineRows(std::vector<LocalTrackRow>
     return moved;
 }
 
-
 void Workspace::renewOutdatedLocalEngine() {
     if (!localCatalogue() || !localCatalogue()->localEngineOutdated()) {
         engine_renewal_pending_ = false;
@@ -152,8 +144,8 @@ void Workspace::renewOutdatedLocalEngine() {
         localPlayback()->state().status == QStringLiteral("playing")) {
         if (!engine_renewal_pending_) {
             view_->showMessage(QStringLiteral("This computer's engine is out of date; it "
-                                                    "restarts when playback stops"),
-                                     10'000);
+                                              "restarts when playback stops"),
+                               10'000);
         }
         engine_renewal_pending_ = true;
         return;
@@ -163,12 +155,11 @@ void Workspace::renewOutdatedLocalEngine() {
     const bool renewed = localCatalogue()->restartLocalEngine();
     QGuiApplication::restoreOverrideCursor();
     view_->showMessage(renewed ? QStringLiteral("This computer's engine was out of date and "
-                                                      "has been restarted")
-                                     : QStringLiteral("This computer's engine is out of date and "
-                                                      "did not restart; see its log"),
-                             8'000);
+                                                "has been restarted")
+                               : QStringLiteral("This computer's engine is out of date and "
+                                                "did not restart; see its log"),
+                       8'000);
 }
-
 
 void Workspace::settingsSaved(const LocalEngineSharing& before) {
     // ADR-0247: the colours chosen, at once, in every window.
@@ -189,27 +180,30 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
             .toStdString();
     const auto rating_backup = SettingsKeys::ratingBackupTag();
     // ADR-0263: how long each keeps what its writes replace.
-    const auto keep_days = chosen.value(QLatin1String(SettingsKeys::undo_keep_days_key),
-                                        SettingsKeys::undo_keep_days_default)
+    const auto keep_days = chosen
+                               .value(QLatin1String(SettingsKeys::undo_keep_days_key),
+                                      SettingsKeys::undo_keep_days_default)
                                .toInt();
-    const auto keep_writes = chosen.value(QLatin1String(SettingsKeys::undo_keep_writes_key),
-                                          SettingsKeys::undo_keep_writes_default)
+    const auto keep_writes = chosen
+                                 .value(QLatin1String(SettingsKeys::undo_keep_writes_key),
+                                        SettingsKeys::undo_keep_writes_default)
                                  .toInt();
-    const auto keep_gigabytes = chosen.value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
-                                             SettingsKeys::undo_keep_gigabytes_default)
+    const auto keep_gigabytes = chosen
+                                    .value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
+                                           SettingsKeys::undo_keep_gigabytes_default)
                                     .toInt();
     for (const auto& engine : engines_) {
         if (engine->does_file_work && engine->file_work) {
-            static_cast<void>(QtConcurrent::run([work = engine->file_work, key, rating_tags,
-                                                 rating_scale, rating_backup, keep_days,
-                                                 keep_writes, keep_gigabytes] {
-                static_cast<void>(work->set_acoustid_key(key));
-                static_cast<void>(work->set_rating_tags(rating_tags));
-                static_cast<void>(work->set_rating_scale(rating_scale));
-                static_cast<void>(work->set_rating_backup_tag(rating_backup));
-                static_cast<void>(
-                    work->set_backup_retention(keep_days, keep_writes, keep_gigabytes));
-            }));
+            static_cast<void>(
+                QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale,
+                                   rating_backup, keep_days, keep_writes, keep_gigabytes] {
+                    static_cast<void>(work->set_acoustid_key(key));
+                    static_cast<void>(work->set_rating_tags(rating_tags));
+                    static_cast<void>(work->set_rating_scale(rating_scale));
+                    static_cast<void>(work->set_rating_backup_tag(rating_backup));
+                    static_cast<void>(
+                        work->set_backup_retention(keep_days, keep_writes, keep_gigabytes));
+                }));
         }
     }
     // ADR-0234: engines added, removed or pointed elsewhere, at once.

@@ -81,9 +81,9 @@ class FlatHeaderStyle final : public QProxyStyle {
         if (alignment.testFlag(Qt::AlignHCenter)) {
             alignment = (alignment & ~Qt::AlignHorizontal_Mask) | Qt::AlignLeft;
         }
-        painter->drawText(label, static_cast<int>(alignment | Qt::AlignVCenter),
-                          QFontMetrics(font).elidedText(header->text, Qt::ElideRight,
-                                                        label.width()));
+        painter->drawText(
+            label, static_cast<int>(alignment | Qt::AlignVCenter),
+            QFontMetrics(font).elidedText(header->text, Qt::ElideRight, label.width()));
         painter->restore();
     }
 

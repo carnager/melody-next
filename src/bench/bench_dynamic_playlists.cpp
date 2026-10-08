@@ -200,15 +200,13 @@ void BenchMainWindow::showDynamicPlaylists() {
         connect(library, &LocalLibraryPanel::ratingsChanged, dialog, changed);
         connect(library, &LocalLibraryPanel::libraryContentChanged, dialog, changed);
     }
-    connect(dialog, &DynamicPlaylistDialog::snapshotRequested, this,
-            [this, dialog, layout](const QString& name,
-                                   const DynamicPlaylistService::Tracks& tracks) {
-                const auto title =
-                    name.isEmpty() ? QStringLiteral("Dynamic playlist snapshot") : name;
-                auto* destination =
-                    workspace_.openDynamicResult(title, tracks, dialog->engine(), true);
-                applyTrackViewLayout(*destination, layout);
-            });
+    connect(
+        dialog, &DynamicPlaylistDialog::snapshotRequested, this,
+        [this, dialog, layout](const QString& name, const DynamicPlaylistService::Tracks& tracks) {
+            const auto title = name.isEmpty() ? QStringLiteral("Dynamic playlist snapshot") : name;
+            auto* destination = workspace_.openDynamicResult(title, tracks, dialog->engine(), true);
+            applyTrackViewLayout(*destination, layout);
+        });
     dialog->followLibrary(from);
     dialog->show();
 }

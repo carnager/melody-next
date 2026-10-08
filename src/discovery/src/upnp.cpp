@@ -6,6 +6,7 @@
 #include <upnptools.h>
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -14,12 +15,11 @@
 #include <iostream>
 #include <mutex>
 #include <net/if.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <optional>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 
 namespace trackknife::discovery {
@@ -117,9 +117,10 @@ std::vector<NetworkInterface> network_interfaces() {
         constexpr auto wanted = IFF_UP | IFF_RUNNING | IFF_MULTICAST;
         found.push_back(NetworkInterface{
             .name = address->ifa_name,
-            .address = ntohl(reinterpret_cast<const sockaddr_in*>(address->ifa_addr)->sin_addr.s_addr),
-            .usable = (address->ifa_flags & wanted) == wanted &&
-                      (address->ifa_flags & IFF_LOOPBACK) == 0,
+            .address =
+                ntohl(reinterpret_cast<const sockaddr_in*>(address->ifa_addr)->sin_addr.s_addr),
+            .usable =
+                (address->ifa_flags & wanted) == wanted && (address->ifa_flags & IFF_LOOPBACK) == 0,
         });
     }
     return found;
@@ -314,11 +315,15 @@ struct UpnpDiscovery::Impl {
     std::map<std::string, UpnpValues> reports;
     std::thread worker;
 
-#if UPNP_VERSION_MAJOR >= 2
-    using EventPointer = void*;
-#else
-    using EventPointer = const void*;
-#endif
+    // The event's pointer as this libupnp's callback type has it -- const on
+    // Arch and Debian, not on macOS -- read from the type itself: the
+    // version does not say (Debian's 1.14 calls itself 17.2).
+    template <typename> struct EventOf;
+    template <typename Result, typename Type, typename Event, typename Cookie>
+    struct EventOf<Result (*)(Type, Event, Cookie)> {
+        using type = Event;
+    };
+    using EventPointer = EventOf<Upnp_FunPtr>::type;
     static int callback(Upnp_EventType type, EventPointer event, void* cookie) {
         auto& self = *static_cast<Impl*>(cookie);
         const std::lock_guard lock{self.mutex};

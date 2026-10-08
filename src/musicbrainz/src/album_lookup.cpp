@@ -49,15 +49,15 @@ AlbumLookupResult judge_album(const AlbumQuery& query, std::vector<Release> rele
         result.candidates.push_back(AlbumCandidate{
             .release = std::move(release), .alignment = std::move(alignment), .clear = clear});
     }
-    std::ranges::stable_sort(result.candidates, [](const AlbumCandidate& left,
-                                                   const AlbumCandidate& right) {
-        if (left.clear != right.clear) {
-            return left.clear;
-        }
-        return left.alignment.confidence > right.alignment.confidence;
-    });
+    std::ranges::stable_sort(result.candidates,
+                             [](const AlbumCandidate& left, const AlbumCandidate& right) {
+                                 if (left.clear != right.clear) {
+                                     return left.clear;
+                                 }
+                                 return left.alignment.confidence > right.alignment.confidence;
+                             });
     const auto clear = std::ranges::count_if(result.candidates, &AlbumCandidate::clear);
-    result.outcome = clear == 1 ? AlbumLookupOutcome::matched
+    result.outcome = clear == 1                  ? AlbumLookupOutcome::matched
                      : result.candidates.empty() ? AlbumLookupOutcome::no_match
                                                  : AlbumLookupOutcome::needs_choice;
     return result;

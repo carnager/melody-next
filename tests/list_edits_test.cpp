@@ -45,12 +45,13 @@ prints(const std::vector<persistence::EngineListItem>& items) {
 }
 
 // What a client sends for a plan: the items named by row, described.
-[[nodiscard]] std::vector<ListEdit> edits_of(const std::vector<persistence::PlannedListEdit>& plan,
-                                             const std::vector<persistence::EngineListItem>& wanted) {
+[[nodiscard]] std::vector<ListEdit>
+edits_of(const std::vector<persistence::PlannedListEdit>& plan,
+         const std::vector<persistence::EngineListItem>& wanted) {
     std::vector<ListEdit> edits;
     for (const auto& planned : plan) {
-        ListEdit edit{.kind = planned.kind, .entries = planned.entries, .items = {},
-                      .after = planned.after};
+        ListEdit edit{
+            .kind = planned.kind, .entries = planned.entries, .items = {}, .after = planned.after};
         for (const auto row : planned.rows) {
             edit.items.push_back(wanted[row]);
         }
@@ -138,25 +139,33 @@ int main() {
     // Refusals leave the list as it was.
     {
         auto applied = list;
-        const auto missing = persistence::apply_list_edits(
-            applied, {ListEdit{.kind = ListEdit::Kind::remove, .entries = {list[0].entry_id},
-                               .items = {}, .after = {}},
-                      ListEdit{.kind = ListEdit::Kind::move,
-                               .entries = {core::StableId::random()}, .items = {},
-                               .after = {}}});
+        const auto missing =
+            persistence::apply_list_edits(applied, {ListEdit{.kind = ListEdit::Kind::remove,
+                                                             .entries = {list[0].entry_id},
+                                                             .items = {},
+                                                             .after = {}},
+                                                    ListEdit{.kind = ListEdit::Kind::move,
+                                                             .entries = {core::StableId::random()},
+                                                             .items = {},
+                                                             .after = {}}});
         require(!missing && missing.error().code == core::ErrorCode::not_found && applied == list,
                 "an edit naming an unknown entry refuses the whole set, nothing applied");
         const auto twice = persistence::apply_list_edits(
-            applied, {ListEdit{.kind = ListEdit::Kind::insert, .entries = {},
-                               .items = {list[2]}, .after = {}}});
+            applied,
+            {ListEdit{
+                .kind = ListEdit::Kind::insert, .entries = {}, .items = {list[2]}, .after = {}}});
         require(!twice && applied == list, "an insert of an entry already held is refused");
-        const auto self = persistence::apply_list_edits(
-            applied, {ListEdit{.kind = ListEdit::Kind::move, .entries = {list[2].entry_id},
-                               .items = {}, .after = list[2].entry_id}});
+        const auto self =
+            persistence::apply_list_edits(applied, {ListEdit{.kind = ListEdit::Kind::move,
+                                                             .entries = {list[2].entry_id},
+                                                             .items = {},
+                                                             .after = list[2].entry_id}});
         require(!self && applied == list, "entries are not moved after themselves");
-        const auto anchor = persistence::apply_list_edits(
-            applied, {ListEdit{.kind = ListEdit::Kind::insert, .entries = {},
-                               .items = {item("x")}, .after = core::StableId::random()}});
+        const auto anchor =
+            persistence::apply_list_edits(applied, {ListEdit{.kind = ListEdit::Kind::insert,
+                                                             .entries = {},
+                                                             .items = {item("x")},
+                                                             .after = core::StableId::random()}});
         require(!anchor && anchor.error().code == core::ErrorCode::not_found && applied == list,
                 "an unknown anchor is refused");
     }

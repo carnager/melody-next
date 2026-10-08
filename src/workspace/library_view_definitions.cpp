@@ -18,9 +18,8 @@ namespace {
 const QString settings_key = QStringLiteral("library/views");
 
 [[nodiscard]] core::Error invalid(const QString& message) {
-    return core::Error{.code = core::ErrorCode::invalid_argument,
-                       .message = message.toStdString(),
-                       .context = {}};
+    return core::Error{
+        .code = core::ErrorCode::invalid_argument, .message = message.toStdString(), .context = {}};
 }
 
 [[nodiscard]] persistence::LibraryViewLevel level(const char* format, const char* sort = "",
@@ -64,22 +63,23 @@ std::vector<LibraryViewDefinition> builtinLibraryViews() {
          .levels = {level("%albumartist% — %album%", "$info(albumdayssinceadded)")},
          .builtin = true,
          .own_tree = true},
-        {.id = folders_library_view_id, .name = QStringLiteral("Folders"), .levels = {},
-         .builtin = true, .own_tree = true},
+        {.id = folders_library_view_id,
+         .name = QStringLiteral("Folders"),
+         .levels = {},
+         .builtin = true,
+         .own_tree = true},
         {.id = QStringLiteral("genre-artist-album"),
          .name = QStringLiteral("Genre › Artist › Album"),
-         .levels = {level("$each(genre)"), level("%albumartist%"),
-                    level("%album%", "%date%")},
+         .levels = {level("$each(genre)"), level("%albumartist%"), level("%album%", "%date%")},
          .builtin = true},
         {.id = QStringLiteral("year-album"),
          .name = QStringLiteral("Year › Album"),
-         .levels = {level("$left(%date%,4)", "", true),
-                    level("%albumartist% — %album%")},
+         .levels = {level("$left(%date%,4)", "", true), level("%albumartist% — %album%")},
          .builtin = true},
         {.id = QStringLiteral("decade-artist-album"),
          .name = QStringLiteral("Decade › Artist › Album"),
-         .levels = {level("$if(%date%,$left(%date%,3)0s,)", "", true),
-                    level("%albumartist%"), level("%album%", "%date%")},
+         .levels = {level("$if(%date%,$left(%date%,3)0s,)", "", true), level("%albumartist%"),
+                    level("%album%", "%date%")},
          .builtin = true},
         {.id = QStringLiteral("album"),
          .name = QStringLiteral("Album"),
@@ -152,20 +152,20 @@ core::Result<void> saveCustomLibraryViews(const std::vector<LibraryViewDefinitio
             if (!error.isEmpty()) {
                 return std::unexpected(invalid(error));
             }
-            levels.append(QJsonObject{{QStringLiteral("format"), QString::fromStdString(item.format)},
-                                      {QStringLiteral("sort"), QString::fromStdString(item.sort)},
-                                      {QStringLiteral("descending"), item.descending},
-                                      {QStringLiteral("dialect"), QStringLiteral("tkfmt")},
-                                      {QStringLiteral("dialect_version"), 1}});
+            levels.append(
+                QJsonObject{{QStringLiteral("format"), QString::fromStdString(item.format)},
+                            {QStringLiteral("sort"), QString::fromStdString(item.sort)},
+                            {QStringLiteral("descending"), item.descending},
+                            {QStringLiteral("dialect"), QStringLiteral("tkfmt")},
+                            {QStringLiteral("dialect_version"), 1}});
         }
         stored.append(QJsonObject{{QStringLiteral("id"), view.id},
                                   {QStringLiteral("name"), view.name.trimmed()},
                                   {QStringLiteral("levels"), levels}});
     }
-    QSettings{}.setValue(settings_key,
-                         QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
-                                                   {QStringLiteral("views"), stored}})
-                             .toJson(QJsonDocument::Compact));
+    QSettings{}.setValue(settings_key, QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                                                                 {QStringLiteral("views"), stored}})
+                                           .toJson(QJsonDocument::Compact));
     emit LibraryViewCatalog::instance().changed();
     return {};
 }

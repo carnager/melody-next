@@ -627,9 +627,9 @@ namespace {
 }
 
 [[nodiscard]] Json encode_request(const operations::UndoRequest& request) {
-    return Json{{"kind", request.kind == operations::UndoKind::metadata ? "metadata"
-                                                                        : "publication"},
-                {"id", request.journal_id.to_string()}};
+    return Json{
+        {"kind", request.kind == operations::UndoKind::metadata ? "metadata" : "publication"},
+        {"id", request.journal_id.to_string()}};
 }
 
 [[nodiscard]] core::Result<operations::UndoRequest> decode_request(const Json& value) {

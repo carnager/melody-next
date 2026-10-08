@@ -236,8 +236,7 @@ CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role
         // ADR-0227: this computer's engine is always there -- the one the
         // workspace starts, or one named for development and tests.
         const auto running =
-            settings
-                .value(QLatin1String(SettingsKeys::library_local_engine_socket_key), QString{})
+            settings.value(QLatin1String(SettingsKeys::library_local_engine_socket_key), QString{})
                 .toString();
         if (!running.isEmpty()) {
             endpoint_ = protocol::Endpoint::parse(running.toStdString(), {});
@@ -432,10 +431,11 @@ QString CatalogueSource::describe() const {
     if (endpoint_) {
         // A refused password is its own case: the engine is there, and saying
         // "unreachable" would send someone looking at the network.
-        return link_->refused ? QObject::tr("Library unavailable: the engine at %1 refused the password")
-                              .arg(endpointText(*endpoint_))
-                        : QObject::tr("Library unavailable: the engine at %1 is unreachable")
-                              .arg(endpointText(*endpoint_));
+        return link_->refused
+                   ? QObject::tr("Library unavailable: the engine at %1 refused the password")
+                         .arg(endpointText(*endpoint_))
+                   : QObject::tr("Library unavailable: the engine at %1 is unreachable")
+                         .arg(endpointText(*endpoint_));
     }
     return QObject::tr("Library unavailable: %1").arg(failure);
 }

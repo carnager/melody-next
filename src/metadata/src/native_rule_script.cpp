@@ -152,8 +152,8 @@ class Reader final {
                 return std::nullopt;
             }
             Call call{
-                .name = ascii_lower(std::string{
-                    source_.substr(position + 1U, *opening - position - 1U)}),
+                .name = ascii_lower(
+                    std::string{source_.substr(position + 1U, *opening - position - 1U)}),
                 .offset = position,
                 .arguments = {},
             };
@@ -770,13 +770,11 @@ export_native_rule_script(const std::span<const MetadataTransformationAction> ac
                            quote_literal(action.target_field) +
                            std::string{mode_suffix(action.match_mode)} + "))";
                 } else if constexpr (std::is_same_v<Action, MetadataTransformValuesAction>) {
-                    const auto* kind = action.transform == MetadataValueTransformKind::trim_ascii
-                                           ? "trim"
-                                       : action.transform == MetadataValueTransformKind::lowercase
-                                           ? "lower"
-                                       : action.transform == MetadataValueTransformKind::uppercase
-                                           ? "upper"
-                                           : "capitalize";
+                    const auto* kind =
+                        action.transform == MetadataValueTransformKind::trim_ascii  ? "trim"
+                        : action.transform == MetadataValueTransformKind::lowercase ? "lower"
+                        : action.transform == MetadataValueTransformKind::uppercase ? "upper"
+                                                                                    : "capitalize";
                     return "$transform(" + quote_literal(action.target_field) + ',' + kind + ')';
                 } else if constexpr (std::is_same_v<Action, MetadataFormatValueAction>) {
                     if (action.dialect != tkfmt) {
@@ -796,11 +794,9 @@ export_native_rule_script(const std::span<const MetadataTransformationAction> ac
                 } else if constexpr (std::is_same_v<Action, MetadataRemoveMatchingValuesAction>) {
                     return "$removevalue(" + quote_literal(action.target_field) + ',' +
                            quote_literal(action.match) + ')';
-                } else if constexpr (std::is_same_v<Action,
-                                                    MetadataReplaceMatchingValuesAction>) {
+                } else if constexpr (std::is_same_v<Action, MetadataReplaceMatchingValuesAction>) {
                     return "$replacevalue(" + quote_literal(action.target_field) + ',' +
-                           quote_literal(action.match) + joined(action.replacement_values) +
-                           ')';
+                           quote_literal(action.match) + joined(action.replacement_values) + ')';
                 } else if constexpr (std::is_same_v<Action, MetadataNumberSelectedItemsAction>) {
                     return "$number(" + quote_literal(action.target_field) + ',' +
                            std::to_string(action.start) + ',' + std::to_string(action.padding) +

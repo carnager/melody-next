@@ -39,8 +39,8 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
-#include <algorithm>
 #include <QToolButton>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -262,9 +262,9 @@ void BenchMainWindow::showIdentifyAlbums() {
     const auto count = rows.size();
     auto opening = workspace_.taggerServices(std::move(work));
     const auto work_engine = opening.engine;
-    auto* dialog = new IdentifyAlbumsDialog(count, selectionSourceReader(model, std::move(rows)),
-                                            Workspace::taggerFields(),
-                                            std::move(opening.services), tabs_);
+    auto* dialog =
+        new IdentifyAlbumsDialog(count, selectionSourceReader(model, std::move(rows)),
+                                 Workspace::taggerFields(), std::move(opening.services), tabs_);
     dialog->setWindowFlags(Qt::Window);
     auto* tagger = dialog->tagger();
     connect(tagger, &TaggerSession::statusMessage, this,

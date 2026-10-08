@@ -160,14 +160,13 @@ int main(int argc, char** argv) {
             "a file outside the library gets none");
 
     // The agents' token opens what plays, converted when asked.
-    const auto agent = output::stream_query(
-                           output::StreamRequest{.raw_path = track,
-                                                 .format = output::StreamFormat{
-                                                     .bitrate_kbps = 64,
-                                                     .codec = output::StreamCodec::opus,
-                                                     .sample_rate_cap = {}},
-                                                 .selection = {},
-                                                 .segment = {}}) +
+    const auto agent = output::stream_query(output::StreamRequest{
+                           .raw_path = track,
+                           .format = output::StreamFormat{.bitrate_kbps = 64,
+                                                          .codec = output::StreamCodec::opus,
+                                                          .sample_rate_cap = {}},
+                           .selection = {},
+                           .segment = {}}) +
                        "&token=agent-token";
     require(get(port, "/stream?" + agent).first == "HTTP/1.1 404 Not Found",
             "not while it is not played");

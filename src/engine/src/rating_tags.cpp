@@ -107,9 +107,10 @@ std::string RatingTags::backup_tag() const {
 core::Result<void> RatingTags::set_backup_tag(std::string tag) {
     if (!tag.empty()) {
         if (auto problem = metadata::rating_backup_tag_problem(tag)) {
-            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                               .message = std::move(*problem),
-                                               .context = {{.key = "param", .value = "backup_tag"}}});
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::invalid_argument,
+                            .message = std::move(*problem),
+                            .context = {{.key = "param", .value = "backup_tag"}}});
         }
     }
     if (tag == backup_tag()) {
@@ -323,8 +324,8 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
         auto refreshed = catalogue.refresh({result.source_raw_path});
         return refreshed ? core::Result<void>{} : std::unexpected(std::move(refreshed.error()));
     };
-    auto committed = operations::commit_metadata_source(plan->sources.front(), journal,
-                                                             dependent, cancellation);
+    auto committed =
+        operations::commit_metadata_source(plan->sources.front(), journal, dependent, cancellation);
     if (!committed) {
         return std::unexpected(std::move(committed.error()));
     }

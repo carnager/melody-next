@@ -4,8 +4,8 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/local_artwork.hpp"
-#include "workspace/library_view_definitions.hpp"
 #include "uicommon/local_files_mime_data.hpp"
+#include "workspace/library_view_definitions.hpp"
 
 #include <QFile>
 #include <QIcon>
@@ -77,12 +77,14 @@ class LibraryModel final : public QStandardItemModel {
             if (entry.kind == persistence::LibraryEntryKind::artist ||
                 entry.kind == persistence::LibraryEntryKind::group)
                 return QString{};
-            const auto tracks =
-                LibraryBrowser::tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
+            const auto tracks = LibraryBrowser::tr("%1 track%2")
+                                    .arg(entry.tracks)
+                                    .arg(entry.tracks == 1U ? "" : "s");
             // Under its artist, an album need not name them again.
             if (entry.kind == persistence::LibraryEntryKind::album)
-                return index.parent().isValid() ? tracks
-                                                : text(entry.artist) + QStringLiteral(" · ") + tracks;
+                return index.parent().isValid()
+                           ? tracks
+                           : text(entry.artist) + QStringLiteral(" · ") + tracks;
             return QString{};
         }
         if (role == library_kind_role || role == library_count_role ||
@@ -90,16 +92,19 @@ class LibraryModel final : public QStandardItemModel {
             const auto value = QStandardItemModel::data(index, entry_role);
             if (!value.isValid()) {
                 return role == library_kind_role || role == library_count_role ? QVariant{QString{}}
-                       : role == library_available_role ? QVariant{false}
-                                                        : QVariant{0U};
+                       : role == library_available_role                        ? QVariant{false}
+                                                                               : QVariant{0U};
             }
             const auto entry = value.value<persistence::LibraryEntry>();
             switch (role) {
             case library_kind_role:
-                return entry.kind == persistence::LibraryEntryKind::artist  ? QStringLiteral("artist")
-                       : entry.kind == persistence::LibraryEntryKind::album ? QStringLiteral("album")
-                       : entry.kind == persistence::LibraryEntryKind::group ? QStringLiteral("group")
-                                                                            : QStringLiteral("track");
+                return entry.kind == persistence::LibraryEntryKind::artist
+                           ? QStringLiteral("artist")
+                       : entry.kind == persistence::LibraryEntryKind::album
+                           ? QStringLiteral("album")
+                       : entry.kind == persistence::LibraryEntryKind::group
+                           ? QStringLiteral("group")
+                           : QStringLiteral("track");
             case library_count_role:
                 return entry.kind == persistence::LibraryEntryKind::artist ||
                                entry.kind == persistence::LibraryEntryKind::group
@@ -161,14 +166,14 @@ class LibraryModel final : public QStandardItemModel {
         for (const auto& entry : entries) {
             carried.push_back(QVariant::fromValue(entry));
         }
-        auto* mime = new ui::LocalFilesMimeData{
-            [browser = browser_, entries = std::move(entries)](
-                ui::LocalFilesMimeData::Completion done) {
-                if (browser) {
-                    browser->resolveEntries(entries, std::move(done));
-                }
-            },
-            engine};
+        auto* mime =
+            new ui::LocalFilesMimeData{[browser = browser_, entries = std::move(entries)](
+                                           ui::LocalFilesMimeData::Completion done) {
+                                           if (browser) {
+                                               browser->resolveEntries(entries, std::move(done));
+                                           }
+                                       },
+                                       engine};
         mime->setProperty(library_entries_property, carried);
         return mime;
     }
@@ -216,8 +221,7 @@ std::vector<persistence::LibraryEntry> LibraryBrowser::selectedEntries(QModelInd
     return entries;
 }
 
-LibraryBrowser::LibraryBrowser(const CatalogueSource& catalogues, EngineKey engine,
-                               QObject* parent)
+LibraryBrowser::LibraryBrowser(const CatalogueSource& catalogues, EngineKey engine, QObject* parent)
     : QObject(parent), catalogues_(&catalogues), engine_(std::move(engine)) {
     pool_.setMaxThreadCount(2);
     artwork_pool_.setMaxThreadCount(1);
@@ -488,68 +492,68 @@ void LibraryBrowser::locatePath(std::string raw_path, bool album) {
     // ADR-0273: found in the layout shown, not by switching to another --
     // a view asks the engine for the way to the file through its levels.
     auto view = view_;
-    enqueue(
-        {[raw_path, view, cancellation = lifetime_cancellation_.token()](
-             engine::Catalogue& library) {
-             Outcome outcome;
-             persistence::LibraryQuery query;
-             query.kind = persistence::LibraryEntryKind::album;
-             query.raw_path = raw_path;
-             auto page = library.query(query, cancellation);
-             if (!page) {
-                 outcome.error = text(page.error().message);
-                 return outcome;
-             }
-             outcome.page = std::move(*page);
-             if (!view.empty() && !outcome.page.entries.empty()) {
-                 persistence::LibraryQuery way;
-                 way.kind = persistence::LibraryEntryKind::group;
-                 way.view = view;
-                 way.raw_path = raw_path;
-                 auto located = library.query(way, cancellation);
-                 if (!located) {
-                     outcome.error = text(located.error().message);
+    enqueue({[raw_path, view,
+              cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
+                 Outcome outcome;
+                 persistence::LibraryQuery query;
+                 query.kind = persistence::LibraryEntryKind::album;
+                 query.raw_path = raw_path;
+                 auto page = library.query(query, cancellation);
+                 if (!page) {
+                     outcome.error = text(page.error().message);
                      return outcome;
                  }
-                 outcome.way = std::move(*located);
-             }
-             return outcome;
-         },
-         [this, generation, album, raw_path](Outcome outcome) {
-             // A failed or empty lookup is a fact about the queried path, true
-             // however the tree changed while the query ran. Reported before
-             // the staleness check, which guards the navigation below.
-             if (!outcome.error.isEmpty()) {
-                 setStatus(outcome.error);
-                 return;
-             }
-             if (outcome.page.entries.empty()) {
-                 setStatus(!engine_.isLocal()
-                               ? tr("This file is not in this library yet; it is found after the "
-                                    "engine's next scan.")
-                               : tr("This file is not in the local library. Add its folder and "
-                                    "Refresh first."));
-                 return;
-             }
-             if (generation != generation_)
-                 return;
-             const auto found = outcome.page.entries.front();
-             auto locating = this->locating(found, raw_path, album, outcome.way);
-             if (!locating) {
-                 setStatus(view_.empty() ? tr("This file is not in this view.")
-                                         : !outcome.way.located
-                                             ? tr("This engine cannot locate in a view yet; update "
-                                                  "its melodyd.")
-                                             : tr("This file is not in this view."));
-                 return;
-             }
-             search_.clear();
-             emit searchChanged();
-             expanded_entries_.clear();
-             current_entry_.clear();
-             reload();
-             locating_ = std::move(locating);
-         }});
+                 outcome.page = std::move(*page);
+                 if (!view.empty() && !outcome.page.entries.empty()) {
+                     persistence::LibraryQuery way;
+                     way.kind = persistence::LibraryEntryKind::group;
+                     way.view = view;
+                     way.raw_path = raw_path;
+                     auto located = library.query(way, cancellation);
+                     if (!located) {
+                         outcome.error = text(located.error().message);
+                         return outcome;
+                     }
+                     outcome.way = std::move(*located);
+                 }
+                 return outcome;
+             },
+             [this, generation, album, raw_path](Outcome outcome) {
+                 // A failed or empty lookup is a fact about the queried path, true
+                 // however the tree changed while the query ran. Reported before
+                 // the staleness check, which guards the navigation below.
+                 if (!outcome.error.isEmpty()) {
+                     setStatus(outcome.error);
+                     return;
+                 }
+                 if (outcome.page.entries.empty()) {
+                     setStatus(
+                         !engine_.isLocal()
+                             ? tr("This file is not in this library yet; it is found after the "
+                                  "engine's next scan.")
+                             : tr("This file is not in the local library. Add its folder and "
+                                  "Refresh first."));
+                     return;
+                 }
+                 if (generation != generation_)
+                     return;
+                 const auto found = outcome.page.entries.front();
+                 auto locating = this->locating(found, raw_path, album, outcome.way);
+                 if (!locating) {
+                     setStatus(view_.empty() ? tr("This file is not in this view.")
+                               : !outcome.way.located
+                                   ? tr("This engine cannot locate in a view yet; update "
+                                        "its melodyd.")
+                                   : tr("This file is not in this view."));
+                     return;
+                 }
+                 search_.clear();
+                 emit searchChanged();
+                 expanded_entries_.clear();
+                 current_entry_.clear();
+                 reload();
+                 locating_ = std::move(locating);
+             }});
 }
 
 LibraryBrowser::Locating LibraryBrowser::locating(const persistence::LibraryEntry& album_entry,
@@ -600,9 +604,10 @@ LibraryBrowser::Locating LibraryBrowser::locating(const persistence::LibraryEntr
     }
     // Recently added lists albums, newest first: the album, whichever asked.
     if (newest_first_) {
-        return [key = album_entry.key](const persistence::LibraryEntry& entry, const std::size_t depth) {
+        return [key = album_entry.key](const persistence::LibraryEntry& entry,
+                                       const std::size_t depth) {
             return depth == 0U && entry.kind == Kind::album && entry.key == key ? Step::target
-                                                                               : Step::none;
+                                                                                : Step::none;
         };
     }
     // The artist tree: the artist, and under it the album.
@@ -781,13 +786,11 @@ void LibraryBrowser::describeItem(QStandardItem& item, const persistence::Librar
     item.setEditable(false);
     item.setDragEnabled(entry.available > 0U);
     item.setDropEnabled(false);
-    item.setIcon(QIcon::fromTheme(entry.kind == persistence::LibraryEntryKind::artist
-                                      ? QStringLiteral("avatar-default")
-                                  : entry.kind == persistence::LibraryEntryKind::album
-                                      ? QStringLiteral("media-optical-audio")
-                                  : entry.kind == persistence::LibraryEntryKind::group
-                                      ? QStringLiteral("folder-music")
-                                      : QStringLiteral("audio-x-generic")));
+    item.setIcon(QIcon::fromTheme(
+        entry.kind == persistence::LibraryEntryKind::artist  ? QStringLiteral("avatar-default")
+        : entry.kind == persistence::LibraryEntryKind::album ? QStringLiteral("media-optical-audio")
+        : entry.kind == persistence::LibraryEntryKind::group ? QStringLiteral("folder-music")
+                                                             : QStringLiteral("audio-x-generic")));
     item.setData(QVariant::fromValue(entry), entry_role);
     // A track by its file, an album by whose it is, an artist by name alone.
     item.setToolTip(entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
@@ -899,89 +902,89 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
     query.offset = 0U;
     const auto generation = generation_;
     const auto root = !parent.isValid();
-    enqueue(
-        {[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
-             Outcome outcome;
-             const auto result = library.query(query, cancellation);
-             if (result) {
-                 outcome.page = *result;
-             } else {
-                 outcome.error = text(result.error().message);
-             }
-             return outcome;
-         },
-         [this, parent, root, query, generation](Outcome outcome) {
-             if (generation != generation_ || (!root && !parent.isValid()) ||
-                 !outcome.error.isEmpty()) {
-                 return;
-             }
-             auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
-             if (target == nullptr) {
-                 return;
-             }
-             // Rows that are no entry -- "Show more…", "No matches" -- go;
-             // what stays is matched by its entry.
-             for (int row = target->rowCount() - 1; row >= 0; --row) {
-                 if (!target->child(row)->data(entry_role).isValid()) {
-                     target->removeRow(row);
+    enqueue({[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
+                 Outcome outcome;
+                 const auto result = library.query(query, cancellation);
+                 if (result) {
+                     outcome.page = *result;
+                 } else {
+                     outcome.error = text(result.error().message);
                  }
-             }
-             int at = 0;
-             for (auto entry : outcome.page.entries) {
-                 prepareEntry(entry, query);
-                 const auto key = entryKey(entry);
-                 int found = -1;
-                 for (int row = at; row < target->rowCount(); ++row) {
-                     if (entryKey(target->child(row)->data(entry_role)
-                                      .value<persistence::LibraryEntry>()) == key) {
-                         found = row;
-                         break;
+                 return outcome;
+             },
+             [this, parent, root, query, generation](Outcome outcome) {
+                 if (generation != generation_ || (!root && !parent.isValid()) ||
+                     !outcome.error.isEmpty()) {
+                     return;
+                 }
+                 auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
+                 if (target == nullptr) {
+                     return;
+                 }
+                 // Rows that are no entry -- "Show more…", "No matches" -- go;
+                 // what stays is matched by its entry.
+                 for (int row = target->rowCount() - 1; row >= 0; --row) {
+                     if (!target->child(row)->data(entry_role).isValid()) {
+                         target->removeRow(row);
                      }
                  }
-                 QStandardItem* item = nullptr;
-                 if (found == at) {
-                     item = target->child(at);
-                 } else if (found > at) {
-                     // Moved: taken with what it holds, and opened again.
-                     auto taken = target->takeRow(found);
-                     target->insertRow(at, taken);
-                     item = target->child(at);
-                     if (expanded_entries_.contains(key)) {
+                 int at = 0;
+                 for (auto entry : outcome.page.entries) {
+                     prepareEntry(entry, query);
+                     const auto key = entryKey(entry);
+                     int found = -1;
+                     for (int row = at; row < target->rowCount(); ++row) {
+                         if (entryKey(target->child(row)
+                                          ->data(entry_role)
+                                          .value<persistence::LibraryEntry>()) == key) {
+                             found = row;
+                             break;
+                         }
+                     }
+                     QStandardItem* item = nullptr;
+                     if (found == at) {
+                         item = target->child(at);
+                     } else if (found > at) {
+                         // Moved: taken with what it holds, and opened again.
+                         auto taken = target->takeRow(found);
+                         target->insertRow(at, taken);
+                         item = target->child(at);
+                         if (expanded_entries_.contains(key)) {
+                             emit expandRequested(item->index());
+                         }
+                     } else {
+                         item = new QStandardItem;
+                         target->insertRow(at, item);
+                     }
+                     // Said again as it is now: counts, ratings, what is
+                     // available -- its rows and whether they are open kept.
+                     describeItem(*item, entry);
+                     if (found < 0 && expanded_entries_.contains(key)) {
                          emit expandRequested(item->index());
                      }
-                 } else {
-                     item = new QStandardItem;
-                     target->insertRow(at, item);
+                     ++at;
                  }
-                 // Said again as it is now: counts, ratings, what is
-                 // available -- its rows and whether they are open kept.
-                 describeItem(*item, entry);
-                 if (found < 0 && expanded_entries_.contains(key)) {
-                     emit expandRequested(item->index());
+                 if (target->rowCount() > at) {
+                     target->removeRows(at, target->rowCount() - at);
                  }
-                 ++at;
-             }
-             if (target->rowCount() > at) {
-                 target->removeRows(at, target->rowCount() - at);
-             }
-             if (outcome.page.more) {
-                 auto next = query;
-                 next.offset = outcome.page.entries.size();
-                 auto* more = new QStandardItem(tr("Show more…"));
-                 more->setEditable(false);
-                 more->setDragEnabled(false);
-                 more->setData(true, more_role);
-                 more->setData(QVariant::fromValue(next), query_role);
-                 target->appendRow(more);
-             } else if (target->rowCount() == 0) {
-                 const bool top = root && query.text.empty();
-                 auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
-                 empty->setEnabled(false);
-                 empty->setData(top, empty_state_role);
-                 target->appendRow(empty);
-             }
-         },
-         true});
+                 if (outcome.page.more) {
+                     auto next = query;
+                     next.offset = outcome.page.entries.size();
+                     auto* more = new QStandardItem(tr("Show more…"));
+                     more->setEditable(false);
+                     more->setDragEnabled(false);
+                     more->setData(true, more_role);
+                     more->setData(QVariant::fromValue(next), query_role);
+                     target->appendRow(more);
+                 } else if (target->rowCount() == 0) {
+                     const bool top = root && query.text.empty();
+                     auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
+                     empty->setEnabled(false);
+                     empty->setData(top, empty_state_role);
+                     target->appendRow(empty);
+                 }
+             },
+             true});
 }
 
 void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
@@ -993,92 +996,91 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
     query.limit = 100'000U;
     const auto generation = generation_;
     const auto root = !parent.isValid();
-    enqueue(
-        {[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
-             Outcome outcome;
-             const auto result = library.query(query, cancellation);
-             if (result) {
-                 outcome.page = *result;
-             } else {
-                 outcome.error = text(result.error().message);
-             }
-             return outcome;
-         },
-         [this, parent, root, query, generation](Outcome outcome) mutable {
-             if (generation != generation_ || (!root && !parent.isValid())) {
-                 return;
-             }
-             auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
-             if (target == nullptr) {
-                 return;
-             }
-             if (!outcome.error.isEmpty()) {
-                 setStatus(outcome.error);
-                 target->setData(false, loaded_role);
-                 return;
-             }
-             if (query.offset == 0U) {
-                 target->removeRows(0, target->rowCount());
-             }
-             if (!scanning_ && status_ == tr("Searching…")) {
-                 setStatus(search_.trimmed().isEmpty() ? tr("Browse artists and albums.")
-                                                       : tr("Search results"));
-             }
-             // ADR-0273: how deep these rows are, for the way being located.
-             std::size_t depth = 0U;
-             for (QModelIndex above = parent; above.isValid(); above = above.parent()) {
-                 ++depth;
-             }
-             bool on_the_way = false;
-             for (auto entry : outcome.page.entries) {
-                 prepareEntry(entry, query);
-                 auto* item = new QStandardItem;
-                 describeItem(*item, entry);
-                 target->appendRow(item);
-                 if (locating_) {
-                     const auto step = locating_(entry, depth);
-                     if (step != Step::none) {
-                         on_the_way = true;
+    enqueue({[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
+                 Outcome outcome;
+                 const auto result = library.query(query, cancellation);
+                 if (result) {
+                     outcome.page = *result;
+                 } else {
+                     outcome.error = text(result.error().message);
+                 }
+                 return outcome;
+             },
+             [this, parent, root, query, generation](Outcome outcome) mutable {
+                 if (generation != generation_ || (!root && !parent.isValid())) {
+                     return;
+                 }
+                 auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
+                 if (target == nullptr) {
+                     return;
+                 }
+                 if (!outcome.error.isEmpty()) {
+                     setStatus(outcome.error);
+                     target->setData(false, loaded_role);
+                     return;
+                 }
+                 if (query.offset == 0U) {
+                     target->removeRows(0, target->rowCount());
+                 }
+                 if (!scanning_ && status_ == tr("Searching…")) {
+                     setStatus(search_.trimmed().isEmpty() ? tr("Browse artists and albums.")
+                                                           : tr("Search results"));
+                 }
+                 // ADR-0273: how deep these rows are, for the way being located.
+                 std::size_t depth = 0U;
+                 for (QModelIndex above = parent; above.isValid(); above = above.parent()) {
+                     ++depth;
+                 }
+                 bool on_the_way = false;
+                 for (auto entry : outcome.page.entries) {
+                     prepareEntry(entry, query);
+                     auto* item = new QStandardItem;
+                     describeItem(*item, entry);
+                     target->appendRow(item);
+                     if (locating_) {
+                         const auto step = locating_(entry, depth);
+                         if (step != Step::none) {
+                             on_the_way = true;
+                             emit expandRequested(item->index());
+                         }
+                         if (step == Step::target) {
+                             emit currentRequested(item->index(), true);
+                             locating_ = {};
+                             setStatus(tr("Located in library."));
+                         }
+                     }
+                     if (current_entry_ == entryKey(entry)) {
+                         emit currentRequested(item->index(), false);
+                     }
+                     if (expanded_entries_.contains(entryKey(entry))) {
                          emit expandRequested(item->index());
                      }
-                     if (step == Step::target) {
-                         emit currentRequested(item->index(), true);
-                         locating_ = {};
-                         setStatus(tr("Located in library."));
+                 }
+                 if (outcome.page.more) {
+                     query.offset += outcome.page.entries.size();
+                     auto* more = new QStandardItem(tr("Show more…"));
+                     more->setEditable(false);
+                     more->setDragEnabled(false);
+                     more->setData(true, more_role);
+                     more->setData(QVariant::fromValue(query), query_role);
+                     target->appendRow(more);
+                     // Not among these: further on, then.
+                     if (locating_ && !on_the_way) {
+                         target->removeRow(more->row());
+                         loadChildren(parent, query);
                      }
+                 } else if (target->rowCount() == 0) {
+                     // Why it is empty, at the top: a search that found nothing
+                     // is not a library with no folders.
+                     const bool top = !parent.isValid() && query.text.empty();
+                     auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
+                     empty->setEnabled(false);
+                     empty->setData(top, empty_state_role);
+                     target->appendRow(empty);
                  }
-                 if (current_entry_ == entryKey(entry)) {
-                     emit currentRequested(item->index(), false);
-                 }
-                 if (expanded_entries_.contains(entryKey(entry))) {
-                     emit expandRequested(item->index());
-                 }
-             }
-             if (outcome.page.more) {
-                 query.offset += outcome.page.entries.size();
-                 auto* more = new QStandardItem(tr("Show more…"));
-                 more->setEditable(false);
-                 more->setDragEnabled(false);
-                 more->setData(true, more_role);
-                 more->setData(QVariant::fromValue(query), query_role);
-                 target->appendRow(more);
-                 // Not among these: further on, then.
-                 if (locating_ && !on_the_way) {
-                     target->removeRow(more->row());
-                     loadChildren(parent, query);
-                 }
-             } else if (target->rowCount() == 0) {
-                 // Why it is empty, at the top: a search that found nothing
-                 // is not a library with no folders.
-                 const bool top = !parent.isValid() && query.text.empty();
-                 auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
-                 empty->setEnabled(false);
-                 empty->setData(top, empty_state_role);
-                 target->appendRow(empty);
-             }
-             emit levelLoaded();
-         },
-         true});
+                 emit levelLoaded();
+             },
+             true});
 }
 
 void LibraryBrowser::loadFilterChildren(const QPersistentModelIndex& parent,
@@ -1535,16 +1537,17 @@ void LibraryBrowser::loadRoots() {
                      if (unavailable) {
                          ++offline;
                      }
-                     roots_.push_back(Root{
-                         .raw_path = root.raw_path,
-                         .label = pathLabel(root.raw_path) + (root.available ? QString{}
-                                                              : unavailable ? tr(" — unavailable")
-                                                                            : tr(" — not scanned")),
-                         .tooltip = text(root.error)});
+                     roots_.push_back(Root{.raw_path = root.raw_path,
+                                           .label = pathLabel(root.raw_path) +
+                                                    (root.available ? QString{}
+                                                     : unavailable  ? tr(" — unavailable")
+                                                                    : tr(" — not scanned")),
+                                           .tooltip = text(root.error)});
                  }
                  emit rootsChanged();
                  if (offline > 0U && !scanning_) {
-                     setStatus(tr("%1 folders unavailable. Cached music is still shown.").arg(offline));
+                     setStatus(
+                         tr("%1 folders unavailable. Cached music is still shown.").arg(offline));
                  }
              }});
 }

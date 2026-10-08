@@ -19,9 +19,8 @@ undo_operations(const std::span<const UndoRequest> requests,
     outcomes.reserve(requests.size());
     for (const auto& request : requests) {
         if (cancellation.is_cancellation_requested()) {
-            return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
-                                               .message = "Undo stopped",
-                                               .context = {}});
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::cancelled, .message = "Undo stopped", .context = {}});
         }
         UndoOutcome outcome{.request = request,
                             .issue = std::nullopt,

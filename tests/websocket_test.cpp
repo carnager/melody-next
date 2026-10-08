@@ -45,7 +45,8 @@ void require(const bool condition, const std::string_view message) {
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     ::inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    require(::connect(connection, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0,
+    require(::connect(connection, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) ==
+                0,
             "the stream port answers");
     return connection;
 }
@@ -113,8 +114,9 @@ void send_bytes(const int descriptor, const std::string& bytes) {
         }
     }
     for (std::size_t index = 0; index < payload.size(); ++index) {
-        out.push_back(masked ? static_cast<char>(static_cast<std::uint8_t>(payload[index]) ^ mask[index % 4U])
-                             : payload[index]);
+        out.push_back(
+            masked ? static_cast<char>(static_cast<std::uint8_t>(payload[index]) ^ mask[index % 4U])
+                   : payload[index]);
     }
     return out;
 }
@@ -185,35 +187,45 @@ int main() {
         std::string kept;
         const auto head = handshake(client, kept);
         require(head.starts_with("HTTP/1.1 101"), "the WebSocket is taken");
-        require(head.find("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") != std::string::npos,
+        require(head.find("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") !=
+                    std::string::npos,
                 "the handshake is answered");
 
         // As on TCP: nothing before the password.
-        const auto refused = ask(client, kept, Json{{"id", 1}, {"method", "test.echo"}, {"params", {{"said", "early"}}}});
+        const auto refused =
+            ask(client, kept,
+                Json{{"id", 1}, {"method", "test.echo"}, {"params", {{"said", "early"}}}});
         require(refused.contains("error") &&
                     refused["error"].value("code", std::string{}) == "unauthorized",
                 "nothing is answered before the password");
-        const auto admitted = ask(client, kept, Json{{"id", 3}, {"method", "session.authenticate"},
-                                                     {"params", {{"password", "secret"}}}});
+        const auto admitted = ask(client, kept,
+                                  Json{{"id", 3},
+                                       {"method", "session.authenticate"},
+                                       {"params", {{"password", "secret"}}}});
         require(admitted.contains("result") && admitted["result"].value("authenticated", false),
                 "the password admits it");
-        const auto echoed = ask(client, kept, Json{{"id", 4}, {"method", "test.echo"},
-                                                   {"params", {{"said", std::string(300, 'x')}}}});
+        const auto echoed = ask(client, kept,
+                                Json{{"id", 4},
+                                     {"method", "test.echo"},
+                                     {"params", {{"said", std::string(300, 'x')}}}});
         require(echoed["result"].value("echo", std::string{}) == std::string(300, 'x'),
                 "a request is answered, at any length");
 
         // A ping is answered with its payload.
         send_bytes(client, client_frame(0x9, "are you there"));
         const auto pong = server_frame(client, kept);
-        require(pong && pong->opcode == 0xA && pong->payload == "are you there", "a ping is answered");
+        require(pong && pong->opcode == 0xA && pong->payload == "are you there",
+                "a ping is answered");
 
         // A message in two parts is one request.
-        const std::string whole = Json{{"id", 5}, {"method", "test.echo"}, {"params", {{"said", "parts"}}}}.dump();
+        const std::string whole =
+            Json{{"id", 5}, {"method", "test.echo"}, {"params", {{"said", "parts"}}}}.dump();
         auto first = client_frame(0x1, whole.substr(0, 10));
         first[0] = static_cast<char>(0x01);
         send_bytes(client, first + client_frame(0x0, whole.substr(10)));
         const auto joined = server_frame(client, kept);
-        require(joined && Json::parse(joined->payload)["result"].value("echo", std::string{}) == "parts",
+        require(joined &&
+                    Json::parse(joined->payload)["result"].value("echo", std::string{}) == "parts",
                 "a message in parts is one request");
         ::close(client);
     }
@@ -223,8 +235,10 @@ int main() {
         const auto client = connect_to(port);
         std::string kept;
         require(handshake(client, kept).starts_with("HTTP/1.1 101"), "taken");
-        const auto wrong = ask(client, kept, Json{{"id", 1}, {"method", "session.authenticate"},
-                                                  {"params", {{"password", "guess"}}}});
+        const auto wrong = ask(client, kept,
+                               Json{{"id", 1},
+                                    {"method", "session.authenticate"},
+                                    {"params", {{"password", "guess"}}}});
         require(wrong.contains("error"), "a wrong password is refused");
         const auto closed = server_frame(client, kept);
         require(closed && closed->opcode == 0x8, "and the WebSocket closed");

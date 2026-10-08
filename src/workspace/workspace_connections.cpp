@@ -238,7 +238,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
     // placeholder: "remote" for the one remote of an older release, whose
     // lists say so, or its address for one added since.
     added->key = !setting.id.isEmpty() ? EngineKey::fromText(setting.id)
-                 : first ? EngineKey::remote()
+                 : first               ? EngineKey::remote()
                          : EngineKey::fromText(QStringLiteral("address:") + setting.address);
     added->setting = setting;
     added->password = setting.effectivePassword();
@@ -345,8 +345,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
     view_->engineConnected(*link, first);
 }
 
-void Workspace::adoptLibraryChange(const EngineKey& engine,
-                                   const std::vector<std::string>& paths,
+void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                                    const std::vector<std::string>& albums, const bool everything) {
     if (auto* found = link(engine); found != nullptr && found->browser) {
         found->browser->applyChanges(albums, everything);
@@ -482,22 +481,24 @@ void Workspace::watchFileWork(EngineLink& link) {
                             .toStdString()));
                 }
                 if (chosen.contains(QLatin1String(SettingsKeys::rating_backup_key))) {
-                    static_cast<void>(
-                        work->set_rating_backup_tag(SettingsKeys::ratingBackupTag()));
+                    static_cast<void>(work->set_rating_backup_tag(SettingsKeys::ratingBackupTag()));
                 }
                 // ADR-0263: once chosen, how long it keeps what writes replace.
                 if (chosen.contains(QLatin1String(SettingsKeys::undo_keep_days_key)) ||
                     chosen.contains(QLatin1String(SettingsKeys::undo_keep_writes_key)) ||
                     chosen.contains(QLatin1String(SettingsKeys::undo_keep_gigabytes_key))) {
                     static_cast<void>(work->set_backup_retention(
-                        chosen.value(QLatin1String(SettingsKeys::undo_keep_days_key),
-                                     SettingsKeys::undo_keep_days_default)
+                        chosen
+                            .value(QLatin1String(SettingsKeys::undo_keep_days_key),
+                                   SettingsKeys::undo_keep_days_default)
                             .toInt(),
-                        chosen.value(QLatin1String(SettingsKeys::undo_keep_writes_key),
-                                     SettingsKeys::undo_keep_writes_default)
+                        chosen
+                            .value(QLatin1String(SettingsKeys::undo_keep_writes_key),
+                                   SettingsKeys::undo_keep_writes_default)
                             .toInt(),
-                        chosen.value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
-                                     SettingsKeys::undo_keep_gigabytes_default)
+                        chosen
+                            .value(QLatin1String(SettingsKeys::undo_keep_gigabytes_key),
+                                   SettingsKeys::undo_keep_gigabytes_default)
                             .toInt()));
                 }
                 if (auto answer = work->interrupted()) {
@@ -544,38 +545,39 @@ void Workspace::watchFileWork(EngineLink& link) {
                     }
                 }
             }
-            postBack(workspace, [workspace, work, does, recovered,
-                                 interrupted = std::move(interrupted)] {
-                if (!workspace) {
-                    return;
-                }
-                if (recovered > 0U) {
-                    workspace->view_->showMessage(
-                        QStringLiteral("Recovered %1 interrupted file operation%2")
-                            .arg(recovered)
-                            .arg(recovered == 1U ? QString{} : QStringLiteral("s")),
-                        5'000);
-                }
-                for (const auto& reported : interrupted) {
-                    if (std::ranges::none_of(
-                            workspace->engine_interruptions_,
-                            [&reported](const auto& known) { return known.id == reported.id; })) {
-                        workspace->engine_interruptions_.push_back(reported);
-                    }
-                }
-                workspace->view_->engineInterruptionsChanged(!interrupted.empty());
-                // By the connection, not the key: an engine's key changes
-                // when it first says its id.
-                for (const auto& candidate : workspace->engines_) {
-                    if (candidate->file_work == work) {
-                        candidate->does_file_work = does;
-                    }
-                }
-                if (does) {
-                    // ADR-0237: it names files with this window's layouts.
-                    workspace->pushLayouts();
-                }
-            });
+            postBack(workspace,
+                     [workspace, work, does, recovered, interrupted = std::move(interrupted)] {
+                         if (!workspace) {
+                             return;
+                         }
+                         if (recovered > 0U) {
+                             workspace->view_->showMessage(
+                                 QStringLiteral("Recovered %1 interrupted file operation%2")
+                                     .arg(recovered)
+                                     .arg(recovered == 1U ? QString{} : QStringLiteral("s")),
+                                 5'000);
+                         }
+                         for (const auto& reported : interrupted) {
+                             if (std::ranges::none_of(workspace->engine_interruptions_,
+                                                      [&reported](const auto& known) {
+                                                          return known.id == reported.id;
+                                                      })) {
+                                 workspace->engine_interruptions_.push_back(reported);
+                             }
+                         }
+                         workspace->view_->engineInterruptionsChanged(!interrupted.empty());
+                         // By the connection, not the key: an engine's key changes
+                         // when it first says its id.
+                         for (const auto& candidate : workspace->engines_) {
+                             if (candidate->file_work == work) {
+                                 candidate->does_file_work = does;
+                             }
+                         }
+                         if (does) {
+                             // ADR-0237: it names files with this window's layouts.
+                             workspace->pushLayouts();
+                         }
+                     });
         }));
     };
     connect(link.playback, &EnginePlayback::connected, this, probe);

@@ -47,8 +47,7 @@ QString applyPendingWorkspaceRestore() {
         const auto rollback =
             std::filesystem::path{QFile::encodeName(data + rollback_name).toStdString()};
         const auto backup = std::filesystem::path{QFile::encodeName(pending).toStdString()};
-        auto restored =
-            persistence::restore_workspace_database_backup(backup, live, rollback);
+        auto restored = persistence::restore_workspace_database_backup(backup, live, rollback);
         if (restored) {
             QString settings_error;
             if (!pending_settings.isEmpty()) {

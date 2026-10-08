@@ -159,7 +159,8 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
         }
         if (event.name == "list.changed") {
             const auto id = QString::fromStdString(event.data.value("id", std::string{}));
-            const auto revision = static_cast<quint64>(event.data.value("revision", std::uint64_t{0}));
+            const auto revision =
+                static_cast<quint64>(event.data.value("revision", std::uint64_t{0}));
             const bool deleted = event.data.value("deleted", false);
             if (self && !id.isEmpty()) {
                 QMetaObject::invokeMethod(
@@ -273,43 +274,41 @@ void EnginePlayback::maintain() {
 void EnginePlayback::request(const QString& method, protocol::Json params, Answer answer,
                              const bool settles) {
     if (!client_) {
-        answer(std::unexpected(core::Error{.code = core::ErrorCode::io,
-                                           .message = "no engine is connected",
-                                           .context = {}}));
+        answer(std::unexpected(core::Error{
+            .code = core::ErrorCode::io, .message = "no engine is connected", .context = {}}));
         return;
     }
     const QPointer self{this};
     if (settles) {
         ++in_flight_;
     }
-    static_cast<void>(QtConcurrent::run(
-        &pool_, [self, this, method, params = std::move(params), answer = std::move(answer),
-                 settles] {
-            if (!self || client_ == nullptr) {
-                if (settles) {
-                    --in_flight_;
-                }
-                return;
-            }
-            auto result = client_->call(method.toStdString(), params);
+    static_cast<void>(QtConcurrent::run(&pool_, [self, this, method, params = std::move(params),
+                                                 answer = std::move(answer), settles] {
+        if (!self || client_ == nullptr) {
             if (settles) {
                 --in_flight_;
             }
-            QMetaObject::invokeMethod(
-                self,
-                [self, answer, result = std::move(result), settles] {
-                    if (!self) {
-                        return;
-                    }
-                    answer(result);
-                    // A state skipped while this was on its way is looked at
-                    // again now.
-                    if (settles) {
-                        emit self->changed();
-                    }
-                },
-                Qt::QueuedConnection);
-        }));
+            return;
+        }
+        auto result = client_->call(method.toStdString(), params);
+        if (settles) {
+            --in_flight_;
+        }
+        QMetaObject::invokeMethod(
+            self,
+            [self, answer, result = std::move(result), settles] {
+                if (!self) {
+                    return;
+                }
+                answer(result);
+                // A state skipped while this was on its way is looked at
+                // again now.
+                if (settles) {
+                    emit self->changed();
+                }
+            },
+            Qt::QueuedConnection);
+    }));
 }
 
 void EnginePlayback::retire() {
@@ -685,7 +684,8 @@ std::optional<LocalTrackRow> EnginePlayback::rowOfEntry(const protocol::Json& en
             row.selection.subsong_index = subsong->get<int>();
         }
     }
-    if (const auto segment = entry.find("segment"); segment != entry.end() && segment->is_object()) {
+    if (const auto segment = entry.find("segment");
+        segment != entry.end() && segment->is_object()) {
         formats::SampleRange range;
         range.start_sample = segment->value("start_sample", std::int64_t{0});
         if (const auto end = segment->find("end_sample");
@@ -819,16 +819,16 @@ EnginePlayback::continuationsOf(const protocol::Json& data) {
             };
             found.insert(
                 list,
-                Continuation{
-                    .rule_id = QString::fromStdString(value.value("rule", std::string{})),
-                    .name = QString::fromStdString(value.value("name", std::string{})),
-                    .query = QString::fromStdString(value.value("query", std::string{})),
-                    .group_by = QString::fromStdString(value.value("group_by", std::string{})),
-                    .groups = count("groups", 0),
-                    .per_group = count("per_group", 0),
-                    .limit = count("limit", 100),
-                    .shuffle = value.value("shuffle", false),
-                    .selection_told = value.contains("groups")});
+                Continuation{.rule_id = QString::fromStdString(value.value("rule", std::string{})),
+                             .name = QString::fromStdString(value.value("name", std::string{})),
+                             .query = QString::fromStdString(value.value("query", std::string{})),
+                             .group_by =
+                                 QString::fromStdString(value.value("group_by", std::string{})),
+                             .groups = count("groups", 0),
+                             .per_group = count("per_group", 0),
+                             .limit = count("limit", 100),
+                             .shuffle = value.value("shuffle", false),
+                             .selection_told = value.contains("groups")});
         }
     }
     return found;

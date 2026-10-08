@@ -14,7 +14,8 @@
 namespace trackknife::bench {
 
 FolderBrowser::FolderBrowser(QObject* parent)
-    : QObject(parent), model_(new ui::LocalFolderTreeModel(this)), bookmarks_(loadFolderBookmarks()) {}
+    : QObject(parent), model_(new ui::LocalFolderTreeModel(this)),
+      bookmarks_(loadFolderBookmarks()) {}
 
 QVariantList FolderBrowser::bookmarks() const {
     QVariantList list;
@@ -29,7 +30,9 @@ bool FolderBrowser::isDirectory(const QModelIndex& index) const {
     return index.isValid() && model_->isDirectory(index);
 }
 
-std::string FolderBrowser::rawPath(const QModelIndex& index) const { return model_->rawPath(index); }
+std::string FolderBrowser::rawPath(const QModelIndex& index) const {
+    return model_->rawPath(index);
+}
 
 void FolderBrowser::revealBookmark(const int row) {
     if (row >= 0 && row < static_cast<int>(bookmarks_.size())) {
@@ -103,14 +106,15 @@ void FolderBrowser::revealStep(const QPersistentModelIndex& parent_index,
         // Waits for the listing whether this starts it or another reveal
         // already has: an in-flight listing is not a loaded one.
         auto connection = std::make_shared<QMetaObject::Connection>();
-        *connection = connect(model_, &ui::LocalFolderTreeModel::directoryLoaded, this,
-                              [this, connection, parent_index, raw_path](const QModelIndex& loaded) {
-                                  if (loaded != QModelIndex{parent_index}) {
-                                      return;
-                                  }
-                                  disconnect(*connection);
-                                  revealStep(parent_index, raw_path);
-                              });
+        *connection =
+            connect(model_, &ui::LocalFolderTreeModel::directoryLoaded, this,
+                    [this, connection, parent_index, raw_path](const QModelIndex& loaded) {
+                        if (loaded != QModelIndex{parent_index}) {
+                            return;
+                        }
+                        disconnect(*connection);
+                        revealStep(parent_index, raw_path);
+                    });
         if (model_->canFetchMore(parent)) {
             model_->fetchMore(parent);
         }

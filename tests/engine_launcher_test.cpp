@@ -9,9 +9,9 @@
 #include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 
+#include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
-#include <QProcess>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -198,8 +198,8 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
                       QStringLiteral("correct horse"));
     settings.sync();
     const auto tcp = [port](const std::string& password) {
-        return protocol::Client::connect(protocol::Endpoint{
-            .socket = {}, .host = "127.0.0.1", .port = port, .token = password});
+        return protocol::Client::connect(
+            protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = password});
     };
 
     auto started = connectLocalEngine(scratch.engine);
@@ -250,11 +250,11 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     QVERIFY(remote_state.isValid());
     QProcess remote;
     remote.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
-    remote.setArguments({QStringLiteral("--socket"), remote_state.filePath(QStringLiteral("r.sock")),
-                         QStringLiteral("--state"), remote_state.path(), QStringLiteral("--name"),
-                         QStringLiteral("remote"), QStringLiteral("--listen"),
-                         QStringLiteral("127.0.0.1:%1").arg(port), QStringLiteral("--password"),
-                         QStringLiteral("correct horse")});
+    remote.setArguments({QStringLiteral("--socket"),
+                         remote_state.filePath(QStringLiteral("r.sock")), QStringLiteral("--state"),
+                         remote_state.path(), QStringLiteral("--name"), QStringLiteral("remote"),
+                         QStringLiteral("--listen"), QStringLiteral("127.0.0.1:%1").arg(port),
+                         QStringLiteral("--password"), QStringLiteral("correct horse")});
     remote.setProcessChannelMode(QProcess::MergedChannels);
     remote.start();
     QVERIFY(remote.waitForStarted());

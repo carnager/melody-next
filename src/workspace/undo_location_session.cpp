@@ -96,8 +96,8 @@ void UndoLocationSession::choose(const Place place, std::string folder) {
         postBack(self, [self, answer = std::move(answer)]() mutable {
             self->busy_ = false;
             if (!answer) {
-                self->status_ = tr("Not changed · %1")
-                                    .arg(QString::fromStdString(answer.error().message));
+                self->status_ =
+                    tr("Not changed · %1").arg(QString::fromStdString(answer.error().message));
             } else {
                 self->settle(place_named(answer->place), std::move(answer->folder),
                              std::move(answer->kept_in));

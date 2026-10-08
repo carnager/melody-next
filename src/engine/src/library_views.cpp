@@ -75,7 +75,7 @@ namespace {
         }
         if (left[i] != right[j]) {
             return static_cast<unsigned char>(left[i]) < static_cast<unsigned char>(right[j]) ? -1
-                                                                                               : 1;
+                                                                                              : 1;
         }
         ++i;
         ++j;
@@ -102,8 +102,10 @@ struct Level {
 };
 
 [[nodiscard]] core::Result<titleformat::Program> compile_level(const std::string& source) {
-    auto compiled = titleformat::compile(
-        source, {.context = titleformat::FormatContextKind::tree_level, .dialect = {}, .parse_options = {}});
+    auto compiled =
+        titleformat::compile(source, {.context = titleformat::FormatContextKind::tree_level,
+                                      .dialect = {},
+                                      .parse_options = {}});
     if (!compiled.isValid()) {
         return std::unexpected(invalid(!compiled.parse_diagnostics.empty()
                                            ? compiled.parse_diagnostics.front().message
@@ -194,8 +196,8 @@ LibraryViews::tree(const persistence::LocalLibrary& library, const LibraryQuery&
         if (!format) {
             return std::unexpected(std::move(format.error()));
         }
-        Level compiled{.format = std::move(*format), .sort = std::nullopt,
-                       .descending = level.descending};
+        Level compiled{
+            .format = std::move(*format), .sort = std::nullopt, .descending = level.descending};
         if (!level.sort.empty()) {
             auto sort = compile_level(level.sort);
             if (!sort) {
@@ -230,8 +232,8 @@ LibraryViews::tree(const persistence::LocalLibrary& library, const LibraryQuery&
             if (found == node.index.end()) {
                 found = node.index.emplace(label, static_cast<std::uint32_t>(node.children.size()))
                             .first;
-                node.children.push_back(Node{.label = label, .sort = {}, .tracks = {},
-                                             .children = {}, .index = {}});
+                node.children.push_back(
+                    Node{.label = label, .sort = {}, .tracks = {}, .children = {}, .index = {}});
             }
             auto& child = node.children[found->second];
             const auto& key = sorts[depth][std::min(branch, sorts[depth].size() - 1U)];
@@ -257,8 +259,8 @@ LibraryViews::tree(const persistence::LocalLibrary& library, const LibraryQuery&
             const auto host = track_fields(track.facts, track.entry.key);
             std::size_t branches = 1U;
             for (std::size_t depth = 0U; depth < levels.size(); ++depth) {
-                auto values =
-                    persistence::tkq_format_each(levels[depth].format, track.facts, host, cancellation);
+                auto values = persistence::tkq_format_each(levels[depth].format, track.facts, host,
+                                                           cancellation);
                 if (!values) {
                     failure = std::move(values.error());
                     return;
@@ -351,8 +353,7 @@ namespace {
         entry.available += track.available;
         albums.insert(grouped.album_keys[index]);
         if (entry.duration_ms >= 0) {
-            entry.duration_ms = track.duration_ms >= 0 ? entry.duration_ms + track.duration_ms
-                                                       : -1;
+            entry.duration_ms = track.duration_ms >= 0 ? entry.duration_ms + track.duration_ms : -1;
         }
         if (!track.date.empty() && (entry.date.empty() || track.date < entry.date)) {
             entry.date = track.date;
@@ -426,7 +427,8 @@ core::Result<LibraryPage> LibraryViews::query(const persistence::LocalLibrary& l
             if (under == node->children.end()) {
                 break;
             }
-            page.entries.push_back(describe_node(grouped, *under, depth + 1U == request.view.size()));
+            page.entries.push_back(
+                describe_node(grouped, *under, depth + 1U == request.view.size()));
             node = &*under;
         }
         return page;

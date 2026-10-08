@@ -13,8 +13,8 @@
 
 namespace trackknife::bench {
 
-core::Result<operations::PreparationPlan> planPreparation(PreparationRequest request,
-                                                          const core::CancellationToken& cancellation) {
+core::Result<operations::PreparationPlan>
+planPreparation(PreparationRequest request, const core::CancellationToken& cancellation) {
     const auto& operation_selection = request.operations;
     const auto& tools = request.tools;
     const auto& draft = request.draft;
@@ -24,9 +24,8 @@ core::Result<operations::PreparationPlan> planPreparation(PreparationRequest req
         (operation_selection.save_tags ? draft.patch_count() : 0U) + request.artwork.size();
     std::optional<metadata::MetadataWritePlan> metadata_plan;
     if (operation_selection.save_tags && !draft.empty()) {
-        auto revalidated = metadata::build_metadata_write_plan(*request.selection, draft,
-                                                               tools.access, cancellation,
-                                                               request.options);
+        auto revalidated = metadata::build_metadata_write_plan(
+            *request.selection, draft, tools.access, cancellation, request.options);
         if (!revalidated) {
             return std::unexpected(std::move(revalidated.error()));
         }
@@ -105,8 +104,7 @@ core::Result<operations::PreparationPlan> planPreparation(PreparationRequest req
             path_preflight = std::move(*checked);
         }
     }
-    return operations::assemble_preparation_plan(operation_selection,
-                                                 metadata_context_change_count,
+    return operations::assemble_preparation_plan(operation_selection, metadata_context_change_count,
                                                  std::move(metadata_plan), std::move(path_plan),
                                                  std::move(path_preflight));
 }
@@ -118,8 +116,8 @@ std::optional<std::string> libraryFolderOf(const std::string& raw_path,
         while (root.size() > 1U && root.ends_with('/')) {
             root.pop_back();
         }
-        const auto holds = root == "/" ? raw_path.starts_with('/')
-                                       : raw_path.starts_with(root + '/');
+        const auto holds =
+            root == "/" ? raw_path.starts_with('/') : raw_path.starts_with(root + '/');
         if (holds && (!found || root.size() > found->size())) {
             found = std::move(root);
         }
@@ -153,11 +151,10 @@ draftOf(const metadata::StagedMetadataSelection& selection,
         if (std::ranges::find(items, patch.item_index) == items.end()) {
             continue;
         }
-        auto stored =
-            patch.kind == metadata::StagedMetadataPatchKind::remove_field
-                ? subset.remove_field(selection, patch.item_index, patch.field_index)
-                : subset.replace_values(selection, patch.item_index, patch.field_index,
-                                        patch.values);
+        auto stored = patch.kind == metadata::StagedMetadataPatchKind::remove_field
+                          ? subset.remove_field(selection, patch.item_index, patch.field_index)
+                          : subset.replace_values(selection, patch.item_index, patch.field_index,
+                                                  patch.values);
         if (!stored) {
             return std::unexpected(std::move(stored.error()));
         }

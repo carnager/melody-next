@@ -188,12 +188,14 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
     QTRY_COMPARE(model->rowCount(jazz_alpha), 1);
     const auto jazz_one = model->index(0, 0, jazz_alpha);
     std::vector<std::string> resolved;
-    panel.resolveEntries(LibraryBrowser::selectedEntries({jazz_one}),
-                         [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
+    panel.resolveEntries(
+        LibraryBrowser::selectedEntries({jazz_one}),
+        [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
     QTRY_COMPARE(resolved, std::vector<std::string>{jazz_and_rock});
     resolved.clear();
-    panel.resolveEntries(LibraryBrowser::selectedEntries({rock}),
-                         [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
+    panel.resolveEntries(
+        LibraryBrowser::selectedEntries({rock}),
+        [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
     QTRY_COMPARE(resolved.size(), std::size_t{2});
 
     // A query narrows the view before it is grouped.
@@ -208,10 +210,11 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
     QTRY_COMPARE(rows(model).size(), 3);
 
     // A view saved in the editor is offered at once, in every panel.
-    LibraryViewDefinition by_album{.id = QStringLiteral("mine"),
-                                   .name = QStringLiteral("By album"),
-                                   .levels = {{.format = "%album%", .sort = {}, .descending = true}},
-                                   .builtin = false};
+    LibraryViewDefinition by_album{
+        .id = QStringLiteral("mine"),
+        .name = QStringLiteral("By album"),
+        .levels = {{.format = "%album%", .sort = {}, .descending = true}},
+        .builtin = false};
     QVERIFY(saveCustomLibraryViews({by_album}).has_value());
     const auto mine = choice->findData(QStringLiteral("mine"));
     QVERIFY(mine >= 0);
@@ -280,8 +283,9 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
     QCOMPARE(row(model, QStringLiteral("one"), root).data(library_kind_role).toString(),
              QStringLiteral("album"));
     resolved.clear();
-    panel.resolveEntries(LibraryBrowser::selectedEntries({root}),
-                         [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
+    panel.resolveEntries(
+        LibraryBrowser::selectedEntries({root}),
+        [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
     QTRY_COMPARE(resolved.size(), std::size_t{3});
 
     // ADR-0273: locating finds the file in the layout shown, and keeps it.

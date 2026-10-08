@@ -118,7 +118,8 @@ class Catalogue {
     // library: this reads files on the engine's machine for anyone who can
     // reach it, so it reads nothing else. Empty when there is no cover.
     [[nodiscard]] virtual core::Result<std::vector<unsigned char>>
-    artwork(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const = 0;
+    artwork(const std::string& raw_path,
+            const core::CancellationToken& cancellation = {}) const = 0;
 
     // Cached fields and technicals for the given raw paths, in input order,
     // preserving duplicates. No filesystem access: a path missing from the

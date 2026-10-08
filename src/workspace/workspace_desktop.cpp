@@ -8,7 +8,6 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "workspace/workspace_view.hpp"
 
-#include <QTimer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -16,6 +15,7 @@
 #include <QGuiApplication>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QTimer>
 
 namespace trackknife::bench {
 

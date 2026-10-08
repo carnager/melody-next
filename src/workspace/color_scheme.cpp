@@ -219,8 +219,8 @@ void ColorSchemes::apply(const ColorScheme scheme) {
     const auto icon_theme =
         !own_ ? *desktop_icon_theme_
               : iconThemeVariant(*desktop_icon_theme_,
-                               QGuiApplication::palette().color(QPalette::Window).lightness() <
-                                   128);
+                                 QGuiApplication::palette().color(QPalette::Window).lightness() <
+                                     128);
     if (icon_theme != QIcon::themeName()) {
         QIcon::setThemeName(icon_theme);
         ++icon_revision_;

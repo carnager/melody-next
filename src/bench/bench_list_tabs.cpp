@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "workspace/open_list_session.hpp"
-#include "workspace/sources.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playback_tab_widget.hpp"
@@ -12,6 +10,8 @@
 #include "bench/track_list_find_bar.hpp"
 #include "uicommon/debug_log.hpp"
 #include "uicommon/local_files_mime_data.hpp"
+#include "workspace/open_list_session.hpp"
+#include "workspace/sources.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
@@ -140,7 +140,6 @@ void BenchMainWindow::scheduleWorkspaceRestore() {
     close();
 }
 
-
 int BenchMainWindow::engineRank(const QWidget* view) const {
     const auto engine = engineOfView(view);
     for (std::size_t index = 0; index < engines_.size(); ++index) {
@@ -201,7 +200,8 @@ void BenchMainWindow::showOpenListDialog() {
         if (item == nullptr || item->parent() == nullptr) {
             return;
         }
-        session->open(tree->indexOfTopLevelItem(item->parent()), item->parent()->indexOfChild(item));
+        session->open(tree->indexOfTopLevelItem(item->parent()),
+                      item->parent()->indexOfChild(item));
     };
     connect(buttons, &QDialogButtonBox::accepted, dialog, open);
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
@@ -744,8 +744,8 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, chrome.playing);
     tabs_->setTabText(index, chrome.text);
-    tabs_->setTabIcon(index, chrome.remote ? QIcon::fromTheme(QStringLiteral("network-server"))
-                                           : QIcon{});
+    tabs_->setTabIcon(index,
+                      chrome.remote ? QIcon::fromTheme(QStringLiteral("network-server")) : QIcon{});
     tabs_->setTabToolTip(index, chrome.tooltip);
     tab.view->setAccessibleName(chrome.accessible_name);
     if (auto* close = tabs_->tabBar()->tabButton(index, QTabBar::RightSide)) {
@@ -1153,7 +1153,6 @@ void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
         dialog->libraryChanged();
     }
 }
-
 
 void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
     if (source_tab)

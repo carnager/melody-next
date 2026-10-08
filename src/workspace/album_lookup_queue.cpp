@@ -25,7 +25,8 @@ AlbumLookupQueue::AlbumLookupQueue(MusicBrainzLookupService service, QObject* pa
     : QObject(parent), service_(std::move(service)) {}
 
 void AlbumLookupQueue::add(const std::size_t id, musicbrainz::AlbumQuery query) {
-    waiting_.push_back(Album{.id = id, .query = std::move(query), .to_examine = {}, .examined = {}});
+    waiting_.push_back(
+        Album{.id = id, .query = std::move(query), .to_examine = {}, .examined = {}});
     if (!current_) {
         next();
     }
@@ -66,8 +67,9 @@ std::size_t AlbumLookupQueue::requestsLeft() const {
         left += of(album);
     }
     if (current_) {
-        left += current_->to_examine.empty() && current_->examined.empty() ? of(*current_)
-                                                                           : current_->to_examine.size();
+        left += current_->to_examine.empty() && current_->examined.empty()
+                    ? of(*current_)
+                    : current_->to_examine.size();
     }
     return left;
 }
@@ -185,28 +187,28 @@ void AlbumLookupQueue::hear(const std::size_t file) {
                 self->hear(file + 1U);
                 return;
             }
-            self->service_.acoustid_lookup(*printed, [self, fresh,
-                                                      file](core::Result<QByteArray> body) {
-                if (!fresh()) {
-                    return;
-                }
-                if (body) {
-                    const auto found = musicbrainz::parse_acoustid_lookup(view(*body));
-                    if (found) {
-                        for (const auto& result : found->results) {
-                            if (result.score < minimum_acoustid_score) {
-                                continue;
-                            }
-                            for (const auto& recording : result.recordings) {
-                                for (const auto& release : recording.release_ids) {
-                                    self->current_->heard_on[release].insert(file);
+            self->service_.acoustid_lookup(
+                *printed, [self, fresh, file](core::Result<QByteArray> body) {
+                    if (!fresh()) {
+                        return;
+                    }
+                    if (body) {
+                        const auto found = musicbrainz::parse_acoustid_lookup(view(*body));
+                        if (found) {
+                            for (const auto& result : found->results) {
+                                if (result.score < minimum_acoustid_score) {
+                                    continue;
+                                }
+                                for (const auto& recording : result.recordings) {
+                                    for (const auto& release : recording.release_ids) {
+                                        self->current_->heard_on[release].insert(file);
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                self->hear(file + 1U);
-            });
+                    self->hear(file + 1U);
+                });
         });
 }
 

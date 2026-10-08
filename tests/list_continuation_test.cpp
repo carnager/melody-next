@@ -99,11 +99,11 @@ int main(const int argc, char** argv) {
                      .set(list, engine::ContinuationRule{.rule_id = "r",
                                                          .name = "Broken",
                                                          .query = "codec (((",
-                                                        .group_by = {},
-                                                        .groups = 0U,
-                                                        .per_group = 0U,
-                                                        .limit = 100U,
-                                                        .shuffle = false})
+                                                         .group_by = {},
+                                                         .groups = 0U,
+                                                         .per_group = 0U,
+                                                         .limit = 100U,
+                                                         .shuffle = false})
                      .has_value(),
                 "a rule that does not compile is refused");
         require(continuation
@@ -244,8 +244,7 @@ int main(const int argc, char** argv) {
                 "the grouping is kept");
         {
             engine::ListContinuation restarted{*workspace, catalogue, {}};
-            require(restarted.all().at(album).group_by == "one",
-                    "and kept across a restart");
+            require(restarted.all().at(album).group_by == "one", "and kept across a restart");
         }
         require(continuation.set(album, rule(1U)).has_value(), "one track a group");
         play_alone();

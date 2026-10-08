@@ -13,9 +13,7 @@ ElidingLabel::ElidingLabel(QWidget* parent) : QLabel(parent) {
     setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 }
 
-QSize ElidingLabel::minimumSizeHint() const {
-    return {0, fontMetrics().height()};
-}
+QSize ElidingLabel::minimumSizeHint() const { return {0, fontMetrics().height()}; }
 
 QSize ElidingLabel::sizeHint() const {
     return {fontMetrics().horizontalAdvance(text()), fontMetrics().height()};

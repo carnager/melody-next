@@ -46,8 +46,9 @@ operations::ArtworkImageFitter artworkFitterFor(const FileWorkTools& tools) {
 
 std::uint32_t largestCoverEdge(const metadata::ArtworkStoragePolicy& policy) {
     std::uint32_t largest = 0U;
-    for (const auto& [writes, edge] : {std::pair{policy.embed, policy.max_embedded_edge},
-                                       std::pair{policy.write_folder_image, policy.max_folder_edge}}) {
+    for (const auto& [writes, edge] :
+         {std::pair{policy.embed, policy.max_embedded_edge},
+          std::pair{policy.write_folder_image, policy.max_folder_edge}}) {
         if (!writes) {
             continue;
         }
@@ -97,9 +98,9 @@ stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const F
                 fitted = std::move(*fit);
             }
             auto there =
-                fitted ? tools.stage(std::span{reinterpret_cast<const unsigned char*>(
-                                                   fitted->bytes.constData()),
-                                               static_cast<std::size_t>(fitted->bytes.size())})
+                fitted ? tools.stage(std::span{
+                             reinterpret_cast<const unsigned char*>(fitted->bytes.constData()),
+                             static_cast<std::size_t>(fitted->bytes.size())})
                        : tools.stage(*bytes);
             if (!there) {
                 return std::unexpected(std::move(there.error()));
@@ -118,14 +119,13 @@ namespace {
 template <typename T, typename Work>
 void answered_on(QObject* context, Work work, std::function<void(core::Result<T>)> completion) {
     const QPointer<QObject> guard{context};
-    static_cast<void>(QtConcurrent::run(
-        [guard, work = std::move(work), completion = std::move(completion)]() mutable {
-            auto answer = work();
-            postBack(guard,
-                     [answer = std::move(answer), completion = std::move(completion)]() mutable {
-                         completion(std::move(answer));
-                     });
-        }));
+    static_cast<void>(QtConcurrent::run([guard, work = std::move(work),
+                                         completion = std::move(completion)]() mutable {
+        auto answer = work();
+        postBack(guard, [answer = std::move(answer), completion = std::move(completion)]() mutable {
+            completion(std::move(answer));
+        });
+    }));
 }
 
 [[nodiscard]] QByteArray bytes_of(const std::string& body) {

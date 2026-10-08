@@ -11,8 +11,8 @@
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
-#include "trackknife/operations/undo.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/client.hpp"
 

@@ -90,17 +90,18 @@ void UndoLocationWidget::chooseFolder() {
     if (const auto& folders = session_.folders()) {
         auto* chooser = new EngineFolderDialog(engine_name_, folders, start, this);
         connect(chooser, &EngineFolderDialog::folderChosen, this, [this](const QByteArray& chosen) {
-            session_.choose(UndoLocationSession::Place::folder,
-                            std::string{chosen.constData(), static_cast<std::size_t>(chosen.size())});
+            session_.choose(
+                UndoLocationSession::Place::folder,
+                std::string{chosen.constData(), static_cast<std::size_t>(chosen.size())});
         });
         chooser->show();
         return;
     }
     const auto selected = QFileDialog::getExistingDirectory(
         this, tr("Keep undo copies in"),
-        start.empty() ? QString{}
-                      : QFile::decodeName(QByteArray{start.data(),
-                                                     static_cast<qsizetype>(start.size())}),
+        start.empty()
+            ? QString{}
+            : QFile::decodeName(QByteArray{start.data(), static_cast<qsizetype>(start.size())}),
         QFileDialog::ShowDirsOnly);
     if (selected.isEmpty()) {
         return;
@@ -122,9 +123,8 @@ void UndoLocationWidget::sync() {
         widget->setEnabled(usable);
     }
     folder_path_->setText(session_.folderText());
-    engine_folder_->setText(session_.place() == UndoLocationSession::Place::engine
-                                ? session_.keptIn()
-                                : QString{});
+    engine_folder_->setText(
+        session_.place() == UndoLocationSession::Place::engine ? session_.keptIn() : QString{});
     switch (session_.place()) {
     case UndoLocationSession::Place::beside:
         note_->setText(tr("A hidden copy of each file written stays in its folder until it is "

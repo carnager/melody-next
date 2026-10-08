@@ -1001,9 +1001,9 @@ load_publication_backups(sqlite3* database, const char* sql, const std::string& 
         const auto text = [&statement](const int column) {
             const auto* bytes =
                 static_cast<const char*>(sqlite3_column_blob(statement->get(), column));
-            return std::string{bytes == nullptr ? "" : bytes,
-                               static_cast<std::size_t>(sqlite3_column_bytes(statement->get(),
-                                                                             column))};
+            return std::string{
+                bytes == nullptr ? "" : bytes,
+                static_cast<std::size_t>(sqlite3_column_bytes(statement->get(), column))};
         };
         Row row{.id = text(0),
                 .state = sqlite3_column_int(statement->get(), 1),
@@ -1082,7 +1082,8 @@ SqliteFilePublicationJournal::load_backup(const core::StableId& id) const {
         implementation_->database,
         "SELECT journal_id, state, undo_id, completed_at_unix_seconds, updated_at_unix_seconds, "
         "error_code, error_message, kept_path, kept_device, kept_inode, kept_size, "
-        "kept_mtime_seconds, kept_mtime_nanoseconds FROM file_publication_backups WHERE journal_id = ?",
+        "kept_mtime_seconds, kept_mtime_nanoseconds FROM file_publication_backups WHERE journal_id "
+        "= ?",
         id.to_string());
     if (!backups) {
         return std::unexpected(std::move(backups.error()));
@@ -1117,14 +1118,15 @@ SqliteFilePublicationJournal::relocate_kept(const core::StableId& id, const std:
     }
     std::scoped_lock lock{implementation_->mutex};
     auto* database = implementation_->database;
-    auto statement = prepare(database,
-                             "UPDATE file_publication_backups SET kept_path = ?, kept_device = ?, "
-                             "kept_inode = ?, kept_size = ?, kept_mtime_seconds = ?, "
-                             "kept_mtime_nanoseconds = ? WHERE journal_id = ? AND state = 0");
+    auto statement =
+        prepare(database, "UPDATE file_publication_backups SET kept_path = ?, kept_device = ?, "
+                          "kept_inode = ?, kept_size = ?, kept_mtime_seconds = ?, "
+                          "kept_mtime_nanoseconds = ? WHERE journal_id = ? AND state = 0");
     if (!statement) {
         return std::unexpected(std::move(statement.error()));
     }
-    if (!bind_blob(statement->get(), 1, raw_path) || !bind_revision(statement->get(), 2, revision) ||
+    if (!bind_blob(statement->get(), 1, raw_path) ||
+        !bind_revision(statement->get(), 2, revision) ||
         !bind_blob(statement->get(), 7, id.to_string())) {
         return std::unexpected(database_error(database, "Could not bind moved retained source"));
     }

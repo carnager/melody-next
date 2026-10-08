@@ -62,9 +62,8 @@ std::optional<persistence::LibraryTrackSnapshot> described_track(const Json& des
     }
     const auto number = [&description](const char* key, const std::int64_t fallback) {
         const auto found = description.find(key);
-        return found != description.end() && found->is_number_integer()
-                   ? found->get<std::int64_t>()
-                   : fallback;
+        return found != description.end() && found->is_number_integer() ? found->get<std::int64_t>()
+                                                                        : fallback;
     };
     track.facts.duration_ms = number("duration_ms", -1);
     track.facts.codec = description.value("codec", std::string{});
@@ -87,12 +86,12 @@ std::optional<persistence::LibraryTrackSnapshot> described_track(const Json& des
                        ? found->get<std::int64_t>()
                        : std::int64_t{0};
         };
-        track.revision = core::LocalSourceRevision{
-            .device = unsigned_of("device"),
-            .inode = unsigned_of("inode"),
-            .size = unsigned_of("size"),
-            .modification_time_seconds = signed_of("seconds"),
-            .modification_time_nanoseconds = signed_of("nanoseconds")};
+        track.revision =
+            core::LocalSourceRevision{.device = unsigned_of("device"),
+                                      .inode = unsigned_of("inode"),
+                                      .size = unsigned_of("size"),
+                                      .modification_time_seconds = signed_of("seconds"),
+                                      .modification_time_nanoseconds = signed_of("nanoseconds")};
     }
     return track;
 }

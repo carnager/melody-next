@@ -96,9 +96,10 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
         // Those offered were not aligned: unplaced, until the person
         // places one.
         for (auto local = own_count_; local < local_tracks_.size(); ++local) {
-            alignment_.tracks.push_back(musicbrainz::TrackAlignment{
-                .local_index = local, .release_track_index = {}, .confidence = 0.0,
-                .user_confirmed = false});
+            alignment_.tracks.push_back(musicbrainz::TrackAlignment{.local_index = local,
+                                                                    .release_track_index = {},
+                                                                    .confidence = 0.0,
+                                                                    .user_confirmed = false});
         }
         slots_.resize(alignment_.release_tracks.size());
         std::vector<bool> placed(local_tracks_.size(), false);

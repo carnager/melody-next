@@ -407,8 +407,7 @@ AlbumBatchSession::nextNeedingYou(const std::optional<std::size_t> after) const 
     // In the order shown, from the one after `after`.
     const auto count = order_.size();
     const auto at = after ? std::ranges::find(order_, *after) : order_.end();
-    const auto first = at == order_.end() ? 0U
-                                          : static_cast<std::size_t>(at - order_.begin()) + 1U;
+    const auto first = at == order_.end() ? 0U : static_cast<std::size_t>(at - order_.begin()) + 1U;
     for (std::size_t step = 0; step < count; ++step) {
         const auto index = order_[(first + step) % count];
         if (after && index == *after) {
@@ -435,8 +434,8 @@ AlbumBatchSession::Files AlbumBatchSession::filesOf(const std::size_t index) con
         files.items.insert(files.items.end(), from.items.begin(), from.items.end());
         for (const auto item : from.items) {
             const auto& path = tagger_->itemSource(item)->raw_path;
-            files.paths.push_back(QString::fromLocal8Bit(QByteArray{
-                path.data(), static_cast<qsizetype>(path.size())}));
+            files.paths.push_back(QString::fromLocal8Bit(
+                QByteArray{path.data(), static_cast<qsizetype>(path.size())}));
         }
     };
     add(album);
@@ -456,9 +455,9 @@ AlbumBatchSession::Files AlbumBatchSession::filesOf(const std::size_t index) con
     for (const auto other : others) {
         const auto& from = albums_[other];
         add(from);
-        const auto label = from.artist.isEmpty() ? from.title
-                                                 : QStringLiteral("%1 — %2").arg(from.artist,
-                                                                                 from.title);
+        const auto label = from.artist.isEmpty()
+                               ? from.title
+                               : QStringLiteral("%1 — %2").arg(from.artist, from.title);
         files.other_albums.insert(files.other_albums.end(), from.items.size(), label);
     }
     return files;
@@ -479,7 +478,8 @@ void AlbumBatchSession::refolder(Album& album) const {
 void AlbumBatchSession::take(const std::size_t index, const std::size_t item) {
     for (std::size_t other = 0; other < albums_.size(); ++other) {
         auto& from = albums_[other];
-        if (other == index || !editable(other) || std::ranges::find(from.items, item) == from.items.end()) {
+        if (other == index || !editable(other) ||
+            std::ranges::find(from.items, item) == from.items.end()) {
             continue;
         }
         std::erase(from.items, item);
@@ -556,19 +556,19 @@ void AlbumBatchSession::undoLastWrite() {
     write_summary_.clear();
     emit changed();
     const QPointer self{this};
-    (void)QtConcurrent::run([requests = last_write_->requests, undo = tagger_->services().undo,
-                             self] {
-        auto outcome = std::make_shared<core::Result<std::vector<operations::UndoOutcome>>>(
-            undo(requests, {}));
-        QMetaObject::invokeMethod(
-            self,
-            [self, outcome] {
-                if (self) {
-                    self->undone(outcome);
-                }
-            },
-            Qt::QueuedConnection);
-    });
+    (void)QtConcurrent::run(
+        [requests = last_write_->requests, undo = tagger_->services().undo, self] {
+            auto outcome = std::make_shared<core::Result<std::vector<operations::UndoOutcome>>>(
+                undo(requests, {}));
+            QMetaObject::invokeMethod(
+                self,
+                [self, outcome] {
+                    if (self) {
+                        self->undone(outcome);
+                    }
+                },
+                Qt::QueuedConnection);
+        });
 }
 
 void AlbumBatchSession::undone(
@@ -578,8 +578,7 @@ void AlbumBatchSession::undone(
         return;
     }
     if (!*outcome) {
-        write_summary_ =
-            QStringLiteral("Nothing undone · %1").arg(text(outcome->error().message));
+        write_summary_ = QStringLiteral("Nothing undone · %1").arg(text(outcome->error().message));
         tagger_->finishWriteElsewhere({});
         emit changed();
         emit undoFinished();
@@ -646,24 +645,24 @@ void AlbumBatchSession::undone(
             : QStringLiteral("Undone in part · %1 %2 could not be put back")
                   .arg(refused)
                   .arg(refused == 1U ? QStringLiteral("file") : QStringLiteral("files"));
-    connect(tagger_, &TaggerSession::writtenElsewhere, this,
-            [this, albums] {
-                // Staged again, as before the Write.
-                for (const auto album : albums) {
-                    if (albums_[album].state != State::written &&
-                        albums_[album].state != State::staged) {
-                        continue;
-                    }
-                    albums_[album].state = State::staging;
-                    albums_[album].note.clear();
-                    to_stage_.push_back(
-                        ToStage{.album = album, .proposals = albums_[album].chosen});
+    connect(
+        tagger_, &TaggerSession::writtenElsewhere, this,
+        [this, albums] {
+            // Staged again, as before the Write.
+            for (const auto album : albums) {
+                if (albums_[album].state != State::written &&
+                    albums_[album].state != State::staged) {
+                    continue;
                 }
-                emit changed();
-                emit undoFinished();
-                stageNext();
-            },
-            Qt::SingleShotConnection);
+                albums_[album].state = State::staging;
+                albums_[album].note.clear();
+                to_stage_.push_back(ToStage{.album = album, .proposals = albums_[album].chosen});
+            }
+            emit changed();
+            emit undoFinished();
+            stageNext();
+        },
+        Qt::SingleShotConnection);
     emit changed();
     tagger_->finishWriteElsewhere(std::move(rewritten));
 }
@@ -817,15 +816,15 @@ void AlbumBatchSession::startWriter(std::vector<std::size_t> albums) {
             }
             last_write_ = std::move(last);
         }
-        write_summary_ = written == total
-                             ? QStringLiteral("Wrote %1 %2")
-                                   .arg(written)
-                                   .arg(written == 1U ? QStringLiteral("album")
-                                                      : QStringLiteral("albums"))
-                             : QStringLiteral("Wrote %1 of %2 albums · the rest stay staged, "
-                                              "saying why")
-                                   .arg(written)
-                                   .arg(total);
+        write_summary_ =
+            written == total
+                ? QStringLiteral("Wrote %1 %2")
+                      .arg(written)
+                      .arg(written == 1U ? QStringLiteral("album") : QStringLiteral("albums"))
+                : QStringLiteral("Wrote %1 of %2 albums · the rest stay staged, "
+                                 "saying why")
+                      .arg(written)
+                      .arg(total);
         writer_->deleteLater();
         writer_ = nullptr;
         emit changed();
@@ -857,9 +856,8 @@ QString AlbumBatchSession::stateText(const Album& album) {
     case State::staging:
         return QStringLiteral("Matched%1 · staging").arg(confidence());
     case State::staged:
-        return album.note.isEmpty()
-                   ? QStringLiteral("Matched%1 · staged").arg(confidence())
-                   : QStringLiteral("Staged · %1").arg(album.note);
+        return album.note.isEmpty() ? QStringLiteral("Matched%1 · staged").arg(confidence())
+                                    : QStringLiteral("Staged · %1").arg(album.note);
     case State::needs_choice:
         return album.result && !album.result->candidates.empty()
                    ? QStringLiteral("Pick a version · %1").arg(album.result->candidates.size())

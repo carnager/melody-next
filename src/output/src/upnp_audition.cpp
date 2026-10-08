@@ -178,12 +178,14 @@ void UpnpAudition::update(discovery::UpnpRenderer renderer) {
         }
     }
     // The worker's own copy, in order with the commands that use it.
-    static_cast<void>(submit([this, renderer = std::move(renderer)]() mutable {
-        device_ = std::move(renderer);
-        sink_.clear();
-        gapless_supported_ = true;
-        return core::Result<void>{};
-    }, Topic::device));
+    static_cast<void>(submit(
+        [this, renderer = std::move(renderer)]() mutable {
+            device_ = std::move(renderer);
+            sink_.clear();
+            gapless_supported_ = true;
+            return core::Result<void>{};
+        },
+        Topic::device));
 }
 bool UpnpAudition::online() const {
     const std::lock_guard lock{state_mutex_};
@@ -479,8 +481,8 @@ void UpnpAudition::run() {
 core::Result<void> UpnpAudition::load_selected_and_play(std::string path,
                                                         formats::AudioSourceSelection selection,
                                                         std::optional<formats::ReplayGainInfo>) {
-    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
-                          .segment = {}};
+    StreamRequest request{
+        .raw_path = std::move(path), .format = {}, .selection = selection, .segment = {}};
     std::uint64_t generation = 0;
     {
         const std::lock_guard lock{state_mutex_};
@@ -490,15 +492,17 @@ core::Result<void> UpnpAudition::load_selected_and_play(std::string path,
         playing_requested_ = true;
         refused_next_.reset();
     }
-    return submit([this, request = std::move(request), generation]() mutable {
-        return load_now(std::move(request), true, 0, generation);
-    }, Topic::track, true);
+    return submit(
+        [this, request = std::move(request), generation]() mutable {
+            return load_now(std::move(request), true, 0, generation);
+        },
+        Topic::track, true);
 }
 core::Result<void> UpnpAudition::load_selected_segment_and_play(
     std::string path, formats::AudioSourceSelection selection, formats::SampleRange segment,
     std::optional<formats::ReplayGainInfo>) {
-    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
-                          .segment = segment};
+    StreamRequest request{
+        .raw_path = std::move(path), .format = {}, .selection = selection, .segment = segment};
     std::uint64_t generation = 0;
     {
         const std::lock_guard lock{state_mutex_};
@@ -508,17 +512,19 @@ core::Result<void> UpnpAudition::load_selected_segment_and_play(
         playing_requested_ = true;
         refused_next_.reset();
     }
-    return submit([this, request = std::move(request), generation]() mutable {
-        return load_now(std::move(request), true, 0, generation);
-    }, Topic::track, true);
+    return submit(
+        [this, request = std::move(request), generation]() mutable {
+            return load_now(std::move(request), true, 0, generation);
+        },
+        Topic::track, true);
 }
 core::Result<void> UpnpAudition::restore_paused(std::string path, core::LocalSourceRevision,
                                                 formats::AudioSourceSelection selection,
                                                 std::optional<formats::SampleRange> segment,
                                                 std::int64_t position_ms,
                                                 std::optional<formats::ReplayGainInfo>) {
-    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
-                          .segment = segment};
+    StreamRequest request{
+        .raw_path = std::move(path), .format = {}, .selection = selection, .segment = segment};
     {
         const std::lock_guard lock{state_mutex_};
         ++generation_;
@@ -530,13 +536,15 @@ core::Result<void> UpnpAudition::restore_paused(std::string path, core::LocalSou
     }
     // Nothing is sent: the speaker may be playing for someone else, and the
     // track goes to it when it is played here.
-    return submit([this, request = std::move(request), position_ms]() mutable {
-        current_.reset();
-        next_.reset();
-        deferred_ = std::move(request);
-        pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
-        return core::Result<void>{};
-    }, Topic::track, true);
+    return submit(
+        [this, request = std::move(request), position_ms]() mutable {
+            current_.reset();
+            next_.reset();
+            deferred_ = std::move(request);
+            pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
+            return core::Result<void>{};
+        },
+        Topic::track, true);
 }
 core::Result<void>
 UpnpAudition::queue_gapless_next_selected(std::string path, formats::AudioSourceSelection selection,
@@ -638,18 +646,20 @@ core::Result<void> UpnpAudition::stop() {
         state_.state = State::empty;
         playing_requested_ = false;
     }
-    return submit([this]() -> core::Result<void> {
-        const bool sent = current_.has_value();
-        current_.reset();
-        next_.reset();
-        deferred_.reset();
-        pending_seek_ms_.reset();
-        if (!sent) {
-            return {};
-        }
-        auto stopped = call("Stop");
-        return stopped ? core::Result<void>{} : std::unexpected(stopped.error());
-    }, Topic::track, true);
+    return submit(
+        [this]() -> core::Result<void> {
+            const bool sent = current_.has_value();
+            current_.reset();
+            next_.reset();
+            deferred_.reset();
+            pending_seek_ms_.reset();
+            if (!sent) {
+                return {};
+            }
+            auto stopped = call("Stop");
+            return stopped ? core::Result<void>{} : std::unexpected(stopped.error());
+        },
+        Topic::track, true);
 }
 core::Result<void> UpnpAudition::seek_to_seconds(double seconds) {
     if (!std::isfinite(seconds) || seconds < 0 || seconds > 3600000000.0) {
@@ -687,16 +697,18 @@ core::Result<void> UpnpAudition::set_volume_percent(int percent) {
         const std::lock_guard lock{state_mutex_};
         state_.volume_percent = percent;
     }
-    return submit([this, percent]() -> core::Result<void> {
-        if (!control_ || !device_.online) {
-            return std::unexpected(unsupported("UPnP renderer is offline"));
-        }
-        auto set = control_->action(device_.rendering, "SetVolume",
-                                    {{"InstanceID", "0"},
-                                     {"Channel", "Master"},
-                                     {"DesiredVolume", std::to_string(percent)}});
-        return set ? core::Result<void>{} : std::unexpected(set.error());
-    }, Topic::device);
+    return submit(
+        [this, percent]() -> core::Result<void> {
+            if (!control_ || !device_.online) {
+                return std::unexpected(unsupported("UPnP renderer is offline"));
+            }
+            auto set = control_->action(device_.rendering, "SetVolume",
+                                        {{"InstanceID", "0"},
+                                         {"Channel", "Master"},
+                                         {"DesiredVolume", std::to_string(percent)}});
+            return set ? core::Result<void>{} : std::unexpected(set.error());
+        },
+        Topic::device);
 }
 // The mode is the engine's setting, kept for whatever output plays next; this
 // one plays at unity gain whatever it is, as its replay_gain: false says. A

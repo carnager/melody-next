@@ -134,9 +134,10 @@ namespace {
         return wire::decode_metadata_read(*read);
     }
     const auto error = file.find("error");
-    auto decoded = error != file.end() ? wire::decode_error(*error)
-                                       : core::Result<core::Error>{std::unexpected(
-                                             unexpected_answer("metadata.read"))};
+    auto decoded =
+        error != file.end()
+            ? wire::decode_error(*error)
+            : core::Result<core::Error>{std::unexpected(unexpected_answer("metadata.read"))};
     return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
 }
 
@@ -210,10 +211,11 @@ metadata::MetadataFileAccess RemoteFileWork::access() {
                                                       unexpected_answer("metadata.read"))};
             return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
         },
-        .read_many = [this](const std::vector<std::string>& raw_paths,
-                            const core::CancellationToken& cancellation) {
-            return read_many(raw_paths, cancellation);
-        }};
+        .read_many =
+            [this](const std::vector<std::string>& raw_paths,
+                   const core::CancellationToken& cancellation) {
+                return read_many(raw_paths, cancellation);
+            }};
 }
 
 core::Result<loudness::LoudnessScanResult>
@@ -258,12 +260,12 @@ RemoteFileWork::scan(const std::span<const loudness::LoudnessScanItem> items,
                 size += encoded[position].dump().size() + 1U;
             }
             if (size > job_bytes_) {
-                return std::unexpected(core::Error{
-                    .code = core::ErrorCode::limit_exceeded,
-                    .message = "an album of " + std::to_string(group.size()) +
-                               " tracks is too large to measure in one piece; group by "
-                               "release instead of the whole selection",
-                    .context = {}});
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::limit_exceeded,
+                                .message = "an album of " + std::to_string(group.size()) +
+                                           " tracks is too large to measure in one piece; group by "
+                                           "release instead of the whole selection",
+                                .context = {}});
             }
             if (!job.empty() && bytes + size > job_bytes_) {
                 jobs.push_back(std::move(job));
@@ -295,26 +297,25 @@ RemoteFileWork::scan(const std::span<const loudness::LoudnessScanItem> items,
         }
         auto outcome =
             (*connection)
-                ->run_job("loudness.scan",
-                          Json{{"items", std::move(batch)}, {"options", wire::encode(options)}},
-                          [&paths, &progress, done_before, total = items.size()](
-                              const Json& reported) {
-                              if (!progress) {
-                                  return;
-                              }
-                              loudness::LoudnessScanProgress step;
-                              step.item_index = reported.value("item_index", std::size_t{0});
-                              step.completed_items =
-                                  done_before + reported.value("completed_items", std::size_t{0});
-                              step.total_items = total;
-                              step.state = loudness::LoudnessScanState::analyzed;
-                              if (const auto found = paths.find(step.item_index);
-                                  found != paths.end()) {
-                                  step.raw_path = *found->second;
-                              }
-                              progress(step);
-                          },
-                          cancellation);
+                ->run_job(
+                    "loudness.scan",
+                    Json{{"items", std::move(batch)}, {"options", wire::encode(options)}},
+                    [&paths, &progress, done_before, total = items.size()](const Json& reported) {
+                        if (!progress) {
+                            return;
+                        }
+                        loudness::LoudnessScanProgress step;
+                        step.item_index = reported.value("item_index", std::size_t{0});
+                        step.completed_items =
+                            done_before + reported.value("completed_items", std::size_t{0});
+                        step.total_items = total;
+                        step.state = loudness::LoudnessScanState::analyzed;
+                        if (const auto found = paths.find(step.item_index); found != paths.end()) {
+                            step.raw_path = *found->second;
+                        }
+                        progress(step);
+                    },
+                    cancellation);
         if (!outcome) {
             return std::unexpected(std::move(outcome.error()));
         }
@@ -417,7 +418,8 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
             bytes += size;
         };
         for (const auto& source : plan.sources) {
-            add(size_of({.sources = {source}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {}}));
+            add(size_of(
+                {.sources = {source}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {}}));
             part.sources.push_back(source);
         }
         for (const auto& sheet : plan.cue_sheets) {
@@ -425,7 +427,8 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
             part.cue_sheets.push_back(sheet);
         }
         for (const auto& sidecar : plan.sidecars) {
-            add(size_of({.sources = {}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {sidecar}}));
+            add(size_of(
+                {.sources = {}, .patch_count = 0U, .cue_sheets = {}, .sidecars = {sidecar}}));
             part.sidecars.push_back(sidecar);
         }
         close();
@@ -437,22 +440,22 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
             merged.cancellation_requested = true;
             break;
         }
-        auto outcome = (*connection)
-                           ->run_job(
-                               "metadata.apply", Json{{"plan", wire::encode(part)}},
-                               [&progress, sources_before, total = plan.sources.size()](
-                                   const Json& reported) {
-                                   if (!progress) {
-                                       return;
-                                   }
-                                   if (auto step = wire::decode_apply_progress(reported)) {
-                                       step->source_index += sources_before;
-                                       step->completed_sources += sources_before;
-                                       step->total_sources = total;
-                                       progress(*step);
-                                   }
-                               },
-                               cancellation);
+        auto outcome =
+            (*connection)
+                ->run_job(
+                    "metadata.apply", Json{{"plan", wire::encode(part)}},
+                    [&progress, sources_before, total = plan.sources.size()](const Json& reported) {
+                        if (!progress) {
+                            return;
+                        }
+                        if (auto step = wire::decode_apply_progress(reported)) {
+                            step->source_index += sources_before;
+                            step->completed_sources += sources_before;
+                            step->total_sources = total;
+                            progress(*step);
+                        }
+                    },
+                    cancellation);
         if (!outcome) {
             return std::unexpected(std::move(outcome.error()));
         }
@@ -682,9 +685,9 @@ RemoteFileWork::stage(const std::span<const unsigned char> bytes) {
     // an original cover, a scan -- goes in parts.
     constexpr std::size_t part_bytes = 384U * 1024U;
     if (bytes.size() <= part_bytes) {
-        return image_of(answer_of(client(), "artwork.stage",
-                                  Json{{"bytes", encoded(0U, bytes.size())}}),
-                        "artwork.stage");
+        return image_of(
+            answer_of(client(), "artwork.stage", Json{{"bytes", encoded(0U, bytes.size())}}),
+            "artwork.stage");
     }
     auto upload = core::StableId::random().to_string();
     std::erase(upload, '-');
@@ -793,19 +796,19 @@ RemoteFileWork::undo(const std::span<const operations::UndoRequest> requests,
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto outcome = (*connection)
-                       ->run_job(
-                           "operations.undo", Json{{"operations", wire::encode(requests)}},
-                           [&progress](const Json& reported) {
-                               if (progress && reported.contains("completed") &&
-                                   reported.contains("total") &&
-                                   reported.at("completed").is_number_unsigned() &&
-                                   reported.at("total").is_number_unsigned()) {
-                                   progress(reported.at("completed").get<std::size_t>(),
-                                            reported.at("total").get<std::size_t>());
-                               }
-                           },
-                           cancellation);
+    auto outcome =
+        (*connection)
+            ->run_job(
+                "operations.undo", Json{{"operations", wire::encode(requests)}},
+                [&progress](const Json& reported) {
+                    if (progress && reported.contains("completed") && reported.contains("total") &&
+                        reported.at("completed").is_number_unsigned() &&
+                        reported.at("total").is_number_unsigned()) {
+                        progress(reported.at("completed").get<std::size_t>(),
+                                 reported.at("total").get<std::size_t>());
+                    }
+                },
+                cancellation);
     if (!outcome) {
         return std::unexpected(std::move(outcome.error()));
     }

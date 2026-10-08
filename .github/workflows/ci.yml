@@ -9,25 +9,34 @@ on:
 permissions:
   contents: read
 
+# Built and tested on Debian trixie, as the release is (packaging/docker):
+# TagLib 2, FFmpeg 7, Qt 6.8. Ubuntu 24.04 has TagLib 1.13 only, which the
+# build does not take, so CI had not got past configuring there.
+env:
+  DEPENDENCIES: >-
+    build-essential cmake ninja-build pkg-config git ca-certificates
+    clang clang-format clang-tidy libclang-rt-dev
+    qt6-base-dev libutf8proc-dev nlohmann-json3-dev
+    libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
+    libebur128-dev libmpdclient-dev libopenmpt-dev libpipewire-0.3-dev
+    libsqlite3-dev libtag-dev libupnp-dev libcurl4-openssl-dev libssl-dev
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
+    container: debian:trixie
     strategy:
       fail-fast: false
       matrix:
         compiler: [gcc, clang]
     env:
-      CC: ${{ matrix.compiler == 'gcc' && 'gcc-13' || 'clang-18' }}
-      CXX: ${{ matrix.compiler == 'gcc' && 'g++-13' || 'clang++-18' }}
+      CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
+      CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
+      QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          cmake ninja-build pkg-config libutf8proc-dev qt6-base-dev clang-format
-          g++-13 clang-18 nlohmann-json3-dev libavformat-dev libavcodec-dev
-          libavutil-dev libswresample-dev libebur128-dev libmpdclient-dev
-          libopenmpt-dev libpipewire-0.3-dev libsqlite3-dev libtag1-dev
+        run: apt-get update && apt-get install -y --no-install-recommends $DEPENDENCIES
+      - uses: actions/checkout@v4
       - name: Configure
         run: >-
           cmake --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
@@ -41,18 +50,15 @@ jobs:
 
   sanitizers:
     runs-on: ubuntu-24.04
+    container: debian:trixie
     env:
-      CC: clang-18
-      CXX: clang++-18
+      CC: clang
+      CXX: clang++
+      QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          cmake ninja-build pkg-config libutf8proc-dev qt6-base-dev clang-18
-          nlohmann-json3-dev libavformat-dev libavcodec-dev libavutil-dev
-          libswresample-dev libebur128-dev libmpdclient-dev libopenmpt-dev
-          libpipewire-0.3-dev libsqlite3-dev libtag1-dev
+        run: apt-get update && apt-get install -y --no-install-recommends $DEPENDENCIES
+      - uses: actions/checkout@v4
       - name: Configure
         run: cmake --preset asan
       - name: Build
@@ -62,15 +68,13 @@ jobs:
 
   fuzz-smoke:
     runs-on: ubuntu-24.04
+    container: debian:trixie
     env:
-      CXX: clang++-18
+      CXX: clang++
     steps:
-      - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          cmake ninja-build pkg-config libutf8proc-dev clang-18
-          libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+        run: apt-get update && apt-get install -y --no-install-recommends $DEPENDENCIES
+      - uses: actions/checkout@v4
       - name: Configure
         run: cmake --preset fuzz -DCMAKE_CXX_COMPILER="$CXX"
       - name: Build

@@ -13,8 +13,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -281,8 +281,9 @@ void covers_of_held_files_need_no_library(const std::filesystem::path& directory
     engine::register_catalogue_methods(dispatcher, catalogue, {},
                                        [&held](const std::string& path) { return path == held; });
 
-    const auto cover = call(dispatcher, 1, "catalogue.artwork",
-                            protocol::Json{{"path", protocol::encode_raw_path(held)}, {"size", 16}});
+    const auto cover =
+        call(dispatcher, 1, "catalogue.artwork",
+             protocol::Json{{"path", protocol::encode_raw_path(held)}, {"size", 16}});
     require(cover.result && cover.result->at("image").is_string(),
             "a held file's cover is given with no library");
     const auto refused = call(dispatcher, 2, "catalogue.artwork",

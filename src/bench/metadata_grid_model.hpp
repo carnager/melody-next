@@ -78,8 +78,8 @@ class MetadataGridModel final : public QAbstractTableModel {
                                     const std::vector<std::size_t>& field_indexes);
     // Whether every cell a preview changes still holds what the preview saw:
     // false when the draft moved under it, and it would be refused.
-    [[nodiscard]] bool previewStillApplies(
-        const metadata::MetadataTransformationPreview& preview) const;
+    [[nodiscard]] bool
+    previewStillApplies(const metadata::MetadataTransformationPreview& preview) const;
     [[nodiscard]] bool stageTransformation(const metadata::MetadataTransformationPreview& preview,
                                            const QStringList& step_sources = {});
     // ADR-0257: the selection built from the files' own tags, taking the place

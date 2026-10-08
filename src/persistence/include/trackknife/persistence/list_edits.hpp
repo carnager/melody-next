@@ -77,8 +77,9 @@ template <typename Element, typename Identity, typename Make>
         }
         const auto found = where.find(*after);
         if (found == where.end()) {
-            return std::unexpected(detail::edit_refused(
-                core::ErrorCode::not_found, "an edit is placed after an entry the list does not hold"));
+            return std::unexpected(
+                detail::edit_refused(core::ErrorCode::not_found,
+                                     "an edit is placed after an entry the list does not hold"));
         }
         return std::next(found->second);
     };
@@ -93,8 +94,9 @@ template <typename Element, typename Identity, typename Make>
                 }
                 const auto found = where.find(entry);
                 if (found == where.end()) {
-                    return std::unexpected(detail::edit_refused(
-                        core::ErrorCode::not_found, "an edit removes an entry the list does not hold"));
+                    return std::unexpected(
+                        detail::edit_refused(core::ErrorCode::not_found,
+                                             "an edit removes an entry the list does not hold"));
                 }
                 working.erase(found->second);
                 where.erase(found);
@@ -127,14 +129,16 @@ template <typename Element, typename Identity, typename Make>
                 }
                 const auto found = where.find(entry);
                 if (found == where.end()) {
-                    return std::unexpected(detail::edit_refused(
-                        core::ErrorCode::not_found, "an edit moves an entry the list does not hold"));
+                    return std::unexpected(
+                        detail::edit_refused(core::ErrorCode::not_found,
+                                             "an edit moves an entry the list does not hold"));
                 }
                 moving.push_back(found->second);
             }
             if (edit.after && named.contains(*edit.after)) {
-                return std::unexpected(detail::edit_refused(
-                    core::ErrorCode::invalid_argument, "entries cannot be moved after one of themselves"));
+                return std::unexpected(
+                    detail::edit_refused(core::ErrorCode::invalid_argument,
+                                         "entries cannot be moved after one of themselves"));
             }
             // Taken out first, so the anchor is found where it is once they
             // have gone.
@@ -153,8 +157,9 @@ template <typename Element, typename Identity, typename Make>
             for (const auto& item : edit.items) {
                 const auto found = where.find(item.entry_id);
                 if (found == where.end()) {
-                    return std::unexpected(detail::edit_refused(
-                        core::ErrorCode::not_found, "an edit updates an entry the list does not hold"));
+                    return std::unexpected(
+                        detail::edit_refused(core::ErrorCode::not_found,
+                                             "an edit updates an entry the list does not hold"));
                 }
                 *found->second = make(item);
             }

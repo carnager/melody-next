@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "drag_position.hpp"
 #include "uicommon/library_tree_view.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_item_delegate.hpp"
@@ -149,7 +150,8 @@ void QueueTableViewTest::localFilesResolveOnlyOnAcceptedDrop() {
         done({"/music/raw-\xff.flac"});
     }};
     const auto position = view.visualRect(model.index(1, 0)).topLeft() + QPoint{2, 2};
-    QDragEnterEvent rejected{QPointF(position), Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent rejected{dragPosition(position), Qt::CopyAction, &files, Qt::LeftButton,
+                             Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &rejected);
     QVERIFY(!rejected.isAccepted());
     QCOMPARE(resolutions, 0);
@@ -162,10 +164,12 @@ void QueueTableViewTest::localFilesResolveOnlyOnAcceptedDrop() {
     });
     QMimeData counterfeit;
     counterfeit.setData(LocalFilesMimeData::mimeType(), QByteArrayLiteral("1"));
-    QDragEnterEvent invalid{QPointF(position), Qt::CopyAction, &counterfeit, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent invalid{dragPosition(position), Qt::CopyAction, &counterfeit, Qt::LeftButton,
+                            Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &invalid);
     QVERIFY(!invalid.isAccepted());
-    QDragEnterEvent enter{QPointF(position), Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, &files, Qt::LeftButton,
+                          Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &enter);
     QVERIFY(enter.isAccepted());
     QCOMPARE(resolutions, 0);
@@ -430,8 +434,8 @@ void QueueTableViewTest::eachDiscOfAnAlbumGetsItsName() {
     model.appendCueAlbum(10);
 
     // The album's header, and under it the first disc's name.
-    QTRY_COMPARE(view.rowHeight(0),
-                 22 + QueueItemDelegate::album_header_height + QueueItemDelegate::disc_header_height);
+    QTRY_COMPARE(view.rowHeight(0), 22 + QueueItemDelegate::album_header_height +
+                                        QueueItemDelegate::disc_header_height);
     QCOMPARE(view.rowHeight(1), 22);
     // The second disc: its name, no second album header.
     QCOMPARE(view.rowHeight(5), 22 + QueueItemDelegate::disc_header_height);
@@ -529,10 +533,12 @@ void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {
 
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(QStringLiteral("/tmp/drop-target.flac"))});
-    QDragEnterEvent enter{QPointF(target), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(target), Qt::CopyAction, &mime, Qt::LeftButton,
+                          Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{QPointF(target), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+    QDragMoveEvent move{dragPosition(target), Qt::CopyAction, &mime, Qt::LeftButton,
+                        Qt::NoModifier};
     QApplication::sendEvent(view.viewport(), &move);
     QVERIFY(move.isAccepted());
 

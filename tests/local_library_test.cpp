@@ -6,6 +6,7 @@
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/search_dialog.hpp"
+#include "drag_position.hpp"
 #include "test_engine.hpp"
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/metadata/local_reader.hpp"
@@ -117,7 +118,8 @@ bool triggerLibraryAction(LocalLibraryPanel* panel, const QModelIndex& index, in
 }
 
 bool dropFiles(QTableView* view, const QMimeData* mime, const QPoint& position) {
-    QDragEnterEvent enter{QPointF(position), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier};
+    QDragEnterEvent enter{dragPosition(position), Qt::CopyAction, mime, Qt::LeftButton,
+                          Qt::NoModifier};
     QApplication::sendEvent(view->viewport(), &enter);
     if (!enter.isAccepted()) {
         return false;
@@ -657,11 +659,9 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     // schema before the app re-migrates forward.
     for (const auto* name :
          {"0052_file_publication_backups.down", "0051_engine_list_drafts.down",
-          "0050_engine_list_item_details.down",
-          "0049_operation_journal_backup_identity.down",
-          "0047_list_engine.down",
-          "0046_engine_lists.down", "0045_library_revision.down", "0044_library_added.down",
-          "0043_remote_list_documents.down", "0042_engine_state.down",
+          "0050_engine_list_item_details.down", "0049_operation_journal_backup_identity.down",
+          "0047_list_engine.down", "0046_engine_lists.down", "0045_library_revision.down",
+          "0044_library_added.down", "0043_remote_list_documents.down", "0042_engine_state.down",
           "0041_list_entry_identity.down", "0040_local_listening_occurrences.down",
           "0039_local_listening_history.down", "0038_folder_image_journal.down",
           "0037_mpd_list_documents.down", "0036_server_search_scope.down",
@@ -1066,12 +1066,11 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
              SQLITE_OK);
     for (const auto* name :
          {"0052_file_publication_backups", "0051_engine_list_drafts",
-          "0050_engine_list_item_details",
-          "0049_operation_journal_backup_identity",
-          "0047_list_engine", "0046_engine_lists",
-          "0045_library_revision", "0044_library_added", "0043_remote_list_documents",
-          "0042_engine_state", "0041_list_entry_identity", "0040_local_listening_occurrences",
-          "0039_local_listening_history", "0038_folder_image_journal"}) {
+          "0050_engine_list_item_details", "0049_operation_journal_backup_identity",
+          "0047_list_engine", "0046_engine_lists", "0045_library_revision", "0044_library_added",
+          "0043_remote_list_documents", "0042_engine_state", "0041_list_entry_identity",
+          "0040_local_listening_occurrences", "0039_local_listening_history",
+          "0038_folder_image_journal"}) {
         QFile downgrade{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.down.sql").arg(QLatin1String{name})};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));
@@ -1459,12 +1458,10 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     for (int index = 0; index < 2; ++index) {
         const auto& row = rows[static_cast<std::size_t>(index)];
         QCOMPARE(results->item(index)->text(),
-                 QString::fromStdString((row.artist.empty() ? std::string{"Unknown artist"}
-                                                            : row.artist) +
-                                        " — " +
-                                        (row.track_number.empty() ? std::string{}
-                                                                  : row.track_number + ". ") +
-                                        row.title));
+                 QString::fromStdString(
+                     (row.artist.empty() ? std::string{"Unknown artist"} : row.artist) + " — " +
+                     (row.track_number.empty() ? std::string{} : row.track_number + ". ") +
+                     row.title));
     }
     QCOMPARE(rows[1].metadata.first_effective_value("albumartist"),
              std::optional<std::string>{"Björk"});

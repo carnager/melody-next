@@ -102,6 +102,8 @@ qt_add_library(
     ../bench/bench_main_window_helpers.hpp
     ../bench/catalogue_source.cpp
     ../bench/catalogue_source.hpp
+    ../bench/desktop_media_session.cpp
+    ../bench/desktop_media_session.hpp
     ../bench/desktop_notifier.cpp
     ../bench/desktop_notifier.hpp
     ../bench/dynamic_playlist_service.cpp
@@ -184,4 +186,26 @@ target_link_libraries(
     PRIVATE trackknife_project_warnings
 )
 target_include_directories(trackknife_workspace PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# ADR-0275: on macOS the desktop sees playback through Now Playing, and the
+# media keys and headsets reach it through the remote command center.
+if(APPLE)
+    target_sources(
+        trackknife_workspace
+        PRIVATE ../bench/now_playing_macos.mm ../bench/now_playing_macos.hpp
+                ../bench/desktop_notifier_macos.mm ../bench/desktop_notifier_macos.hpp
+    )
+    set_source_files_properties(
+        ../bench/now_playing_macos.mm ../bench/desktop_notifier_macos.mm
+        PROPERTIES COMPILE_OPTIONS -fobjc-arc
+    )
+    find_library(TRACKKNIFE_APPKIT_FRAMEWORK AppKit REQUIRED)
+    find_library(TRACKKNIFE_MEDIAPLAYER_FRAMEWORK MediaPlayer REQUIRED)
+    find_library(TRACKKNIFE_USERNOTIFICATIONS_FRAMEWORK UserNotifications REQUIRED)
+    target_link_libraries(
+        trackknife_workspace
+        PRIVATE "${TRACKKNIFE_APPKIT_FRAMEWORK}" "${TRACKKNIFE_MEDIAPLAYER_FRAMEWORK}"
+                "${TRACKKNIFE_USERNOTIFICATIONS_FRAMEWORK}"
+    )
+endif()
 target_compile_features(trackknife_workspace PUBLIC cxx_std_23)

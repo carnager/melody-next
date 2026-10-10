@@ -144,7 +144,7 @@ class MprisPlayerAdaptor final : public QDBusAbstractAdaptor {
     MprisService* service_;
 };
 
-MprisService::MprisService(QObject* parent) : QObject(parent) {
+MprisService::MprisService(QObject* parent) : DesktopMediaSession(parent) {
     new MprisRootAdaptor(this);
     new MprisPlayerAdaptor(this);
 

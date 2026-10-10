@@ -132,7 +132,11 @@ not imply that one is safe to delete.
 ## 8. Desktop integration
 
 MPRIS and media keys control the engine that plays; the playing album's
-cover reaches both MPRIS and notifications. Nothing is open here.
+cover reaches both MPRIS and notifications. On macOS, Now Playing does the
+same for the media keys, Bluetooth headsets and Control Center (ADR-0275).
+
+- [ ] Notifications on macOS need `Trackknife.app`: build or package the
+  bundle.
 
 ## Other recorded follow-ups
 

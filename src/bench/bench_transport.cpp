@@ -2,7 +2,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/desktop_notifier.hpp"
-#include "bench/mpris_service.hpp"
+#include "bench/desktop_media_session.hpp"
 #include <QDockWidget>
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -1081,53 +1081,53 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
 }
 
 // Desktop commands land on the exact transport actions the visible controls
-// use, so MPRIS can never steer past the active authority (ADR-0135).
+// use, so MPRIS or Now Playing can never steer past them (ADR-0135, ADR-0275).
 void BenchMainWindow::buildMprisService() {
-    mpris_ = new MprisService(this);
+    mpris_ = createDesktopMediaSession(this);
     const auto trigger = [](QAction* action) {
         if (action != nullptr && action->isEnabled()) {
             action->trigger();
         }
     };
-    connect(mpris_, &MprisService::playPauseRequested, this,
+    connect(mpris_, &DesktopMediaSession::playPauseRequested, this,
             [this, trigger] { trigger(play_pause_action_); });
-    connect(mpris_, &MprisService::playRequested, this, [this, trigger] {
+    connect(mpris_, &DesktopMediaSession::playRequested, this, [this, trigger] {
         if (mpris_->currentState().status != QStringLiteral("Playing")) {
             trigger(play_pause_action_);
         }
     });
-    connect(mpris_, &MprisService::pauseRequested, this, [this, trigger] {
+    connect(mpris_, &DesktopMediaSession::pauseRequested, this, [this, trigger] {
         if (mpris_->currentState().status == QStringLiteral("Playing")) {
             trigger(play_pause_action_);
         }
     });
-    connect(mpris_, &MprisService::stopRequested, this, [this, trigger] { trigger(stop_action_); });
-    connect(mpris_, &MprisService::nextRequested, this, [this, trigger] { trigger(next_action_); });
-    connect(mpris_, &MprisService::previousRequested, this,
+    connect(mpris_, &DesktopMediaSession::stopRequested, this, [this, trigger] { trigger(stop_action_); });
+    connect(mpris_, &DesktopMediaSession::nextRequested, this, [this, trigger] { trigger(next_action_); });
+    connect(mpris_, &DesktopMediaSession::previousRequested, this,
             [this, trigger] { trigger(previous_action_); });
-    connect(mpris_, &MprisService::positionRequested, this, [this](const qlonglong position_ms) {
+    connect(mpris_, &DesktopMediaSession::positionRequested, this, [this](const qlonglong position_ms) {
         if (seek_ != nullptr && seek_->isEnabled()) {
             seekToMs(position_ms);
         }
     });
-    connect(mpris_, &MprisService::volumeRequested, this, [this](const int volume_percent) {
+    connect(mpris_, &DesktopMediaSession::volumeRequested, this, [this](const int volume_percent) {
         if (volume_ != nullptr && volume_->isEnabled()) {
             volume_->setValue(volume_percent);
         }
     });
     // The order set from the desktop: the modes follow, and the controls and
     // MPRIS with them.
-    connect(mpris_, &MprisService::loopStatusRequested, this, [this](const QString& status) {
+    connect(mpris_, &DesktopMediaSession::loopStatusRequested, this, [this](const QString& status) {
         workspace_.setLoopStatus(status);
         refreshLocalPlaybackControls();
         publishMprisState();
     });
-    connect(mpris_, &MprisService::shuffleRequested, this, [this](const bool shuffle) {
+    connect(mpris_, &DesktopMediaSession::shuffleRequested, this, [this](const bool shuffle) {
         workspace_.setShuffled(shuffle);
         refreshLocalPlaybackControls();
         publishMprisState();
     });
-    connect(mpris_, &MprisService::raiseRequested, this, [this] {
+    connect(mpris_, &DesktopMediaSession::raiseRequested, this, [this] {
         showNormal();
         raise();
         activateWindow();

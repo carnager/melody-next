@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "workspace/keep_awake.hpp"
+
 #include "bench/replaygain_scan.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -107,6 +109,8 @@ class ReplayGainJob final : public QObject {
     QStringList problems_;
     bool preview_only_{false};
     bool running_{false};
+    // ADR-0277: the computer kept awake while this runs.
+    KeepAwake::Hold awake_;
     bool stopping_{false};
     int progress_value_{0};
     int progress_maximum_{0};

@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "workspace/keep_awake.hpp"
+
 #include "bench/artwork_services.hpp"
 #include "bench/file_work_tools.hpp"
 #include "bench/musicbrainz_lookup.hpp"
@@ -664,6 +666,8 @@ class TaggerSession final : public QObject {
     std::optional<std::string> move_folder_;
     bool write_plan_running_{false};
     bool apply_running_{false};
+    // ADR-0277: the computer kept awake while this runs.
+    KeepAwake::Hold awake_;
     bool applying_file_paths_{false};
     bool apply_stop_requested_{false};
     bool apply_committed_{false};

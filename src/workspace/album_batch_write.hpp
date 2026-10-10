@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "workspace/keep_awake.hpp"
+
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
@@ -121,6 +123,8 @@ class AlbumBatchWrite final : public QObject {
     std::shared_ptr<Progress> progress_;
     core::CancellationSource cancellation_;
     bool running_{false};
+    // ADR-0277: the computer kept awake while this runs.
+    KeepAwake::Hold awake_;
     bool stopping_{false};
 };
 

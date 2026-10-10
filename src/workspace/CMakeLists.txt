@@ -93,6 +93,8 @@ qt_add_library(
     preparation_planning.hpp
     tagger_session.cpp
     tagger_session.hpp
+    keep_awake.cpp
+    keep_awake.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp
     ../bench/artwork_services.hpp
@@ -202,10 +204,13 @@ if(APPLE)
     find_library(TRACKKNIFE_APPKIT_FRAMEWORK AppKit REQUIRED)
     find_library(TRACKKNIFE_MEDIAPLAYER_FRAMEWORK MediaPlayer REQUIRED)
     find_library(TRACKKNIFE_USERNOTIFICATIONS_FRAMEWORK UserNotifications REQUIRED)
+    find_library(TRACKKNIFE_IOKIT_FRAMEWORK IOKit REQUIRED)
+    find_library(TRACKKNIFE_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
     target_link_libraries(
         trackknife_workspace
         PRIVATE "${TRACKKNIFE_APPKIT_FRAMEWORK}" "${TRACKKNIFE_MEDIAPLAYER_FRAMEWORK}"
-                "${TRACKKNIFE_USERNOTIFICATIONS_FRAMEWORK}"
+                "${TRACKKNIFE_USERNOTIFICATIONS_FRAMEWORK}" "${TRACKKNIFE_IOKIT_FRAMEWORK}"
+                "${TRACKKNIFE_COREFOUNDATION_FRAMEWORK}"
     )
 endif()
 target_compile_features(trackknife_workspace PUBLIC cxx_std_23)

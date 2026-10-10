@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "workspace/convert_job.hpp"
+#include "workspace/keep_awake.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -758,6 +759,7 @@ void ConvertJob::run() {
     }
 
     running_ = true;
+    awake_ = KeepAwake::hold(QStringLiteral("Converting"));
     running_total_ = scan_items.size();
     cancellation_ = core::CancellationSource{};
     completed_ = std::make_shared<std::atomic_size_t>(0U);
@@ -879,6 +881,7 @@ bool ConvertJob::requestClose() {
 
 void ConvertJob::finishConversion() {
     running_ = false;
+    awake_.reset();
     poll_.stop();
     const auto outcome = watcher_.result();
     if (!outcome || !*outcome) {

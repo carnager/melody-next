@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "bench/mpris_service.hpp"
+#include "bench/desktop_media_session.hpp"
 
 #include <QObject>
 #include <QString>

@@ -2,6 +2,10 @@
 
 #include "bench/desktop_notifier.hpp"
 
+#ifdef __APPLE__
+#include "bench/desktop_notifier_macos.hpp"
+#endif
+
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusPendingCall>
@@ -16,10 +20,13 @@ namespace trackknife::bench {
 namespace {
 
 [[nodiscard]] QString markup_escaped(QString text) {
-    // The notification body is markup per the freedesktop specification.
+#ifndef __APPLE__
+    // The notification body is markup per the freedesktop specification;
+    // the macOS notification center shows its text as it is.
     text.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
     text.replace(QLatin1Char('<'), QStringLiteral("&lt;"));
     text.replace(QLatin1Char('>'), QStringLiteral("&gt;"));
+#endif
     return text;
 }
 
@@ -65,6 +72,11 @@ void DesktopNotifier::send(const QString& summary, const QString& body, const QS
         emit deliveryFinished({});
         return;
     }
+#ifdef __APPLE__
+    postMacNotification(this, summary, body, image,
+                        [this](const QString& error) { emit deliveryFinished(error); });
+    return;
+#endif
     auto bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) {
         emit deliveryFinished(QStringLiteral("No desktop session bus is available"));

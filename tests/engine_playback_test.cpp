@@ -16,7 +16,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_list_model.hpp"
-#include "bench/mpris_service.hpp"
+#include "bench/desktop_media_session.hpp"
 #include "bench/settings_dialog.hpp"
 #include "recording_audition.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -904,7 +904,7 @@ void EnginePlaybackTest::theDesktopSeesWhatTheEnginePlays() {
 
     BenchMainWindow window;
     window.show();
-    auto* mpris = window.findChild<MprisService*>();
+    auto* mpris = window.findChild<DesktopMediaSession*>();
     QVERIFY(mpris != nullptr);
 
     window.openLocalPaths({raw_path});

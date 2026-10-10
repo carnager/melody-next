@@ -9,6 +9,11 @@ project(
     LANGUAGES CXX
 )
 
+# The macOS desktop integration is Objective-C++ (ADR-0275).
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CTest)

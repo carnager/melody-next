@@ -106,7 +106,7 @@ class LocalLibraryPanel;
 class MetadataPropertiesDialog;
 class SearchDialog;
 class DesktopNotifier;
-class MprisService;
+class DesktopMediaSession;
 class TrackListFindBar;
 class LocalListEditBar;
 class PlaylistTransferBar;
@@ -136,7 +136,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::vector<std::unique_ptr<ListTab>>& list_tabs_{workspace_.list_tabs_};
     QHash<QString, QByteArray>& restored_track_view_layouts_{
         workspace_.restored_track_view_layouts_};
-    MprisService*& mpris_{workspace_.mpris_};
+    DesktopMediaSession*& mpris_{workspace_.mpris_};
     DesktopNotifier*& notifier_{workspace_.notifier_};
     ui::ListPersistenceService*& persistence_{workspace_.persistence_};
     std::filesystem::path& database_path_{workspace_.database_path_};

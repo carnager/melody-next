@@ -11,7 +11,7 @@
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
-#include "bench/mpris_service.hpp"
+#include "bench/desktop_media_session.hpp"
 #include "bench/output_profile_store.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/remote_mount.hpp"
@@ -219,7 +219,7 @@ class Workspace final : public QObject {
     std::map<const LibraryBrowser*, std::deque<core::StableId>> pending_searches_;
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QHash<QString, QByteArray> restored_track_view_layouts_;
-    MprisService* mpris_{nullptr};
+    DesktopMediaSession* mpris_{nullptr};
     // The cover file given to the desktop, and which album it is.
     QString desktop_cover_key_;
     // A new track's cover still being fetched, by group key, and the track

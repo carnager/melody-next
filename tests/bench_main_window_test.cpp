@@ -8609,7 +8609,11 @@ void BenchMainWindowTest::desktopNotificationsNotifyBackgroundTrackChanges() {
     QVERIFY(notifier.publish(playing, false));
     QCOMPARE(notifier.sentCount(), 1ULL);
     QCOMPARE(sent.size(), 1);
+#ifdef __APPLE__
+    QCOMPARE(sent.front(), QStringLiteral("Second Song|A & B — Album"));
+#else
     QCOMPARE(sent.front(), QStringLiteral("Second Song|A &amp; B — Album"));
+#endif
     // A change while the window is active stays silent and is tracked.
     playing.track_key = QStringLiteral("key-3");
     QVERIFY(!notifier.publish(playing, true));

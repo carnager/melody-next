@@ -245,4 +245,12 @@ class LocalAuditionService final : public Audition {
     std::unique_ptr<Impl> implementation_;
 };
 
+// Following the system's default output, whether the device it played on
+// went away -- headphones unplugged, a Bluetooth headset switched off -- as
+// against a default the person chose: the old one is still there. Playback
+// pauses then rather than carry on aloud on whatever device is left.
+[[nodiscard]] bool default_output_left(const std::optional<std::string>& previous_default,
+                                       const std::vector<PipeWireDevice>& devices,
+                                       const std::optional<std::string>& target);
+
 } // namespace trackknife::audio

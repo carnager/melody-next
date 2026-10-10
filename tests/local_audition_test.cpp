@@ -99,6 +99,21 @@ int main() {
     CHECK(trackknife::audio::playback_buffer_preset_from_id("balanced") ==
           PlaybackBufferPreset::balanced);
     CHECK(!trackknife::audio::playback_buffer_preset_from_id("unknown"));
+
+    // Following the default, playback pauses when the device it played on
+    // leaves -- not when the person picks another default, and never for a
+    // chosen device, which suspends instead.
+    {
+        using trackknife::audio::default_output_left;
+        using trackknife::audio::PipeWireDevice;
+        const std::vector<PipeWireDevice> speakers{{.name = "speakers", .description = "Speakers"}};
+        const std::vector<PipeWireDevice> both{{.name = "speakers", .description = "Speakers"},
+                                               {.name = "headphones", .description = "Headphones"}};
+        CHECK(default_output_left(std::string{"headphones"}, speakers, std::nullopt));
+        CHECK(!default_output_left(std::string{"headphones"}, both, std::nullopt));
+        CHECK(!default_output_left(std::nullopt, speakers, std::nullopt));
+        CHECK(!default_output_left(std::string{"headphones"}, speakers, std::string{"speakers"}));
+    }
     CHECK((trackknife::audio::playback_buffer_preset_config(PlaybackBufferPreset::responsive) ==
            trackknife::audio::PlaybackBufferDurationConfig{.capacity = 250ms,
                                                            .start_threshold = 50ms}));

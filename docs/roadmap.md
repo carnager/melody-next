@@ -138,6 +138,13 @@ same for the media keys, Bluetooth headsets and Control Center (ADR-0275).
 - [ ] Notifications on macOS need `Trackknife.app`: build or package the
   bundle.
 
+Lyrics from the files -- an `.lrc` beside them or their tags -- show in a
+panel that follows the song (ADR-0276).
+
+- [ ] Lyrics fetched from the internet (LRCLIB), offered for review and
+  saved as an `.lrc` or a tag: the first use of a plugin boundary.
+- [ ] Lyrics on the phone, through the same method.
+
 ## Other recorded follow-ups
 
 These are requirements or proposals on record, not commitments for the next

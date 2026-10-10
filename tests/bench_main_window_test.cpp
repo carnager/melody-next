@@ -13,6 +13,7 @@
 #include "bench/identify_albums_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/lists_panel.hpp"
+#include "bench/lyrics_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
@@ -432,6 +433,7 @@ class BenchMainWindowTest final : public QObject {
     void headerPillsFollowAPaletteChangedLater();
     void listTabCloseButtonsClose();
     void mprisOrderAndCoverFollowTheWorkspace();
+    void lyricsPanelFollowsThePosition();
     void windowListTabsCloseFromTheirButtons();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
@@ -14827,6 +14829,74 @@ void BenchMainWindowTest::mprisOrderAndCoverFollowTheWorkspace() {
     QVERIFY(second != first && QFileInfo::exists(second));
     QVERIFY(!QFileInfo::exists(first));
     QFile::remove(second);
+}
+
+// ADR-0276: the line being sung is highlighted, carried on between the
+// engine's reports while it plays, and a click on a line seeks there.
+void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
+    LyricsPanel panel;
+    panel.resize(300, 400);
+    panel.show();
+    auto* lines = panel.findChild<QListWidget*>(QStringLiteral("lyrics-lines"));
+    auto* source = panel.findChild<QLabel*>(QStringLiteral("lyrics-source"));
+    QVERIFY(lines != nullptr && source != nullptr);
+    QCOMPARE(lines->count(), 1); // "Nothing is playing"
+
+    metadata::Lyrics synced{.source = "sidecar", .synced = true, .lines = {}};
+    for (const auto& [time, text] : {std::pair{1'000, "One"}, std::pair{2'000, "Two"},
+                                     std::pair{3'000, ""}, std::pair{60'000, "Late"}}) {
+        synced.lines.push_back({.time_ms = time, .text = text});
+    }
+    panel.showLyrics(synced);
+    QCOMPARE(lines->count(), 4);
+    QCOMPARE(source->text(), QStringLiteral("Synced · .lrc file"));
+    panel.setPosition(500, false);
+    QCOMPARE(panel.currentLine(), -1);
+    panel.setPosition(1'200, false);
+    QCOMPARE(panel.currentLine(), 0);
+    QVERIFY(lines->item(0)->font().bold() && !lines->item(1)->font().bold());
+    // Playing, the same report moves on by itself, refreshed as the
+    // window's transport timer does.
+    QTRY_VERIFY_WITH_TIMEOUT((panel.setPosition(1'900, true), panel.currentLine() == 1), 2'000);
+    QVERIFY(!lines->item(0)->font().bold() && lines->item(1)->font().bold());
+    // Paused, it stays; a seek far on jumps there.
+    panel.setPosition(2'500, false);
+    QCOMPARE(panel.currentLine(), 1);
+    panel.setPosition(3'100, false);
+    QCOMPARE(panel.currentLine(), 2);
+    panel.setPosition(61'000, false);
+    QCOMPARE(panel.currentLine(), 3);
+
+    QSignalSpy seeks{&panel, &LyricsPanel::seekRequested};
+    QTest::mouseClick(lines->viewport(), Qt::LeftButton, {},
+                      lines->visualItemRect(lines->item(1)).center());
+    QCOMPARE(seeks.size(), 1);
+    QCOMPARE(seeks.front().front().toLongLong(), qint64{2'000});
+
+    // Plain lyrics: text, nothing highlighted, a click seeks nowhere.
+    panel.showLyrics({.source = "tag:LYRICS",
+                      .synced = false,
+                      .lines = {{.time_ms = std::nullopt, .text = "Words"}}});
+    QCOMPARE(source->text(), QStringLiteral("Plain · LYRICS tag"));
+    panel.setPosition(5'000, true);
+    QCOMPARE(panel.currentLine(), -1);
+    QTest::mouseClick(lines->viewport(), Qt::LeftButton, {},
+                      lines->visualItemRect(lines->item(0)).center());
+    QCOMPARE(seeks.size(), 1);
+
+    panel.showMessage(QStringLiteral("No lyrics"));
+    QCOMPARE(lines->count(), 1);
+    QCOMPARE(lines->item(0)->text(), QStringLiteral("No lyrics"));
+    QVERIFY(source->text().isEmpty());
+
+    // In the window: a dock, hidden at first, shown from the Playback menu.
+    BenchMainWindow window;
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
+    auto* toggle = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
+    QVERIFY(dock != nullptr && toggle != nullptr);
+    QCOMPARE(toggle->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+L")));
+    QVERIFY(!QSettings{}.value(QStringLiteral("lyrics/visible"), false).toBool() ||
+            dock->isVisibleTo(&window));
 }
 
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {

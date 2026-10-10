@@ -60,6 +60,9 @@ class RemoteCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<unsigned char>>
     artwork(const std::string& raw_path,
             const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::optional<metadata::Lyrics>>
+    lyrics(const std::string& raw_path,
+           const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::size_t>
     refresh(const std::vector<std::string>& raw_paths,
             const core::CancellationToken& cancellation = {}) override;

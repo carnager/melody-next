@@ -209,6 +209,7 @@ void BenchMainWindow::refreshHeaderCover(const QString& entry) {
 
 void BenchMainWindow::buildTransport() {
     buildUpNext();
+    buildLyrics();
     auto* bar = addToolBar(QStringLiteral("Transport"));
     bar->setObjectName(QStringLiteral("bench-transport"));
     bar->setMovable(false);
@@ -469,6 +470,8 @@ void BenchMainWindow::buildTransport() {
     playback_menu->addSeparator();
 
     buildLocalPlaybackControls(playback_menu);
+    playback_menu->addSeparator();
+    playback_menu->addAction(findChild<QAction*>(QStringLiteral("action-show-lyrics")));
 
     // ADR-0144: quiet, opt-in track-change notifications while the
     // window is in the background.
@@ -990,6 +993,7 @@ void BenchMainWindow::refreshEngineTransport() {
     }
     refreshMuteButton();
 
+    refreshLyrics(state);
     const auto shown = workspace_.nowPlaying(state);
     now_playing_->setText(shown.title);
     setWindowTitle(shown.window_title);

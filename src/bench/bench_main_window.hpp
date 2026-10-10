@@ -107,6 +107,7 @@ class MetadataPropertiesDialog;
 class SearchDialog;
 class DesktopNotifier;
 class DesktopMediaSession;
+class LyricsPanel;
 class TrackListFindBar;
 class LocalListEditBar;
 class PlaylistTransferBar;
@@ -252,6 +253,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void buildWorkspace();
     void buildTransport();
     void buildUpNext();
+    // ADR-0276: the Lyrics panel, and what it shows following what plays.
+    void buildLyrics();
+    void refreshLyrics(const EnginePlayback::State& state);
     void refreshUpNext() override;
     // Queues what was dragged out of a library, with its tags.
     bool enqueueLibraryDrop(const ui::LocalFilesMimeData& files, int position);
@@ -817,6 +821,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
     QDockWidget* up_next_dock_{nullptr};
+    QDockWidget* lyrics_dock_{nullptr};
+    LyricsPanel* lyrics_panel_{nullptr};
+    // The entry whose lyrics the panel shows or awaits -- empty, nothing
+    // plays; none, the panel shows nothing current.
+    std::optional<QString> lyrics_entry_;
     QToolButton* up_next_button_{nullptr};
     QLabel* up_next_badge_{nullptr};
     QLabel* device_chevron_{nullptr};

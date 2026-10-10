@@ -12,6 +12,7 @@
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
 #include "bench/desktop_media_session.hpp"
+#include "trackknife/metadata/lyrics.hpp"
 #include "bench/output_profile_store.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/remote_mount.hpp"
@@ -26,6 +27,7 @@
 #include "workspace/tagger_session.hpp"
 
 #include <QElapsedTimer>
+#include <QFuture>
 #include <QFutureWatcher>
 #include <QHash>
 #include <QImage>
@@ -847,6 +849,11 @@ class Workspace final : public QObject {
         unsigned rating{0U};
     };
     [[nodiscard]] NowPlaying nowPlaying(const EnginePlayback::State& state);
+    // ADR-0276: the lyrics of what plays, asked of the engine that plays it
+    // on a worker. Nullopt when nothing plays on an engine.
+    using LyricsAnswer = core::Result<std::optional<metadata::Lyrics>>;
+    [[nodiscard]] std::optional<QFuture<LyricsAnswer>>
+    lyricsOfPlaying(const EnginePlayback::State& state);
     // ADR-0226, ADR-0228: where it sounds. Taken from each state -- saying
     // what changed since the last -- and offered as a menu of the engine's
     // speakers and the chosen one's devices.

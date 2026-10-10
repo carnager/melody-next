@@ -4,6 +4,8 @@
 
 #include "trackknife/protocol/message.hpp"
 
+#include <algorithm>
+
 namespace trackknife::engine {
 namespace {
 
@@ -197,6 +199,52 @@ RemoteCatalogue::artwork(const std::string& raw_path, const core::CancellationTo
         return std::unexpected(malformed("image"));
     }
     return std::vector<unsigned char>(decoded->begin(), decoded->end());
+}
+
+core::Result<std::optional<metadata::Lyrics>>
+RemoteCatalogue::lyrics(const std::string& raw_path, const core::CancellationToken&) const {
+    auto answer =
+        client_->call("catalogue.lyrics", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto found = answer->find("lyrics");
+    if (found == answer->end()) {
+        return std::unexpected(malformed("lyrics"));
+    }
+    if (found->is_null()) {
+        return std::optional<metadata::Lyrics>{};
+    }
+    const auto source = found->find("source");
+    const auto synced = found->find("synced");
+    const auto lines = found->find("lines");
+    if (!found->is_object() || source == found->end() || !source->is_string() ||
+        synced == found->end() || !synced->is_boolean() || lines == found->end() ||
+        !lines->is_array()) {
+        return std::unexpected(malformed("lyrics"));
+    }
+    metadata::Lyrics lyrics{
+        .source = source->get<std::string>(), .synced = synced->get<bool>(), .lines = {}};
+    for (const auto& line : *lines) {
+        const auto text = line.find("text");
+        if (!line.is_object() || text == line.end() || !text->is_string()) {
+            return std::unexpected(malformed("lyrics.lines"));
+        }
+        metadata::LyricsLine entry{.time_ms = std::nullopt, .text = text->get<std::string>()};
+        if (const auto time = line.find("time_ms"); time != line.end()) {
+            if (!time->is_number_integer()) {
+                return std::unexpected(malformed("lyrics.lines"));
+            }
+            entry.time_ms = time->get<std::int64_t>();
+        }
+        lyrics.lines.push_back(std::move(entry));
+    }
+    if (lyrics.synced && std::ranges::any_of(lyrics.lines, [](const metadata::LyricsLine& line) {
+            return !line.time_ms;
+        })) {
+        return std::unexpected(malformed("lyrics.lines"));
+    }
+    return std::optional<metadata::Lyrics>{std::move(lyrics)};
 }
 
 core::Result<std::optional<std::string>>

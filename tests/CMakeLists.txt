@@ -48,6 +48,13 @@ add_test(
     COMMAND trackknife_metadata_reader_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
+add_executable(trackknife_lyrics_tests lyrics_test.cpp)
+target_link_libraries(
+    trackknife_lyrics_tests PRIVATE Trackknife::Metadata PkgConfig::TAGLIB
+                                    trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME lyrics COMMAND trackknife_lyrics_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+
 add_executable(trackknife_metadata_artwork_tests metadata_artwork_test.cpp)
 target_link_libraries(
     trackknife_metadata_artwork_tests
@@ -405,7 +412,8 @@ target_link_libraries(
     PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
-add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests)
+add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests
+                                   "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
 
 # ADR-0254: library views, grouped by the engine from real tagged files.
 add_executable(trackknife_library_views_tests library_views_test.cpp)

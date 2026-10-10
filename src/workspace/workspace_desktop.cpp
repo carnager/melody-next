@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QtConcurrent/QtConcurrentRun>
 
 namespace trackknife::bench {
 
@@ -264,6 +265,28 @@ void Workspace::publishDesktopState() {
         setProperty("trackknife-notification-body", notifier_->lastBody());
         setProperty("trackknife-notification-image", notifier_->lastImage());
     }
+}
+
+std::optional<QFuture<Workspace::LyricsAnswer>>
+Workspace::lyricsOfPlaying(const EnginePlayback::State& state) {
+    if (!playingOnEngine() || state.entry.isEmpty()) {
+        return std::nullopt;
+    }
+    const auto* link = linkOf(transport_);
+    auto* source = link != nullptr ? catalogueOf(link->key) : nullptr;
+    if (source == nullptr) {
+        return std::nullopt;
+    }
+    // The row's bytes where a list has it; the state's path is text.
+    const auto* track = playingRow(state.entry);
+    auto raw_path = track != nullptr ? track->raw_path : state.path.toLocal8Bit().toStdString();
+    if (raw_path.empty()) {
+        return std::nullopt;
+    }
+    std::shared_ptr<engine::Catalogue> catalogue{source->openDeferred()};
+    return QtConcurrent::run([catalogue = std::move(catalogue), raw_path = std::move(raw_path)] {
+        return catalogue->lyrics(raw_path);
+    });
 }
 
 } // namespace trackknife::bench

@@ -5,14 +5,18 @@
 #include "trackknife/metadata/artwork_write_plan.hpp"
 #include "trackknife/metadata/artwork_writers.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
+#include "trackknife/metadata/mp4_writer.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
 #include <taglib/attachedpictureframe.h>
 #include <taglib/id3v2tag.h>
+#include <taglib/mp4file.h>
 #include <taglib/mpegfile.h>
+#include <taglib/unsynchronizedlyricsframe.h>
 
 #include <algorithm>
 #include <array>
@@ -239,6 +243,82 @@ void roundTripsId3TextEditsPreservingAudio(const std::filesystem::path& fixture_
     CHECK(adapters_ok);
 }
 
+// ADR-0276: lyrics typed in the tagger are one value of many lines. Written,
+// they are each format's own lyrics -- ID3 USLT, MP4 \u00a9lyr -- with every
+// line, and read back as lyrics.
+void roundTripsMultiLineLyrics(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const std::string text{"First line\nSecond line\n\nThird after a verse"};
+    struct Case {
+        const char* fixture;
+        const char* name;
+    };
+    for (const auto& [fixture, name] :
+         {Case{"tagged-tone-mp3.b64", "lyrics.mp3"}, Case{"tagged-tone-m4a.b64", "lyrics.m4a"}}) {
+        const auto source = materialize(fixture_directory, fixture, directory.path() / name);
+        const auto read = trackknife::metadata::read_local_metadata(source.native());
+        CHECK(read.has_value());
+        if (!read) {
+            continue;
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            continue;
+        }
+        const auto lyrics = selection->ensure_missing_field("lyrics", "Lyrics");
+        CHECK(lyrics.has_value());
+        if (!lyrics) {
+            continue;
+        }
+        trackknife::metadata::StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, *lyrics, {text}).has_value());
+        auto plan = make_plan(*selection, patches);
+        CHECK(plan && plan->ready());
+        if (!plan || !plan->ready()) {
+            continue;
+        }
+        const auto prepared_path = directory.path() / (std::string{"prepared-"} + name);
+        const bool mp3 = std::string_view{name}.ends_with(".mp3");
+        const auto written =
+            mp3 ? trackknife::metadata::prepare_mp3_metadata_write_copy(plan->sources.front(),
+                                                                       prepared_path.native())
+                      .has_value()
+                : trackknife::metadata::prepare_mp4_metadata_write_copy(plan->sources.front(),
+                                                                       prepared_path.native())
+                      .has_value();
+        CHECK(written);
+        const auto reread = trackknife::metadata::read_local_metadata(prepared_path.native());
+        CHECK(reread && reread->document.first_effective_value("lyrics") ==
+                            std::optional<std::string>{text});
+        if (mp3) {
+            TagLib::MPEG::File file{prepared_path.c_str()};
+            CHECK(file.hasID3v2Tag() && !file.ID3v2Tag()->frameList("USLT").isEmpty());
+        } else {
+            TagLib::MP4::File file{prepared_path.c_str()};
+            CHECK(file.hasMP4Tag() && file.tag()->contains(TagLib::String{"\xa9lyr", TagLib::String::Latin1}));
+        }
+        const auto found = trackknife::metadata::read_lyrics(prepared_path.native());
+        CHECK(found && *found && (*found)->source == "tag:LYRICS" && (*found)->lines.size() == 4U);
+    }
+
+    // A USLT frame with a description reads as LYRICS:<description>; its
+    // lyrics are found all the same.
+    const auto described =
+        materialize(fixture_directory, "tagged-tone-mp3.b64", directory.path() / "described.mp3");
+    {
+        TagLib::MPEG::File file{described.c_str()};
+        auto* frame = new TagLib::ID3v2::UnsynchronizedLyricsFrame(TagLib::String::UTF8);
+        frame->setDescription("Song text");
+        frame->setLanguage("eng");
+        frame->setText("Sung\nwords");
+        file.ID3v2Tag(true)->addFrame(frame);
+        CHECK(file.save());
+    }
+    const auto found = trackknife::metadata::read_lyrics(described.native());
+    CHECK(found && *found && (*found)->source == "tag:LYRICS:SONG TEXT" &&
+          (*found)->lines.size() == 2U);
+}
+
 void toleratesId3v1TrailersUnlikeWavPack(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source =
@@ -423,6 +503,7 @@ int main(const int argc, char** argv) {
         const std::filesystem::path fixture_directory{argv[1]};
         roundTripsId3TextEditsPreservingAudio(fixture_directory);
         toleratesId3v1TrailersUnlikeWavPack(fixture_directory);
+        roundTripsMultiLineLyrics(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }
     return failures == 0 ? 0 : 1;

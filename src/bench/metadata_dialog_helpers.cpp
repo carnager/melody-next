@@ -49,7 +49,11 @@ QString display_plan_values(const std::vector<std::string>& values) {
         visible.push_back(
             QStringLiteral("… +%1 values").arg(values.size() - maximum_visible_values));
     }
-    return visible.join(QStringLiteral("  ·  "));
+    auto text = visible.join(QStringLiteral("  ·  "));
+    text.replace(QStringLiteral("\r\n"), QStringLiteral(" ↵ "));
+    text.replace(QLatin1Char('\n'), QStringLiteral(" ↵ "));
+    text.replace(QLatin1Char('\r'), QStringLiteral(" ↵ "));
+    return text;
 }
 
 QString apply_state_text(const operations::MetadataApplySourceState state) {

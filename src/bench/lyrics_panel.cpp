@@ -8,10 +8,15 @@
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QScrollBar>
+#include <QSettings>
+#include <QVariantAnimation>
+#include <QWheelEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace trackknife::bench {
 namespace {
@@ -77,10 +82,18 @@ LyricsPanel::LyricsPanel(QWidget* parent) : QWidget(parent) {
         }
     });
     layout->addWidget(lines_, 1);
+    scroll_ = new QVariantAnimation(this);
+    scroll_->setDuration(450);
+    scroll_->setEasingCurve(QEasingCurve::InOutCubic);
+    connect(scroll_, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+        lines_->verticalScrollBar()->setValue(value.toInt());
+    });
+    lines_->viewport()->installEventFilter(this);
     showMessage(QStringLiteral("Nothing is playing"));
 }
 
 void LyricsPanel::showLyrics(const metadata::Lyrics& lyrics) {
+    scroll_->stop();
     lines_->clear();
     times_.clear();
     current_ = -1;
@@ -103,6 +116,7 @@ void LyricsPanel::showLyrics(const metadata::Lyrics& lyrics) {
 }
 
 void LyricsPanel::showMessage(const QString& message) {
+    scroll_->stop();
     lines_->clear();
     times_.clear();
     current_ = -1;
@@ -116,31 +130,59 @@ void LyricsPanel::showMessage(const QString& message) {
 }
 
 void LyricsPanel::setPosition(const qint64 position_ms, const bool playing) {
-    if (reported_ms_ != position_ms || playing_ != playing) {
-        reported_ms_ = position_ms;
+    // Reports come twice a second and a moment late; the clock between them
+    // is this one. A report moves it only when it is far off -- a seek made
+    // elsewhere, a stall -- or when playing starts or stops.
+    constexpr qint64 tolerance_ms = 400;
+    const bool fresh = reported_ms_ != position_ms || playing_ != playing;
+    const bool started_or_stopped = playing_ != playing;
+    reported_ms_ = position_ms;
+    if (fresh) {
+        const auto predicted = position();
         playing_ = playing;
-        since_report_.start();
+        if (seek_ms_) {
+            // Until a report agrees with the seek, or a moment has passed,
+            // the reports are from before it.
+            const auto expected = *seek_ms_ + (playing ? seek_clock_.elapsed() : 0);
+            if (std::llabs(position_ms - expected) <= 1'500) {
+                seek_ms_.reset();
+            } else if (seek_clock_.elapsed() < 2'000) {
+                if (synced_) {
+                    highlight(lineAt(position()));
+                }
+                return;
+            } else {
+                seek_ms_.reset();
+            }
+        }
+        if (started_or_stopped || !anchor_clock_.isValid() ||
+            std::llabs(position_ms - predicted) > tolerance_ms) {
+            anchor_ms_ = position_ms;
+            anchor_clock_.start();
+        }
     }
-    if (!synced_) {
-        return;
+    if (synced_) {
+        highlight(lineAt(position()));
     }
-    const auto now = position_ms + (playing && since_report_.isValid() ? since_report_.elapsed() : 0);
-    highlight(lineAt(now));
 }
 
-void LyricsPanel::changeEvent(QEvent* event) {
-    QWidget::changeEvent(event);
-    if (event->type() == QEvent::PaletteChange) {
-        recolor();
+void LyricsPanel::seekTo(const qint64 position_ms) {
+    seek_ms_ = position_ms;
+    seek_clock_.start();
+    anchor_ms_ = position_ms;
+    anchor_clock_.start();
+    // Asked for here: the person wants to see it, not what they scrolled to.
+    manual_scroll_.invalidate();
+    if (synced_) {
+        highlight(lineAt(position()));
     }
 }
 
-void LyricsPanel::recolor() {
-    for (int row = 0; row < lines_->count(); ++row) {
-        const bool dim = message_ || (synced_ && row != current_);
-        lines_->item(row)->setForeground(
-            palette().brush(dim ? QPalette::PlaceholderText : QPalette::Text));
+qint64 LyricsPanel::position() const {
+    if (!anchor_clock_.isValid()) {
+        return reported_ms_.value_or(0);
     }
+    return anchor_ms_ + (playing_ ? anchor_clock_.elapsed() : 0);
 }
 
 int LyricsPanel::lineAt(const qint64 position_ms) const {
@@ -165,7 +207,56 @@ void LyricsPanel::highlight(const int line) {
         font.setBold(true);
         item->setFont(font);
         item->setForeground(palette().brush(QPalette::Text));
-        lines_->scrollToItem(item, QAbstractItemView::PositionAtCenter);
+    }
+    follow(current_ < 0 ? 0 : current_);
+}
+
+void LyricsPanel::follow(const int line) {
+    // Scrolled by hand a moment ago: the person is reading elsewhere.
+    if (manual_scroll_.isValid() && manual_scroll_.elapsed() < 4'000) {
+        return;
+    }
+    auto* item = lines_->item(line);
+    if (item == nullptr) {
+        return;
+    }
+    auto* bar = lines_->verticalScrollBar();
+    const auto rect = lines_->visualItemRect(item);
+    const auto target =
+        std::clamp(bar->value() + rect.center().y() - lines_->viewport()->height() / 2,
+                   bar->minimum(), bar->maximum());
+    scroll_->stop();
+    if (!isVisible() || std::abs(target - bar->value()) > lines_->viewport()->height() * 2 ||
+        !QSettings{}.value(QStringLiteral("appearance/panel-animations"), true).toBool()) {
+        // Far away -- a seek -- or not seen: there at once.
+        bar->setValue(target);
+        return;
+    }
+    scroll_->setStartValue(bar->value());
+    scroll_->setEndValue(target);
+    scroll_->start();
+}
+
+bool LyricsPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == lines_->viewport() && event->type() == QEvent::Wheel) {
+        scroll_->stop();
+        manual_scroll_.start();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void LyricsPanel::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange) {
+        recolor();
+    }
+}
+
+void LyricsPanel::recolor() {
+    for (int row = 0; row < lines_->count(); ++row) {
+        const bool dim = message_ || (synced_ && row != current_);
+        lines_->item(row)->setForeground(
+            palette().brush(dim ? QPalette::PlaceholderText : QPalette::Text));
     }
 }
 

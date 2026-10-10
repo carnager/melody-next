@@ -328,14 +328,22 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
                 break;
             }
         }
+        // An ID3 USLT frame with a description reads as LYRICS:<description>.
         const auto properties = reference.file()->properties();
-        for (const char* key : {"LYRICS", "UNSYNCEDLYRICS"}) {
-            const auto values = properties.find(key);
+        std::vector<std::string> keys{"LYRICS"};
+        for (const auto& [key, values] : properties) {
+            if (const auto name = key.to8Bit(true); name.starts_with("LYRICS:")) {
+                keys.push_back(name);
+            }
+        }
+        keys.emplace_back("UNSYNCEDLYRICS");
+        for (const auto& key : keys) {
+            const auto values = properties.find(TagLib::String{key, TagLib::String::UTF8});
             if (values == properties.end() || values->second.isEmpty()) {
                 continue;
             }
             auto lyrics = parse_lyrics(values->second.toString("\n").to8Bit(true));
-            lyrics.source = std::string{"tag:"} + key;
+            lyrics.source = "tag:" + key;
             found.push_back(std::move(lyrics));
         }
     }

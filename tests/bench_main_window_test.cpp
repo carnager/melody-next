@@ -128,6 +128,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QWheelEvent>
 #include <QSlider>
 #include <QSpinBox>
 #include <QSplitter>
@@ -14867,6 +14868,25 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
     panel.setPosition(61'000, false);
     QCOMPARE(panel.currentLine(), 3);
 
+    // A seek asked for here moves the highlight at once; reports from
+    // before it, still on their way, are not believed; one that agrees is.
+    panel.seekTo(1'500);
+    QCOMPARE(panel.currentLine(), 0);
+    panel.setPosition(61'000, false);
+    QCOMPARE(panel.currentLine(), 0);
+    panel.setPosition(1'550, false);
+    QCOMPARE(panel.currentLine(), 0);
+    // A seek made elsewhere -- far from what the clock says -- is followed.
+    panel.setPosition(2'200, false);
+    QCOMPARE(panel.currentLine(), 1);
+    // Playing, a report a little behind the clock does not pull it back.
+    panel.setPosition(2'000, true);
+    QTRY_VERIFY_WITH_TIMEOUT((panel.setPosition(2'000, true), panel.position() >= 2'250), 2'000);
+    const auto before_late_report = panel.position();
+    panel.setPosition(before_late_report - 200, true);
+    QVERIFY(panel.position() >= before_late_report);
+    panel.setPosition(0, false);
+
     QSignalSpy seeks{&panel, &LyricsPanel::seekRequested};
     QTest::mouseClick(lines->viewport(), Qt::LeftButton, {},
                       lines->visualItemRect(lines->item(1)).center());
@@ -14883,6 +14903,33 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
     QTest::mouseClick(lines->viewport(), Qt::LeftButton, {},
                       lines->visualItemRect(lines->item(0)).center());
     QCOMPARE(seeks.size(), 1);
+
+    // Long lyrics scroll the line sung to the middle, gliding there; a
+    // scroll by hand is left alone for a moment.
+    metadata::Lyrics song{.source = "sidecar", .synced = true, .lines = {}};
+    for (int line = 0; line < 60; ++line) {
+        song.lines.push_back({.time_ms = line * 1'000, .text = "Line " + std::to_string(line)});
+    }
+    panel.showLyrics(song);
+    panel.setPosition(30'200, false);
+    QCOMPARE(panel.currentLine(), 30);
+    const auto centred = [&] {
+        const auto rect = lines->visualItemRect(lines->item(panel.currentLine()));
+        return std::abs(rect.center().y() - lines->viewport()->height() / 2) <= rect.height();
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(centred(), 2'000);
+    QWheelEvent wheel{QPointF{10, 10}, lines->viewport()->mapToGlobal(QPointF{10, 10}),
+                      QPoint{}, QPoint{0, 120}, Qt::NoButton, Qt::NoModifier,
+                      Qt::NoScrollPhase, false};
+    QApplication::sendEvent(lines->viewport(), &wheel);
+    const auto scrolled_to = lines->verticalScrollBar()->value();
+    panel.setPosition(33'200, false);
+    QCOMPARE(panel.currentLine(), 33);
+    QTest::qWait(600);
+    QCOMPARE(lines->verticalScrollBar()->value(), scrolled_to);
+    // A seek from here shows the line again.
+    panel.seekTo(40'100);
+    QTRY_VERIFY_WITH_TIMEOUT(centred(), 2'000);
 
     panel.showMessage(QStringLiteral("No lyrics"));
     QCOMPARE(lines->count(), 1);
@@ -16138,6 +16185,52 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     field_prompt->reject();
     QTRY_VERIFY(dialog->findChild<QInputDialog*>(
                     QStringLiteral("bench-metadata-add-field-dialog")) == nullptr);
+
+    // ADR-0276: lyrics are many lines. Their editor takes Enter as a new
+    // line, keeps the text on Ctrl+Enter and drops it on Escape; the row
+    // shows the line breaks as marks.
+    QTest::mouseClick(add_field, Qt::LeftButton);
+    QTRY_VERIFY((field_prompt = dialog->findChild<QInputDialog*>(
+                     QStringLiteral("bench-metadata-add-field-dialog"))) != nullptr);
+    field_prompt->setTextValue(QStringLiteral("Lyrics"));
+    field_prompt->accept();
+    std::optional<int> lyrics_row;
+    QTRY_VERIFY((lyrics_row = aggregate_model->fieldRow(QStringLiteral("lyrics"))).has_value());
+    const auto lyrics_column = grid_model->fieldColumn(QStringLiteral("lyrics"));
+    QVERIFY(lyrics_column.has_value());
+    const auto lyrics_draft = aggregate_model->index(*lyrics_row, 2);
+    QTRY_COMPARE(fields->currentIndex(), lyrics_draft);
+    QTest::keyClick(fields, Qt::Key_F2);
+    QPlainTextEdit* lyrics_editor = nullptr;
+    QTRY_VERIFY((lyrics_editor = fields->findChild<QPlainTextEdit*>(
+                     QStringLiteral("metadata-long-text-editor"))) != nullptr);
+    QVERIFY(fields->findChild<QLineEdit*>() == nullptr);
+    QVERIFY(lyrics_editor->height() > fields->visualRect(lyrics_draft).height() * 4);
+    QTest::keyClicks(lyrics_editor, QStringLiteral("First line"));
+    QTest::keyClick(lyrics_editor, Qt::Key_Return);
+    QTest::keyClicks(lyrics_editor, QStringLiteral("Second line"));
+    QVERIFY(fields->findChild<QPlainTextEdit*>(QStringLiteral("metadata-long-text-editor")) !=
+            nullptr);
+    QTest::keyClick(lyrics_editor, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(fields->findChild<QPlainTextEdit*>(QStringLiteral("metadata-long-text-editor")) ==
+                nullptr);
+    QCOMPARE(grid_model->index(0, *lyrics_column).data(metadata_cell_values_role).toStringList(),
+             (QStringList{QStringLiteral("First line\nSecond line")}));
+    QCOMPARE(lyrics_draft.data(Qt::DisplayRole).toString(),
+             QStringLiteral("First line ↵ Second line"));
+    QTest::keyClick(fields, Qt::Key_F2);
+    QTRY_VERIFY((lyrics_editor = fields->findChild<QPlainTextEdit*>(
+                     QStringLiteral("metadata-long-text-editor"))) != nullptr);
+    QCOMPARE(lyrics_editor->toPlainText(), QStringLiteral("First line\nSecond line"));
+    QTest::keyClicks(lyrics_editor, QStringLiteral(" and more"));
+    QTest::keyClick(lyrics_editor, Qt::Key_Escape);
+    QTRY_VERIFY(fields->findChild<QPlainTextEdit*>(QStringLiteral("metadata-long-text-editor")) ==
+                nullptr);
+    QCOMPARE(grid_model->index(0, *lyrics_column).data(metadata_cell_values_role).toStringList(),
+             (QStringList{QStringLiteral("First line\nSecond line")}));
+    QTRY_VERIFY(remove_field->isEnabled());
+    QTest::mouseClick(remove_field, Qt::LeftButton);
+    QTRY_VERIFY(!grid_model->index(0, *lyrics_column).data(metadata_cell_staged_role).toBool());
 
     // One selected file exposes exact values in the same lower table and limits
     // edits to that source row.

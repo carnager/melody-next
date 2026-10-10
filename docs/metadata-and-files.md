@@ -135,7 +135,9 @@ Important tag families include:
 - Vorbis comments and FLAC metadata blocks;
 - Opus comments plus the Opus output-gain field;
 - APEv2 for APE/WavPack/Musepack and optional uses elsewhere;
-- MP4 atoms/freeform `----` metadata;
+- MP4 atoms/freeform `----` metadata, including names with a colon of their
+  own (Picard's AcousticBrainz `AB:GENRE`), which TagLib alone cannot write
+  and Trackknife renders itself so a rewrite keeps them;
 - ASF/WMA attributes;
 - Matroska tags, attachments, and chapters;
 - RIFF/BWF/INFO and AIFF chunks;

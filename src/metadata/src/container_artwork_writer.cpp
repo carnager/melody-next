@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/artwork_writers.hpp"
+#include "mp4_item_factory_detail.hpp"
 
 #include "container_preservation_detail.hpp"
 #include "text_writer_detail.hpp"
@@ -148,7 +149,8 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
 [[nodiscard]] core::Result<void> apply_covr_change(const ArtworkWritePlanSource& source_plan,
                                                    const std::string& prepared_raw_path,
                                                    const std::vector<unsigned char>& replacement) {
-    TagLib::MP4::File file{prepared_raw_path.c_str(), false};
+    TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
+                           mp4_detail::FreeFormFactory::instance()};
     if (!file.isValid() || file.tag() == nullptr) {
         return std::unexpected(writer_error(core::ErrorCode::backend,
                                             "TagLib rejected the prepared MP4 copy",
@@ -615,7 +617,8 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
                     return std::unexpected(applied.error());
                 }
             } else {
-                TagLib::MP4::File file{prepared.c_str(), false};
+                TagLib::MP4::File file{prepared.c_str(), false, TagLib::AudioProperties::Average,
+                                       mp4_detail::FreeFormFactory::instance()};
                 auto applied = text_writer_detail::apply_text_changes_to_properties(
                     "MP4", plan, file, prepared, cancellation, false);
                 if (!applied) {

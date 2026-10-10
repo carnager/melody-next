@@ -100,6 +100,19 @@ struct Command {
                                [&target](const auto& device) { return device.name == *target; });
 }
 
+} // namespace
+
+bool default_output_left(const std::optional<std::string>& previous_default,
+                         const std::vector<PipeWireDevice>& devices,
+                         const std::optional<std::string>& target) {
+    return !target && previous_default &&
+           std::ranges::none_of(devices, [&previous_default](const PipeWireDevice& device) {
+               return device.name == *previous_default;
+           });
+}
+
+namespace {
+
 constexpr auto maximum_buffer_capacity = std::chrono::seconds{10};
 constexpr auto device_monitor_poll_period = std::chrono::milliseconds{100};
 constexpr auto output_recovery_period = std::chrono::seconds{1};
@@ -455,6 +468,7 @@ struct LocalAuditionService::Impl {
 
     void apply_device_snapshot(PipeWireDeviceSnapshot device_snapshot) {
         const bool was_available = output_available;
+        const auto previous_default = std::move(default_output_target);
         devices = std::move(device_snapshot.devices);
         default_output_target = std::move(device_snapshot.default_target);
         device_generation = device_snapshot.generation;
@@ -472,6 +486,15 @@ struct LocalAuditionService::Impl {
             suspend_for_output_loss();
         } else if (!was_available && now_available) {
             recover_suspended_output();
+        } else if (source && default_output_left(previous_default, devices,
+                                                 config.output.target_object)) {
+            // The system moves the stream to the next device by itself; a
+            // pause, as the person would give it, keeps it from playing there
+            // until they say so.
+            const auto state = source->snapshot().state;
+            if (state == LocalPlaybackState::playing || state == LocalPlaybackState::buffering) {
+                source->pause();
+            }
         }
         publish();
     }

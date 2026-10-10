@@ -321,6 +321,7 @@ class BenchMainWindowTest final : public QObject {
     void identifyAlbumsTakesAFileGroupedApart();
     void identifyAlbumsWritesWhatIsChosen();
     void identifyAlbumsOpensFromTools();
+    void paintedStatusIconsFollowThePalette();
     void identifyAlbumsStagesAlongsideAutomaticScripts();
     void cachedRowsAreReadEvenWithARevision();
     void settingsGroupWhatTheyAreAbout();
@@ -7044,6 +7045,39 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTRY_COMPARE(write_again->text(), QStringLiteral("Write 2 albums"));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
+}
+
+// The desktop says dark only after the window is up, and the scheme's
+// palette comes later: the status bar's painted icons -- album shuffle --
+// are painted again in its colours, not left in the light palette's dark.
+void BenchMainWindowTest::paintedStatusIconsFollowThePalette() {
+    const auto before = QGuiApplication::palette();
+    BenchMainWindow window;
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* album_shuffle = window.findChild<QAction*>(QStringLiteral("action-local-album-random"));
+    QVERIFY(album_shuffle != nullptr);
+    // The colour of the icon's strokes: its most opaque pixel.
+    const auto ink = [album_shuffle] {
+        const auto image = album_shuffle->icon().pixmap(24, 24).toImage();
+        QColor strongest{Qt::transparent};
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const auto pixel = image.pixelColor(x, y);
+                if (pixel.alpha() > strongest.alpha()) {
+                    strongest = pixel;
+                }
+            }
+        }
+        return strongest;
+    };
+    auto later = before;
+    later.setColor(QPalette::Window, QColor{0x1e, 0x1f, 0x22});
+    later.setColor(QPalette::ButtonText, QColor{0xff, 0x00, 0x00});
+    QGuiApplication::setPalette(later);
+    QTRY_VERIFY2(ink().red() > 200 && ink().green() < 60 && ink().blue() < 60,
+                 qPrintable(ink().name(QColor::HexArgb)));
+    QGuiApplication::setPalette(before);
 }
 
 // ADR-0261: albums that fit more than one release wait for the person, who

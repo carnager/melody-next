@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "workspace/tagger_session.hpp"
+#include "workspace/keep_awake.hpp"
 
 #include "workspace/preparation_planning.hpp"
 
@@ -2563,6 +2564,7 @@ void TaggerSession::startWritePlan() {
     };
     const auto cancellation = write_plan_cancellation_.token();
     write_plan_running_ = true;
+    awake_ = KeepAwake::hold(QStringLiteral("Writing tags"));
     if (artwork_ != nullptr) {
         artwork_->setWorking(true);
     }
@@ -2579,6 +2581,9 @@ void TaggerSession::finishWritePlan() {
     const auto generation = write_plan_job_generation_;
     const auto result = write_plan_watcher_.result();
     write_plan_running_ = false;
+    if (!apply_running_) {
+        awake_.reset();
+    }
     if (artwork_ != nullptr) {
         artwork_->setWorking(false);
     }
@@ -2809,6 +2814,7 @@ void TaggerSession::startMetadataApply(std::shared_ptr<const operations::Prepara
     apply_progress_state_->issues.resize(plan->metadata->sources.size());
     file_apply_progress_state_.reset();
     apply_running_ = true;
+    awake_ = KeepAwake::hold(QStringLiteral("Writing tags"));
     if (artwork_ != nullptr) {
         artwork_->setWorking(true);
     }
@@ -2861,6 +2867,7 @@ void TaggerSession::startFileApply(std::shared_ptr<const operations::Preparation
     file_apply_progress_state_->issues.resize(plan->path_preflight->sources.size());
     apply_progress_state_.reset();
     apply_running_ = true;
+    awake_ = KeepAwake::hold(QStringLiteral("Writing tags"));
     if (artwork_ != nullptr) {
         artwork_->setWorking(true);
     }
@@ -2923,6 +2930,7 @@ void TaggerSession::updateApplyProgress() {
 
 void TaggerSession::finishMetadataApply() {
     apply_running_ = false;
+    awake_.reset();
     if (artwork_ != nullptr) {
         artwork_->setWorking(false);
     }
@@ -3043,6 +3051,7 @@ void TaggerSession::finishMetadataApply() {
 
 void TaggerSession::finishFileApply() {
     apply_running_ = false;
+    awake_.reset();
     if (artwork_ != nullptr) {
         artwork_->setWorking(false);
     }

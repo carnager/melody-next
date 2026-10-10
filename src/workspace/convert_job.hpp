@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "workspace/keep_awake.hpp"
+
 #include "trackknife/convert/preset.hpp"
 #include "trackknife/convert/scan.hpp"
 #include "trackknife/core/cancellation.hpp"
@@ -212,6 +214,8 @@ class ConvertJob final : public QObject {
 
     std::optional<operations::OutputPathPlan> plan_;
     bool running_{false};
+    // ADR-0277: the computer kept awake while this runs.
+    KeepAwake::Hold awake_;
     core::CancellationSource cancellation_;
     std::shared_ptr<std::atomic_size_t> completed_;
     std::size_t running_total_{0U};

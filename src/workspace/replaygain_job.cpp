@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "workspace/replaygain_job.hpp"
+#include "workspace/keep_awake.hpp"
 
 #include "bench/metadata_dialog_helpers.hpp"
 #include "trackknife/loudness/replaygain.hpp"
@@ -121,6 +122,7 @@ void ReplayGainJob::setStatusText(const QString& text) {
 
 void ReplayGainJob::setRunning(const bool running) {
     running_ = running;
+    awake_ = running ? KeepAwake::hold(QStringLiteral("Measuring ReplayGain")) : nullptr;
     stopping_ = false;
     if (!running) {
         progress_timer_.stop();

@@ -137,6 +137,9 @@ same for the media keys, Bluetooth headsets and Control Center (ADR-0275).
 
 - [ ] Notifications on macOS need `Trackknife.app`: build or package the
   bundle.
+- [ ] A long Apply as one engine job the window can reattach to, so a
+  closed lid or a dropped connection does not stop it (ADR-0277 holds off
+  idle sleep meanwhile).
 
 Lyrics from the files -- an `.lrc` beside them or their tags -- show in a
 panel that follows the song (ADR-0276).

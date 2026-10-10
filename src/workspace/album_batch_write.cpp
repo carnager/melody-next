@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "workspace/album_batch_write.hpp"
+#include "workspace/keep_awake.hpp"
 
 #include "bench/metadata_dialog_helpers.hpp"
 #include "workspace/preparation_planning.hpp"
@@ -88,6 +89,7 @@ void AlbumBatchWrite::start() {
         return;
     }
     running_ = true;
+    awake_ = KeepAwake::hold(QStringLiteral("Writing tags"));
     for (std::size_t item = 0U; item < selection->item_count(); ++item) {
         items_at_[selection->source(item).raw_path].push_back(item);
     }
@@ -536,6 +538,7 @@ void AlbumBatchWrite::finish() {
     }
     if (tagger_ == nullptr) {
         running_ = false;
+        awake_.reset();
         emit finished();
         return;
     }
@@ -543,6 +546,7 @@ void AlbumBatchWrite::finish() {
         tagger_, &TaggerSession::writtenElsewhere, this,
         [this] {
             running_ = false;
+            awake_.reset();
             emit finished();
         },
         Qt::SingleShotConnection);

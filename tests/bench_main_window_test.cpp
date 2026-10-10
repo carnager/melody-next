@@ -32,6 +32,7 @@
 #include "bench/trackknife_style.hpp"
 #include "bench/up_next_delegate.hpp"
 #include "bench/widget_color_scheme.hpp"
+#include "workspace/keep_awake.hpp"
 #include "drag_position.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -128,6 +129,9 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QDBusMessage>
+#include <QDBusConnection>
+#include <QDBusArgument>
 #include <QWheelEvent>
 #include <QSlider>
 #include <QSpinBox>
@@ -436,6 +440,7 @@ class BenchMainWindowTest final : public QObject {
     void headerPillsFollowAPaletteChangedLater();
     void listTabCloseButtonsClose();
     void mprisOrderAndCoverFollowTheWorkspace();
+    void longJobsKeepTheComputerAwake();
     void lyricsPanelFollowsThePosition();
     void windowListTabsCloseFromTheirButtons();
     void localListOrderingActionsRespectAuthorityAndPersist();
@@ -4069,6 +4074,64 @@ void BenchMainWindowTest::listRowsFollowChangedFiles() {
     other.source_revision = core::LocalSourceRevision{.device = 1, .inode = 99};
     model.replaceRows({other});
     QVERIFY(!model.applyCommittedRelocation("/music/old.flac", "/music/new.flac", before, written));
+}
+
+// ADR-0277: a long file job holds idle sleep off, one platform hold however
+// many jobs run, let go with the last. Where logind answers, it lists the
+// hold while it lasts.
+void BenchMainWindowTest::longJobsKeepTheComputerAwake() {
+    const auto ours = [] {
+        auto bus = QDBusConnection::systemBus();
+        if (!bus.isConnected()) {
+            return -1;
+        }
+        auto call = QDBusMessage::createMethodCall(
+            QStringLiteral("org.freedesktop.login1"), QStringLiteral("/org/freedesktop/login1"),
+            QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("ListInhibitors"));
+        const auto reply = bus.call(call, QDBus::Block, 2'000);
+        if (reply.type() != QDBusMessage::ReplyMessage) {
+            return -1;
+        }
+        const auto listed = reply.arguments().front().value<QDBusArgument>();
+        int count = 0;
+        listed.beginArray();
+        while (!listed.atEnd()) {
+            QString what;
+            QString who;
+            QString why;
+            QString mode;
+            uint uid = 0;
+            uint pid = 0;
+            listed.beginStructure();
+            listed >> what >> who >> why >> mode >> uid >> pid;
+            listed.endStructure();
+            if (who == QStringLiteral("Trackknife") &&
+                pid == static_cast<uint>(QCoreApplication::applicationPid())) {
+                ++count;
+            }
+        }
+        listed.endArray();
+        return count;
+    };
+    QCOMPARE(KeepAwake::holds(), 0);
+    auto first = KeepAwake::hold(QStringLiteral("Writing tags"));
+    auto second = KeepAwake::hold(QStringLiteral("Measuring ReplayGain"));
+    QCOMPARE(KeepAwake::holds(), 2);
+    const bool logind = ours() >= 0;
+    if (logind) {
+        QTRY_COMPARE_WITH_TIMEOUT(ours(), 1, 3'000);
+    }
+    first.reset();
+    QCOMPARE(KeepAwake::holds(), 1);
+    if (logind) {
+        QTest::qWait(200);
+        QCOMPARE(ours(), 1);
+    }
+    second.reset();
+    QCOMPARE(KeepAwake::holds(), 0);
+    if (logind) {
+        QTRY_COMPARE_WITH_TIMEOUT(ours(), 0, 3'000);
+    }
 }
 
 // ADR-0237: files are written only by the engine holding them. Without one

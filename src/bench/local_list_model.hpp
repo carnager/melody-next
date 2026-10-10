@@ -188,6 +188,11 @@ class LocalListModel final : public QAbstractTableModel {
     // its engine's library knows of its file; its place, identity and the
     // part of the file it plays stay. False when it is not that entry.
     bool describeRow(int row, const core::StableId& entry, LocalTrackRow described);
+    // ADR-0268: the rows at these paths -- or under them, a folder; or,
+    // `everything`, every row -- whose files changed, to be described again.
+    // A CUE track is described by its sheet, and is left out.
+    [[nodiscard]] std::vector<core::StableId>
+    entriesAt(const std::vector<std::string>& raw_paths, bool everything) const;
     // Refreshes every duplicate/logical occurrence of one verified physical
     // source while retaining annotation, segment, and sidecar layers.
     [[nodiscard]] core::Result<std::size_t>

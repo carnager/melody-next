@@ -45,3 +45,28 @@ so no row changed.
   what this window does, as before.
 - A change that touches many albums asks every loaded level again once
   (changes within a quarter second are taken together).
+
+## Amendment, 2026-10-11: lists follow what their files hold
+
+A file rewritten by another tagger -- or another window -- went on showing
+its old tags in every list, and the tag editor, trusting a row it had
+written itself, took the row's old file for the file there now: every Apply
+was refused, "the source changed after the metadata draft was captured",
+until the track was added to the list again.
+
+- **Lists follow tags, not only presence.** The rows a `catalogue.changed`
+  names -- at its paths, or under them; all of them after a scan -- are
+  described again by their engine (`list.describe`, ADR-0259), in place:
+  their tags, length and file identity, their place, entry and selection
+  kept. A CUE track is described by its sheet and is left alone.
+- **The tag editor reads every file when it opens**, whatever the row knows
+  of it, showing the row's tags meanwhile (ADR-0257). A row's identity says
+  which file it is, never that its tags are the file's.
+- **A file changed between reading and Apply is read again**, the draft
+  carried onto what it now holds, with "Changed since read · read again,
+  N drafts kept · check, then apply again" -- not a list of problems to
+  fix by hand. Anything else blocking Apply is shown as before.
+- **A rename follows a row already described again.** The engine's notice
+  of a write can reach the window before the write's own result; a row
+  described in between names the file as written, and is moved with it as
+  one naming the file as it was.

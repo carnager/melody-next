@@ -303,6 +303,9 @@ class Workspace final : public QObject {
     // Tabs being described, and those taken up again meanwhile.
     QSet<QString> describing_;
     QSet<QString> describe_again_;
+    // ADR-0268: rows whose files changed, described again once the list's
+    // describing in flight is done.
+    QHash<QString, std::vector<core::StableId>> redescribe_;
     bool probe_running_{false};
     core::CancellationSource probe_cancellation_;
     QFutureWatcher<void> artwork_watcher_;
@@ -956,6 +959,7 @@ class Workspace final : public QObject {
     // ADR-0259: rows of an engine's list the engine's library can describe,
     // filled in from it a part at a time, top first.
     void describeEngineRows(ListTab& tab);
+    void describeEngineEntries(ListTab& tab, std::vector<core::StableId> entries);
     void describeEngineRowsFrom(const QString& document_id, std::vector<core::StableId> entries,
                                 std::size_t from);
     void enrichRemoteRows(ListTab& tab);

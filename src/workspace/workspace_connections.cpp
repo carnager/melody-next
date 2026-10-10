@@ -351,12 +351,17 @@ void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<st
         found->browser->applyChanges(albums, everything);
     }
     // ADR-0268: its lists' rows at those paths -- or under them, a folder --
-    // looked at again: gone, or back.
+    // looked at again: gone, or back; and what the files now hold, asked of
+    // the engine, so a tag changed anywhere shows in every list, and the
+    // tagger never takes a row's old file for the file there now.
     for (const auto& tab : list_tabs_) {
         if (EngineKey::of(tab->document) != engine) {
             continue;
         }
         const auto id = QString::fromStdString(tab->document.id.to_string());
+        if (auto entries = tab->model->entriesAt(paths, everything); !entries.empty()) {
+            describeEngineEntries(*tab, std::move(entries));
+        }
         if (everything) {
             scheduleMissingCheck(id);
             continue;

@@ -642,6 +642,7 @@ void TaggerSession::finishSelection() {
         }
         const auto rewritten = std::exchange(rewritten_items_, {});
         const auto after_write = std::exchange(writing_elsewhere_, false);
+        const auto changed_since = std::exchange(reading_changed_, false);
         auto adopted = grid_model_->adoptReadSelection(std::move(**result), rewritten);
         if (!adopted) {
             sticky_status_ = QStringLiteral("The tags read could not replace the cached ones · %1")
@@ -654,6 +655,22 @@ void TaggerSession::finishSelection() {
             return;
         }
         provisional_ = false;
+        if (changed_since) {
+            // Its scripts ran when it was opened; the draft is the person's.
+            describeSelection(grid_model_->selection());
+            selectAllRows();
+            const auto kept = adopted->first;
+            sticky_status_ =
+                QStringLiteral("Changed since read · read again, %L1 %2 kept · check, then apply "
+                               "again")
+                    .arg(kept)
+                    .arg(kept == 1U ? QStringLiteral("draft") : QStringLiteral("drafts"));
+            setStatus(sticky_status_);
+            reportUnreadable();
+            updateTechnicalSummary();
+            emit changed();
+            return;
+        }
         if (after_write) {
             // The files' scripts already ran when they were opened.
             describeSelection(grid_model_->selection());
@@ -1704,6 +1721,32 @@ void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written,
     startSelection();
 }
 
+void TaggerSession::readChangedAgain(std::vector<std::size_t> items) {
+    if (grid_model_ == nullptr || items.empty()) {
+        return;
+    }
+    const auto& selection = grid_model_->selection();
+    sources_.clear();
+    sources_.reserve(selection.item_count());
+    for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+        sources_.push_back(selection.source(item));
+    }
+    for (const auto item : items) {
+        if (item < sources_.size()) {
+            sources_[item].source_revision.reset();
+            sources_[item].needs_metadata_capture = true;
+        }
+    }
+    rewritten_items_.clear();
+    reading_changed_ = true;
+    provisional_ = true;
+    setStatus(QStringLiteral("%L1 %2 changed since read · reading again, the draft kept…")
+                  .arg(items.size())
+                  .arg(items.size() == 1U ? QStringLiteral("file") : QStringLiteral("files")));
+    emit changed();
+    startSelection();
+}
+
 std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
     if (grid_model_ == nullptr || proposal_running_ || identify_dialog_open_ ||
         !services_.musicbrainz.fetch) {
@@ -2569,6 +2612,57 @@ void TaggerSession::finishWritePlan() {
         pending_plan_ = std::move(plan);
         emit folderImagesReviewRequested(std::move(folders));
         return;
+    }
+
+    // ADR-0268: blocked only because files changed since they were read --
+    // another tagger wrote them, or another window: nothing to fix by hand.
+    // They are read again and the draft carried over, for another look.
+    if (plan->metadata && grid_model_ != nullptr) {
+        const auto changed_only =
+            std::ranges::none_of(plan->issues, [](const auto& issue) { return issue.blocking; }) &&
+            !(plan->output_paths &&
+              std::ranges::any_of(plan->output_paths->issues,
+                                  [](const auto& issue) { return issue.blocking; })) &&
+            !(plan->path_preflight &&
+              std::ranges::any_of(plan->path_preflight->issues,
+                                  [](const auto& issue) { return issue.blocking; })) &&
+            std::ranges::none_of(plan->metadata->cue_sheets,
+                                 [](const auto& sheet) {
+                                     return std::ranges::any_of(sheet.issues, [](const auto& issue) {
+                                         return issue.blocking;
+                                     });
+                                 }) &&
+            std::ranges::none_of(plan->metadata->sidecars, [](const auto& sidecar) {
+                return std::ranges::any_of(sidecar.issues,
+                                           [](const auto& issue) { return issue.blocking; });
+            });
+        std::set<std::string> changed;
+        bool other = false;
+        for (const auto& source : plan->metadata->sources) {
+            for (const auto& issue : source.issues) {
+                if (!issue.blocking) {
+                    continue;
+                }
+                if (issue.kind == metadata::MetadataWritePlanIssueKind::source_changed) {
+                    changed.insert(source.raw_path);
+                } else {
+                    other = true;
+                }
+            }
+        }
+        if (changed_only && !other && !changed.empty()) {
+            std::vector<std::size_t> items;
+            const auto& selection = grid_model_->selection();
+            for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+                if (changed.contains(selection.source(item).raw_path)) {
+                    items.push_back(item);
+                }
+            }
+            if (!items.empty()) {
+                readChangedAgain(std::move(items));
+                return;
+            }
+        }
     }
 
     // Blocked: nothing was written; list only what needs attention.

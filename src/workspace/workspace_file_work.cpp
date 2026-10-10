@@ -419,15 +419,12 @@ Workspace::selectionSourceReader(LocalListModel* source_model,
                           .end_sample = row.segment ? row.segment->end_sample : std::nullopt,
                       }}
                     : std::nullopt;
-        // ADR-0257: tags the library cached are read from the file in the
-        // background, the cache shown meanwhile -- also when the row knows
-        // the file's revision, as a row the engine described does
-        // (ADR-0259): its revision says which file, not that its tags are
-        // the file's.
-        const auto cached = std::ranges::any_of(row.metadata.fields, [](const auto& field) {
-            return field.provenance == metadata::FieldProvenance::cached_snapshot;
-        });
-        const auto to_read = (cached || !row.source_revision) && row.probed && !logical;
+        // ADR-0257: the file is read in the background, what the row holds
+        // shown meanwhile -- always, whatever the row knows of the file. Its
+        // revision and tags are of the file as it was when the row learned
+        // them, and the file may have changed since, through another tagger
+        // or another window (ADR-0268): the draft must start from the file.
+        const auto to_read = row.probed && !logical;
         return MetadataPropertiesSource{
             .source =
                 metadata::StagedMetadataSource{

@@ -28,6 +28,9 @@ struct Lyrics {
     // Synced: every line has a time, and the lines are in time order.
     bool synced{false};
     std::vector<LyricsLine> lines;
+    // LRC's [length:] header: the length of the recording the timings were
+    // made for, to choose between versions. Read here; never sent.
+    std::optional<std::int64_t> declared_length_ms;
 
     friend bool operator==(const Lyrics&, const Lyrics&) = default;
 };
@@ -36,7 +39,8 @@ struct Lyrics {
 // a line with several timings is one line per timing, `[offset:]` moves them
 // all, word timings (<mm:ss.xx>) and header tags ([ar:], [ti:]) are dropped,
 // and lines without a timing are left out. Text without timings is plain,
-// line by line. Pure; `source` is left empty.
+// line by line. `[length:]` is kept as the declared length. Pure; `source`
+// is left empty.
 [[nodiscard]] Lyrics parse_lyrics(std::string_view text);
 
 // The sidecar beside an audio file, if there is one: the same name with an
@@ -45,7 +49,10 @@ struct Lyrics {
 
 // The lyrics of one file: the first synced lyrics among the `.lrc` beside
 // it, ID3 SYLT, the LYRICS tag and the UNSYNCEDLYRICS tag, or else the first
-// plain ones; none, nullopt. A file TagLib cannot read may still have a
+// plain ones; none, nullopt. A tag with several values is several versions,
+// never joined: a copy of one is dropped, and synced lyrics whose [length:]
+// is not the track's -- made for another edit of the song -- come after
+// those that fit or say nothing. A file TagLib cannot read may still have a
 // sidecar. Runs on a worker, never the UI thread.
 [[nodiscard]] core::Result<std::optional<Lyrics>>
 read_lyrics(const std::string& raw_path, const core::CancellationToken& cancellation = {});

@@ -25,7 +25,8 @@ client cannot open them to look.
   1. an `.lrc` beside the file, with the same name (`Song.flac` → `Song.lrc`,
      compared case-insensitively);
   2. ID3 `SYLT`;
-  3. the `LYRICS` tag, then `UNSYNCEDLYRICS`.
+  3. the `LYRICS` tag, then `LYRICS:<description>` -- an ID3 `USLT` frame
+     with a description reads so -- then `UNSYNCEDLYRICS`.
   Synced wins over plain whatever its source, because a file often carries
   plain text embedded and an `.lrc` beside it that someone fetched later.
 - **The answer** is `{source, synced, lines: [{time_ms?, text}]}`, the
@@ -41,8 +42,14 @@ client cannot open them to look.
   rather than failing.
 - **A Lyrics panel** in Trackknife, a dock like Up Next, shows the playing
   track's lyrics and follows it as it changes. Synced lyrics highlight the
-  current line and keep it centred; the position is carried on locally
-  between the engine's reports, so the highlight moves smoothly. Clicking a
+  current line and glide it to the centre; the position is carried on
+  locally between the engine's reports, which come twice a second and a
+  moment late. A report moves that clock only when it is more than 400 ms
+  off -- a seek elsewhere, a stall -- so jitter never pulls the highlight
+  back. A seek from this window (the slider, the desktop, a line clicked)
+  moves it at once, and reports still on their way from before the seek are
+  not believed for up to two seconds. Scrolling by hand stops the following
+  for a few seconds. Clicking a
   line seeks to it. Plain lyrics are a scrolling page of text. The panel
   shows where the lyrics came from and says "No lyrics" plainly when there
   are none. Hidden in the shipped layout; Playback › Lyrics (Ctrl+Shift+L)
@@ -57,12 +64,20 @@ client cannot open them to look.
   intended first use of a plugin boundary, decided separately; what it
   fetches would be offered for review and saved as an `.lrc` or a tag
   through the usual preview.
-- **Editing lyrics** beyond what the tagger already does with the `LYRICS`
-  field, and writing `.lrc` files.
+- Writing `.lrc` files.
 - The phone app; it can use the same method later.
 
 - **The library's field index keeps `LYRICS`,** as it keeps every tag, so
   embedded lyrics stay searchable (`lyrics HAS ...`).
+
+## Amendment, 2026-10-10: lyrics in the tagger
+
+`Lyrics` is a known field (`LYRICS`), offered by Add field. Its value --
+and any value that already has line breaks -- is edited in a text box of
+many lines over the grid: Enter starts a line, Ctrl+Enter keeps the text,
+Escape drops it, leaving keeps it. A row shows a value's line breaks as ↵.
+Written through the usual preview, it is each format's own lyrics: the
+Vorbis comment, ID3 `USLT`, MP4 `©lyr`, the APE item.
 
 ## Consequences
 

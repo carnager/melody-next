@@ -649,7 +649,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void refreshPlaybackBufferChecks() override;
     void reloadPlaybackPreferences();
     void togglePlayPause() { workspace_.togglePlayPause(); }
-    void seekToMs(qint64 position_ms) { workspace_.seekToMs(position_ms); }
+    void seekToMs(qint64 position_ms);
 
     FolderBrowser* folder_browser_{nullptr};
     ui::LocalFolderTreeModel* folder_model_{nullptr};

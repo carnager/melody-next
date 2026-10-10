@@ -35,6 +35,7 @@ constexpr std::array catalog{
     Candidate{"Performer", Kind::conventional},
     Candidate{"Conductor", Kind::conventional},
     Candidate{"Lyricist", Kind::conventional},
+    Candidate{"Lyrics", Kind::conventional},
     Candidate{"Label", Kind::conventional},
     Candidate{"Catalog Number", Kind::conventional},
     Candidate{"Barcode", Kind::conventional},

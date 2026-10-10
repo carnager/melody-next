@@ -41,6 +41,7 @@ constexpr std::array conventional_mappings{
     ConventionalMapping{"performer", "PERFORMER"},
     ConventionalMapping{"conductor", "CONDUCTOR"},
     ConventionalMapping{"lyricist", "LYRICIST"},
+    ConventionalMapping{"lyrics", "LYRICS"},
     ConventionalMapping{"label", "LABEL"},
     ConventionalMapping{"catalognumber", "CATALOGNUMBER"},
     ConventionalMapping{"barcode", "BARCODE"},

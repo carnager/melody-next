@@ -33,6 +33,15 @@ void BenchMainWindow::buildLyrics() {
     addAction(toggle);
 }
 
+// Every seek from this window -- the slider, the desktop, a lyric line --
+// reaches the Lyrics panel at once, before the engine reports it.
+void BenchMainWindow::seekToMs(const qint64 position_ms) {
+    workspace_.seekToMs(position_ms);
+    if (lyrics_panel_ != nullptr) {
+        lyrics_panel_->seekTo(position_ms);
+    }
+}
+
 void BenchMainWindow::refreshLyrics(const EnginePlayback::State& state) {
     // Hidden, it asks nothing; shown again, it asks for what plays then.
     if (lyrics_panel_ == nullptr || lyrics_dock_ == nullptr || lyrics_dock_->isHidden()) {

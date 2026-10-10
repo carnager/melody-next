@@ -79,6 +79,15 @@ Escape drops it, leaving keeps it. A row shows a value's line breaks as ↵.
 Written through the usual preview, it is each format's own lyrics: the
 Vorbis comment, ID3 `USLT`, MP4 `©lyr`, the APE item.
 
+## Amendment, 2026-10-10: several versions in one tag
+
+A `LYRICS` tag may hold several values -- taggers append rather than
+replace -- and each is a version of its own, never joined into one text:
+joined, two timings of one song interleave and the highlight jumps between
+them. Copies of a version are one version. Synced versions whose `[length:]`
+differs from the track's by more than three seconds were timed for another
+edit of the song; they come after those that fit or say nothing.
+
 ## Consequences
 
 - Lyrics work the same for a local and a remote engine, and need no tag

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -192,9 +193,10 @@ constexpr std::size_t directory_limit = 10'000U;
 } // namespace
 
 Lyrics parse_lyrics(const std::string_view text) {
-    Lyrics synced{.source = {}, .synced = true, .lines = {}};
+    Lyrics synced{.source = {}, .synced = true, .lines = {}, .declared_length_ms = {}};
     Lyrics plain;
     std::int64_t offset_ms = 0;
+    std::optional<std::int64_t> declared_length_ms;
     for (const auto raw : lines_of(text)) {
         auto line = trimmed(raw);
         std::vector<std::int64_t> times;
@@ -212,7 +214,11 @@ Lyrics parse_lyrics(const std::string_view text) {
                        std::ranges::all_of(tag.substr(0, colon), [](const char c) {
                            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
                        })) {
-                if (lower(std::string{tag.substr(0, colon)}) == "offset") {
+                const auto key = lower(std::string{tag.substr(0, colon)});
+                if (key == "length") {
+                    declared_length_ms = timing(trimmed(tag.substr(colon + 1U)));
+                }
+                if (key == "offset") {
                     auto value = trimmed(tag.substr(colon + 1U));
                     const bool negative = value.starts_with('-');
                     if (negative || value.starts_with('+')) {
@@ -245,6 +251,7 @@ Lyrics parse_lyrics(const std::string_view text) {
         std::ranges::stable_sort(synced.lines, {}, [](const LyricsLine& line) {
             return *line.time_ms;
         });
+        synced.declared_length_ms = declared_length_ms;
         return synced;
     }
     while (!plain.lines.empty() && plain.lines.back().text.empty()) {
@@ -294,6 +301,7 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
         };
     };
     std::vector<Lyrics> found;
+    std::optional<std::int64_t> track_length_ms;
     if (const auto sidecar = lyrics_sidecar_path(raw_path)) {
         if (const auto bytes = read_small_file(*sidecar)) {
             auto lyrics = parse_lyrics(as_utf8(*bytes));
@@ -304,10 +312,14 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled());
     }
-    // Read-only, as the metadata reader opens files (ADR-0232).
+    // Read-only, as the metadata reader opens files (ADR-0232); with the
+    // audio's length, to tell which version of timed lyrics fits.
     TagLib::FileStream stream{raw_path.c_str(), true};
-    TagLib::FileRef reference{&stream, false};
+    TagLib::FileRef reference{&stream, true, TagLib::AudioProperties::Fast};
     if (!reference.isNull() && reference.file() != nullptr && reference.file()->isValid()) {
+        if (const auto* audio = reference.audioProperties(); audio != nullptr) {
+            track_length_ms = audio->lengthInMilliseconds();
+        }
         if (auto* mpeg = dynamic_cast<TagLib::MPEG::File*>(reference.file());
             mpeg != nullptr && mpeg->hasID3v2Tag()) {
             for (auto* frame : mpeg->ID3v2Tag()->frameList("SYLT")) {
@@ -316,7 +328,7 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
                                            TagLib::ID3v2::SynchronizedLyricsFrame::AbsoluteMilliseconds) {
                     continue;
                 }
-                Lyrics lyrics{.source = "sylt", .synced = true, .lines = {}};
+                Lyrics lyrics{.source = "sylt", .synced = true, .lines = {}, .declared_length_ms = {}};
                 for (const auto& entry : sylt->synchedText()) {
                     lyrics.lines.push_back({.time_ms = static_cast<std::int64_t>(entry.time),
                                             .text = std::string{trimmed(entry.text.to8Bit(true))}});
@@ -342,15 +354,38 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
             if (values == properties.end() || values->second.isEmpty()) {
                 continue;
             }
-            auto lyrics = parse_lyrics(values->second.toString("\n").to8Bit(true));
-            lyrics.source = "tag:" + key;
-            found.push_back(std::move(lyrics));
+            for (const auto& value : values->second) {
+                auto lyrics = parse_lyrics(value.to8Bit(true));
+                lyrics.source = "tag:" + key;
+                found.push_back(std::move(lyrics));
+            }
         }
     }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled());
     }
     std::erase_if(found, [](const Lyrics& lyrics) { return !has_lines(lyrics); });
+    // A copy of a version already found is no second version.
+    std::vector<Lyrics> versions;
+    for (auto& lyrics : found) {
+        if (std::ranges::none_of(versions, [&lyrics](const Lyrics& kept) {
+                return kept.synced == lyrics.synced && kept.lines == lyrics.lines;
+            })) {
+            versions.push_back(std::move(lyrics));
+        }
+    }
+    found = std::move(versions);
+    // Timed for another edit of the song: its declared length is not this
+    // track's. Within a few seconds is the same recording.
+    const auto fits = [&track_length_ms](const Lyrics& lyrics) {
+        return !lyrics.declared_length_ms || !track_length_ms || *track_length_ms <= 0 ||
+               std::llabs(*lyrics.declared_length_ms - *track_length_ms) <= 3'000;
+    };
+    if (const auto synced = std::ranges::find_if(
+            found, [&fits](const Lyrics& lyrics) { return lyrics.synced && fits(lyrics); });
+        synced != found.end()) {
+        return std::optional<Lyrics>{std::move(*synced)};
+    }
     if (const auto synced = std::ranges::find_if(found, &Lyrics::synced); synced != found.end()) {
         return std::optional<Lyrics>{std::move(*synced)};
     }

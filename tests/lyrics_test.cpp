@@ -84,6 +84,11 @@ void parsing() {
     CHECK((mixed.lines == std::vector{at(1'000, "A <b> c")}));
     CHECK(!metadata::parse_lyrics("[00:61.00]Not a second").synced);
     CHECK(metadata::parse_lyrics("").lines.empty());
+
+    // [length:] is kept, to tell versions of the song apart.
+    CHECK(metadata::parse_lyrics("[length: 05:52]\n[00:01.00]A").declared_length_ms ==
+          std::optional<std::int64_t>{352'000});
+    CHECK(!metadata::parse_lyrics("[00:01.00]A").declared_length_ms);
 }
 
 [[nodiscard]] std::string decoded(const std::filesystem::path& fixture) {
@@ -176,6 +181,42 @@ void finding(const std::filesystem::path& fixtures, const std::filesystem::path&
     tag(flac, "LYRICS", "[00:02.00]Synced tag");
     const auto tagged = metadata::read_lyrics(flac.string());
     CHECK(tagged && *tagged && (*tagged)->source == "tag:LYRICS" && (*tagged)->synced);
+
+    // Several LYRICS values are several versions, never one text: here two
+    // copies of lyrics timed for a longer edit of the song, and one that
+    // says nothing of its length. The copies are one version; the one that
+    // may fit the track is chosen.
+    std::filesystem::remove(directory / "TRACK.LRC");
+    const auto versions = materialized(fixtures, directory, "tagged-tone-flac.b64", "multi.flac");
+    {
+        TagLib::FileRef file{versions.c_str()};
+        auto properties = file.file()->properties();
+        const TagLib::String other_edit{"[length: 05:52]\n[00:21.81]Life is a mystery\n"
+                                        "[00:30.50]I hear you call my name",
+                                        TagLib::String::UTF8};
+        const TagLib::String this_edit{"[00:00.50]Life is a mystery\n[00:00.90]Everyone",
+                                       TagLib::String::UTF8};
+        properties.replace("LYRICS", TagLib::StringList{other_edit, other_edit, this_edit});
+        file.file()->setProperties(properties);
+        CHECK(file.save());
+    }
+    const auto chosen = metadata::read_lyrics(versions.string());
+    CHECK(chosen && *chosen && (*chosen)->synced);
+    if (chosen && *chosen) {
+        CHECK(((*chosen)->lines ==
+               std::vector{at(500, "Life is a mystery"), at(900, "Everyone")}));
+    }
+    // Only versions for another edit: the first is still shown.
+    {
+        TagLib::FileRef file{versions.c_str()};
+        auto properties = file.file()->properties();
+        properties.replace("LYRICS",
+                           TagLib::StringList{TagLib::String{"[length: 05:52]\n[00:21.81]Only"}});
+        file.file()->setProperties(properties);
+        CHECK(file.save());
+    }
+    const auto only = metadata::read_lyrics(versions.string());
+    CHECK(only && *only && (*only)->lines.size() == 1U);
 
     // An MP3's SYLT frame, in milliseconds.
     const auto mp3 = materialized(fixtures, directory, "tagged-tone-mp3.b64", "synced.mp3");

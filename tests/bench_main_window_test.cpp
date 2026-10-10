@@ -14843,7 +14843,8 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
     QVERIFY(lines != nullptr && source != nullptr);
     QCOMPARE(lines->count(), 1); // "Nothing is playing"
 
-    metadata::Lyrics synced{.source = "sidecar", .synced = true, .lines = {}};
+    metadata::Lyrics synced{
+        .source = "sidecar", .synced = true, .lines = {}, .declared_length_ms = {}};
     for (const auto& [time, text] : {std::pair{1'000, "One"}, std::pair{2'000, "Two"},
                                      std::pair{3'000, ""}, std::pair{60'000, "Late"}}) {
         synced.lines.push_back({.time_ms = time, .text = text});
@@ -14896,7 +14897,8 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
     // Plain lyrics: text, nothing highlighted, a click seeks nowhere.
     panel.showLyrics({.source = "tag:LYRICS",
                       .synced = false,
-                      .lines = {{.time_ms = std::nullopt, .text = "Words"}}});
+                      .lines = {{.time_ms = std::nullopt, .text = "Words"}},
+                      .declared_length_ms = {}});
     QCOMPARE(source->text(), QStringLiteral("Plain · LYRICS tag"));
     panel.setPosition(5'000, true);
     QCOMPARE(panel.currentLine(), -1);
@@ -14906,7 +14908,8 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
 
     // Long lyrics scroll the line sung to the middle, gliding there; a
     // scroll by hand is left alone for a moment.
-    metadata::Lyrics song{.source = "sidecar", .synced = true, .lines = {}};
+    metadata::Lyrics song{
+        .source = "sidecar", .synced = true, .lines = {}, .declared_length_ms = {}};
     for (int line = 0; line < 60; ++line) {
         song.lines.push_back({.time_ms = line * 1'000, .text = "Line " + std::to_string(line)});
     }

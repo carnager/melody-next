@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <QFrame>
 #include <QProxyStyle>
 #include <QWidget>
 
@@ -66,6 +67,18 @@ class TrackknifeStyle final : public QProxyStyle {
                      const QWidget* widget = nullptr) const override;
     void drawComplexControl(ComplexControl control, const QStyleOptionComplex* option,
                             QPainter* painter, const QWidget* widget = nullptr) const override;
+};
+
+// A footer under a hairline, drawn from the palette as it is when painted:
+// a style sheet's border, which this replaces, froze the palette of every
+// widget below it at first show -- the status line kept a light palette's
+// dark text after the scheme turned dark.
+class RuledFrame final : public QFrame {
+  public:
+    explicit RuledFrame(QWidget* parent = nullptr);
+
+  protected:
+    void paintEvent(QPaintEvent* event) override;
 };
 
 // A header, footer or side area, shaded: a step off the window (sunken),

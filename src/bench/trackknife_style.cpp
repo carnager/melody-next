@@ -907,6 +907,14 @@ void TrackknifeStyle::drawComplexControl(const ComplexControl control,
 
 Band::Band(const Edge edge, QWidget* parent) : QWidget{parent}, edge_{edge} {}
 
+RuledFrame::RuledFrame(QWidget* parent) : QFrame(parent) { setFrameShape(QFrame::NoFrame); }
+
+void RuledFrame::paintEvent(QPaintEvent* event) {
+    QFrame::paintEvent(event);
+    QPainter painter{this};
+    painter.fillRect(QRect{0, 0, width(), 1}, TrackknifeStyle::hairline(palette()));
+}
+
 void Band::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter{this};
     painter.fillRect(rect(), TrackknifeStyle::sunken(palette()));

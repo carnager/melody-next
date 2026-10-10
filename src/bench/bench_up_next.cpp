@@ -4,6 +4,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/settings_dialog.hpp"
+#include "bench/trackknife_style.hpp"
 #include "bench/up_next_delegate.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/list_persistence_service.hpp"
@@ -125,18 +126,8 @@ void BenchMainWindow::buildUpNext() {
     layout->addWidget(up_next_view_, 1);
     // Footer: the edits on the left, the way back to the list on the right,
     // under a hairline.
-    auto* footer = new QFrame(content);
+    auto* footer = new RuledFrame(content);
     footer->setObjectName(QStringLiteral("up-next-footer"));
-    {
-        const auto ground = palette().color(QPalette::Window);
-        const auto ink = palette().color(QPalette::Text);
-        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
-        footer->setStyleSheet(
-            QStringLiteral("QFrame#up-next-footer { border-top: 1px solid %1; }")
-                .arg(QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
-                                     mix(ground.blue(), ink.blue()))
-                         .name()));
-    }
     auto* footer_layout = new QHBoxLayout(footer);
     footer_layout->setContentsMargins(4, 4, 8, 4);
     footer_layout->setSpacing(4);

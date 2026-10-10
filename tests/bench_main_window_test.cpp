@@ -296,6 +296,8 @@ class BenchMainWindowTest final : public QObject {
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void metadataRenameMovesTheFileAndItsRow();
+    void applyReadsAgainAFileChangedElsewhere();
+    void listRowsFollowChangedFiles();
     void fileWorkWithoutAnEngineSaysWhy();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
@@ -996,8 +998,10 @@ void BenchMainWindowTest::cachedRowsAreReadEvenWithARevision() {
     const auto second = reader(1U);
     const auto third = reader(2U);
     QVERIFY(first && second && third);
+    // ADR-0268: a row read from the file is read again too -- the file may
+    // have changed since, through another tagger -- so every one is read.
     QVERIFY(first->source.needs_metadata_capture && !first->source.source_revision);
-    QVERIFY(!second->source.needs_metadata_capture && second->source.source_revision);
+    QVERIFY(second->source.needs_metadata_capture && !second->source.source_revision);
     QVERIFY(third->source.needs_metadata_capture && !third->source.source_revision);
 }
 
@@ -3932,6 +3936,139 @@ void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
+}
+
+// ADR-0268: a file changed by another tagger after the editor read it is no
+// dead end. Apply reads it again, the draft kept, for another look; the
+// next Apply writes it.
+void BenchMainWindowTest::applyReadsAgainAFileChangedElsewhere() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("changed-elsewhere.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    const auto encoded = QFile::encodeName(path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr && properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(list_model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    properties_action->trigger();
+
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
+    auto* apply = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QVERIFY(aggregate_model != nullptr && status != nullptr && apply != nullptr);
+    // Read and ready: the status says so, or has moved on to the draft.
+    QTRY_VERIFY2_WITH_TIMEOUT(status->text().contains(QStringLiteral("Tags read")) ||
+                                  status->text().contains(QStringLiteral("No pending edits")),
+                              qPrintable(status->text()), 10'000);
+    const auto title_row = aggregate_model->fieldRow(QStringLiteral("title"));
+    QVERIFY(title_row.has_value());
+    QVERIFY(aggregate_model->setData(aggregate_model->index(*title_row, 2),
+                                     QStringLiteral("Edited here"), Qt::EditRole));
+
+    // Another tagger writes the file meanwhile: it is no longer the one read.
+    const auto before = metadata::read_local_metadata(raw_path);
+    QVERIFY(before.has_value());
+    {
+        QFile file{path};
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        QVERIFY(file.setFileTime(QDateTime::currentDateTime().addSecs(-3'600),
+                                 QFileDevice::FileModificationTime));
+    }
+
+    QTRY_VERIFY(apply->isEnabled());
+    QTest::mouseClick(apply, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(QStringLiteral("Changed since read")),
+                             10'000);
+    QVERIFY(status->text().contains(QStringLiteral("1 draft kept")));
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
+    QTRY_COMPARE(aggregate_model->index(*title_row, 2).data(Qt::DisplayRole).toString(),
+                 QStringLiteral("Edited here"));
+    const auto untouched = metadata::read_local_metadata(raw_path);
+    QVERIFY(untouched.has_value());
+    QCOMPARE(untouched->document.effective_values("title"),
+             before->document.effective_values("title"));
+
+    // Looked at again, applied again: written.
+    QTRY_VERIFY(apply->isEnabled());
+    QTest::mouseClick(apply, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr, 10'000);
+    const auto written = metadata::read_local_metadata(raw_path);
+    QVERIFY(written.has_value());
+    QCOMPARE(written->document.effective_values("title"),
+             (std::vector<std::string>{"Edited here"}));
+    QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
+                             5'000);
+}
+
+// ADR-0268: the rows a change names -- at its paths, or under a folder of
+// them -- are described again, a CUE track by its sheet and not; and a row
+// described again after a rename, naming the file as written, still follows
+// the file to its new name.
+void BenchMainWindowTest::listRowsFollowChangedFiles() {
+    LocalListModel model;
+    const auto row = [](const char* path) {
+        LocalTrackRow track;
+        track.raw_path = path;
+        track.probed = true;
+        return track;
+    };
+    auto cue = row("/music/A/live.flac");
+    cue.segment = formats::SampleRange{.start_sample = 0, .end_sample = 100};
+    model.replaceRows({row("/music/A/01.flac"), row("/music/A/02.flac"), row("/music/B/01.flac"),
+                       row("/music/AB/01.flac"), cue});
+    const auto ids = [&model](const std::vector<core::StableId>& entries) {
+        std::vector<std::string> paths;
+        for (const auto& entry : entries) {
+            for (const auto& track : model.rows()) {
+                if (track.entry_id == entry) {
+                    paths.push_back(track.raw_path);
+                }
+            }
+        }
+        return paths;
+    };
+    QCOMPARE(ids(model.entriesAt({"/music/A/02.flac"}, false)),
+             (std::vector<std::string>{"/music/A/02.flac"}));
+    QCOMPARE(ids(model.entriesAt({"/music/A"}, false)),
+             (std::vector<std::string>{"/music/A/01.flac", "/music/A/02.flac"}));
+    QCOMPARE(model.entriesAt({}, true).size(), std::size_t{4U});
+
+    const core::LocalSourceRevision before{.device = 1, .inode = 10};
+    const core::LocalSourceRevision written{.device = 1, .inode = 11};
+    auto described = row("/music/old.flac");
+    described.source_revision = written;
+    model.replaceRows({described});
+    const auto moved =
+        model.applyCommittedRelocation("/music/old.flac", "/music/new.flac", before, written);
+    QVERIFY(moved && *moved == 1U);
+    QCOMPARE(model.rows().front().raw_path, std::string{"/music/new.flac"});
+    auto other = row("/music/old.flac");
+    other.source_revision = core::LocalSourceRevision{.device = 1, .inode = 99};
+    model.replaceRows({other});
+    QVERIFY(!model.applyCommittedRelocation("/music/old.flac", "/music/new.flac", before, written));
 }
 
 // ADR-0237: files are written only by the engine holding them. Without one
@@ -16032,8 +16169,9 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY2(summary->text().contains(QStringLiteral("2 of 2 files selected")),
              qPrintable(QStringLiteral("unexpected summary: %1").arg(summary->text())));
     QVERIFY(summary->text().contains(QStringLiteral("2 sources")));
-    QVERIFY2(read_only->text().contains(QStringLiteral("No pending edits")),
-             qPrintable(QStringLiteral("unexpected status: %1").arg(read_only->text())));
+    // The files are read on opening, whatever the rows knew (ADR-0268).
+    QTRY_VERIFY2(read_only->text().contains(QStringLiteral("Tags read")),
+                 qPrintable(QStringLiteral("unexpected status: %1").arg(read_only->text())));
     QCOMPARE(buttons->standardButtons(), QDialogButtonBox::Close);
     QVERIFY(buttons->button(QDialogButtonBox::Apply) == nullptr);
     QCOMPARE(files->selectionBehavior(), QAbstractItemView::SelectRows);

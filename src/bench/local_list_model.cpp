@@ -632,6 +632,24 @@ bool LocalListModel::describeRow(const int row, const core::StableId& entry,
     return true;
 }
 
+std::vector<core::StableId> LocalListModel::entriesAt(const std::vector<std::string>& raw_paths,
+                                                      const bool everything) const {
+    std::vector<core::StableId> entries;
+    for (const auto& row : rows_) {
+        if (row.segment) {
+            continue;
+        }
+        if (everything || std::ranges::any_of(raw_paths, [&row](const std::string& path) {
+                return row.raw_path == path ||
+                       (row.raw_path.size() > path.size() && row.raw_path.starts_with(path) &&
+                        row.raw_path[path.size()] == '/');
+            })) {
+            entries.push_back(row.entry_id);
+        }
+    }
+    return entries;
+}
+
 bool LocalListModel::applyProbeRows(const std::string& raw_path, const int hint_row,
                                     std::vector<LocalTrackRow> rows) {
     touched();
@@ -859,8 +877,14 @@ LocalListModel::applyCommittedRelocation(const std::string& source_raw_path,
         return row.raw_path == source_raw_path;
     };
     auto candidates = retainedRows();
+    // A row the engine described again after the write already names the
+    // published file (ADR-0268): it is the same row, and follows.
+    const auto identifies = [&](const LocalTrackRow& row) {
+        return row.source_revision == previous_revision ||
+               row.source_revision == published_revision;
+    };
     if (std::ranges::any_of(candidates, [&](const auto* row) {
-            return matches_source(*row) && row->source_revision != previous_revision;
+            return matches_source(*row) && !identifies(*row);
         })) {
         clearHistory();
         candidates.clear();
@@ -883,7 +907,7 @@ LocalListModel::applyCommittedRelocation(const std::string& source_raw_path,
         });
     }
     if (std::ranges::any_of(candidates, [&](const LocalTrackRow* row) {
-            return matches_source(*row) && row->source_revision != previous_revision;
+            return matches_source(*row) && !identifies(*row);
         })) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::conflict,

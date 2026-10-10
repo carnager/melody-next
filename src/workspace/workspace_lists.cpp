@@ -22,6 +22,8 @@
 #include <ranges>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -190,6 +192,14 @@ void Workspace::adoptEngineList(const persistence::ListDocument& document) {
     schedulePersist();
 }
 
+void Workspace::describeEngineEntries(ListTab& tab, std::vector<core::StableId> entries) {
+    const auto id = QString::fromStdString(tab.document.id.to_string());
+    auto& pending = redescribe_[id];
+    pending.insert(pending.end(), std::make_move_iterator(entries.begin()),
+                   std::make_move_iterator(entries.end()));
+    describeEngineRows(tab);
+}
+
 void Workspace::describeEngineRows(ListTab& tab) {
     const auto id = QString::fromStdString(tab.document.id.to_string());
     if (describing_.contains(id)) {
@@ -198,9 +208,14 @@ void Workspace::describeEngineRows(ListTab& tab) {
     }
     // A row with a revision was read or described already; a CUE track's
     // title is its own.
+    // And the rows whose files changed since (ADR-0268).
     std::vector<core::StableId> entries;
+    std::unordered_set<std::string> again;
+    for (const auto& entry : redescribe_.take(id)) {
+        again.insert(entry.to_string());
+    }
     for (const auto& row : tab.model->rows()) {
-        if (!row.source_revision && !row.segment) {
+        if (!row.segment && (!row.source_revision || again.contains(row.entry_id.to_string()))) {
             entries.push_back(row.entry_id);
         }
     }

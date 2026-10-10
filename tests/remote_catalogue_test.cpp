@@ -16,9 +16,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -64,6 +66,10 @@ void a_catalogue_behaves_the_same_either_side(engine::Catalogue& catalogue,
     const auto artwork = catalogue.artwork_source("no-such-album");
     require(artwork.has_value(), label + ": a missing cover is not an error");
     require(!artwork->has_value(), label + ": and carries no source");
+
+    // ADR-0276: lyrics are read only for what the library has.
+    require(!catalogue.lyrics("/not/in/the/library.flac"),
+            label + ": lyrics of a file outside the library are refused");
 
     // A malformed rating identity is refused by the engine either way, so a
     // client cannot store a row nothing can find.
@@ -131,6 +137,24 @@ void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std:
         // different answers.
         require(!(*facts)[0].facts.history.has_value() || (*facts)[0].facts.history->size() == 6U,
                 label + ": history is absent or complete");
+        // ADR-0276: lyrics cross whole, times and text, plain or synced.
+        auto sidecar = std::filesystem::path{(*indexed)[0]}.replace_extension(".lrc");
+        std::ofstream{sidecar} << "[00:01.00]One\n[00:02.00]\n";
+        const auto lyrics = catalogue.lyrics((*indexed)[0]);
+        require(lyrics && *lyrics && (*lyrics)->synced && (*lyrics)->source == "sidecar",
+                label + ": synced lyrics from beside the file");
+        require(((*lyrics)->lines ==
+                 std::vector<trackknife::metadata::LyricsLine>{{.time_ms = 1'000, .text = "One"},
+                                                               {.time_ms = 2'000, .text = ""}}),
+                label + ": every line, an empty one too");
+        std::ofstream{sidecar, std::ios::trunc} << "Just words\n";
+        const auto words = catalogue.lyrics((*indexed)[0]);
+        require(words && *words && !(*words)->synced && (*words)->lines.size() == 1U &&
+                    !(*words)->lines[0].time_ms,
+                label + ": plain lyrics have no times");
+        std::filesystem::remove(sidecar);
+        const auto none = catalogue.lyrics((*indexed)[0]);
+        require(none && !*none, label + ": and none is none");
     }
 
     // ADR-0258: the engine selects -- here one group of everything,
@@ -200,7 +224,8 @@ void history_crosses_with_its_sources(engine::Catalogue& catalogue, const std::s
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    require(argc == 2, "usage: remote_catalogue_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-remote-catalogue-" + core::StableId::random().to_string());
     std::filesystem::create_directory(directory);
@@ -238,6 +263,17 @@ int main() {
     {
         std::ofstream track{music / "track.flac", std::ios::binary};
         track << "not really a flac, but a file the walk must visit";
+    }
+    {
+        // And one that is, so the library has a track to answer about.
+        std::ifstream input{std::filesystem::path{argv[1]} / "tagged-tone-flac.b64"};
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+        std::erase(base64, '\n');
+        const auto decoded = protocol::decode_raw_path(base64);
+        require(decoded.has_value(), "the fixture decodes");
+        std::ofstream real{music / "real.flac", std::ios::binary};
+        real.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
     }
     adding_and_scanning_a_folder_works(local, "local", music);
     adding_and_scanning_a_folder_works(remote, "remote", music);

@@ -6,6 +6,7 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/engine/dynamic_selection.hpp"
 #include "trackknife/engine/library_views.hpp"
+#include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
 
@@ -120,6 +121,13 @@ class Catalogue {
     [[nodiscard]] virtual core::Result<std::vector<unsigned char>>
     artwork(const std::string& raw_path,
             const core::CancellationToken& cancellation = {}) const = 0;
+
+    // ADR-0276: a track's lyrics, read on the engine's machine -- an .lrc
+    // beside it, else its tags. Only for a track in the library, as artwork
+    // is. Nullopt when it has none.
+    [[nodiscard]] virtual core::Result<std::optional<metadata::Lyrics>>
+    lyrics(const std::string& raw_path,
+           const core::CancellationToken& cancellation = {}) const = 0;
 
     // Cached fields and technicals for the given raw paths, in input order,
     // preserving duplicates. No filesystem access: a path missing from the
@@ -240,6 +248,9 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<unsigned char>>
     artwork(const std::string& raw_path,
             const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::optional<metadata::Lyrics>>
+    lyrics(const std::string& raw_path,
+           const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::size_t>
     refresh(const std::vector<std::string>& raw_paths,
             const core::CancellationToken& cancellation = {}) override;

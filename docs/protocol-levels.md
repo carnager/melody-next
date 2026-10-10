@@ -7,6 +7,13 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 9 (2026-10-10)
+
+- `catalogue.lyrics {path}` answers a track's lyrics, read where the files
+  are: `{lyrics: {source, synced, lines: [{time_ms?, text}]}}`, or
+  `{lyrics: null}` when it has none (ADR-0276). An older engine does not
+  know the method.
+
 ### Level 8 (2026-10-06)
 
 - `agent.register` takes `report`: what the agent plays now, as its

@@ -751,7 +751,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // no access to them. Null when the track has none.
     dispatcher.on(
         "catalogue.artwork",
-        [&catalogue, holds = std::move(holds)](const Json& params) -> core::Result<Json> {
+        [&catalogue, holds](const Json& params) -> core::Result<Json> {
             // By a track, or by an album: a grid of albums knows their keys, not
             // their files, and asking for a file first would double the trips.
             std::string raw_path;
@@ -807,6 +807,42 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                                      reinterpret_cast<const char*>(image->data()), image->size()}));
             return answer;
         });
+
+    // ADR-0276: a track's lyrics, found where the files are. Null when it has
+    // none. Held to play, it may be outside the library, as for its cover.
+    dispatcher.on("catalogue.lyrics",
+                  [&catalogue, holds](const Json& params) -> core::Result<Json> {
+                      auto encoded = required_string(params, "path");
+                      if (!encoded) {
+                          return std::unexpected(std::move(encoded.error()));
+                      }
+                      auto raw_path = protocol::decode_raw_path(*encoded);
+                      if (!raw_path) {
+                          return std::unexpected(
+                              bad_params("path is not an encoded path", "path"));
+                      }
+                      auto lyrics = holds && holds(*raw_path) ? metadata::read_lyrics(*raw_path)
+                                                              : catalogue.lyrics(*raw_path);
+                      if (!lyrics) {
+                          return std::unexpected(std::move(lyrics.error()));
+                      }
+                      Json answer = Json::object();
+                      answer["lyrics"] = Json(nullptr);
+                      if (*lyrics) {
+                          auto lines = Json::array();
+                          for (const auto& line : (*lyrics)->lines) {
+                              Json entry{{"text", line.text}};
+                              if (line.time_ms) {
+                                  entry["time_ms"] = *line.time_ms;
+                              }
+                              lines.push_back(std::move(entry));
+                          }
+                          answer["lyrics"] = Json{{"source", (*lyrics)->source},
+                                                  {"synced", (*lyrics)->synced},
+                                                  {"lines", std::move(lines)}};
+                      }
+                      return answer;
+                  });
 
     dispatcher.on(
         "catalogue.artwork_source", [&catalogue](const Json& params) -> core::Result<Json> {

@@ -291,6 +291,63 @@ void covers_of_held_files_need_no_library(const std::filesystem::path& directory
     require(!refused.result.has_value(), "a file neither held nor indexed is not read");
 }
 
+// ADR-0276: a track's lyrics come from where its files are -- here an .lrc
+// beside it -- and only for what is in the library or held to play.
+void lyrics_come_from_beside_the_file(const std::filesystem::path& directory,
+                                      const std::filesystem::path& fixtures) {
+    const auto music = directory / "lyrics";
+    std::filesystem::create_directories(music);
+    {
+        std::ifstream input{fixtures / "art-tone-flac.b64"};
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+        std::erase(base64, '\n');
+        const auto decoded = protocol::decode_raw_path(base64);
+        require(decoded.has_value(), "the fixture decodes");
+        for (const auto* name : {"sung.flac", "quiet.flac"}) {
+            std::ofstream output{music / name, std::ios::binary};
+            output.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
+        }
+    }
+    std::ofstream{music / "sung.lrc"} << "[ti:Sung]\n[00:01.00]First\n[00:02.50]Second\n";
+    engine::LocalCatalogue catalogue{directory / "lyrics.sqlite3"};
+    require(catalogue.prepare().has_value(), "the catalogue opens");
+    require(catalogue.add_root(music.string()).has_value(), "the folder is added");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "and scanned");
+    const auto held = (directory / "held.flac").string();
+    std::filesystem::copy_file(music / "quiet.flac", held);
+    std::filesystem::copy_file(music / "sung.lrc", directory / "held.lrc");
+    const auto elsewhere = (directory / "elsewhere.flac").string();
+    std::filesystem::copy_file(music / "quiet.flac", elsewhere);
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue, {},
+                                       [&held](const std::string& path) { return path == held; });
+    const auto ask = [&](const std::string& path) {
+        return call(dispatcher, 1, "catalogue.lyrics",
+                    protocol::Json{{"path", protocol::encode_raw_path(path)}});
+    };
+
+    const auto sung = ask((music / "sung.flac").string());
+    require(sung.result.has_value(), "lyrics are answered");
+    const auto& lyrics = sung.result->at("lyrics");
+    require(lyrics.at("source") == "sidecar" && lyrics.at("synced") == true,
+            "synced, from the .lrc beside the file");
+    require(lyrics.at("lines") == protocol::Json::array({{{"text", "First"}, {"time_ms", 1'000}},
+                                                         {{"text", "Second"}, {"time_ms", 2'500}}}),
+            "line by line, timed");
+    const auto quiet = ask((music / "quiet.flac").string());
+    require(quiet.result && quiet.result->at("lyrics").is_null(),
+            "a track with none has null, which is not an error");
+    const auto from_held = ask(held);
+    require(from_held.result && from_held.result->at("lyrics").is_object(),
+            "a file held to play has its lyrics read outside the library");
+    require(!ask(elsewhere).result.has_value(), "a file neither held nor indexed is not read");
+    require(!call(dispatcher, 2, "catalogue.lyrics", protocol::Json{{"path", "%%%"}})
+                 .result.has_value(),
+            "a path that is not encoded is refused");
+}
+
 int main(int argc, char** argv) {
     require(argc == 2, "usage: engine_methods_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
@@ -301,6 +358,7 @@ int main(int argc, char** argv) {
     jobs_submit_and_cancel_over_the_wire(database);
     covers_come_by_album_and_by_size(directory, argv[1]);
     covers_of_held_files_need_no_library(directory, argv[1]);
+    lyrics_come_from_beside_the_file(directory, argv[1]);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
     return EXIT_SUCCESS;

@@ -179,6 +179,19 @@ LocalCatalogue::artwork(const std::string& raw_path,
     return formats::load_track_artwork(raw_path, cancellation);
 }
 
+core::Result<std::optional<metadata::Lyrics>>
+LocalCatalogue::lyrics(const std::string& raw_path,
+                       const core::CancellationToken& cancellation) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    if (auto known = library->cached_tracks({raw_path}, cancellation); !known) {
+        return std::unexpected(std::move(known.error()));
+    }
+    return metadata::read_lyrics(raw_path, cancellation);
+}
+
 core::Result<std::vector<persistence::LibraryTrackSnapshot>>
 LocalCatalogue::cached_tracks(const std::vector<std::string>& raw_paths,
                               const core::CancellationToken& cancellation) const {

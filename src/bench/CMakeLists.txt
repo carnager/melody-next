@@ -26,6 +26,9 @@ qt_add_library(
     bench_track_views.cpp
     bench_lastfm.cpp
     bench_up_next.cpp
+    bench_lyrics.cpp
+    lyrics_panel.cpp
+    lyrics_panel.hpp
     up_next_delegate.cpp
     quick_pick_popup.cpp
     quick_pick_popup.hpp

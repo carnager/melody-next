@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_library_panel.hpp"
+#include "bench/trackknife_style.hpp"
 
 #include "bench/library_views_dialog.hpp"
 #include "workspace/library_view_definitions.hpp"
@@ -199,19 +200,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     connect(tree_, &QTreeView::customContextMenuRequested, this,
             &LocalLibraryPanel::showContextMenu);
     // The footer: one small, quiet line of news, under a hairline.
-    auto* footer = new QFrame(this);
+    auto* footer = new RuledFrame(this);
     footer->setObjectName(QStringLiteral("local-library-footer"));
-    footer->setFrameShape(QFrame::NoFrame);
-    {
-        const auto ground = palette().color(QPalette::Window);
-        const auto ink = palette().color(QPalette::Text);
-        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
-        footer->setStyleSheet(
-            QStringLiteral("QFrame#local-library-footer { border-top: 1px solid %1; }")
-                .arg(QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
-                                     mix(ground.blue(), ink.blue()))
-                         .name()));
-    }
     auto* footer_layout = new QVBoxLayout(footer);
     footer_layout->setContentsMargins(4, 6, 4, 2);
     footer_layout->setSpacing(2);

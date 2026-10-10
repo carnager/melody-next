@@ -102,6 +102,7 @@ class LibraryViewsPanelTest final : public QObject {
     void initTestCase();
     void init();
     void thePanelShowsAView();
+    void theFooterFollowsALaterPalette();
 };
 
 void LibraryViewsPanelTest::initTestCase() { QStandardPaths::setTestModeEnabled(true); }
@@ -330,6 +331,34 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
     QCOMPARE(tree->currentIndex().parent().data().toString(), QStringLiteral("Alpha"));
 
     (*server)->stop();
+}
+
+// The desktop says dark only after the window is up -- through its portal,
+// a moment after start -- and the colour scheme follows with a palette of
+// its own. The footer's status took it on too; under a style sheet it had
+// kept the palette it was first shown with: dark text on the dark ground.
+void LibraryViewsPanelTest::theFooterFollowsALaterPalette() {
+    const auto before = QGuiApplication::palette();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         directory.path() + QStringLiteral("/no-engine.sock"));
+    const std::filesystem::path unused{
+        (directory.path() + QStringLiteral("/unused.sqlite3")).toStdString()};
+    CatalogueSource catalogues{unused, CatalogueSource::Role::remote};
+    LocalLibraryPanel panel{catalogues};
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel));
+    auto* status = panel.findChild<QLabel*>(QStringLiteral("local-library-status"));
+    QVERIFY(status != nullptr);
+
+    auto later = before;
+    const QColor quiet{0x9a, 0xa0, 0xa8};
+    later.setColor(QPalette::Window, QColor{0x1e, 0x1f, 0x22});
+    later.setColor(QPalette::PlaceholderText, quiet);
+    QGuiApplication::setPalette(later);
+    QTRY_COMPARE(status->palette().color(QPalette::PlaceholderText), quiet);
+    QGuiApplication::setPalette(before);
 }
 
 } // namespace trackknife::bench

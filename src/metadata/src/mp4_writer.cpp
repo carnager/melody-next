@@ -3,6 +3,7 @@
 #include "trackknife/metadata/mp4_writer.hpp"
 
 #include "container_preservation_detail.hpp"
+#include "mp4_item_factory_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/ratings.hpp"
@@ -206,7 +207,8 @@ namespace {
         })) {
         return {};
     }
-    TagLib::MP4::File file{prepared_raw_path.c_str(), false};
+    TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
+                           mp4_detail::FreeFormFactory::instance()};
     if (!file.isValid() || file.tag() == nullptr) {
         return std::unexpected(writer_error(core::ErrorCode::backend,
                                             "TagLib rejected the prepared MP4 copy",
@@ -237,7 +239,8 @@ namespace {
     {
         // Closed before the rating atom is renamed: TagLib finishes its
         // writes only when the file is closed.
-        TagLib::MP4::File file{prepared_raw_path.c_str(), false};
+        TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
+                           mp4_detail::FreeFormFactory::instance()};
         if (!file.isValid()) {
             return std::unexpected(writer_error(core::ErrorCode::backend,
                                                 "TagLib rejected the prepared MP4 copy",

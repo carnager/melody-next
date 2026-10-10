@@ -355,11 +355,37 @@ verify_text_result(const std::string_view format_label, const MetadataDocument& 
                                                 " changed unsupported native metadata identities",
                                             source_plan.raw_path, prepared_raw_path));
     }
-    if (expected != effective_native_text(after)) {
-        return std::unexpected(writer_error(core::ErrorCode::conflict,
-                                            "prepared " + std::string{format_label} +
-                                                " metadata reread differs from the plan",
-                                            source_plan.raw_path, prepared_raw_path));
+    if (const auto reread = effective_native_text(after); expected != reread) {
+        // Which fields: a refusal that says only "differs" cannot be acted on.
+        std::string fields;
+        std::size_t named = 0U;
+        const auto name = [&fields, &named](const std::string& field, const char* how) {
+            if (named++ < 8U) {
+                fields += (fields.empty() ? "" : ", ") + field + " " + how;
+            }
+        };
+        for (const auto& [field, value] : expected) {
+            const auto found = reread.find(field);
+            if (found == reread.end()) {
+                name(field, "lost");
+            } else if (found->second != value) {
+                name(field, "changed");
+            }
+        }
+        for (const auto& [field, value] : reread) {
+            if (!expected.contains(field)) {
+                name(field, "appeared");
+            }
+        }
+        if (named > 8U) {
+            fields += ", and " + std::to_string(named - 8U) + " more";
+        }
+        auto refused = writer_error(core::ErrorCode::conflict,
+                                    "prepared " + std::string{format_label} +
+                                        " metadata reread differs from the plan",
+                                    source_plan.raw_path, prepared_raw_path);
+        refused.context.push_back({.key = "fields", .value = std::move(fields)});
+        return std::unexpected(std::move(refused));
     }
     return {};
 }

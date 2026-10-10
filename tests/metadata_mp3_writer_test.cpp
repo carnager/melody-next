@@ -319,6 +319,56 @@ void roundTripsMultiLineLyrics(const std::filesystem::path& fixture_directory) {
           (*found)->lines.size() == 2U);
 }
 
+// An MP4 free-form tag whose name has a colon of its own -- Picard's
+// AcousticBrainz AB:GENRE -- is written, and kept by the writes after it:
+// TagLib alone dropped it on every save, and the reread refused the write.
+void keepsMp4FreeFormNamesWithColons(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto write = [](const std::filesystem::path& from, const std::filesystem::path& to,
+                          const char* canonical, const char* display, const char* value) {
+        const auto read = trackknife::metadata::read_local_metadata(from.native());
+        CHECK(read.has_value());
+        if (!read) {
+            return false;
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            return false;
+        }
+        std::size_t field = 0U;
+        if (const auto found = selection->field_index(canonical)) {
+            field = *found;
+        } else if (const auto added = selection->ensure_missing_field(canonical, display)) {
+            field = *added;
+        } else {
+            return false;
+        }
+        trackknife::metadata::StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, field, {value}).has_value());
+        auto plan = make_plan(*selection, patches);
+        if (!plan || !plan->ready()) {
+            return false;
+        }
+        const auto written =
+            trackknife::metadata::prepare_mp4_metadata_write_copy(plan->sources.front(), to.native());
+        if (!written) {
+            std::cerr << written.error().message << '\n';
+        }
+        return written.has_value();
+    };
+    const auto source =
+        materialize(fixture_directory, "tagged-tone-m4a.b64", directory.path() / "ab.m4a");
+    const auto tagged = directory.path() / "ab-tagged.m4a";
+    CHECK(write(source, tagged, "ab:genre", "AB:GENRE", "Jazz"));
+    const auto retitled = directory.path() / "ab-retitled.m4a";
+    CHECK(write(tagged, retitled, "title", "Title", "Retitled"));
+    const auto reread = trackknife::metadata::read_local_metadata(retitled.native());
+    CHECK(reread && reread->document.first_effective_value("ab:genre") ==
+                        std::optional<std::string>{"Jazz"});
+    CHECK(reread && reread->document.first_effective_value("title") ==
+                        std::optional<std::string>{"Retitled"});
+}
+
 void toleratesId3v1TrailersUnlikeWavPack(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source =
@@ -504,6 +554,7 @@ int main(const int argc, char** argv) {
         roundTripsId3TextEditsPreservingAudio(fixture_directory);
         toleratesId3v1TrailersUnlikeWavPack(fixture_directory);
         roundTripsMultiLineLyrics(fixture_directory);
+        keepsMp4FreeFormNamesWithColons(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }
     return failures == 0 ? 0 : 1;

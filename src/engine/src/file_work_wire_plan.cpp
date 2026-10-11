@@ -70,13 +70,16 @@ constexpr std::array<std::pair<operations::MetadataOperationContentKind, std::st
 
 namespace detail {
 
+// ADR-0278: what was written, where and as which file -- not the tags
+// written, which are in the file. Every file's tags in one result made a
+// result of thousands of files megabytes, past what a connection holds, and
+// the client was let go. A client wanting them reads the file.
 Json encode_commit(const operations::MetadataCommitResult& done) {
     return Json{{"journal_id", done.journal_id.to_string()},
                 {"source_path", protocol::encode_raw_path(done.source_raw_path)},
                 {"backup_path", protocol::encode_raw_path(done.backup_raw_path)},
                 {"previous_revision", encode(done.previous_revision)},
                 {"published_revision", encode(done.published_revision)},
-                {"document", encode(done.document)},
                 {"occurrence_indexes", done.occurrence_indexes},
                 {"content_kind", name_of(done.content_kind, content_kinds)}};
 }
@@ -92,7 +95,8 @@ operations::MetadataCommitResult read_commit(Reader& commit_in) {
     commit.backup_raw_path = commit_in.bytes("backup_path");
     commit.previous_revision = commit_in.revision("previous_revision");
     commit.published_revision = commit_in.revision("published_revision");
-    if (const auto* document = commit_in.need("document")) {
+    // Absent from ADR-0278 on: the tags are in the file.
+    if (const auto* document = commit_in.find("document")) {
         if (auto decoded = decode_document(*document)) {
             commit.document = std::move(*decoded);
         } else {

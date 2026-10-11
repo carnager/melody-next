@@ -302,6 +302,8 @@ class Workspace final : public QObject {
     std::deque<ProbeJob> probe_queue_;
     // Tabs being described, and those taken up again meanwhile.
     QSet<QString> describing_;
+    std::set<std::string> rows_to_read_;
+    bool row_reads_scheduled_{false};
     QSet<QString> describe_again_;
     // ADR-0268: rows whose files changed, described again once the list's
     // describing in flight is done.
@@ -409,6 +411,11 @@ class Workspace final : public QObject {
     // What a file tool changed, followed by the lists, the library and the
     // queue.
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);
+    // ADR-0278: a write's result names the file, not its tags. The list rows
+    // at the paths written read them from their engine, in batches, a moment
+    // after -- however many files one Apply wrote.
+    void readRowsAgain(std::string raw_path);
+    void flushRowReads();
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
     void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
     void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);

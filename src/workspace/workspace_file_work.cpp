@@ -17,7 +17,9 @@
 #include "workspace/library_browser.hpp"
 #include "workspace/workspace_view.hpp"
 
+#include <QFutureWatcher>
 #include <QPointer>
+#include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -25,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <ranges>
 #include <string_view>
 #include <utility>
@@ -230,6 +233,8 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                                     applyCommittedPublicationMetadata(*here,
                                                                       *source.published_metadata);
                                 }
+                            } else {
+                                readRowsAgain(source.commit->target_raw_path);
                             }
                             committed = true;
                         } else if (source.commit) {
@@ -237,6 +242,8 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                             if (source.published_metadata) {
                                 applyCommittedPublicationMetadata(*source.commit,
                                                                   *source.published_metadata);
+                            } else {
+                                readRowsAgain(source.commit->target_raw_path);
                             }
                             committed = true;
                         }
@@ -810,6 +817,12 @@ void Workspace::applyCommittedMetadata(const operations::MetadataCommitResult& r
     // Cached misses and previous covers must not survive either path.
     invalidateArtwork(result.source_raw_path);
     refreshLocalLibrary();
+    // ADR-0278: an engine names what it wrote and leaves the tags in the
+    // file; the rows read them again from there.
+    if (result.document == metadata::MetadataDocument{}) {
+        readRowsAgain(result.source_raw_path);
+        return;
+    }
     for (auto& tab : list_tabs_) {
         auto applied = tab->model->applyCommittedMetadata(result.source_raw_path, result.document,
                                                           result.published_revision);
@@ -943,4 +956,90 @@ void Workspace::applyCommittedPublicationMetadata(
         }
     }
 }
+void Workspace::readRowsAgain(std::string raw_path) {
+    rows_to_read_.insert(std::move(raw_path));
+    if (row_reads_scheduled_) {
+        return;
+    }
+    row_reads_scheduled_ = true;
+    // An Apply commits file after file: read together, a moment after.
+    QTimer::singleShot(150, this, [this] {
+        row_reads_scheduled_ = false;
+        flushRowReads();
+    });
+}
+
+void Workspace::flushRowReads() {
+    const auto wanted = std::exchange(rows_to_read_, {});
+    // Each list's rows are read from the engine the list is of.
+    std::map<EngineKey, std::vector<std::string>> by_engine;
+    for (const auto& tab : list_tabs_) {
+        auto& paths = by_engine[EngineKey::of(tab->document)];
+        for (const auto& row : tab->model->rows()) {
+            if (wanted.contains(row.raw_path) && !std::ranges::contains(paths, row.raw_path)) {
+                paths.push_back(row.raw_path);
+            }
+        }
+    }
+    for (auto& [key, paths] : by_engine) {
+        auto work = fileWorkOf(key);
+        if (paths.empty() || !work) {
+            continue;
+        }
+        using Reads = std::vector<std::pair<std::string, metadata::LocalMetadataRead>>;
+        auto* watcher = new QFutureWatcher<Reads>(this);
+        connect(watcher, &QFutureWatcher<Reads>::finished, this, [this, watcher, key] {
+            watcher->deleteLater();
+            const auto reads = watcher->result();
+            for (const auto& tab : list_tabs_) {
+                if (EngineKey::of(tab->document) != key) {
+                    continue;
+                }
+                std::size_t changed = 0U;
+                for (const auto& [path, read] : reads) {
+                    if (auto applied = tab->model->applyCommittedMetadata(path, read.document,
+                                                                          read.source_revision)) {
+                        changed += *applied;
+                    }
+                }
+                if (changed > 0U) {
+                    syncArtwork(*tab);
+                }
+            }
+            if (!reads.empty()) {
+                schedulePersist();
+            }
+        });
+        watcher->setFuture(QtConcurrent::run([access = work->access(), paths = std::move(paths)] {
+            Reads reads;
+            for (std::size_t first = 0U; first < paths.size();
+                 first += metadata::metadata_capture_batch) {
+                const auto last = std::min(paths.size(), first + metadata::metadata_capture_batch);
+                const std::vector<std::string> batch{
+                    paths.begin() + static_cast<std::ptrdiff_t>(first),
+                    paths.begin() + static_cast<std::ptrdiff_t>(last)};
+                std::vector<core::Result<metadata::LocalMetadataRead>> results;
+                if (access.read_many) {
+                    auto asked = access.read_many(batch, {});
+                    if (!asked) {
+                        break;
+                    }
+                    results = std::move(*asked);
+                } else {
+                    for (const auto& path : batch) {
+                        results.push_back(access.read(path, {}));
+                    }
+                }
+                for (std::size_t index = 0U; index < results.size() && index < batch.size();
+                     ++index) {
+                    if (results[index]) {
+                        reads.emplace_back(batch[index], std::move(*results[index]));
+                    }
+                }
+            }
+            return reads;
+        }));
+    }
+}
+
 } // namespace trackknife::bench

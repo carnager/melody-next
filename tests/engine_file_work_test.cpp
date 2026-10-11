@@ -35,6 +35,9 @@
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <fileref.h>
+#include <tpropertymap.h>
+
 #include <flacfile.h>
 #include <id3v2tag.h>
 #include <mp4file.h>
@@ -454,6 +457,58 @@ struct Jobs {
     }
 };
 
+// ADR-0278: a write's result says what was written, not the tags, so it stays
+// small however many files and however large their tags. With every file's
+// tags in it, the result of a large Apply passed the 4 MiB a connection
+// holds for its events, and the client was let go.
+void a_large_apply_answers_small(const std::filesystem::path& directory,
+                                 const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    constexpr std::size_t files = 20U;
+    const std::string bulky(50'000U, 'w');
+    std::vector<metadata::StagedMetadataSource> sources;
+    for (std::size_t index = 0U; index < files; ++index) {
+        const auto path = materialize(fixtures, "tagged-tone-flac",
+                                      directory / ("bulk-" + std::to_string(index) + ".flac"))
+                              .string();
+        {
+            TagLib::FileRef file{path.c_str()};
+            auto properties = file.file()->properties();
+            properties.replace("WAVEFORM", TagLib::StringList{TagLib::String{bulky}});
+            file.file()->setProperties(properties);
+            require(file.save(), "a bulky tag is written");
+        }
+        const auto read = metadata::read_local_metadata(path);
+        require(read.has_value(), "the bulky file is read");
+        sources.push_back({.raw_path = path,
+                           .source_revision = read->source_revision,
+                           .baseline = read->document});
+    }
+    const std::array<std::string_view, 1> preferred{"title"};
+    auto selection = metadata::StagedMetadataSelection::create(sources, preferred);
+    require(selection.has_value(), "a selection of them");
+    std::optional<std::size_t> title;
+    for (std::size_t index = 0; index < selection->field_count(); ++index) {
+        if (selection->field(index).canonical_name == "title") {
+            title = index;
+        }
+    }
+    require(title.has_value(), "with a title field");
+    metadata::StagedMetadataPatchSet patches;
+    for (std::size_t item = 0U; item < files; ++item) {
+        require(patches.replace_values(*selection, item, *title, {"Bulk"}).has_value(),
+                "a title is staged");
+    }
+    const auto plan = metadata::revalidate_metadata_write_plan(*selection, patches);
+    require(plan && plan->ready(), "the preview is clean");
+    Jobs jobs{directory / "bulk.sqlite3"};
+    const auto outcome = jobs.run("metadata.apply", {{"plan", wire::encode(*plan)}});
+    const auto result = wire::decode_apply_result(outcome.at("result"));
+    require(result && result->committed_source_count() == files, "every file is written");
+    require(outcome.dump().size() < files * 2'048U,
+            "and the result names them without their tags");
+}
+
 void the_engine_writes_what_was_previewed(const std::filesystem::path& directory,
                                           const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -682,9 +737,11 @@ void the_engine_moves_what_was_previewed(const std::filesystem::path& directory,
     require(combined && combined->ready(), "tags and rename make one preparation");
     const auto both = jobs.run("preparation.apply", {{"plan", wire::encode(*combined)}});
     const auto both_result = wire::decode_publication_apply_result(both.at("result"));
+    // ADR-0278: the result says what was written, not the tags: those are
+    // in the file.
     require(both_result && both_result->committed_source_count() == 1U &&
-                both_result->sources.front().published_metadata.has_value(),
-            "the engine writes and renames it");
+                !both_result->sources.front().published_metadata.has_value(),
+            "the engine writes and renames it, and sends no tags back");
     const auto renamed = renaming_preflight->sources.front().planned.target_raw_path;
     require(renamed.ends_with("Tagged and renamed.flac") && !std::filesystem::exists(target),
             "under its new title");
@@ -1372,10 +1429,12 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
             .kind = trackknife::operations::UndoKind::metadata,
             .journal_id = applied->sources.front().commit->journal_id}};
         const auto undone = remote.undo(undo, {}, {});
+        // ADR-0278: it says which file it restored; the tags are in the file.
         require(undone && undone->size() == 1U && !undone->front().issue &&
                     undone->front().to_raw_path == flac && undone->front().restored &&
-                    undone->front().restored->document.first_effective_value("title") ==
-                        original->document.first_effective_value("title"),
+                    undone->front().restored->source_raw_path == flac &&
+                    metadata::read_local_metadata(flac)->document.first_effective_value(
+                        "title") == original->document.first_effective_value("title"),
                 "a write is undone through the engine, saying what it restored");
         require(bytes_of(flac) == original_bytes, "the file is the original, byte for byte");
         const auto again = remote.undo(undo, {}, {});
@@ -1805,6 +1864,7 @@ int main(int argc, char** argv) {
     documents_are_exact();
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
+    a_large_apply_answers_small(directory, argv[1]);
     backups_are_kept_as_long_as_asked(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);

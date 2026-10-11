@@ -3931,7 +3931,9 @@ void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     const auto target = media.filePath(QStringLiteral("Renamed by title.flac"));
     const auto target_raw = QFile::encodeName(target).toStdString();
     QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().raw_path, target_raw, 10'000);
-    QCOMPARE(list_model->rows().front().title, std::string{"Renamed by title"});
+    // ADR-0278: the row reads its new tags from the file a moment after.
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().title, std::string{"Renamed by title"},
+                              5'000);
     QVERIFY(!QFile::exists(source_path));
     const auto reread = metadata::read_local_metadata(target_raw);
     QVERIFY(reread.has_value());

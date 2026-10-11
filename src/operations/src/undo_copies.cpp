@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "trackknife/operations/undo_copies.hpp"
 
+#include "trackknife/core/posix.hpp"
+
 #include "trackknife/operations/file_publication_journal.hpp"
 #include "trackknife/operations/metadata_journal.hpp"
 

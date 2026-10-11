@@ -7,6 +7,16 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 10 (2026-10-11)
+
+- A file-work result names what was written, not its tags: a commit
+  (`metadata.apply`, artwork, publication, undo) no longer carries its
+  `document`, nor a publication its `published_metadata`. Every file's tags
+  made the result of a large Apply megabytes, past the 4 MiB a connection
+  holds for its events, and the client was let go ("the engine closed the
+  connection"). A client wanting the tags reads the files (ADR-0278). An
+  older client expecting them reads none and keeps the rows it had.
+
 ### Level 9 (2026-10-10)
 
 - `catalogue.lyrics {path}` answers a track's lyrics, read where the files

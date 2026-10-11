@@ -497,10 +497,10 @@ Json encode(const operations::FilePublicationApplyResult& result) {
                 {"publication", name_of(source.publication, publication_kinds)},
                 {"state", name_of(source.state, apply_states)},
                 {"commit", source.commit ? encode_publication_commit(*source.commit) : Json()},
+                // ADR-0278: the tags published are in the file, and are not
+                // sent: `published_metadata` is no longer part of a result.
                 {"metadata_commit",
                  source.metadata_commit ? encode_commit(*source.metadata_commit) : Json()},
-                {"published_metadata",
-                 source.published_metadata ? encode(*source.published_metadata) : Json()},
                 {"issue", encode_optional_error(source.issue)}};
         });
     return Json{{"sources", std::move(sources)},
@@ -689,9 +689,7 @@ Json encode(const std::span<const operations::UndoOutcome> outcomes) {
         if (outcome.moved_back) {
             entry["moved_back"] = encode(*outcome.moved_back);
         }
-        if (outcome.published_metadata) {
-            entry["published_metadata"] = encode(*outcome.published_metadata);
-        }
+        // ADR-0278: the tags restored are in the file, and are not sent.
         list.push_back(std::move(entry));
     }
     return list;

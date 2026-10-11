@@ -339,10 +339,10 @@ struct PipeWireOutput::Impl {
         }
     }
 
-    static OSStatus render(void* data, AudioUnitRenderActionFlags* /*flags*/,
+    static OSStatus render(void* context, AudioUnitRenderActionFlags* /*flags*/,
                            const AudioTimeStamp* /*timestamp*/, UInt32 /*bus*/, const UInt32 frames,
                            AudioBufferList* buffers) noexcept {
-        auto& output = *static_cast<Impl*>(data);
+        auto& output = *static_cast<Impl*>(context);
         output.active_callbacks.fetch_add(1U, std::memory_order_acq_rel);
         output.callback_count.fetch_add(1U, std::memory_order_relaxed);
         const auto finish = [&output] {

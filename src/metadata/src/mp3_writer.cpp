@@ -5,6 +5,7 @@
 
 #include "apev2_trailer_detail.hpp"
 #include "container_preservation_detail.hpp"
+#include "writer_steps_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
@@ -199,17 +200,16 @@ planned_rating(const MetadataWritePlanSource& source_plan) {
     return std::nullopt;
 }
 
-[[nodiscard]] core::Result<void> apply_rating_frames(const MetadataWritePlanSource& source_plan,
-                                                     const std::string& prepared_raw_path) {
+} // namespace
+
+namespace mp3_detail {
+
+core::Result<void> apply_rating_frames_to(const MetadataWritePlanSource& source_plan,
+                                          TagLib::MPEG::File& file,
+                                          const std::string& prepared_raw_path) {
     const auto planned = planned_rating(source_plan);
     if (!planned) {
         return {};
-    }
-    TagLib::MPEG::File file{prepared_raw_path.c_str(), false};
-    if (!file.isValid()) {
-        return std::unexpected(writer_error(core::ErrorCode::backend,
-                                            "TagLib rejected the prepared MP3 copy",
-                                            source_plan.raw_path, prepared_raw_path));
     }
     auto* tag = file.ID3v2Tag(true);
     const TagLib::String spelling{std::string{fmps_rating_spelling}};
@@ -248,6 +248,28 @@ planned_rating(const MetadataWritePlanSource& source_plan) {
                                             source_plan.raw_path, prepared_raw_path));
     }
     return {};
+}
+
+std::optional<std::optional<unsigned>> planned_rating_of(const MetadataWritePlanSource& plan) {
+    return planned_rating(plan);
+}
+
+} // namespace mp3_detail
+
+namespace {
+
+[[nodiscard]] core::Result<void> apply_rating_frames(const MetadataWritePlanSource& source_plan,
+                                                     const std::string& prepared_raw_path) {
+    if (!planned_rating(source_plan)) {
+        return {};
+    }
+    TagLib::MPEG::File file{prepared_raw_path.c_str(), false};
+    if (!file.isValid()) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib rejected the prepared MP3 copy",
+                                            source_plan.raw_path, prepared_raw_path));
+    }
+    return mp3_detail::apply_rating_frames_to(source_plan, file, prepared_raw_path);
 }
 
 [[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,

@@ -10,6 +10,7 @@
 #include "trackknife/metadata/artwork_writers.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
+#include "trackknife/metadata/in_place_writer.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/loudness_sidecar.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
@@ -31,6 +32,7 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -878,6 +880,7 @@ unlink_if_matches(const std::string& raw_path,
 
 std::atomic<bool> copied_backups_for_testing{false};
 std::atomic<bool> moved_backups_for_testing{false};
+std::atomic<bool> copied_writes_for_testing{false};
 
 using detail::hard_link_refused;
 
@@ -1685,6 +1688,456 @@ transition_backup(MetadataOperationJournal& journal, const core::StableId& journ
             .expected_state = from, .state = to, .undo_id = undo_id, .failure = failure});
 }
 
+// ADR-0281: a write in place. Its backup is a range file -- the bytes each
+// range held and holds after -- not a copy of the file.
+namespace in_place {
+
+constexpr std::string_view range_magic = "TKRANGES1\n";
+
+void put_u64(std::string& out, const std::uint64_t value) {
+    for (unsigned shift = 0U; shift < 64U; shift += 8U) {
+        out.push_back(static_cast<char>((value >> shift) & 0xFFU));
+    }
+}
+
+[[nodiscard]] std::optional<std::uint64_t> get_u64(const std::string_view bytes,
+                                                   std::size_t& at) {
+    if (at + 8U > bytes.size()) {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0U;
+    for (unsigned index = 0U; index < 8U; ++index) {
+        value |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[at + index]))
+                 << (index * 8U);
+    }
+    at += 8U;
+    return value;
+}
+
+struct RangeBackup {
+    std::uint64_t length{0U};
+    std::vector<metadata::InPlaceRange> ranges;
+};
+
+[[nodiscard]] std::string encode(const RangeBackup& backup) {
+    std::string out{range_magic};
+    put_u64(out, backup.length);
+    put_u64(out, backup.ranges.size());
+    for (const auto& range : backup.ranges) {
+        put_u64(out, range.offset);
+        put_u64(out, range.before.size());
+        out += range.before;
+        out += range.after;
+    }
+    return out;
+}
+
+[[nodiscard]] std::optional<RangeBackup> decode(const std::string_view bytes) {
+    if (!bytes.starts_with(range_magic)) {
+        return std::nullopt;
+    }
+    std::size_t at = range_magic.size();
+    RangeBackup backup;
+    const auto length = get_u64(bytes, at);
+    const auto count = get_u64(bytes, at);
+    if (!length || !count || *count > bytes.size()) {
+        return std::nullopt;
+    }
+    backup.length = *length;
+    for (std::uint64_t index = 0U; index < *count; ++index) {
+        const auto offset = get_u64(bytes, at);
+        const auto size = get_u64(bytes, at);
+        if (!offset || !size || *size > (bytes.size() - at) / 2U) {
+            return std::nullopt;
+        }
+        metadata::InPlaceRange range{.offset = *offset,
+                                     .before = std::string{bytes.substr(at, *size)},
+                                     .after = std::string{bytes.substr(at + *size, *size)}};
+        at += 2U * *size;
+        backup.ranges.push_back(std::move(range));
+    }
+    if (at != bytes.size()) {
+        return std::nullopt;
+    }
+    return backup;
+}
+
+[[nodiscard]] core::Result<core::LocalSourceRevision>
+write_backup(const MetadataOperationJournalRecord& record, const RangeBackup& backup) {
+    const auto bytes = encode(backup);
+    Descriptor file{::open(record.backup_raw_path.c_str(),
+                           O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600)};
+    if (!file.valid()) {
+        return std::unexpected(system_error("creating the in-place backup failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    std::size_t written = 0U;
+    while (written < bytes.size()) {
+        const auto count = ::write(file.get(), bytes.data() + written, bytes.size() - written);
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            const auto number = errno;
+            static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+            return std::unexpected(system_error("writing the in-place backup failed", number,
+                                                record.source_raw_path, record.id));
+        }
+        written += static_cast<std::size_t>(count);
+    }
+    if (::fsync(file.get()) != 0 || !file.close()) {
+        const auto number = errno;
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return std::unexpected(system_error("syncing the in-place backup failed", number,
+                                            record.source_raw_path, record.id));
+    }
+    if (auto synced = fsync_parent(record.backup_raw_path, record.source_raw_path, record.id);
+        !synced) {
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return std::unexpected(std::move(synced.error()));
+    }
+    return core::observe_local_source_revision(record.backup_raw_path);
+}
+
+[[nodiscard]] core::Result<RangeBackup> read_backup(const MetadataOperationJournalRecord& record) {
+    std::ifstream input{std::filesystem::path{record.backup_raw_path}, std::ios::binary};
+    if (!input) {
+        return std::unexpected(operation_error(core::ErrorCode::io,
+                                               "the in-place backup could not be opened",
+                                               record.source_raw_path, record.id));
+    }
+    const std::string bytes{std::istreambuf_iterator<char>{input},
+                            std::istreambuf_iterator<char>{}};
+    auto backup = decode(bytes);
+    if (!backup) {
+        return std::unexpected(operation_error(core::ErrorCode::conflict,
+                                               "the in-place backup is damaged",
+                                               record.source_raw_path, record.id));
+    }
+    return std::move(*backup);
+}
+
+// Which of the two the file's ranges hold now: every range as before, every
+// one as after, or neither -- a write stopped part way, or another program.
+enum class Holds : std::uint8_t { before, after, mixed };
+
+[[nodiscard]] core::Result<Holds> holds(const MetadataOperationJournalRecord& record,
+                                        const RangeBackup& backup) {
+    Descriptor file{::open(record.source_raw_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)};
+    if (!file.valid()) {
+        return std::unexpected(system_error("opening the file written in place failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    struct stat status{};
+    if (::fstat(file.get(), &status) != 0 ||
+        static_cast<std::uint64_t>(status.st_size) != backup.length) {
+        return Holds::mixed;
+    }
+    bool all_before = true;
+    bool all_after = true;
+    for (const auto& range : backup.ranges) {
+        std::string bytes(range.after.size(), '\0');
+        std::size_t done = 0U;
+        while (done < bytes.size()) {
+            const auto count = ::pread(file.get(), bytes.data() + done, bytes.size() - done,
+                                       static_cast<off_t>(range.offset + done));
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            if (count <= 0) {
+                return std::unexpected(system_error("reading the file written in place failed",
+                                                    errno, record.source_raw_path, record.id));
+            }
+            done += static_cast<std::size_t>(count);
+        }
+        all_before = all_before && bytes == range.before;
+        all_after = all_after && bytes == range.after;
+    }
+    return all_after ? Holds::after : all_before ? Holds::before : Holds::mixed;
+}
+
+// Writes each range's bytes -- the new ones, or the old ones back -- and
+// syncs the file.
+[[nodiscard]] core::Result<void> write_ranges(const MetadataOperationJournalRecord& record,
+                                              const RangeBackup& backup, const bool after) {
+    Descriptor file{::open(record.source_raw_path.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW)};
+    if (!file.valid()) {
+        return std::unexpected(system_error("opening the file to write in place failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    for (const auto& range : backup.ranges) {
+        const auto& bytes = after ? range.after : range.before;
+        std::size_t done = 0U;
+        while (done < bytes.size()) {
+            const auto count = ::pwrite(file.get(), bytes.data() + done, bytes.size() - done,
+                                        static_cast<off_t>(range.offset + done));
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            if (count <= 0) {
+                return std::unexpected(system_error("writing in place failed", errno,
+                                                    record.source_raw_path, record.id));
+            }
+            done += static_cast<std::size_t>(count);
+        }
+    }
+    if (::fsync(file.get()) != 0 || !file.close()) {
+        return std::unexpected(system_error("syncing the file written in place failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    return {};
+}
+
+// The old bytes back, and the backup gone: nothing of the write is left.
+[[nodiscard]] core::Result<void> roll_back(const MetadataOperationJournalRecord& record,
+                                           const RangeBackup& backup) {
+    if (auto restored = write_ranges(record, backup, false); !restored) {
+        return restored;
+    }
+    if (::unlink(record.backup_raw_path.c_str()) != 0 && errno != ENOENT) {
+        return std::unexpected(system_error("removing the in-place backup failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    return {};
+}
+
+[[nodiscard]] core::Result<MetadataCommitResult>
+commit(const metadata::MetadataWritePlanSource& source_plan,
+       const metadata::InPlaceMetadataWrite& write, MetadataOperationJournal& journal,
+       const MetadataDependentStateCommitter& dependent_state_committer,
+       const core::CancellationToken& cancellation) {
+    const auto journal_id = core::StableId::random();
+    auto made = make_journal_record(source_plan, journal_id);
+    if (!made) {
+        return std::unexpected(std::move(made.error()));
+    }
+    auto record = std::move(*made);
+    record.in_place = true;
+    if (auto created = journal.create(record); !created) {
+        return std::unexpected(std::move(created.error()));
+    }
+    const auto expected = record.expected_revision;
+    const auto fail = [&](const State state, const std::optional<core::LocalSourceRevision>& published,
+                          core::Error failure,
+                          const bool restored) -> core::Result<MetadataCommitResult> {
+        auto terminal = record_terminal_failure(journal, record, state, expected, published,
+                                                failure, restored);
+        if (!terminal) {
+            return std::unexpected(std::move(terminal.error()));
+        }
+        return std::unexpected(std::move(failure));
+    };
+    const RangeBackup backup{.length = write.length, .ranges = write.ranges};
+
+    // The bytes to be replaced, kept and journaled before anything is written.
+    auto backup_revision = write_backup(record, backup);
+    if (!backup_revision) {
+        return fail(State::planned, std::nullopt, backup_revision.error(), true);
+    }
+    if (auto prepared = transition(journal, record, State::planned, State::prepared, expected,
+                                   std::nullopt);
+        !prepared) {
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return fail(State::planned, std::nullopt, prepared.error(), true);
+    }
+    if (auto recorded = journal.transition(record.id,
+                                           MetadataOperationJournalTransition{
+                                               .expected_state = State::prepared,
+                                               .state = State::prepared,
+                                               .prepared_revision = expected,
+                                               .published_revision = std::nullopt,
+                                               .failure = std::nullopt,
+                                               .backup_revision = *backup_revision,
+                                           });
+        !recorded) {
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return fail(State::prepared, std::nullopt, recorded.error(), true);
+    }
+    record.backup_revision = *backup_revision;
+    record.state = State::prepared;
+
+    const auto undo_on = [&](const State state,
+                             const std::optional<core::LocalSourceRevision>& published,
+                             const core::Error& failure) {
+        const auto rolled_back = roll_back(record, backup);
+        return fail(state, published, rolled_back ? failure : not_rolled_back(failure, rolled_back.error()),
+                    rolled_back.has_value());
+    };
+    if (cancellation.is_cancellation_requested()) {
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return fail(State::prepared, std::nullopt, cancelled(record.source_raw_path), true);
+    }
+    if (auto current = core::observe_local_source_revision(record.source_raw_path);
+        !current || *current != expected) {
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return fail(State::prepared, std::nullopt,
+                    !current ? current.error()
+                             : operation_error(core::ErrorCode::conflict,
+                                               "the file changed before it was written in place",
+                                               record.source_raw_path, record.id),
+                    true);
+    }
+
+    if (auto written = write_ranges(record, backup, true); !written) {
+        return undo_on(State::prepared, std::nullopt, written.error());
+    }
+    auto published = core::observe_local_source_revision(record.source_raw_path);
+    if (!published) {
+        return undo_on(State::prepared, std::nullopt, published.error());
+    }
+    if (auto transitioned =
+            transition(journal, record, State::prepared, State::published, expected, *published);
+        !transitioned) {
+        return undo_on(State::prepared, *published, transitioned.error());
+    }
+    auto reread = metadata::read_local_metadata(record.source_raw_path, cancellation);
+    if (!reread || reread->document != write.document) {
+        return undo_on(State::published, *published,
+                       !reread ? reread.error()
+                               : operation_error(core::ErrorCode::conflict,
+                                                 "the tags written in place differ from the "
+                                                 "ones checked",
+                                                 record.source_raw_path, record.id));
+    }
+    auto result = verified_commit_result(record, *published, std::move(reread->document));
+    if (auto dependent = dependent_state_committer(*result); !dependent) {
+        return undo_on(State::published, *published, dependent.error());
+    }
+    auto final_revision = core::observe_local_source_revision(record.source_raw_path);
+    if (!final_revision || *final_revision != *published) {
+        return fail(State::published, *published,
+                    !final_revision
+                        ? final_revision.error()
+                        : operation_error(core::ErrorCode::conflict,
+                                          "metadata source changed during dependent-state commit",
+                                          record.source_raw_path, record.id),
+                    false);
+    }
+    if (auto completed =
+            transition(journal, record, State::published, State::complete, expected, *published);
+        !completed) {
+        return std::unexpected(std::move(completed.error()));
+    }
+    return result;
+}
+
+// After a crash: nothing written, or the old bytes put back -- the original
+// as it was, whatever the write had reached.
+[[nodiscard]] MetadataRecoveryResult recover(MetadataOperationJournalRecord record,
+                                             MetadataOperationJournal& journal) {
+    const auto finish = [&](const bool restored, core::Error issue) {
+        static_cast<void>(record_terminal_failure(journal, record, record.state,
+                                                  record.prepared_revision,
+                                                  record.published_revision, issue, restored));
+        return MetadataRecoveryResult{
+            .journal_id = record.id,
+            .outcome = restored ? MetadataRecoveryOutcome::rolled_back
+                                : MetadataRecoveryOutcome::needs_reconciliation,
+            .issue = restored ? std::nullopt : std::optional{std::move(issue)},
+        };
+    };
+    const auto rolled = operation_error(core::ErrorCode::cancelled,
+                                        "interrupted in-place write was rolled back",
+                                        record.source_raw_path, record.id);
+    if (record.state == State::planned || !record.backup_revision) {
+        // The file was not yet touched; a backup half written is ours.
+        static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+        return finish(true, rolled);
+    }
+    auto backup = read_backup(record);
+    if (!backup) {
+        return finish(false, backup.error());
+    }
+    auto held = holds(record, *backup);
+    if (!held) {
+        return finish(false, held.error());
+    }
+    if (*held == Holds::mixed) {
+        // Only a write of ours stopped part way leaves the ranges so, at the
+        // file's length: the old bytes go back over it.
+        Descriptor file{::open(record.source_raw_path.c_str(), O_RDONLY | O_CLOEXEC)};
+        struct stat status{};
+        if (!file.valid() || ::fstat(file.get(), &status) != 0 ||
+            static_cast<std::uint64_t>(status.st_size) != backup->length) {
+            return finish(false, operation_error(core::ErrorCode::conflict,
+                                                 "the file written in place changed since",
+                                                 record.source_raw_path, record.id));
+        }
+    }
+    if (auto restored = roll_back(record, *backup); !restored) {
+        return finish(false, restored.error());
+    }
+    return finish(true, rolled);
+}
+
+// Undo: the old bytes back, after the ranges are checked to hold what was
+// written -- or already the old ones, an undo a crash stopped.
+[[nodiscard]] core::Result<MetadataCommitResult>
+undo(MetadataOperationBackupRecord backup_record, MetadataOperationJournal& journal,
+     const MetadataDependentStateCommitter& dependent_state_committer,
+     const core::CancellationToken& cancellation) {
+    const auto& record = backup_record.operation;
+    const auto reconcile = [&](core::Error issue) -> core::Result<MetadataCommitResult> {
+        auto marked = transition_backup(journal, record.id, BackupState::undoing,
+                                        BackupState::needs_reconciliation, backup_record.undo_id,
+                                        issue);
+        return std::unexpected(marked ? std::move(issue) : std::move(marked.error()));
+    };
+    auto backup = read_backup(record);
+    if (!backup) {
+        return reconcile(backup.error());
+    }
+    auto held = holds(record, *backup);
+    if (!held) {
+        return reconcile(held.error());
+    }
+    if (*held == Holds::mixed) {
+        return reconcile(operation_error(core::ErrorCode::conflict,
+                                         "the file changed since it was written in place",
+                                         record.source_raw_path, record.id));
+    }
+    if (*held == Holds::after) {
+        if (auto restored = write_ranges(record, *backup, false); !restored) {
+            return reconcile(restored.error());
+        }
+    }
+    auto restored_revision = core::observe_local_source_revision(record.source_raw_path);
+    if (!restored_revision) {
+        return reconcile(restored_revision.error());
+    }
+    auto reread = metadata::read_local_metadata(record.source_raw_path, cancellation);
+    if (!reread) {
+        return reconcile(reread.error());
+    }
+    MetadataCommitResult result{
+        .journal_id = *backup_record.undo_id,
+        .source_raw_path = record.source_raw_path,
+        .backup_raw_path = record.backup_raw_path,
+        .previous_revision = *record.published_revision,
+        .published_revision = *restored_revision,
+        .document = std::move(reread->document),
+        .occurrence_indexes = record.occurrence_indexes,
+    };
+    if (auto dependent = dependent_state_committer(result); !dependent) {
+        // Written again, as it was before the undo.
+        if (auto rewritten = write_ranges(record, *backup, true); !rewritten) {
+            return reconcile(rewritten.error());
+        }
+        static_cast<void>(
+            transition_backup(journal, record.id, BackupState::undoing, BackupState::retained));
+        return std::unexpected(dependent.error());
+    }
+    static_cast<void>(::unlink(record.backup_raw_path.c_str()));
+    if (auto completed = transition_backup(journal, record.id, BackupState::undoing,
+                                           BackupState::undone, backup_record.undo_id);
+        !completed) {
+        return std::unexpected(std::move(completed.error()));
+    }
+    return result;
+}
+
+} // namespace in_place
+
 [[nodiscard]] core::Result<void>
 verify_direct_single_link(const std::string& raw_path, const Descriptor& descriptor,
                           const core::LocalSourceRevision& expected,
@@ -1719,6 +2172,16 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         return std::unexpected(operation_error(core::ErrorCode::invalid_argument,
                                                "metadata undo has incomplete journal evidence",
                                                record.source_raw_path, record.id));
+    }
+    if (record.in_place) {
+        auto process_lock =
+            acquire_process_lock(*record.published_revision, cancellation, record.source_raw_path);
+        if (!process_lock) {
+            static_cast<void>(
+                transition_backup(journal, record.id, BackupState::undoing, BackupState::retained));
+            return std::unexpected(std::move(process_lock.error()));
+        }
+        return in_place::undo(std::move(backup), journal, dependent_state_committer, cancellation);
     }
 
     auto process_lock =
@@ -2439,6 +2902,19 @@ commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
         return std::unexpected(std::move(originals.error()));
     }
 
+    // ADR-0281: tags that fit are written in place; the rest, and covers,
+    // through a prepared copy.
+    if (!source_plan.artwork && !copied_writes_for_testing.load(std::memory_order_relaxed)) {
+        auto in_place_write = metadata::prepare_in_place_metadata_write(source_plan, cancellation);
+        if (!in_place_write) {
+            return std::unexpected(std::move(in_place_write.error()));
+        }
+        if (*in_place_write) {
+            return in_place::commit(source_plan, **in_place_write, journal,
+                                    dependent_state_committer, cancellation);
+        }
+    }
+
     const auto journal_id = core::StableId::random();
     auto record = make_journal_record(source_plan, journal_id);
     if (source_plan.artwork) {
@@ -3043,6 +3519,10 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             });
             continue;
         }
+        if (record.in_place) {
+            results.push_back(in_place::recover(record, journal));
+            continue;
+        }
         if (record.content_kind == MetadataOperationContentKind::folder_image) {
             auto recovered = recover_folder_image(record, journal, cancellation);
             if (!recovered)
@@ -3431,6 +3911,10 @@ void use_copied_metadata_backups_for_testing(const bool enabled) noexcept {
 
 void use_moved_metadata_backups_for_testing(const bool enabled) noexcept {
     moved_backups_for_testing.store(enabled, std::memory_order_relaxed);
+}
+
+void use_prepared_copies_only_for_testing(const bool enabled) noexcept {
+    copied_writes_for_testing.store(enabled, std::memory_order_relaxed);
 }
 
 core::Result<MetadataCommitResult>

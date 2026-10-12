@@ -6,6 +6,7 @@
 #include "trackknife/formats/artwork.hpp"
 #include "trackknife/formats/cue_sheet.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
+#include "trackknife/metadata/in_place_writer.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/loudness_sidecar.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
@@ -962,6 +963,175 @@ void recovers_a_commit_interrupted_after_moving_the_original(
     CHECK(std::filesystem::exists(source) && read_bytes(source) == original_bytes);
     CHECK(!std::filesystem::exists(record.backup_raw_path));
     CHECK(!std::filesystem::exists(record.prepared_raw_path));
+}
+
+// ADR-0281: a file with room for its tags -- padded by a first write -- is
+// written in place: the same file, the same length, the replaced bytes its
+// backup. Rolled back and undone byte for byte.
+void commits_in_place_where_the_tags_fit(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto source = materialize(fixture_directory, directory.path() / "in-place.flac");
+    auto journal = open_journal(directory, "in-place.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    operations::use_prepared_copies_only_for_testing(true);
+    auto padding = title_plan(source, "A first title, long enough to grow the tags and pad them");
+    const auto padded =
+        padding ? operations::commit_metadata_source(*padding, *journal, successful_dependent_commit)
+                : std::unexpected(core::Error{});
+    operations::use_prepared_copies_only_for_testing(false);
+    CHECK(padded.has_value());
+    if (!padded) {
+        return;
+    }
+    const auto before_bytes = read_bytes(source);
+    const auto before = core::observe_local_source_revision(source.native());
+    CHECK(before.has_value());
+    const std::string title(70U, 'T');
+
+    // A failure after the write puts the old bytes back.
+    auto plan = title_plan(source, title);
+    CHECK(plan.has_value());
+    if (!plan || !before) {
+        return;
+    }
+    const auto refused = operations::commit_metadata_source(
+        *plan, *journal, [](const operations::MetadataCommitResult&) -> core::Result<void> {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::database, .message = "injected", .context = {}});
+        });
+    CHECK(!refused && refused.error().message == "injected");
+    CHECK(read_bytes(source) == before_bytes);
+    const auto incomplete = journal->load_incomplete();
+    CHECK(incomplete.has_value() && incomplete->empty());
+
+    plan = title_plan(source, title);
+    CHECK(plan.has_value());
+    if (!plan) {
+        return;
+    }
+    const auto unchanged = core::observe_local_source_revision(source.native());
+    const auto committed =
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+    if (!committed) {
+        std::cerr << committed.error().message << '\n';
+    }
+    CHECK(committed.has_value());
+    if (!committed || !unchanged) {
+        return;
+    }
+    const auto record = journal->load(committed->journal_id);
+    CHECK(record && *record && (**record).in_place && (**record).state == State::complete);
+    // The same file, the same length, the new title; the backup a few
+    // kilobytes of replaced bytes, not a copy.
+    const auto after = core::observe_local_source_revision(source.native());
+    CHECK(after && after->inode == unchanged->inode && after->size == unchanged->size);
+    const auto reread = metadata::read_local_metadata(source.native());
+    CHECK(reread && reread->document.first_effective_value("title") == std::optional{title});
+    CHECK(std::filesystem::file_size(committed->backup_raw_path) < 64U * 1024U);
+    CHECK(read_bytes(committed->backup_raw_path).size() >= 10U);
+
+    const auto undone = operations::undo_metadata_operation(
+        committed->journal_id, *journal,
+        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+    if (!undone) {
+        std::cerr << undone.error().message << '\n';
+    }
+    CHECK(undone.has_value());
+    CHECK(read_bytes(source) == before_bytes);
+    CHECK(!std::filesystem::exists(committed->backup_raw_path));
+}
+
+// ADR-0281: a crash part way through writing in place -- some new bytes,
+// some old -- is rolled back from the kept bytes: the file as it was.
+void recovers_a_write_interrupted_in_place(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto source = materialize(fixture_directory, directory.path() / "torn.flac");
+    auto journal = open_journal(directory, "torn.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    operations::use_prepared_copies_only_for_testing(true);
+    auto padding = title_plan(source, "A first title, long enough to grow the tags and pad them");
+    CHECK(padding && operations::commit_metadata_source(*padding, *journal,
+                                                        successful_dependent_commit)
+                         .has_value());
+    operations::use_prepared_copies_only_for_testing(false);
+    const auto original_bytes = read_bytes(source);
+    auto plan = title_plan(source, std::string(70U, 'T'));
+    CHECK(plan.has_value());
+    if (!plan) {
+        return;
+    }
+    const auto write = metadata::prepare_in_place_metadata_write(*plan);
+    CHECK(write && *write && !(*write)->ranges.empty());
+    if (!write || !*write) {
+        return;
+    }
+    auto record = interrupted_record(*plan, core::StableId::random());
+    record.in_place = true;
+    CHECK(journal->create(record).has_value());
+    // The kept bytes, as the commit writes them.
+    {
+        std::string bytes{"TKRANGES1\n"};
+        const auto put = [&bytes](std::uint64_t value) {
+            for (unsigned shift = 0U; shift < 64U; shift += 8U) {
+                bytes.push_back(static_cast<char>((value >> shift) & 0xFFU));
+            }
+        };
+        put((*write)->length);
+        put((*write)->ranges.size());
+        for (const auto& range : (*write)->ranges) {
+            put(range.offset);
+            put(range.before.size());
+            bytes += range.before;
+            bytes += range.after;
+        }
+        std::ofstream{record.backup_raw_path, std::ios::binary} << bytes;
+    }
+    const auto kept = core::observe_local_source_revision(record.backup_raw_path);
+    CHECK(kept.has_value());
+    CHECK(journal
+              ->transition(record.id,
+                           operations::MetadataOperationJournalTransition{
+                               .expected_state = State::planned,
+                               .state = State::prepared,
+                               .prepared_revision = record.expected_revision,
+                               .published_revision = std::nullopt,
+                               .failure = std::nullopt,
+                           })
+              .has_value());
+    CHECK(journal
+              ->transition(record.id,
+                           operations::MetadataOperationJournalTransition{
+                               .expected_state = State::prepared,
+                               .state = State::prepared,
+                               .prepared_revision = record.expected_revision,
+                               .published_revision = std::nullopt,
+                               .failure = std::nullopt,
+                               .backup_revision = *kept,
+                           })
+              .has_value());
+    // Half of the first range written, and then nothing.
+    {
+        const auto& range = (*write)->ranges.front();
+        std::fstream file{source, std::ios::in | std::ios::out | std::ios::binary};
+        file.seekp(static_cast<std::streamoff>(range.offset));
+        file.write(range.after.data(), static_cast<std::streamsize>(range.after.size() / 2U));
+    }
+    CHECK(read_bytes(source) != original_bytes);
+    const auto recovered =
+        operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    if (!recovered) {
+        std::cerr << recovered.error().message << '\n';
+    }
+    CHECK(recovered.has_value() && recovered->size() == 1U &&
+          recovered->front().outcome == operations::MetadataRecoveryOutcome::rolled_back);
+    CHECK(read_bytes(source) == original_bytes);
+    CHECK(!std::filesystem::exists(record.backup_raw_path));
 }
 
 void recovers_copied_backups_interrupted_around_journaling(
@@ -4088,6 +4258,8 @@ int main(const int argc, char** argv) {
         commits_with_copied_backup_where_links_are_refused(fixture_directory);
         commits_with_moved_backup_where_links_are_refused(fixture_directory);
         recovers_a_commit_interrupted_after_moving_the_original(fixture_directory);
+        commits_in_place_where_the_tags_fit(fixture_directory);
+        recovers_a_write_interrupted_in_place(fixture_directory);
         recovers_copied_backups_interrupted_around_journaling(fixture_directory);
         renamed_files_keep_their_identity_where_renames_renumber(fixture_directory);
         script_written_rating_verifies_over_an_existing_one(fixture_directory);

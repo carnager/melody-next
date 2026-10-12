@@ -28,7 +28,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 53U;
+constexpr unsigned current_schema_version = 54U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1558,6 +1558,19 @@ ALTER TABLE file_publication_backups ADD COLUMN kept_size BLOB;
 ALTER TABLE file_publication_backups ADD COLUMN kept_mtime_seconds BLOB;
 ALTER TABLE file_publication_backups ADD COLUMN kept_mtime_nanoseconds BLOB;
 UPDATE schema_version SET version = 53;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 53) {
+        // ADR-0281: a write made in place: its backup is the bytes it
+        // replaced, not a file.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE operation_journal ADD COLUMN in_place INTEGER NOT NULL DEFAULT 0
+    CHECK(in_place IN (0, 1));
+UPDATE schema_version SET version = 54;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

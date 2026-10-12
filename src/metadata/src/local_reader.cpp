@@ -2,6 +2,8 @@
 
 #include "trackknife/metadata/local_reader.hpp"
 
+#include "local_reader_detail.hpp"
+
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/ratings.hpp"
 
@@ -104,20 +106,9 @@ constexpr std::size_t maximum_text_bytes = 4U * 1024U * 1024U;
 
 } // namespace
 
-core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
-                                                    const core::CancellationToken& cancellation) {
-    if (cancellation.is_cancellation_requested()) {
-        return std::unexpected(cancelled(raw_path));
-    }
-    auto revision_before = core::observe_local_source_revision(raw_path);
-    if (!revision_before) {
-        return std::unexpected(std::move(revision_before.error()));
-    }
-
-    // Read-only. TagLib opens for writing when it may, and a file opened for
-    // writing reads as changed when closed -- to inotify, and so to
-    // melody-watch, which would send it back to be read again (ADR-0232).
-    TagLib::FileStream stream{raw_path.c_str(), true};
+core::Result<LocalMetadataRead> read_metadata_from_stream(const std::string& raw_path,
+                                                          TagLib::IOStream& stream,
+                                                          const core::CancellationToken& cancellation) {
     TagLib::FileRef reference{&stream, false};
     if (reference.isNull() || reference.file() == nullptr) {
         return std::unexpected(error(core::ErrorCode::unsupported,
@@ -242,23 +233,6 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
             NativeObjectIdentity{.identity = std::move(identity)});
     }
 
-    auto revision_after = core::observe_local_source_revision(raw_path);
-    if (!revision_after) {
-        return std::unexpected(std::move(revision_after.error()));
-    }
-    if (*revision_before != *revision_after) {
-        // Said in full: on a network mount, which value moved is the clue.
-        // Ending in the name of the file read: shown cut in the middle, the
-        // end still says whether it was the file or a copy prepared from it.
-        const auto slash = raw_path.find_last_of('/');
-        return std::unexpected(
-            error(core::ErrorCode::conflict,
-                  "local source changed while metadata was being read (" +
-                      core::describe_revision_change(*revision_before, *revision_after) + ") in " +
-                      core::display_raw_path(
-                          slash == std::string::npos ? raw_path : raw_path.substr(slash + 1U)),
-                  raw_path));
-    }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(raw_path));
     }
@@ -271,7 +245,7 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
         native_mpeg || native_vorbis || native_opus || native_mp4;
     return LocalMetadataRead{
         .raw_path = raw_path,
-        .source_revision = *revision_after,
+        .source_revision = {},
         .document = std::move(document),
         .adapter_name = native_flac      ? "taglib-flac-v1"
                         : native_wavpack ? "taglib-wavpack-v1"
@@ -291,6 +265,44 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
             },
         .popularimeter = popularimeter,
     };
+}
+
+core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
+                                                    const core::CancellationToken& cancellation) {
+    if (cancellation.is_cancellation_requested()) {
+        return std::unexpected(cancelled(raw_path));
+    }
+    auto revision_before = core::observe_local_source_revision(raw_path);
+    if (!revision_before) {
+        return std::unexpected(std::move(revision_before.error()));
+    }
+    // Read-only. TagLib opens for writing when it may, and a file opened for
+    // writing reads as changed when closed -- to inotify, and so to
+    // melody-watch, which would send it back to be read again (ADR-0232).
+    TagLib::FileStream stream{raw_path.c_str(), true};
+    auto read = read_metadata_from_stream(raw_path, stream, cancellation);
+    if (!read) {
+        return read;
+    }
+    auto revision_after = core::observe_local_source_revision(raw_path);
+    if (!revision_after) {
+        return std::unexpected(std::move(revision_after.error()));
+    }
+    if (*revision_before != *revision_after) {
+        // Said in full: on a network mount, which value moved is the clue.
+        // Ending in the name of the file read: shown cut in the middle, the
+        // end still says whether it was the file or a copy prepared from it.
+        const auto slash = raw_path.find_last_of('/');
+        return std::unexpected(
+            error(core::ErrorCode::conflict,
+                  "local source changed while metadata was being read (" +
+                      core::describe_revision_change(*revision_before, *revision_after) + ") in " +
+                      core::display_raw_path(
+                          slash == std::string::npos ? raw_path : raw_path.substr(slash + 1U)),
+                  raw_path));
+    }
+    read->source_revision = *revision_after;
+    return read;
 }
 
 core::Result<std::vector<StagedMetadataSource>>

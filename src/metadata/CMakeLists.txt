@@ -21,6 +21,7 @@ add_library(
     src/wavpack_writer.cpp
     src/local_reader.cpp
     src/lyrics.cpp
+    src/in_place_writer.cpp
     src/ratings.cpp
     src/loudness_sidecar.cpp
     src/proposal.cpp

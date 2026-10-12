@@ -4,6 +4,7 @@
 
 #include "container_preservation_detail.hpp"
 #include "mp4_item_factory_detail.hpp"
+#include "writer_steps_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/ratings.hpp"
@@ -199,17 +200,24 @@ namespace {
 // ADR-0237 stage 2: the generic mapping names the rating's freeform atom
 // in capitals; it is named as the FMPS specification spells it, which is
 // what the players that read it look for.
-[[nodiscard]] core::Result<void> spell_rating_atom(const MetadataWritePlanSource& source_plan,
-                                                   const std::string& prepared_raw_path) {
+[[nodiscard]] bool rating_planned(const MetadataWritePlanSource& source_plan) {
     const auto canonical = canonicalize_field_name(fmps_rating_field);
-    if (std::ranges::none_of(source_plan.changes, [&canonical](const auto& change) {
-            return change.canonical_name == canonical;
-        })) {
+    return std::ranges::any_of(source_plan.changes, [&canonical](const auto& change) {
+        return change.canonical_name == canonical;
+    });
+}
+
+} // namespace
+
+namespace mp4_detail {
+
+core::Result<void> spell_rating_atom_in(const MetadataWritePlanSource& source_plan,
+                                        TagLib::MP4::File& file,
+                                        const std::string& prepared_raw_path) {
+    if (!rating_planned(source_plan)) {
         return {};
     }
-    TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
-                           mp4_detail::FreeFormFactory::instance()};
-    if (!file.isValid() || file.tag() == nullptr) {
+    if (file.tag() == nullptr) {
         return std::unexpected(writer_error(core::ErrorCode::backend,
                                             "TagLib rejected the prepared MP4 copy",
                                             source_plan.raw_path, prepared_raw_path));
@@ -231,6 +239,25 @@ namespace {
                                             source_plan.raw_path, prepared_raw_path));
     }
     return {};
+}
+
+} // namespace mp4_detail
+
+namespace {
+
+[[nodiscard]] core::Result<void> spell_rating_atom(const MetadataWritePlanSource& source_plan,
+                                                   const std::string& prepared_raw_path) {
+    if (!rating_planned(source_plan)) {
+        return {};
+    }
+    TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
+                           mp4_detail::FreeFormFactory::instance()};
+    if (!file.isValid()) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib rejected the prepared MP4 copy",
+                                            source_plan.raw_path, prepared_raw_path));
+    }
+    return mp4_detail::spell_rating_atom_in(source_plan, file, prepared_raw_path);
 }
 
 [[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,

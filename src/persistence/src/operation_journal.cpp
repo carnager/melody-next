@@ -868,6 +868,7 @@ load_records(sqlite3* database, const char* sql, const std::string_view id = {},
             .artwork = std::nullopt,
             .failure = std::move(failure),
             .backup_revision = *backup_revision,
+            .in_place = sqlite3_column_int(statement->get(), 28) != 0,
         });
     }
     if (record_result != SQLITE_DONE) {
@@ -1001,7 +1002,7 @@ load_backup_records(sqlite3* database, const char* sql, const std::string_view i
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
         "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
-        "backup_mtime_nanoseconds "
+        "backup_mtime_nanoseconds, in_place "
         "FROM operation_journal WHERE id = ?";
     std::vector<BackupRecord> backups;
     backups.reserve(rows.size());
@@ -1108,8 +1109,8 @@ SqliteMetadataOperationJournal::create(const operations::MetadataOperationJourna
         "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
-        "content_kind) "
-        "VALUES(?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        "content_kind, in_place) "
+        "VALUES(?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     const auto id = record.id.to_string();
     if (!insert || !bind_blob(insert->get(), 1, id) ||
         sqlite3_bind_int(insert->get(), 2, static_cast<int>(record.state)) != SQLITE_OK ||
@@ -1121,7 +1122,8 @@ SqliteMetadataOperationJournal::create(const operations::MetadataOperationJourna
         !bind_optional_revision(insert->get(), 16, record.published_revision) ||
         sqlite3_bind_null(insert->get(), 21) != SQLITE_OK ||
         sqlite3_bind_null(insert->get(), 22) != SQLITE_OK ||
-        sqlite3_bind_int(insert->get(), 23, static_cast<int>(record.content_kind)) != SQLITE_OK) {
+        sqlite3_bind_int(insert->get(), 23, static_cast<int>(record.content_kind)) != SQLITE_OK ||
+        sqlite3_bind_int(insert->get(), 24, record.in_place ? 1 : 0) != SQLITE_OK) {
         auto error = insert ? database_error(database, "Could not bind operation journal")
                             : std::move(insert.error());
         rollback();
@@ -1379,7 +1381,7 @@ SqliteMetadataOperationJournal::load(const core::StableId& id) const {
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
         "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
-        "backup_mtime_nanoseconds "
+        "backup_mtime_nanoseconds, in_place "
         "FROM operation_journal WHERE id = ?";
     auto records = load_records(implementation_->database, sql, id.to_string());
     if (!records) {
@@ -1405,7 +1407,7 @@ SqliteMetadataOperationJournal::load_incomplete() const {
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
         "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
-        "backup_mtime_nanoseconds "
+        "backup_mtime_nanoseconds, in_place "
         "FROM operation_journal WHERE state NOT IN (3, 4) ORDER BY rowid LIMIT 10001";
     auto records = load_records(implementation_->database, sql, {}, DamagedEvidence::reconcile);
     if (!records) {
@@ -1428,7 +1430,7 @@ SqliteMetadataOperationJournal::load_incomplete_for_source(const std::string& ra
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
         "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
-        "backup_mtime_nanoseconds "
+        "backup_mtime_nanoseconds, in_place "
         "FROM operation_journal WHERE source_path = ? AND state NOT IN (3, 4) ORDER BY rowid LIMIT "
         "10001";
     auto records =

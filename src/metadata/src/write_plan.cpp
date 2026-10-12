@@ -868,6 +868,67 @@ build_metadata_write_plan(const StagedMetadataSelection& selection,
             }
         }
 
+        // ADR-0279: a file being written drops its empty values -- a field
+        // with no value, or the empty values beside others. They hold
+        // nothing, and some formats cannot write them back; kept, a single
+        // empty field left by another tagger made the whole file untaggable.
+        // Each is a change of its own, to that exact spelling, so the reread
+        // after the write checks it like any other.
+        if (!source.changes.empty() && !source.occurrence_indexes.empty()) {
+            std::unordered_set<std::string> touched_logical;
+            std::unordered_set<std::string> touched_native;
+            for (const auto& change : source.changes) {
+                if (change.exact_native_name) {
+                    touched_native.insert(*change.exact_native_name);
+                } else {
+                    touched_logical.insert(change.canonical_name);
+                }
+            }
+            for (const auto& field : effective_native) {
+                const auto native = canonicalize_native_field_name(field.native_name);
+                const auto empty = [](const std::string& value) { return value.empty(); };
+                if (touched_logical.contains(field.canonical_name) ||
+                    touched_native.contains(native) ||
+                    (!field.values.empty() && std::ranges::none_of(field.values, empty))) {
+                    continue;
+                }
+                std::optional<std::size_t> field_index;
+                for (std::size_t index = 0U; index < selection.field_count(); ++index) {
+                    if (selection.field(index).canonical_name == field.canonical_name) {
+                        field_index = index;
+                        if (selection.field(index).exact_native_name == native) {
+                            break;
+                        }
+                    }
+                }
+                if (!field_index) {
+                    continue;
+                }
+                std::vector<std::string> kept;
+                std::ranges::copy_if(field.values, std::back_inserter(kept),
+                                     [](const std::string& value) { return !value.empty(); });
+                const auto kind = kept.empty() ? StagedMetadataPatchKind::remove_field
+                                               : StagedMetadataPatchKind::replace_values;
+                source.changes.push_back(MetadataWritePlanChange{
+                    .field_index = *field_index,
+                    .canonical_name = field.canonical_name,
+                    .display_name = field.native_name,
+                    .native_name = field.native_name,
+                    .original_present = true,
+                    .original_values = field.values,
+                    .intents = {MetadataWritePlanIntent{
+                        .item_index = source.occurrence_indexes.front(),
+                        .kind = kind,
+                        .values = std::move(kept),
+                    }},
+                    .conflicting_intents = false,
+                    .unresolved_non_embedded_target = false,
+                    .exact_native_name = native,
+                });
+                touched_native.insert(native);
+            }
+        }
+
         // ADR-0143: an adapter that cannot take a safe tag write still
         // gets its ReplayGain — clean conventional REPLAYGAIN_* changes
         // divert into the file's loudness sidecar as a whole-file entry.
@@ -967,35 +1028,6 @@ build_metadata_write_plan(const StagedMetadataSelection& selection,
         }
         if (read->adapter_name == "taglib-flac-v1" || read->adapter_name == "taglib-wavpack-v1" ||
             read->adapter_name == "taglib-mpeg-v1") {
-            std::unordered_set<std::string> changed_logical_fields;
-            std::unordered_set<std::string> changed_native_fields;
-            changed_logical_fields.reserve(source.changes.size());
-            changed_native_fields.reserve(source.changes.size());
-            for (const auto& change : source.changes) {
-                if (change.exact_native_name) {
-                    changed_native_fields.insert(*change.exact_native_name);
-                } else {
-                    changed_logical_fields.insert(change.canonical_name);
-                }
-            }
-            const auto unrepresentable_untouched =
-                std::ranges::find_if(effective_native, [&](const auto& field) {
-                    return !changed_logical_fields.contains(field.canonical_name) &&
-                           !changed_native_fields.contains(
-                               canonicalize_native_field_name(field.native_name)) &&
-                           (field.values.empty() ||
-                            std::ranges::any_of(field.values,
-                                                [](const auto& value) { return value.empty(); }));
-                });
-            if (unrepresentable_untouched != effective_native.end()) {
-                add_issue(
-                    source, MetadataWritePlanIssueKind::unsupported_field_mapping,
-                    planner_error(
-                        core::ErrorCode::unsupported,
-                        "an untouched FLAC field contains an exact empty value that the writer "
-                        "cannot preserve",
-                        source.raw_path));
-            }
             for (const auto& change : source.changes) {
                 if (change.intents.empty() || change.conflicting_intents) {
                     continue;

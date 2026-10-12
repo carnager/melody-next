@@ -42,7 +42,7 @@ class MetadataExactValueModel final : public QAbstractListModel {
         }
         const auto& value = values_[index.row()];
         if (role == Qt::DisplayRole) {
-            return value.isEmpty() ? QVariant{QStringLiteral("(empty value)")} : QVariant{value};
+            return value.isEmpty() ? QVariant{QStringLiteral("(empty · dropped when written)")} : QVariant{value};
         }
         if (role == Qt::EditRole) {
             return value;

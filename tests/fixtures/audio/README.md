@@ -399,3 +399,13 @@ The binary SHA-256 is
 ADR-0149 tests scan it to assert R128 Q7.8 proposals and write
 `R128_TRACK_GAIN`/`R128_ALBUM_GAIN` comments onto materialized copies to
 assert the decoder's -23 to -18 LUFS reference lift.
+
+`empty-field-flac.b64` is `tagged-tone-flac.b64` with one Vorbis comment
+whose value is empty, as other taggers leave them (ADR-0279). TagLib cannot
+write an empty comment, so it was made with metaflac:
+
+```sh
+base64 -d tagged-tone-flac.b64 > empty-field.flac
+metaflac --set-tag="EMPTYFIELD=" empty-field.flac
+base64 -w 76 empty-field.flac > empty-field-flac.b64
+```

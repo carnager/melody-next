@@ -21,7 +21,7 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-10-11, through ADR-0278: database schema 53, protocol 1 at
+Updated on 2026-10-12, through ADR-0279: database schema 53, protocol 1 at
 level 10 ([protocol levels](protocol-levels.md)).
 
 **The unified engine is in place.** `melodyd` owns the library and playback
@@ -42,6 +42,7 @@ older ADRs and in `architecture.md`.
 - [ADR-0276: Lyrics, read by the engine and shown beside playback](adr/0276-lyrics.md).
 - [ADR-0277: Long file jobs keep the computer awake](adr/0277-long-jobs-keep-the-computer-awake.md).
 - [ADR-0278: A file job's result names what was written, not its tags](adr/0278-results-name-what-was-written.md).
+- [ADR-0279: Empty values are dropped when a file is written](adr/0279-empty-values-are-dropped.md).
 - [ADR-0270: The phone reaches an engine through a TLS proxy](adr/0270-the-phone-reaches-an-engine-through-a-tls-proxy.md).
 - [ADR-0269: Up Next is the engine's, and the window shows it](adr/0269-up-next-is-the-engines.md).
 - [ADR-0268: What shows a library follows its changes](adr/0268-the-library-follows-its-files.md).

@@ -316,37 +316,59 @@ void rejectsEmptyInvalidAndCancelledPlanning() {
     CHECK(cancelled.error().code == trackknife::core::ErrorCode::cancelled);
 }
 
-void blocksUntouchedExactEmptyFlacValues() {
-    using trackknife::metadata::MetadataWritePlanIssueKind;
+// ADR-0279: a file being written drops its empty values, in every format --
+// each a change of the plan to that exact spelling, the rest untouched.
+void dropsEmptyValuesOfFilesWritten() {
+    using trackknife::metadata::StagedMetadataPatchKind;
     using trackknife::metadata::StagedMetadataPatchSet;
-    auto selection = trackknife::metadata::StagedMetadataSelection::create({
-        source("/music/empty-value.flac", revision(41U),
-               {field("TITLE", {"Old"}), field("CUSTOM_FIELD", {""})}),
-    });
-    CHECK(selection.has_value());
-    if (!selection) {
-        return;
-    }
-    const auto title = selection->field_index("title");
-    CHECK(title.has_value());
-    if (!title) {
-        return;
-    }
-    StagedMetadataPatchSet patches;
-    CHECK(patches.replace_values(*selection, 0U, *title, {"New"}).has_value());
-    const auto planned = trackknife::metadata::build_metadata_write_plan(
-        *selection, patches,
-        [](const std::string& path, const trackknife::core::CancellationToken&) {
-            auto result =
-                read(path, revision(41U), {field("TITLE", {"Old"}), field("CUSTOM_FIELD", {""})});
-            result.adapter_name = "taglib-flac-v1";
-            return trackknife::core::Result<trackknife::metadata::LocalMetadataRead>{
-                std::move(result)};
+    for (const char* adapter : {"taglib-flac-v1", "taglib-mpeg-v1", "taglib-mp4-v1"}) {
+        const auto fields = [] {
+            return std::vector{field("TITLE", {"Old"}), field("CUSTOM_FIELD", {""}),
+                               field("MULTI_FIELD", {"kept", ""}), field("ALBUM", {"Album"})};
+        };
+        auto selection = trackknife::metadata::StagedMetadataSelection::create({
+            source("/music/empty-value.flac", revision(41U), fields()),
         });
-    CHECK(planned.has_value());
-    CHECK(planned && !planned->ready());
-    CHECK(planned && has_issue(planned->sources.front(),
-                               MetadataWritePlanIssueKind::unsupported_field_mapping));
+        CHECK(selection.has_value());
+        if (!selection) {
+            return;
+        }
+        const auto title = selection->field_index("title");
+        CHECK(title.has_value());
+        if (!title) {
+            return;
+        }
+        StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, *title, {"New"}).has_value());
+        const auto planned = trackknife::metadata::build_metadata_write_plan(
+            *selection, patches,
+            [&fields, adapter](const std::string& path,
+                               const trackknife::core::CancellationToken&) {
+                auto result = read(path, revision(41U), fields());
+                result.adapter_name = adapter;
+                return trackknife::core::Result<trackknife::metadata::LocalMetadataRead>{
+                    std::move(result)};
+            });
+        CHECK(planned && planned->ready());
+        if (!planned || !planned->ready()) {
+            continue;
+        }
+        const auto& changes = planned->sources.front().changes;
+        const auto change_of = [&changes](const std::string& native) {
+            return std::ranges::find_if(changes, [&native](const auto& change) {
+                return change.exact_native_name == native;
+            });
+        };
+        const auto custom = change_of("custom_field");
+        CHECK(custom != changes.end() &&
+              custom->intents.front().kind == StagedMetadataPatchKind::remove_field);
+        const auto multi = change_of("multi_field");
+        CHECK(multi != changes.end() &&
+              multi->intents.front().kind == StagedMetadataPatchKind::replace_values &&
+              multi->intents.front().values == std::vector<std::string>{"kept"});
+        // The title as staged, and nothing for a field with values.
+        CHECK(changes.size() == 3U);
+    }
 }
 
 void logicalLoudnessRequiresItsOwnStorageTarget() {
@@ -757,7 +779,7 @@ int main() {
     reportsRevisionCapabilityReadAndAliasBlockers();
     rejectsInconsistentCapturedRevisionsForOnePath();
     rejectsEmptyInvalidAndCancelledPlanning();
-    blocksUntouchedExactEmptyFlacValues();
+    dropsEmptyValuesOfFilesWritten();
     logicalLoudnessRequiresItsOwnStorageTarget();
     routesCueReplayGainIntoSheetPlans();
     routesNonCueLogicalLoudnessIntoSidecarPlans();

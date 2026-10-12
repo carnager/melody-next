@@ -5,6 +5,7 @@
 #include "trackknife/metadata/artwork_write_plan.hpp"
 #include "trackknife/metadata/artwork_writers.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/metadata/flac_writer.hpp"
 #include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
@@ -16,6 +17,7 @@
 #include <taglib/id3v2tag.h>
 #include <taglib/mp4file.h>
 #include <taglib/mpegfile.h>
+#include <taglib/textidentificationframe.h>
 #include <taglib/unsynchronizedlyricsframe.h>
 
 #include <algorithm>
@@ -369,6 +371,89 @@ void keepsMp4FreeFormNamesWithColons(const std::filesystem::path& fixture_direct
                         std::optional<std::string>{"Retitled"});
 }
 
+// ADR-0279: files with empty fields, as other taggers leave them, take a
+// write in every format, and lose only the empties.
+void dropsEmptyFieldsOfFilesWritten(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto write_title = [](const std::filesystem::path& from,
+                                const std::filesystem::path& to) {
+        const auto read = trackknife::metadata::read_local_metadata(from.native());
+        CHECK(read.has_value());
+        if (!read) {
+            return false;
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            return false;
+        }
+        const auto title = selection->field_index("title");
+        if (!title) {
+            return false;
+        }
+        trackknife::metadata::StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, *title, {"Despite the empties"}).has_value());
+        auto plan = make_plan(*selection, patches);
+        if (!plan || !plan->ready()) {
+            return false;
+        }
+        const auto written =
+            to.extension() == ".mp3"
+                ? trackknife::metadata::prepare_mp3_metadata_write_copy(plan->sources.front(),
+                                                                        to.native())
+                      .has_value()
+                : trackknife::metadata::prepare_flac_metadata_write_copy(plan->sources.front(),
+                                                                         to.native())
+                      .has_value();
+        return written;
+    };
+    const auto names = [](const std::filesystem::path& path) {
+        std::vector<std::string> found;
+        if (const auto read = trackknife::metadata::read_local_metadata(path.native())) {
+            for (const auto& field : read->document.fields) {
+                found.push_back(field.native_name);
+            }
+        }
+        return found;
+    };
+
+    const auto mp3 =
+        materialize(fixture_directory, "tagged-tone-mp3.b64", directory.path() / "empty.mp3");
+    {
+        TagLib::MPEG::File file{mp3.c_str()};
+        auto* user = new TagLib::ID3v2::UserTextIdentificationFrame(TagLib::String::UTF8);
+        user->setDescription("EMPTYTAG");
+        user->setText(TagLib::String{""});
+        file.ID3v2Tag(true)->addFrame(user);
+        auto* album_artist =
+            new TagLib::ID3v2::TextIdentificationFrame("TPE2", TagLib::String::UTF8);
+        album_artist->setText(TagLib::String{""});
+        file.ID3v2Tag()->addFrame(album_artist);
+        CHECK(file.save());
+    }
+    CHECK(std::ranges::contains(names(mp3), std::string{"EMPTYTAG"}));
+    const auto mp3_written = directory.path() / "empty-written.mp3";
+    CHECK(write_title(mp3, mp3_written));
+    const auto mp3_after = names(mp3_written);
+    CHECK(!std::ranges::contains(mp3_after, std::string{"EMPTYTAG"}) &&
+          std::ranges::contains(mp3_after, std::string{"ARTIST"}));
+
+    // TagLib cannot write an empty comment, and does not read one either: the
+    // fixture, made with metaflac, has it in its bytes only. A write takes it
+    // with it, as the rule says, and goes through.
+    const auto flac =
+        materialize(fixture_directory, "empty-field-flac.b64", directory.path() / "empty.flac");
+    const auto has_empty = [](const std::filesystem::path& path) {
+        const auto bytes = read_bytes(path);
+        const std::string_view text{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+        return text.find("EMPTYFIELD=") != std::string_view::npos;
+    };
+    CHECK(has_empty(flac));
+    const auto flac_written = directory.path() / "empty-written.flac";
+    CHECK(write_title(flac, flac_written));
+    CHECK(!has_empty(flac_written));
+    CHECK(std::ranges::contains(names(flac_written), std::string{"ALBUM"}));
+}
+
 void toleratesId3v1TrailersUnlikeWavPack(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source =
@@ -555,6 +640,7 @@ int main(const int argc, char** argv) {
         toleratesId3v1TrailersUnlikeWavPack(fixture_directory);
         roundTripsMultiLineLyrics(fixture_directory);
         keepsMp4FreeFormNamesWithColons(fixture_directory);
+        dropsEmptyFieldsOfFilesWritten(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }
     return failures == 0 ? 0 : 1;

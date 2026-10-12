@@ -84,7 +84,7 @@ enum class DraftChangeKind : std::uint8_t { added, changed, removed };
     auto displayed = display_values(values);
     for (auto& value : displayed) {
         if (value.isEmpty()) {
-            value = QStringLiteral("(empty value)");
+            value = QStringLiteral("(empty · dropped when written)");
         }
     }
     return displayed;

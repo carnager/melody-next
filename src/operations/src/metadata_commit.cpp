@@ -877,6 +877,7 @@ unlink_if_matches(const std::string& raw_path,
 }
 
 std::atomic<bool> copied_backups_for_testing{false};
+std::atomic<bool> moved_backups_for_testing{false};
 
 using detail::hard_link_refused;
 
@@ -1965,6 +1966,20 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     auto current_source = core::observe_local_source_revision(record.source_raw_path);
     std::optional<core::Error> backup_failure;
     bool copy_cleaned = true;
+    bool backup_moved = false;
+    // Before the new file is in place, a failure takes the backup away: a
+    // copy or a link is removed; a moved original is put back where it was.
+    const auto undo_backup = [&]() -> core::Result<void> {
+        if (!backup_moved) {
+            return unlink_if_matches(record.backup_raw_path, backup_identity(record),
+                                     record.source_raw_path, record.id);
+        }
+        if (::rename(record.backup_raw_path.c_str(), record.source_raw_path.c_str()) != 0) {
+            return std::unexpected(system_error("putting the moved original back failed", errno,
+                                                record.source_raw_path, record.id));
+        }
+        return fsync_parent(record.source_raw_path, record.source_raw_path, record.id);
+    };
     if (!current_source) {
         backup_failure = std::move(current_source.error());
     } else if (*current_source != record.expected_revision) {
@@ -1974,10 +1989,50 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
                 core::describe_revision_change(record.expected_revision, *current_source) + ")",
             record.source_raw_path, record.id);
     } else if (copied_backups_for_testing.load(std::memory_order_relaxed) ||
+               moved_backups_for_testing.load(std::memory_order_relaxed) ||
                ::link(record.source_raw_path.c_str(), record.backup_raw_path.c_str()) != 0) {
-        const auto number =
-            copied_backups_for_testing.load(std::memory_order_relaxed) ? ENOTSUP : errno;
-        if (!hard_link_refused(number)) {
+        const auto number = copied_backups_for_testing.load(std::memory_order_relaxed) ||
+                                    moved_backups_for_testing.load(std::memory_order_relaxed)
+                                ? ENOTSUP
+                                : errno;
+        // ADR-0280: no hard link -- SMB has none -- the original itself is
+        // the backup: moved where the backup goes, by a rename on the same
+        // filesystem, copying nothing. Only where that rename cannot be made
+        // -- the undo folder on another disk -- is it copied.
+        std::optional<core::LocalSourceRevision> moved;
+        if (hard_link_refused(number) && !copied_backups_for_testing.load(std::memory_order_relaxed) &&
+            ::rename(record.source_raw_path.c_str(), record.backup_raw_path.c_str()) == 0) {
+            auto observed = core::observe_local_source_revision(record.backup_raw_path);
+            if (observed && core::same_file_after_rename(record.backup_raw_path,
+                                                         record.expected_revision, *observed)) {
+                moved = *observed;
+            } else {
+                // Not the file it was: put back at once, and refused.
+                static_cast<void>(
+                    ::rename(record.backup_raw_path.c_str(), record.source_raw_path.c_str()));
+                backup_failure = operation_error(core::ErrorCode::conflict,
+                                                 "the moved metadata backup is not the source",
+                                                 record.source_raw_path, record.id);
+            }
+        }
+        if (backup_failure) {
+        } else if (moved) {
+            backup_moved = true;
+            if (auto recorded = journal.transition(record.id,
+                                                   MetadataOperationJournalTransition{
+                                                       .expected_state = State::prepared,
+                                                       .state = State::prepared,
+                                                       .prepared_revision = prepared_revision,
+                                                       .published_revision = std::nullopt,
+                                                       .failure = std::nullopt,
+                                                       .backup_revision = *moved,
+                                                   });
+                !recorded) {
+                backup_failure = std::move(recorded.error());
+            } else {
+                record.backup_revision = *moved;
+            }
+        } else if (!hard_link_refused(number)) {
             backup_failure = system_error("creating metadata backup failed", number,
                                           record.source_raw_path, record.id);
         } else if (auto copied = copy_metadata_backup(record, source_descriptor, source_status,
@@ -2002,6 +2057,9 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
             record.backup_revision = *copied;
         }
     }
+    if (backup_failure && backup_moved) {
+        copy_cleaned = undo_backup().has_value();
+    }
     if (backup_failure) {
         const auto& failure = *backup_failure;
         const auto cleaned = unlink_if_matches(record.prepared_raw_path, prepared_revision,
@@ -2014,7 +2072,11 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         }
         return std::unexpected(cleaned ? failure : cleaned.error());
     }
-    auto backup_source = core::observe_local_source_revision(record.source_raw_path);
+    // Moved, the original is the backup and nothing is at its name until
+    // the new file is renamed there.
+    auto backup_source = backup_moved
+                             ? core::Result<core::LocalSourceRevision>{record.expected_revision}
+                             : core::observe_local_source_revision(record.source_raw_path);
     auto backup = core::observe_local_source_revision(record.backup_raw_path);
     if (!backup_source || !backup || *backup_source != record.expected_revision ||
         *backup != backup_identity(record)) {
@@ -2026,8 +2088,7 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
                        : operation_error(core::ErrorCode::conflict,
                                          "metadata backup does not preserve the expected source",
                                          record.source_raw_path, record.id));
-        const auto backup_cleaned = unlink_if_matches(
-            record.backup_raw_path, backup_identity(record), record.source_raw_path, record.id);
+        const auto backup_cleaned = undo_backup();
         const auto prepared_cleaned = unlink_if_matches(record.prepared_raw_path, prepared_revision,
                                                         record.source_raw_path, record.id);
         const bool restored = backup_cleaned.has_value() && prepared_cleaned.has_value();
@@ -2043,8 +2104,7 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     auto directory_synced = fsync_parent(record.source_raw_path, record.source_raw_path, record.id);
     if (!directory_synced) {
         const auto& failure = directory_synced.error();
-        const auto backup_cleaned = unlink_if_matches(
-            record.backup_raw_path, backup_identity(record), record.source_raw_path, record.id);
+        const auto backup_cleaned = undo_backup();
         const auto prepared_cleaned = unlink_if_matches(record.prepared_raw_path, prepared_revision,
                                                         record.source_raw_path, record.id);
         const bool restored = backup_cleaned.has_value() && prepared_cleaned.has_value();
@@ -2057,8 +2117,7 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     }
     if (cancellation.is_cancellation_requested()) {
         const auto failure = cancelled(record.source_raw_path);
-        const auto backup_cleaned = unlink_if_matches(
-            record.backup_raw_path, backup_identity(record), record.source_raw_path, record.id);
+        const auto backup_cleaned = undo_backup();
         const auto prepared_cleaned = unlink_if_matches(record.prepared_raw_path, prepared_revision,
                                                         record.source_raw_path, record.id);
         const bool restored = backup_cleaned.has_value() && prepared_cleaned.has_value();
@@ -2073,8 +2132,7 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     if (::rename(record.prepared_raw_path.c_str(), record.source_raw_path.c_str()) != 0) {
         const auto failure = system_error("publishing prepared metadata failed", errno,
                                           record.source_raw_path, record.id);
-        const auto backup_cleaned = unlink_if_matches(
-            record.backup_raw_path, backup_identity(record), record.source_raw_path, record.id);
+        const auto backup_cleaned = undo_backup();
         const auto prepared_cleaned = unlink_if_matches(record.prepared_raw_path, prepared_revision,
                                                         record.source_raw_path, record.id);
         const bool restored = backup_cleaned.has_value() && prepared_cleaned.has_value();
@@ -3124,6 +3182,47 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             backup_revision = std::move(kept);
         }
 
+        // ADR-0280: a crash between moving the original to be the backup and
+        // renaming the new file into its place leaves nothing at its name
+        // and the original at the backup's: put back, and the new file goes.
+        if (!*source_revision && *backup_revision &&
+            (**backup_revision == backup_identity(record) ||
+             core::same_file_after_rename(record.backup_raw_path, record.expected_revision,
+                                          **backup_revision))) {
+            std::optional<core::Error> issue;
+            if (::rename(record.backup_raw_path.c_str(), record.source_raw_path.c_str()) != 0) {
+                issue = system_error("putting the moved original back failed", errno,
+                                     record.source_raw_path, record.id);
+            } else if (auto synced = fsync_parent(record.source_raw_path, record.source_raw_path,
+                                                  record.id);
+                       !synced) {
+                issue = std::move(synced.error());
+            } else if (auto removed = unlink_if_matches(record.prepared_raw_path,
+                                                        record.prepared_revision,
+                                                        record.source_raw_path, record.id, true);
+                       !removed) {
+                issue = std::move(removed.error());
+            }
+            const bool restored = !issue;
+            const auto failure = restored
+                                     ? operation_error(core::ErrorCode::cancelled,
+                                                       "interrupted metadata commit was rolled "
+                                                       "back; the original is in place",
+                                                       record.source_raw_path, record.id)
+                                     : *issue;
+            auto terminal =
+                record_terminal_failure(journal, record, record.state, record.prepared_revision,
+                                        record.published_revision, failure, restored);
+            results.push_back({.journal_id = record.id,
+                               .outcome = restored ? MetadataRecoveryOutcome::rolled_back
+                                                   : MetadataRecoveryOutcome::needs_reconciliation,
+                               .issue = restored ? std::nullopt : std::optional{failure}});
+            if (!terminal) {
+                return std::unexpected(std::move(terminal.error()));
+            }
+            continue;
+        }
+
         // The original, or -- after a rollback that renamed a copied backup
         // back -- that copy (ADR-0248): nothing was published, or it was
         // undone, so the debris goes. A copy made but not yet journaled is
@@ -3328,6 +3427,10 @@ bool filesystem_without_links_simulated() noexcept {
 
 void use_copied_metadata_backups_for_testing(const bool enabled) noexcept {
     copied_backups_for_testing.store(enabled, std::memory_order_relaxed);
+}
+
+void use_moved_metadata_backups_for_testing(const bool enabled) noexcept {
+    moved_backups_for_testing.store(enabled, std::memory_order_relaxed);
 }
 
 core::Result<MetadataCommitResult>

@@ -65,6 +65,9 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
 // Tests only: every backup is made as a copy, as on a filesystem that
 // refuses hard links (ADR-0248).
 void use_copied_metadata_backups_for_testing(bool enabled) noexcept;
+// Tests only: hard links refused, as on SMB, so the original is moved to be
+// the backup (ADR-0280).
+void use_moved_metadata_backups_for_testing(bool enabled) noexcept;
 
 enum class MetadataRecoveryOutcome : std::uint8_t {
     completed,

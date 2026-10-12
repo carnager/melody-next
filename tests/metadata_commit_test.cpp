@@ -826,6 +826,144 @@ void commits_with_copied_backup_where_links_are_refused(
     operations::use_copied_metadata_backups_for_testing(false);
 }
 
+// ADR-0280: where hard links are refused -- SMB -- the original itself is
+// moved to be the backup: nothing copied, the same file, rolled back, undone
+// and released as any backup.
+void commits_with_moved_backup_where_links_are_refused(
+    const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    operations::use_moved_metadata_backups_for_testing(true);
+    const auto source = materialize(fixture_directory, directory.path() / "moved.flac");
+    const auto original_bytes = read_bytes(source);
+    auto journal = open_journal(directory, "moved.sqlite3");
+    auto plan = title_plan(source, "Moved backup title");
+    CHECK(plan.has_value() && journal.has_value());
+    if (!plan || !journal) {
+        operations::use_moved_metadata_backups_for_testing(false);
+        return;
+    }
+    const auto original = *plan->observed_revision;
+
+    // A failure after publication rolls back from the moved original: the
+    // very file returns, and nothing is left behind.
+    const auto refused = operations::commit_metadata_source(
+        *plan, *journal, [](const operations::MetadataCommitResult&) -> core::Result<void> {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::database, .message = "injected", .context = {}});
+        });
+    CHECK(!refused && refused.error().message == "injected");
+    CHECK(read_bytes(source) == original_bytes);
+    const auto incomplete = journal->load_incomplete();
+    CHECK(incomplete.has_value() && incomplete->empty());
+    CHECK(std::ranges::none_of(
+        std::filesystem::directory_iterator{directory.path()}, [](const auto& entry) {
+            return entry.path().filename().native().starts_with(".trackknife-");
+        }));
+
+    plan = title_plan(source, "Moved backup title");
+    CHECK(plan.has_value());
+    if (!plan) {
+        operations::use_moved_metadata_backups_for_testing(false);
+        return;
+    }
+    const auto before = *plan->observed_revision;
+    const auto committed =
+        operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+    if (!committed) {
+        std::cerr << committed.error().message << '\n';
+    }
+    CHECK(committed.has_value());
+    if (!committed) {
+        operations::use_moved_metadata_backups_for_testing(false);
+        return;
+    }
+    // The backup is the original file itself, moved: its inode, its bytes.
+    CHECK(read_bytes(committed->backup_raw_path) == original_bytes);
+    const auto backup = core::observe_local_source_revision(committed->backup_raw_path);
+    CHECK(backup.has_value() && backup->inode == before.inode);
+    const auto record = journal->load(committed->journal_id);
+    CHECK(record && *record && (**record).state == State::complete &&
+          operations::backup_identity(**record) == *backup);
+
+    const auto undone = operations::undo_metadata_operation(
+        committed->journal_id, *journal,
+        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+    if (!undone) {
+        std::cerr << undone.error().message << '\n';
+    }
+    CHECK(undone.has_value());
+    CHECK(read_bytes(source) == original_bytes);
+    static_cast<void>(original);
+
+    // Retention releases a moved backup like any other.
+    plan = title_plan(source, "Released moved title");
+    CHECK(plan.has_value());
+    if (plan) {
+        const auto again =
+            operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
+        CHECK(again.has_value());
+        const auto maintained = operations::maintain_metadata_backups(
+            *journal,
+            operations::MetadataBackupRetentionPolicy{
+                .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
+            static_cast<std::int64_t>(std::time(nullptr)) + 1);
+        CHECK(maintained.has_value());
+        CHECK(again && !std::filesystem::exists(again->backup_raw_path));
+    }
+    operations::use_moved_metadata_backups_for_testing(false);
+}
+
+// ADR-0280: a crash between moving the original to be the backup and renaming
+// the new file into its place: nothing at the file's name. Recovery puts the
+// original back, and the new file goes.
+void recovers_a_commit_interrupted_after_moving_the_original(
+    const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    auto journal = open_journal(directory, "moved-recovery.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    const auto source = materialize(fixture_directory, directory.path() / "moved-crash.flac");
+    const auto original_bytes = read_bytes(source);
+    auto plan = title_plan(source, "Never published");
+    CHECK(plan.has_value());
+    if (!plan) {
+        return;
+    }
+    auto record = interrupted_record(*plan, core::StableId::random());
+    CHECK(journal->create(record).has_value());
+    const auto prepared = metadata::prepare_flac_metadata_write_copy(*plan, record.prepared_raw_path);
+    CHECK(prepared.has_value());
+    if (!prepared) {
+        return;
+    }
+    record.prepared_revision = prepared->prepared_revision;
+    CHECK(journal
+              ->transition(record.id,
+                           operations::MetadataOperationJournalTransition{
+                               .expected_state = State::planned,
+                               .state = State::prepared,
+                               .prepared_revision = record.prepared_revision,
+                               .published_revision = std::nullopt,
+                               .failure = std::nullopt,
+                           })
+              .has_value());
+    // Moved, and the process gone before anything else.
+    CHECK(::rename(source.c_str(), record.backup_raw_path.c_str()) == 0);
+    CHECK(!std::filesystem::exists(source));
+    const auto recovered =
+        operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    if (!recovered) {
+        std::cerr << recovered.error().message << '\n';
+    }
+    CHECK(recovered.has_value() && recovered->size() == 1U &&
+          recovered->front().outcome == operations::MetadataRecoveryOutcome::rolled_back);
+    CHECK(std::filesystem::exists(source) && read_bytes(source) == original_bytes);
+    CHECK(!std::filesystem::exists(record.backup_raw_path));
+    CHECK(!std::filesystem::exists(record.prepared_raw_path));
+}
+
 void recovers_copied_backups_interrupted_around_journaling(
     const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
@@ -3948,6 +4086,8 @@ int main(const int argc, char** argv) {
         rejects_hard_linked_sources_before_journaling(fixture_directory);
         recovers_publication_interrupted_before_journal_transition(fixture_directory);
         commits_with_copied_backup_where_links_are_refused(fixture_directory);
+        commits_with_moved_backup_where_links_are_refused(fixture_directory);
+        recovers_a_commit_interrupted_after_moving_the_original(fixture_directory);
         recovers_copied_backups_interrupted_around_journaling(fixture_directory);
         renamed_files_keep_their_identity_where_renames_renumber(fixture_directory);
         script_written_rating_verifies_over_an_existing_one(fixture_directory);

@@ -333,7 +333,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 53U, "state repository schema must be explicit");
+        require(repository.schema_version() == 54U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -720,7 +720,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 53U,
+        require(repository.schema_version() == 54U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1456,7 +1456,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 53U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 54U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -2216,6 +2216,7 @@ void lists_of_an_older_release_name_their_engine() {
                          "ALTER TABLE operation_journal DROP COLUMN backup_size;"
                          "ALTER TABLE operation_journal DROP COLUMN backup_mtime_seconds;"
                          "ALTER TABLE operation_journal DROP COLUMN backup_mtime_nanoseconds;"
+                         "ALTER TABLE operation_journal DROP COLUMN in_place;"
                          "ALTER TABLE list_documents DROP COLUMN engine;"
                          "UPDATE schema_version SET version = 46;",
                          nullptr, nullptr, nullptr) == SQLITE_OK,
@@ -2223,7 +2224,7 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3_close(db);
 
     auto reopened = persistence::ListRepository::open(path);
-    require(reopened.has_value() && reopened->schema_version() == 53U, "and is upgraded");
+    require(reopened.has_value() && reopened->schema_version() == 54U, "and is upgraded");
     const auto loaded = reopened->load_all();
     require(loaded.has_value() && loaded->size() == 2U, "with both lists");
     for (const auto& list : *loaded) {

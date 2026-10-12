@@ -96,6 +96,9 @@ struct MetadataOperationJournalRecord {
     // filesystem refuses a hard link. Empty for a hard link, which is the
     // original itself and carries expected_revision.
     std::optional<core::LocalSourceRevision> backup_revision{};
+    // ADR-0281: written in place. The backup is the bytes replaced, kept in
+    // a range file at backup_raw_path; there is no prepared copy.
+    bool in_place{false};
 
     friend bool operator==(const MetadataOperationJournalRecord&,
                            const MetadataOperationJournalRecord&) = default;

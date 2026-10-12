@@ -68,6 +68,8 @@ void use_copied_metadata_backups_for_testing(bool enabled) noexcept;
 // Tests only: hard links refused, as on SMB, so the original is moved to be
 // the backup (ADR-0280).
 void use_moved_metadata_backups_for_testing(bool enabled) noexcept;
+// Tests only: no write in place, every one through a prepared copy (ADR-0281).
+void use_prepared_copies_only_for_testing(bool enabled) noexcept;
 
 enum class MetadataRecoveryOutcome : std::uint8_t {
     completed,

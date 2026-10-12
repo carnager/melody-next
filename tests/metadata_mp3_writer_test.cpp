@@ -6,6 +6,7 @@
 #include "trackknife/metadata/artwork_writers.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
+#include "trackknife/metadata/in_place_writer.hpp"
 #include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
@@ -454,6 +455,120 @@ void dropsEmptyFieldsOfFilesWritten(const std::filesystem::path& fixture_directo
     CHECK(std::ranges::contains(names(flac_written), std::string{"ALBUM"}));
 }
 
+// ADR-0281: a write that fits is made in place -- the ranges it answers, laid
+// on the file, are byte for byte what the prepared copy would be -- and one
+// that outgrows its room is not.
+void writesInPlaceExactlyAsACopyWould(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    using trackknife::metadata::StagedMetadataPatchSet;
+    struct Edit {
+        const char* canonical;
+        const char* display;
+        std::string value;
+    };
+    const auto plan_for = [](const std::filesystem::path& path, const std::vector<Edit>& edits)
+        -> std::optional<trackknife::metadata::MetadataWritePlanSource> {
+        const auto read = trackknife::metadata::read_local_metadata(path.native());
+        if (!read) {
+            return std::nullopt;
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            return std::nullopt;
+        }
+        StagedMetadataPatchSet patches;
+        for (const auto& edit : edits) {
+            std::size_t field = 0U;
+            if (const auto found = selection->field_index(edit.canonical)) {
+                field = *found;
+            } else if (const auto added =
+                           selection->ensure_missing_field(edit.canonical, edit.display)) {
+                field = *added;
+            } else {
+                return std::nullopt;
+            }
+            if (!patches.replace_values(*selection, 0U, field, {edit.value})) {
+                return std::nullopt;
+            }
+        }
+        auto plan = make_plan(*selection, patches);
+        if (!plan || !plan->ready()) {
+            return std::nullopt;
+        }
+        return plan->sources.front();
+    };
+    const auto copy_write = [](const trackknife::metadata::MetadataWritePlanSource& source,
+                               const std::filesystem::path& to) {
+        const auto& adapter = source.adapter_name;
+        return adapter == "taglib-flac-v1"
+                   ? trackknife::metadata::prepare_flac_metadata_write_copy(source, to.native())
+                         .has_value()
+               : adapter == "taglib-mpeg-v1"
+                   ? trackknife::metadata::prepare_mp3_metadata_write_copy(source, to.native())
+                         .has_value()
+                   : trackknife::metadata::prepare_mp4_metadata_write_copy(source, to.native())
+                         .has_value();
+    };
+    const auto lay = [](const std::filesystem::path& file,
+                        const trackknife::metadata::InPlaceMetadataWrite& write) {
+        std::fstream stream{file, std::ios::in | std::ios::out | std::ios::binary};
+        for (const auto& range : write.ranges) {
+            stream.seekp(static_cast<std::streamoff>(range.offset));
+            stream.write(range.after.data(), static_cast<std::streamsize>(range.after.size()));
+        }
+    };
+    const std::string long_title(60U, 'L');
+    for (const auto& [fixture, name] :
+         {std::pair{"tagged-tone-flac.b64", "room.flac"}, std::pair{"tagged-tone-mp3.b64", "room.mp3"},
+          std::pair{"tagged-tone-m4a.b64", "room.m4a"}}) {
+        // A first write through a copy that grows the tags gives the file
+        // TagLib's padding, as any file tagged before has.
+        const auto fresh = materialize(fixture_directory, fixture, directory.path() / name);
+        const auto padded = directory.path() / (std::string{"padded-"} + name);
+        const auto first =
+            plan_for(fresh, {{"title", "Title", "A first title, long enough to grow the tags"}});
+        CHECK(first && copy_write(*first, padded));
+        if (!first) {
+            continue;
+        }
+        std::vector<Edit> edits{{"title", "Title", long_title}};
+        if (std::string_view{name}.ends_with(".mp3")) {
+            edits.push_back({"fmpsrating", "FMPS_RATING", "0.8"});
+        }
+        if (std::string_view{name}.ends_with(".m4a")) {
+            edits.push_back({"ab:genre", "AB:GENRE", "Jazz"});
+        }
+        const auto source = plan_for(padded, edits);
+        CHECK(source.has_value());
+        if (!source) {
+            continue;
+        }
+        const auto in_place = trackknife::metadata::prepare_in_place_metadata_write(*source);
+        CHECK(in_place && *in_place && !(*in_place)->ranges.empty());
+        if (!in_place || !*in_place) {
+            continue;
+        }
+        const auto laid = directory.path() / (std::string{"laid-"} + name);
+        const auto copied = directory.path() / (std::string{"copied-"} + name);
+        std::filesystem::copy_file(padded, laid);
+        lay(laid, **in_place);
+        CHECK(copy_write(*source, copied));
+        CHECK(read_bytes(laid) == read_bytes(copied));
+        CHECK(std::filesystem::file_size(laid) == std::filesystem::file_size(padded));
+        const auto reread = trackknife::metadata::read_local_metadata(laid.native());
+        CHECK(reread && reread->document == (*in_place)->document &&
+              reread->document.first_effective_value("title") == std::optional{long_title});
+
+        // Tags far past the room there is: the prepared copy takes them.
+        const auto huge = plan_for(padded, {{"comment", "Comment", std::string(200'000U, 'x')}});
+        CHECK(huge.has_value());
+        if (huge) {
+            const auto outgrown = trackknife::metadata::prepare_in_place_metadata_write(*huge);
+            CHECK(outgrown && !*outgrown);
+        }
+    }
+}
+
 void toleratesId3v1TrailersUnlikeWavPack(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source =
@@ -641,6 +756,7 @@ int main(const int argc, char** argv) {
         roundTripsMultiLineLyrics(fixture_directory);
         keepsMp4FreeFormNamesWithColons(fixture_directory);
         dropsEmptyFieldsOfFilesWritten(fixture_directory);
+        writesInPlaceExactlyAsACopyWould(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }
     return failures == 0 ? 0 : 1;

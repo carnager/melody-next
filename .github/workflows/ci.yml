@@ -20,6 +20,10 @@ env:
     libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
     libebur128-dev libmpdclient-dev libopenmpt-dev libpipewire-0.3-dev
     libsqlite3-dev libtag-dev libupnp-dev libcurl4-openssl-dev libssl-dev
+    pipewire pipewire-bin wireplumber dbus-daemon dbus-bin
+  # The tests play through a PipeWire null sink (.github/with-silent-audio.sh);
+  # configuring already reads where its socket is.
+  XDG_RUNTIME_DIR: /tmp/ci-runtime
 
 jobs:
   build-and-test:
@@ -44,7 +48,9 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
       - name: Test
-        run: ctest --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
+        run: >-
+          .github/with-silent-audio.sh
+          ctest --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }} --output-on-failure
       - name: Check formatting
         run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }} --target format-check
 
@@ -64,7 +70,30 @@ jobs:
       - name: Build
         run: cmake --build --preset asan
       - name: Test
-        run: ctest --preset asan
+        run: .github/with-silent-audio.sh ctest --preset asan --output-on-failure
+
+  # What the people running it run: the current Arch packages, FFmpeg and
+  # TagLib as they are now. Debian above is what the release is built on.
+  arch:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      XDG_RUNTIME_DIR: /tmp/ci-runtime
+    steps:
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel cmake ninja pkgconf git clang qt6-base utf8proc nlohmann-json
+          ffmpeg libebur128 libmpdclient libopenmpt taglib sqlite libupnp curl openssl
+          pipewire wireplumber dbus
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset dev
+      - name: Build
+        run: cmake --build --preset dev
+      - name: Test
+        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure
 
   fuzz-smoke:
     runs-on: ubuntu-24.04

@@ -14,9 +14,9 @@
 // device-independent and are exactly the thing that was missing.
 
 #include "bench/bench_main_window.hpp"
+#include "bench/desktop_media_session.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_list_model.hpp"
-#include "bench/desktop_media_session.hpp"
 #include "bench/settings_dialog.hpp"
 #include "recording_audition.hpp"
 #include "trackknife/core/stable_id.hpp"

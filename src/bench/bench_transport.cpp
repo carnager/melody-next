@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "bench/desktop_notifier.hpp"
 #include "bench/desktop_media_session.hpp"
+#include "bench/desktop_notifier.hpp"
 #include <QDockWidget>
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -1105,15 +1105,18 @@ void BenchMainWindow::buildMprisService() {
             trigger(play_pause_action_);
         }
     });
-    connect(mpris_, &DesktopMediaSession::stopRequested, this, [this, trigger] { trigger(stop_action_); });
-    connect(mpris_, &DesktopMediaSession::nextRequested, this, [this, trigger] { trigger(next_action_); });
+    connect(mpris_, &DesktopMediaSession::stopRequested, this,
+            [this, trigger] { trigger(stop_action_); });
+    connect(mpris_, &DesktopMediaSession::nextRequested, this,
+            [this, trigger] { trigger(next_action_); });
     connect(mpris_, &DesktopMediaSession::previousRequested, this,
             [this, trigger] { trigger(previous_action_); });
-    connect(mpris_, &DesktopMediaSession::positionRequested, this, [this](const qlonglong position_ms) {
-        if (seek_ != nullptr && seek_->isEnabled()) {
-            seekToMs(position_ms);
-        }
-    });
+    connect(mpris_, &DesktopMediaSession::positionRequested, this,
+            [this](const qlonglong position_ms) {
+                if (seek_ != nullptr && seek_->isEnabled()) {
+                    seekToMs(position_ms);
+                }
+            });
     connect(mpris_, &DesktopMediaSession::volumeRequested, this, [this](const int volume_percent) {
         if (volume_ != nullptr && volume_->isEnabled()) {
             volume_->setValue(volume_percent);

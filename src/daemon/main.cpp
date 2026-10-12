@@ -15,6 +15,7 @@
 #if TRACKKNIFE_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
 #endif
+#include "trackknife/core/environment.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -70,13 +71,14 @@ void request_stop(int) { stop_requested.store(true); }
 // starts adopts the library, ratings and history already there rather than
 // beginning empty beside them.
 [[nodiscard]] std::filesystem::path default_state_directory() {
-    if (const auto* explicit_home = std::getenv("TRACKKNIFE_STATE_DIR")) {
+    if (const auto* explicit_home =
+            trackknife::core::environment_variable("TRACKKNIFE_STATE_DIR")) {
         return explicit_home;
     }
-    if (const auto* data_home = std::getenv("XDG_DATA_HOME")) {
+    if (const auto* data_home = trackknife::core::environment_variable("XDG_DATA_HOME")) {
         return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
-    if (const auto* home = std::getenv("HOME")) {
+    if (const auto* home = trackknife::core::environment_variable("HOME")) {
 #ifdef __APPLE__
         return std::filesystem::path{home} / "Library" / "Application Support" / "trackknife";
 #else
@@ -137,7 +139,7 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 }
 
 [[nodiscard]] std::filesystem::path default_socket_path() {
-    if (const auto* runtime = std::getenv("XDG_RUNTIME_DIR")) {
+    if (const auto* runtime = trackknife::core::environment_variable("XDG_RUNTIME_DIR")) {
         return std::filesystem::path{runtime} / "melodyd.sock";
     }
     return std::filesystem::temp_directory_path() / "melodyd.sock";
@@ -723,7 +725,8 @@ int main(int argc, char** argv) {
         if (tcp_server) {
             connect = [&tcp_server]() -> int {
                 std::array<int, 2> pair{-1, -1};
-                if (trackknife::core::socketpair_cloexec(AF_UNIX, SOCK_STREAM, 0, pair.data()) < 0) {
+                if (trackknife::core::socketpair_cloexec(AF_UNIX, SOCK_STREAM, 0, pair.data()) <
+                    0) {
                     return -1;
                 }
                 tcp_server->attach(pair[0], false);
@@ -929,6 +932,7 @@ int main(int argc, char** argv) {
                 .already =
                     [&play_fors] {
                         std::vector<std::string> addresses;
+                        addresses.reserve(play_fors.size());
                         for (const auto& target : play_fors) {
                             addresses.push_back(target.address);
                         }

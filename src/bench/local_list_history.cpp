@@ -54,8 +54,10 @@ QVariant LocalListModel::listeningHistoryData(const QModelIndex& index, const in
                    : QStringLiteral("—");
     auto* cell = listening_cache_.object(index.row());
     if (!cell && listening_pending_.size() < 64) {
-        cell = new ListeningCell;
-        listening_cache_.insert(index.row(), cell);
+        // The cache owns it -- and deletes it at once if it has no room --
+        // so it is looked up again rather than used as made.
+        listening_cache_.insert(index.row(), new ListeningCell);
+        cell = listening_cache_.object(index.row());
         listening_pending_.insert(index.row());
         if (!listening_busy_ && !listening_timer_->isActive())
             listening_timer_->start(0);

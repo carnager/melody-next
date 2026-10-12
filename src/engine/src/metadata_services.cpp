@@ -146,7 +146,7 @@ namespace {
 } // namespace
 
 MetadataServices::MetadataServices(std::filesystem::path database, std::filesystem::path state)
-    : database_(std::move(database)), key_file_(std::move(state) / "acoustid.key") {}
+    : database_(std::move(database)), key_file_(state / "acoustid.key") {}
 
 MetadataServices::Throttle MetadataServices::throttle(const long status,
                                                       const std::int64_t retry_after_seconds,

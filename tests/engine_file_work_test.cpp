@@ -505,8 +505,7 @@ void a_large_apply_answers_small(const std::filesystem::path& directory,
     const auto outcome = jobs.run("metadata.apply", {{"plan", wire::encode(*plan)}});
     const auto result = wire::decode_apply_result(outcome.at("result"));
     require(result && result->committed_source_count() == files, "every file is written");
-    require(outcome.dump().size() < files * 2'048U,
-            "and the result names them without their tags");
+    require(outcome.dump().size() < files * 2'048U, "and the result names them without their tags");
 }
 
 void the_engine_writes_what_was_previewed(const std::filesystem::path& directory,
@@ -1433,8 +1432,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         require(undone && undone->size() == 1U && !undone->front().issue &&
                     undone->front().to_raw_path == flac && undone->front().restored &&
                     undone->front().restored->source_raw_path == flac &&
-                    metadata::read_local_metadata(flac)->document.first_effective_value(
-                        "title") == original->document.first_effective_value("title"),
+                    metadata::read_local_metadata(flac)->document.first_effective_value("title") ==
+                        original->document.first_effective_value("title"),
                 "a write is undone through the engine, saying what it restored");
         require(bytes_of(flac) == original_bytes, "the file is the original, byte for byte");
         const auto again = remote.undo(undo, {}, {});
@@ -1815,7 +1814,7 @@ void backups_are_kept_as_long_as_asked(const std::filesystem::path& directory,
     engine::register_backup_methods(dispatcher, database, *workspace);
     const auto ask = [&dispatcher](std::string method, protocol::Json params) {
         return dispatcher.dispatch(protocol::Request{
-            .id = 1, .method = std::move(method), .params = over_the_wire(std::move(params))});
+            .id = 1, .method = std::move(method), .params = over_the_wire(params)});
     };
     const auto first = ask("backups.retention", protocol::Json::object());
     require(first.result && first.result->at("max_age_days") == 7 &&

@@ -25,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -32,9 +33,11 @@ namespace trackknife::engine {
 namespace {
 
 [[nodiscard]] core::Error system_error(std::string message) {
-    return core::Error{.code = core::ErrorCode::io,
-                       .message = std::move(message),
-                       .context = {{.key = "errno", .value = std::strerror(errno)}}};
+    return core::Error{
+        .code = core::ErrorCode::io,
+        .message = std::move(message),
+        .context = {
+            {.key = "errno", .value = std::error_code{errno, std::generic_category()}.message()}}};
 }
 
 // A line longer than this is refused rather than buffered without bound: the

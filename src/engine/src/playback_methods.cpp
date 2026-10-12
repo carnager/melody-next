@@ -217,7 +217,7 @@ replay_gain_from_json(const Json& value) {
         if (!parsed) {
             return std::unexpected(std::move(parsed.error()));
         }
-        entry.replay_gain = std::move(*parsed);
+        entry.replay_gain = *parsed;
     }
     return entry;
 }

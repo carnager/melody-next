@@ -212,6 +212,7 @@ struct Fixture {
 
     static std::vector<trackknife::core::StableId> make_ids(const int count) {
         std::vector<trackknife::core::StableId> ids;
+        ids.reserve(static_cast<std::size_t>(count));
         for (int index = 0; index < count; ++index) {
             ids.push_back(trackknife::core::StableId::random());
         }

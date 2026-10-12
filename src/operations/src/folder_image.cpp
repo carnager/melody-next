@@ -17,6 +17,7 @@
 #include <mutex>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <system_error>
 #include <unistd.h>
 #include <vector>
 
@@ -38,7 +39,10 @@ struct Descriptor {
 core::Error error(std::string message) {
     return {.code = core::ErrorCode::conflict, .message = std::move(message), .context = {}};
 }
-core::Error io_error() { return error(std::string{"Folder image: "} + std::strerror(errno)); }
+core::Error io_error() {
+    return error(std::string{"Folder image: "} +
+                 std::error_code{errno, std::generic_category()}.message());
+}
 
 // Open every directory component without following symlinks, retaining the
 // directory descriptor for all mutations. Never reinterpret a raw path as UTF-8.

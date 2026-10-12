@@ -39,7 +39,8 @@ QString display_plan_values(const std::vector<std::string>& values) {
     visible.reserve(static_cast<qsizetype>(std::min(values.size(), maximum_visible_values) +
                                            (values.size() > maximum_visible_values)));
     for (const auto& value : values | std::views::take(maximum_visible_values)) {
-        auto display = value.empty() ? QStringLiteral("(empty · dropped when written)") : display_utf8(value);
+        auto display =
+            value.empty() ? QStringLiteral("(empty · dropped when written)") : display_utf8(value);
         if (display.size() > maximum_visible_characters) {
             display = display.left(maximum_visible_characters) + QChar{0x2026};
         }

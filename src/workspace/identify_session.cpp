@@ -259,6 +259,7 @@ void TrackMatchSession::resetOrder(const bool by_filename) {
         return;
     }
     std::vector<std::size_t> files;
+    files.reserve(own_count_);
     for (std::size_t local = 0; local < own_count_; ++local) {
         files.push_back(local);
     }

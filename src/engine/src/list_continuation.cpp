@@ -37,7 +37,10 @@ constexpr std::string_view store_key = "list-continuation.v1";
     auto narrowed = query::narrow_tkq_source(
         query, "HISTORY(dayssinceplayed) MISSING OR HISTORY(dayssinceplayed) GREATER " +
                    std::to_string(days - 1));
-    return narrowed ? std::move(*narrowed) : query;
+    if (narrowed) {
+        return std::move(*narrowed);
+    }
+    return query;
 }
 
 // A rule as it is stored, told and set: {rule|id, name, query, ...}.

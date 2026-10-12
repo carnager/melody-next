@@ -50,13 +50,14 @@ void parsing() {
     // blank lines around are dropped. A section marker is text.
     const auto prose = metadata::parse_lyrics("\n\nFirst line\r\n\r\n[Chorus]\nSecond\n\n");
     CHECK(!prose.synced);
-    CHECK((prose.lines == std::vector{plain("First line"), plain(""), plain("[Chorus]"),
-                                      plain("Second")}));
+    CHECK((prose.lines ==
+           std::vector{plain("First line"), plain(""), plain("[Chorus]"), plain("Second")}));
 
     // Synced, with every timing form, a header, a BOM and CRLF.
-    const auto lrc = metadata::parse_lyrics("\xEF\xBB\xBF[ar:Someone]\r\n[ti:Song]\r\n"
-                                            "[00:01.5]One\r\n[00:02.25]Two\r\n"
-                                            "[00:03.125]Three\r\n[00:04:50]Four\r\n[01:05]Five\r\n");
+    const auto lrc =
+        metadata::parse_lyrics("\xEF\xBB\xBF[ar:Someone]\r\n[ti:Song]\r\n"
+                               "[00:01.5]One\r\n[00:02.25]Two\r\n"
+                               "[00:03.125]Three\r\n[00:04:50]Four\r\n[01:05]Five\r\n");
     CHECK(lrc.synced);
     CHECK((lrc.lines == std::vector{at(1'500, "One"), at(2'250, "Two"), at(3'125, "Three"),
                                     at(4'500, "Four"), at(65'000, "Five")}));
@@ -141,8 +142,8 @@ void tag(const std::filesystem::path& path, const char* key, const std::string& 
 void finding(const std::filesystem::path& fixtures, const std::filesystem::path& directory) {
     // Every container that carries a LYRICS tag gives it back.
     constexpr std::array containers{
-        std::pair{"tagged-tone-flac.b64", ".flac"}, std::pair{"tagged-tone-mp3.b64", ".mp3"},
-        std::pair{"tagged-tone-m4a.b64", ".m4a"},   std::pair{"tagged-tone-opus.b64", ".opus"},
+        std::pair{"tagged-tone-flac.b64", ".flac"},  std::pair{"tagged-tone-mp3.b64", ".mp3"},
+        std::pair{"tagged-tone-m4a.b64", ".m4a"},    std::pair{"tagged-tone-opus.b64", ".opus"},
         std::pair{"tagged-tone-vorbis.b64", ".ogg"}, std::pair{"tagged-tone-wavpack.b64", ".wv"}};
     for (const auto& [fixture, suffix] : containers) {
         const auto path = materialized(fixtures, directory, fixture, std::string{"song"} + suffix);
@@ -203,8 +204,7 @@ void finding(const std::filesystem::path& fixtures, const std::filesystem::path&
     const auto chosen = metadata::read_lyrics(versions.string());
     CHECK(chosen && *chosen && (*chosen)->synced);
     if (chosen && *chosen) {
-        CHECK(((*chosen)->lines ==
-               std::vector{at(500, "Life is a mystery"), at(900, "Everyone")}));
+        CHECK(((*chosen)->lines == std::vector{at(500, "Life is a mystery"), at(900, "Everyone")}));
     }
     // Only versions for another edit: the first is still shown.
     {

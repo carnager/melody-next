@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Qt code: an object made with a parent -- new QFutureWatcher(this) -- is
+# deleted with it, which the analyzer cannot see, and every such object read
+# as a leak. Everything else is checked as in the rest of the project.
+InheritParentConfig: true
+Checks: >
+  -clang-analyzer-cplusplus.NewDeleteLeaks

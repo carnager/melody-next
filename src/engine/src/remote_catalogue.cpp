@@ -223,11 +223,10 @@ RemoteCatalogue::lyrics(const std::string& raw_path, const core::CancellationTok
         !lines->is_array()) {
         return std::unexpected(malformed("lyrics"));
     }
-    metadata::Lyrics lyrics{
-        .source = source->get<std::string>(),
-        .synced = synced->get<bool>(),
-        .lines = {},
-        .declared_length_ms = {}};
+    metadata::Lyrics lyrics{.source = source->get<std::string>(),
+                            .synced = synced->get<bool>(),
+                            .lines = {},
+                            .declared_length_ms = {}};
     for (const auto& line : *lines) {
         const auto text = line.find("text");
         if (!line.is_object() || text == line.end() || !text->is_string()) {

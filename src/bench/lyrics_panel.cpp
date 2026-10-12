@@ -10,10 +10,10 @@
 #include <QListWidget>
 #include <QScrollBar>
 #include <QSettings>
-#include <QVariantAnimation>
-#include <QWheelEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QVariantAnimation>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <cstdlib>
@@ -30,7 +30,8 @@ namespace {
         return kind + QStringLiteral(" · ID3 SYLT");
     }
     if (lyrics.source.starts_with("tag:")) {
-        return kind + QStringLiteral(" · %1 tag").arg(QString::fromStdString(lyrics.source.substr(4)));
+        return kind +
+               QStringLiteral(" · %1 tag").arg(QString::fromStdString(lyrics.source.substr(4)));
     }
     return kind;
 }

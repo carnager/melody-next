@@ -6,6 +6,7 @@
 #include "trackknife/protocol/version.hpp"
 
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -23,7 +24,7 @@ void require(const bool condition, const std::string_view message) {
 
 } // namespace
 
-int main() {
+int main() try {
     using protocol::Compatibility;
     using protocol::Json;
 
@@ -65,4 +66,10 @@ int main() {
                 .ends_with("Update gemenon's melodyd."),
             "the engine, for an older one");
     return EXIT_SUCCESS;
+} catch (const std::exception& error) {
+    std::cerr << "FAILED: " << error.what() << '\n';
+    return EXIT_FAILURE;
+} catch (...) {
+    std::cerr << "FAILED: an unknown exception\n";
+    return EXIT_FAILURE;
 }

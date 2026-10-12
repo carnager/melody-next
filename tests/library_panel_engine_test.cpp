@@ -323,7 +323,7 @@ void LibraryPanelEngineTest::aChangeSaysWhichAlbumsItTouched() {
     const auto gone = std::ranges::find_if(listed->entries,
                                            [&](const auto& entry) { return entry.key == touched; });
     QVERIFY(gone != listed->entries.end());
-    const auto deleted_album = touched;
+    const auto& deleted_album = touched;
     heard.clear();
     held.unlock();
 

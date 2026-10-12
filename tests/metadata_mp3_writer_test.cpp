@@ -4,9 +4,9 @@
 #include "trackknife/metadata/artwork.hpp"
 #include "trackknife/metadata/artwork_write_plan.hpp"
 #include "trackknife/metadata/artwork_writers.hpp"
-#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
 #include "trackknife/metadata/in_place_writer.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
@@ -282,23 +282,23 @@ void roundTripsMultiLineLyrics(const std::filesystem::path& fixture_directory) {
         }
         const auto prepared_path = directory.path() / (std::string{"prepared-"} + name);
         const bool mp3 = std::string_view{name}.ends_with(".mp3");
-        const auto written =
-            mp3 ? trackknife::metadata::prepare_mp3_metadata_write_copy(plan->sources.front(),
-                                                                       prepared_path.native())
-                      .has_value()
-                : trackknife::metadata::prepare_mp4_metadata_write_copy(plan->sources.front(),
-                                                                       prepared_path.native())
-                      .has_value();
+        const auto written = mp3 ? trackknife::metadata::prepare_mp3_metadata_write_copy(
+                                       plan->sources.front(), prepared_path.native())
+                                       .has_value()
+                                 : trackknife::metadata::prepare_mp4_metadata_write_copy(
+                                       plan->sources.front(), prepared_path.native())
+                                       .has_value();
         CHECK(written);
         const auto reread = trackknife::metadata::read_local_metadata(prepared_path.native());
-        CHECK(reread && reread->document.first_effective_value("lyrics") ==
-                            std::optional<std::string>{text});
+        CHECK(reread &&
+              reread->document.first_effective_value("lyrics") == std::optional<std::string>{text});
         if (mp3) {
             TagLib::MPEG::File file{prepared_path.c_str()};
             CHECK(file.hasID3v2Tag() && !file.ID3v2Tag()->frameList("USLT").isEmpty());
         } else {
             TagLib::MP4::File file{prepared_path.c_str()};
-            CHECK(file.hasMP4Tag() && file.tag()->contains(TagLib::String{"\xa9lyr", TagLib::String::Latin1}));
+            CHECK(file.hasMP4Tag() &&
+                  file.tag()->contains(TagLib::String{"\xa9lyr", TagLib::String::Latin1}));
         }
         const auto found = trackknife::metadata::read_lyrics(prepared_path.native());
         CHECK(found && *found && (*found)->source == "tag:LYRICS" && (*found)->lines.size() == 4U);
@@ -352,8 +352,8 @@ void keepsMp4FreeFormNamesWithColons(const std::filesystem::path& fixture_direct
         if (!plan || !plan->ready()) {
             return false;
         }
-        const auto written =
-            trackknife::metadata::prepare_mp4_metadata_write_copy(plan->sources.front(), to.native());
+        const auto written = trackknife::metadata::prepare_mp4_metadata_write_copy(
+            plan->sources.front(), to.native());
         if (!written) {
             std::cerr << written.error().message << '\n';
         }
@@ -366,8 +366,8 @@ void keepsMp4FreeFormNamesWithColons(const std::filesystem::path& fixture_direct
     const auto retitled = directory.path() / "ab-retitled.m4a";
     CHECK(write(tagged, retitled, "title", "Title", "Retitled"));
     const auto reread = trackknife::metadata::read_local_metadata(retitled.native());
-    CHECK(reread && reread->document.first_effective_value("ab:genre") ==
-                        std::optional<std::string>{"Jazz"});
+    CHECK(reread &&
+          reread->document.first_effective_value("ab:genre") == std::optional<std::string>{"Jazz"});
     CHECK(reread && reread->document.first_effective_value("title") ==
                         std::optional<std::string>{"Retitled"});
 }
@@ -397,14 +397,13 @@ void dropsEmptyFieldsOfFilesWritten(const std::filesystem::path& fixture_directo
         if (!plan || !plan->ready()) {
             return false;
         }
-        const auto written =
-            to.extension() == ".mp3"
-                ? trackknife::metadata::prepare_mp3_metadata_write_copy(plan->sources.front(),
-                                                                        to.native())
-                      .has_value()
-                : trackknife::metadata::prepare_flac_metadata_write_copy(plan->sources.front(),
-                                                                         to.native())
-                      .has_value();
+        const auto written = to.extension() == ".mp3"
+                                 ? trackknife::metadata::prepare_mp3_metadata_write_copy(
+                                       plan->sources.front(), to.native())
+                                       .has_value()
+                                 : trackknife::metadata::prepare_flac_metadata_write_copy(
+                                       plan->sources.front(), to.native())
+                                       .has_value();
         return written;
     };
     const auto names = [](const std::filesystem::path& path) {
@@ -518,9 +517,9 @@ void writesInPlaceExactlyAsACopyWould(const std::filesystem::path& fixture_direc
         }
     };
     const std::string long_title(60U, 'L');
-    for (const auto& [fixture, name] :
-         {std::pair{"tagged-tone-flac.b64", "room.flac"}, std::pair{"tagged-tone-mp3.b64", "room.mp3"},
-          std::pair{"tagged-tone-m4a.b64", "room.m4a"}}) {
+    for (const auto& [fixture, name] : {std::pair{"tagged-tone-flac.b64", "room.flac"},
+                                        std::pair{"tagged-tone-mp3.b64", "room.mp3"},
+                                        std::pair{"tagged-tone-m4a.b64", "room.m4a"}}) {
         // A first write through a copy that grows the tags gives the file
         // TagLib's padding, as any file tagged before has.
         const auto fresh = materialize(fixture_directory, fixture, directory.path() / name);

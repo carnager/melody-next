@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "bench/desktop_media_session.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/engine_key.hpp"
 #include "bench/engine_launcher.hpp"
@@ -11,8 +12,6 @@
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
-#include "bench/desktop_media_session.hpp"
-#include "trackknife/metadata/lyrics.hpp"
 #include "bench/output_profile_store.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/remote_mount.hpp"
@@ -20,6 +19,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
+#include "trackknife/metadata/lyrics.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"

@@ -550,7 +550,7 @@ class Evaluator final {
         auto places = coerceInteger(arguments->at(2).text, id);
         for (const auto* each : {&value, &divisor, &places}) {
             if (!*each) {
-                return std::unexpected(std::move(each->error()));
+                return std::unexpected(each->error());
             }
         }
         if (*divisor == 0) {

@@ -150,7 +150,7 @@ core::Result<void> Workspace::record_local_listen(const persistence::ListItem& s
                                                   core::StableId occurrence_id,
                                                   std::int64_t played_at_ms) {
     const std::lock_guard guard{*mutex_};
-    return repository_.record_local_listen(source, std::move(occurrence_id), played_at_ms);
+    return repository_.record_local_listen(source, occurrence_id, played_at_ms);
 }
 
 core::Result<void> Workspace::save_local_resume(const std::string_view track_hash,

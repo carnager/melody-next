@@ -398,6 +398,7 @@ void EngineListSync::update(const std::vector<persistence::ListDocumentWrite>& d
         sync(id);
     }
     std::vector<EngineKey> keys;
+    keys.reserve(engines_.size());
     for (const auto& [key, engine] : engines_) {
         keys.push_back(key);
     }

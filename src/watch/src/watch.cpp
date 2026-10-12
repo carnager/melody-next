@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -142,10 +143,11 @@ std::vector<PresentFile> present_files(const FolderMapping& mapping) {
 core::Result<std::unique_ptr<TreeWatcher>> TreeWatcher::create() {
     const auto descriptor = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (descriptor < 0) {
-        return std::unexpected(
-            core::Error{.code = core::ErrorCode::io,
-                        .message = "could not start watching",
-                        .context = {{.key = "errno", .value = std::strerror(errno)}}});
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::io,
+            .message = "could not start watching",
+            .context = {{.key = "errno",
+                         .value = std::error_code{errno, std::generic_category()}.message()}}});
     }
     return std::unique_ptr<TreeWatcher>{new TreeWatcher{descriptor}};
 }

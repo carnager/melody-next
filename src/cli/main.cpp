@@ -4,6 +4,7 @@
 // library by words, outputs -- what a script, a key binding or a rofi menu
 // wants, over the same protocol Trackknife speaks.
 
+#include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -18,6 +19,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -150,11 +152,12 @@ void usage(std::ostream& out) {
 
 [[noreturn]] void fail(const std::string& message) {
     std::cerr << "melody-cli: " << message << "\n";
-    std::exit(EXIT_FAILURE);
+    // On the main thread, the one that ends the process either way.
+    std::exit(EXIT_FAILURE); // NOLINT(concurrency-mt-unsafe)
 }
 
 [[nodiscard]] std::filesystem::path local_socket() {
-    if (const char* runtime = std::getenv("XDG_RUNTIME_DIR");
+    if (const char* runtime = trackknife::core::environment_variable("XDG_RUNTIME_DIR");
         runtime != nullptr && *runtime != '\0') {
         return std::filesystem::path{runtime} / "melodyd.sock";
     }
@@ -997,6 +1000,7 @@ int run(const Options& options) {
             auto requests =
                 call(*client, "playback.requests").value("entries", std::vector<Json>{});
             std::vector<Json> asked;
+            asked.reserve(entries.size());
             for (const auto& entry : entries) {
                 asked.push_back(text_of(entry, "entry"));
             }
@@ -1027,8 +1031,8 @@ int run(const Options& options) {
         if (options.json) {
             const auto count = found.size();
             Json listed = Json::array();
-            for (auto& entry : found) {
-                listed.push_back(std::move(entry));
+            for (const auto& entry : found) {
+                listed.push_back(entry);
             }
             std::cout << listed.dump() << "\n";
             return count == 0U ? EXIT_FAILURE : EXIT_SUCCESS;
@@ -1395,14 +1399,19 @@ int run(const Options& options) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     Options options;
-    if (const char* server = std::getenv("MELODY_SERVER"); server != nullptr) {
+    if (const char* server = trackknife::core::environment_variable("MELODY_SERVER");
+        server != nullptr) {
         options.server = server;
     }
-    if (const char* password = std::getenv("MELODY_PASSWORD"); password != nullptr) {
+    if (const char* password = trackknife::core::environment_variable("MELODY_PASSWORD");
+        password != nullptr) {
         options.password = password;
-    } else if (const char* file = std::getenv("MELODY_PASSWORD_FILE"); file != nullptr) {
+    } else if (const char* file = trackknife::core::environment_variable("MELODY_PASSWORD_FILE");
+               file != nullptr) {
         options.password_file = file;
     }
     for (int index = 1; index < argc; ++index) {
@@ -1461,4 +1470,19 @@ int main(int argc, char** argv) {
         options.password = std::move(*read);
     }
     return run(options);
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    // Anything thrown is said, and the program fails, rather than ending in
+    // terminate().
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "melody-cli: " << error.what() << "\n";
+    } catch (...) {
+        std::cerr << "melody-cli: an unknown error\n";
+    }
+    return EXIT_FAILURE;
 }

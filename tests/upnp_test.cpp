@@ -15,7 +15,7 @@ namespace {
 void require(bool condition, const char* message) {
     if (!condition) {
         std::cerr << message << '\n';
-        std::exit(1);
+        std::abort();
     }
 }
 class Renderer final : public discovery::UpnpControl {

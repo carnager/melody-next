@@ -394,7 +394,7 @@ core::Result<CarriedMetadataPatches> carry_staged_patches(const StagedMetadataSe
                        : carried.patches.remove_field(onto, patch.item_index, *target))
                 : carried.patches.replace_values(onto, patch.item_index, *target, patch.values);
         if (!stored) {
-            return std::unexpected(std::move(stored.error()));
+            return std::unexpected(stored.error());
         }
         if (*stored) {
             ++carried.carried;

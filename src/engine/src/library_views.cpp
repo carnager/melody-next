@@ -33,7 +33,10 @@ namespace {
 
 [[nodiscard]] std::string folded(const std::string& text) {
     auto lowered = core::unicodeSimpleLower(text);
-    return lowered ? std::move(*lowered) : text;
+    if (lowered) {
+        return std::move(*lowered);
+    }
+    return text;
 }
 
 [[nodiscard]] bool digit(const char c) { return c >= '0' && c <= '9'; }
@@ -182,7 +185,8 @@ LibraryViews::tree(const persistence::LocalLibrary& library, const LibraryQuery&
                    tree->stamp == *stamp;
         });
         if (found != trees_.end()) {
-            auto tree = *found;
+            // Taken out before its place is erased, then put back in front.
+            auto tree = std::move(*found);
             trees_.erase(found);
             trees_.push_front(tree);
             return std::shared_ptr<const Tree>{tree};

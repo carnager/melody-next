@@ -710,7 +710,7 @@ RemoteFileWork::stage(const std::span<const unsigned char> bytes) {
             return std::unexpected(std::move(answer.error()));
         }
         if (last) {
-            return image_of(std::move(answer), "artwork.stage_part");
+            return image_of(answer, "artwork.stage_part");
         }
     }
     return std::unexpected(unexpected_answer("artwork.stage_part"));

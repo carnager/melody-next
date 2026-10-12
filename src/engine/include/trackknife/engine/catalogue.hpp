@@ -126,8 +126,7 @@ class Catalogue {
     // beside it, else its tags. Only for a track in the library, as artwork
     // is. Nullopt when it has none.
     [[nodiscard]] virtual core::Result<std::optional<metadata::Lyrics>>
-    lyrics(const std::string& raw_path,
-           const core::CancellationToken& cancellation = {}) const = 0;
+    lyrics(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const = 0;
 
     // Cached fields and technicals for the given raw paths, in input order,
     // preserving duplicates. No filesystem access: a path missing from the

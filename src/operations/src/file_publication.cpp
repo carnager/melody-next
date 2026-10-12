@@ -2888,7 +2888,7 @@ using BackupState = MetadataOperationBackupState;
     return journal.transition_backup(id, FilePublicationBackupTransition{
                                              .expected_state = from,
                                              .state = to,
-                                             .undo_id = std::move(undo_id),
+                                             .undo_id = undo_id,
                                              .failure = std::move(failure),
                                          });
 }

@@ -6,6 +6,7 @@
 // those over its mount instead of scanning the whole library across the
 // network.
 
+#include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/protocol/client.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -15,6 +16,7 @@
 
 #include <csignal>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <set>
@@ -67,10 +69,12 @@ struct Options final {
 
 [[nodiscard]] std::optional<Options> read_options(const int argc, char** argv) {
     Options options;
-    if (const char* server = std::getenv("MELODY_SERVER"); server != nullptr) {
+    if (const char* server = trackknife::core::environment_variable("MELODY_SERVER");
+        server != nullptr) {
         options.server = server;
     }
-    if (const char* password = std::getenv("MELODY_PASSWORD"); password != nullptr) {
+    if (const char* password = trackknife::core::environment_variable("MELODY_PASSWORD");
+        password != nullptr) {
         options.password = password;
     }
     for (int index = 1; index < argc; ++index) {
@@ -84,7 +88,8 @@ struct Options final {
         };
         if (argument == "--help" || argument == "-h") {
             usage(std::cout);
-            std::exit(EXIT_SUCCESS);
+            // Before any thread is started.
+            std::exit(EXIT_SUCCESS); // NOLINT(concurrency-mt-unsafe)
         } else if (argument == "--server") {
             auto given = value();
             if (!given) {
@@ -394,7 +399,9 @@ class Watcher final {
 
 } // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     auto options = read_options(argc, argv);
     if (!options) {
         return EXIT_FAILURE;
@@ -408,4 +415,19 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, [](int) { stopping = 1; });
     Watcher watcher{std::move(*options), std::move(*endpoint)};
     return watcher.run();
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    // Anything thrown is said, and the program fails, rather than ending in
+    // terminate().
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "melody-watch: " << error.what() << "\n";
+    } catch (...) {
+        std::cerr << "melody-watch: an unknown error\n";
+    }
+    return EXIT_FAILURE;
 }

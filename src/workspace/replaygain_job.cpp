@@ -262,6 +262,7 @@ void ReplayGainJob::startReading() {
         if (!capture->selection)
             return capture;
         std::vector<const metadata::MetadataDocument*> documents;
+        documents.reserve(capture->selection->item_count());
         for (std::size_t i = 0; i < capture->selection->item_count(); ++i)
             documents.push_back(&capture->selection->source(i).baseline);
         const auto keys = loudness::assign_loudness_groups(grouping, documents, token);

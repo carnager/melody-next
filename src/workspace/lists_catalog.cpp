@@ -28,10 +28,11 @@ ListsCatalog::ListsCatalog(Workspace& work, QObject* parent) : QObject(parent), 
             playback->request(
                 QStringLiteral("list.all"), protocol::Json::object(),
                 [self, key = engine->key](const core::Result<protocol::Json>& answer) {
-                    if (!self) {
+                    auto* catalog = self.data();
+                    if (catalog == nullptr) {
                         return;
                     }
-                    auto* answered = self->work_.link(key);
+                    auto* answered = catalog->work_.link(key);
                     if (answered == nullptr) {
                         return;
                     }
@@ -42,10 +43,12 @@ ListsCatalog::ListsCatalog(Workspace& work, QObject* parent) : QObject(parent), 
                         answered->lists.reset();
                         answered->lists_error = QString::fromStdString(answer.error().message);
                     }
-                    self->present();
+                    catalog->present();
                 });
         }
-        present();
+        // The timer's own object, never null; QPointer's null check above is
+        // what makes the analyzer think it could be.
+        present(); // NOLINT(clang-analyzer-core.CallAndMessage)
     });
 }
 

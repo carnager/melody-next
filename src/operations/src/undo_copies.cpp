@@ -54,7 +54,8 @@ namespace {
 
 [[nodiscard]] core::Error io_failure(const std::string& what, const std::string& path) {
     return core::Error{.code = core::ErrorCode::io,
-                       .message = what + ": " + std::strerror(errno),
+                       .message =
+                           what + ": " + std::error_code{errno, std::generic_category()}.message(),
                        .context = {{.key = "path", .value = path}}};
 }
 

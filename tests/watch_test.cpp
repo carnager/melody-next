@@ -79,6 +79,7 @@ void catching_up_finds_what_changed_while_nobody_watched() {
 
     // Everything gone at once is a wrong mapping or a missing mount.
     std::vector<watch::IndexedFile> library;
+    library.reserve(40U);
     for (int index = 0; index < 40; ++index) {
         library.push_back({.path = "/m/" + std::to_string(index) + ".flac",
                            .size = 1,

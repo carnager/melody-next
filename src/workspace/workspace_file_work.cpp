@@ -27,8 +27,8 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <set>
 #include <ranges>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -981,9 +981,9 @@ void Workspace::flushRowReads() {
             }
         }
     }
-    for (auto& [key, paths] : by_engine) {
+    for (auto& [key, engine_paths] : by_engine) {
         auto work = fileWorkOf(key);
-        if (paths.empty() || !work) {
+        if (engine_paths.empty() || !work) {
             continue;
         }
         using Reads = std::vector<std::pair<std::string, metadata::LocalMetadataRead>>;
@@ -1010,7 +1010,8 @@ void Workspace::flushRowReads() {
                 schedulePersist();
             }
         });
-        watcher->setFuture(QtConcurrent::run([access = work->access(), paths = std::move(paths)] {
+        watcher->setFuture(QtConcurrent::run([access = work->access(),
+                                              paths = std::move(engine_paths)] {
             Reads reads;
             for (std::size_t first = 0U; first < paths.size();
                  first += metadata::metadata_capture_batch) {

@@ -4,6 +4,7 @@
 
 #include "bench/remote_engines.hpp"
 #include "bench/settings_keys.hpp"
+#include "trackknife/core/environment.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -33,7 +34,8 @@ namespace {
 }
 
 [[nodiscard]] std::filesystem::path runtime_directory() {
-    if (const auto* runtime = std::getenv("XDG_RUNTIME_DIR"); runtime != nullptr && *runtime) {
+    if (const auto* runtime = trackknife::core::environment_variable("XDG_RUNTIME_DIR");
+        runtime != nullptr && *runtime) {
         return runtime;
     }
     return std::filesystem::temp_directory_path();
@@ -43,7 +45,8 @@ namespace {
 // workspace starts and one started by hand or by the user service are the
 // same engine on the same socket.
 [[nodiscard]] std::filesystem::path standard_state() {
-    if (const auto* data_home = std::getenv("XDG_DATA_HOME"); data_home != nullptr && *data_home) {
+    if (const auto* data_home = trackknife::core::environment_variable("XDG_DATA_HOME");
+        data_home != nullptr && *data_home) {
         return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
 #ifdef __APPLE__

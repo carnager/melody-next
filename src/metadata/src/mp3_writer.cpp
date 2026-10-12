@@ -5,13 +5,13 @@
 
 #include "apev2_trailer_detail.hpp"
 #include "container_preservation_detail.hpp"
-#include "writer_steps_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
 #include "trackknife/metadata/ogg_writer.hpp"
 #include "trackknife/metadata/ratings.hpp"
 #include "trackknife/metadata/wavpack_writer.hpp"
+#include "writer_steps_detail.hpp"
 
 #include <id3v2tag.h>
 #include <mpegfile.h>

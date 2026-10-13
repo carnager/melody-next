@@ -41,18 +41,15 @@ jobs:
       - name: Install build dependencies
         run: apt-get update && apt-get install -y --no-install-recommends $DEPENDENCIES
       - uses: actions/checkout@v4
+      # Lint and formatting are checked in the arch job: clang-tidy and
+      # clang-format change their verdicts between versions, and Debian's
+      # trail the ones the code is written with.
       - name: Configure
-        run: >-
-          cmake --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
-          -DCMAKE_CXX_COMPILER="$CXX"
+        run: cmake --preset dev -DCMAKE_CXX_COMPILER="$CXX"
       - name: Build
-        run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
+        run: cmake --build --preset dev
       - name: Test
-        run: >-
-          .github/with-silent-audio.sh
-          ctest --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }} --output-on-failure
-      - name: Check formatting
-        run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }} --target format-check
+        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure
 
   sanitizers:
     runs-on: ubuntu-24.04
@@ -88,12 +85,15 @@ jobs:
           ffmpeg libebur128 libmpdclient libopenmpt taglib sqlite libupnp curl openssl
           pipewire wireplumber dbus openbsd-netcat
       - uses: actions/checkout@v4
+      # Current clang, clang-tidy and clang-format: the lint gate.
       - name: Configure
-        run: cmake --preset dev
+        run: cmake --preset tidy
       - name: Build
-        run: cmake --build --preset dev
+        run: cmake --build --preset tidy
       - name: Test
-        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure
+        run: .github/with-silent-audio.sh ctest --preset tidy --output-on-failure
+      - name: Check formatting
+        run: cmake --build --preset tidy --target format-check
 
   fuzz-smoke:
     runs-on: ubuntu-24.04

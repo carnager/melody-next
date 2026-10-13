@@ -17,6 +17,8 @@
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
+#include "mp4_item_factory_detail.hpp"
+
 #include <tfile.h>
 #include <tpropertymap.h>
 #include <tstring.h>
@@ -34,6 +36,7 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <system_error>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -430,7 +433,8 @@ template <typename File>
     const std::string_view format_label, const MetadataWritePlanSource& source_plan, File& file,
     const std::string& prepared_raw_path, const core::CancellationToken& cancellation,
     const bool paired_totals = true) {
-    auto properties = file.properties();
+    const auto before = file.properties();
+    auto properties = before;
     for (const auto& change : source_plan.changes) {
         if (cancellation.is_cancellation_requested()) {
             return std::unexpected(
@@ -496,7 +500,13 @@ template <typename File>
             }
         }
     }
-    const auto unsupported = file.setProperties(properties);
+    const auto unsupported = [&] {
+        if constexpr (std::is_same_v<File, TagLib::MP4::File>) {
+            return mp4_detail::set_changed_properties(file, before, properties);
+        } else {
+            return file.setProperties(properties);
+        }
+    }();
     if (!unsupported.isEmpty()) {
         return std::unexpected(writer_error(core::ErrorCode::unsupported,
                                             "TagLib could not map every planned " +

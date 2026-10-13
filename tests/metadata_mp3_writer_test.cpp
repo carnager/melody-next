@@ -454,6 +454,80 @@ void dropsEmptyFieldsOfFilesWritten(const std::filesystem::path& fixture_directo
     CHECK(std::ranges::contains(names(flac_written), std::string{"ALBUM"}));
 }
 
+// MP4 free-form atoms are written under the file's own spelling and touched
+// only when they change. TagLib's generic write wrote every property again in
+// its capitals -- `label` came back as `label` and `LABEL` -- and removed an
+// empty one under its own name, so an empty `encodedby` stayed and the reread
+// refused the write.
+void keepsMp4FreeFormSpellings(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto write = [](const std::filesystem::path& from, const std::filesystem::path& to,
+                          const char* canonical, const char* value) {
+        const auto read = trackknife::metadata::read_local_metadata(from.native());
+        CHECK(read.has_value());
+        if (!read) {
+            return false;
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            return false;
+        }
+        const auto field = selection->field_index(canonical);
+        if (!field) {
+            return false;
+        }
+        trackknife::metadata::StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, *field, {value}).has_value());
+        auto plan = make_plan(*selection, patches);
+        if (!plan || !plan->ready()) {
+            return false;
+        }
+        const auto written = trackknife::metadata::prepare_mp4_metadata_write_copy(
+            plan->sources.front(), to.native());
+        if (!written) {
+            std::cerr << written.error().message << '\n';
+        }
+        return written.has_value();
+    };
+    const auto keys = [](const std::filesystem::path& path) {
+        std::vector<std::string> found;
+        TagLib::MP4::File file{path.c_str()};
+        for (const auto& [key, item] : file.tag()->itemMap()) {
+            found.push_back(key.to8Bit(true));
+        }
+        return found;
+    };
+    const auto source =
+        materialize(fixture_directory, "tagged-tone-m4a.b64", directory.path() / "spelled.m4a");
+    {
+        TagLib::MP4::File file{source.c_str()};
+        file.tag()->setItem("----:com.apple.iTunes:encodedby",
+                            TagLib::MP4::Item{TagLib::StringList{TagLib::String{}}});
+        file.tag()->setItem("----:com.apple.iTunes:label",
+                            TagLib::MP4::Item{TagLib::StringList{"Interscope"}});
+        CHECK(file.save());
+    }
+    const auto retitled = directory.path() / "spelled-retitled.m4a";
+    CHECK(write(source, retitled, "title", "Retitled"));
+    const auto after_title = keys(retitled);
+    CHECK(!std::ranges::contains(after_title, std::string{"----:com.apple.iTunes:encodedby"}));
+    CHECK(!std::ranges::contains(after_title, std::string{"\xc2\xa9"
+                                                          "enc"}));
+    CHECK(std::ranges::contains(after_title, std::string{"----:com.apple.iTunes:label"}));
+    CHECK(!std::ranges::contains(after_title, std::string{"----:com.apple.iTunes:LABEL"}));
+
+    const auto relabelled = directory.path() / "spelled-relabelled.m4a";
+    CHECK(write(retitled, relabelled, "label", "Interscope Records"));
+    const auto after_label = keys(relabelled);
+    CHECK(std::ranges::contains(after_label, std::string{"----:com.apple.iTunes:label"}));
+    CHECK(!std::ranges::contains(after_label, std::string{"----:com.apple.iTunes:LABEL"}));
+    const auto reread = trackknife::metadata::read_local_metadata(relabelled.native());
+    CHECK(reread && reread->document.first_effective_value("label") ==
+                        std::optional<std::string>{"Interscope Records"});
+    CHECK(reread && reread->document.first_effective_value("title") ==
+                        std::optional<std::string>{"Retitled"});
+}
+
 // ADR-0281: a write that fits is made in place -- the ranges it answers, laid
 // on the file, are byte for byte what the prepared copy would be -- and one
 // that outgrows its room is not.
@@ -755,6 +829,7 @@ int main(const int argc, char** argv) {
         roundTripsMultiLineLyrics(fixture_directory);
         keepsMp4FreeFormNamesWithColons(fixture_directory);
         dropsEmptyFieldsOfFilesWritten(fixture_directory);
+        keepsMp4FreeFormSpellings(fixture_directory);
         writesInPlaceExactlyAsACopyWould(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }

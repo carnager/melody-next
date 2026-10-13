@@ -1690,6 +1690,31 @@ transition_backup(MetadataOperationJournal& journal, const core::StableId& journ
 
 // ADR-0281: a write in place. Its backup is a range file -- the bytes each
 // range held and holds after -- not a copy of the file.
+// The file was not as the commit left it by the time its dependents were
+// recorded. Says what differed: a refusal of a file that seems unchanged
+// cannot be acted on.
+[[nodiscard]] core::Error changed_under(const MetadataOperationJournalRecord& record,
+                                        const core::LocalSourceRevision& published,
+                                        const core::LocalSourceRevision& now) {
+    auto error = operation_error(core::ErrorCode::conflict,
+                                 "metadata source changed during dependent-state commit",
+                                 record.source_raw_path, record.id);
+    std::string changed;
+    const auto add = [&changed](const char* what, const auto& before, const auto& after) {
+        if (before != after) {
+            changed += (changed.empty() ? "" : "; ") + std::string{what} + " " +
+                       std::to_string(before) + " -> " + std::to_string(after);
+        }
+    };
+    add("device", published.device, now.device);
+    add("inode", published.inode, now.inode);
+    add("size", published.size, now.size);
+    add("seconds", published.modification_time_seconds, now.modification_time_seconds);
+    add("nanoseconds", published.modification_time_nanoseconds, now.modification_time_nanoseconds);
+    error.context.push_back({.key = "changed", .value = changed});
+    return error;
+}
+
 namespace in_place {
 
 constexpr std::string_view range_magic = "TKRANGES1\n";
@@ -1880,8 +1905,12 @@ enum class Holds : std::uint8_t { before, after, mixed };
             done += static_cast<std::size_t>(count);
         }
     }
-    if (::fsync(file.get()) != 0 || !file.close()) {
+    if (::fsync(file.get()) != 0) {
         return std::unexpected(system_error("syncing the file written in place failed", errno,
+                                            record.source_raw_path, record.id));
+    }
+    if (!file.close()) {
+        return std::unexpected(system_error("closing the file written in place failed", errno,
                                             record.source_raw_path, record.id));
     }
     return {};
@@ -1981,6 +2010,10 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
     if (auto written = write_ranges(record, backup, true); !written) {
         return undo_on(State::prepared, std::nullopt, written.error());
     }
+    // As a prepared copy's: on a network mount the client and the server
+    // disagree about the time of a file just written for a while, and the
+    // file then seemed to change under the commit that wrote it.
+    core::settle_rewritten_file_time(record.source_raw_path, expected);
     auto published = core::observe_local_source_revision(record.source_raw_path);
     if (!published) {
         return undo_on(State::prepared, std::nullopt, published.error());
@@ -2006,11 +2039,8 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
     auto final_revision = core::observe_local_source_revision(record.source_raw_path);
     if (!final_revision || *final_revision != *published) {
         return fail(State::published, *published,
-                    !final_revision
-                        ? final_revision.error()
-                        : operation_error(core::ErrorCode::conflict,
-                                          "metadata source changed during dependent-state commit",
-                                          record.source_raw_path, record.id),
+                    !final_revision ? final_revision.error()
+                                    : changed_under(record, *published, *final_revision),
                     false);
     }
     if (auto completed =
@@ -2681,12 +2711,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     }
     auto final_revision = core::observe_local_source_revision(record.source_raw_path);
     if (!final_revision || *final_revision != *published) {
-        const auto failure =
-            !final_revision
-                ? final_revision.error()
-                : operation_error(core::ErrorCode::conflict,
-                                  "metadata source changed during dependent-state commit",
-                                  record.source_raw_path, record.id);
+        const auto failure = !final_revision ? final_revision.error()
+                                             : changed_under(record, *published, *final_revision);
         auto terminal = record_terminal_failure(journal, record, State::published,
                                                 prepared_revision, *published, failure, false);
         if (!terminal) {

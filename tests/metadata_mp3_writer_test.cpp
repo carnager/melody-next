@@ -528,6 +528,64 @@ void keepsMp4FreeFormSpellings(const std::filesystem::path& fixture_directory) {
                         std::optional<std::string>{"Retitled"});
 }
 
+// ID3 involved-people frames TagLib cannot express as properties -- a role
+// outside its list, a role with no person -- are kept through a write.
+// TagLib rebuilds TIPL and TMCL from the properties on every save, so they
+// were dropped, and the reread refused the write.
+void keepsInvolvedPeopleTagLibCannotExpress(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto source =
+        materialize(fixture_directory, "tagged-tone-mp3.b64", directory.path() / "credits.mp3");
+    const auto add = [](TagLib::ID3v2::Tag& tag, const TagLib::StringList& fields) {
+        auto* frame = new TagLib::ID3v2::TextIdentificationFrame("TIPL", TagLib::String::UTF8);
+        frame->setText(fields);
+        tag.addFrame(frame);
+    };
+    {
+        TagLib::MPEG::File file{source.c_str()};
+        add(*file.ID3v2Tag(true), {"orchestration", "Someone"});
+        add(*file.ID3v2Tag(), {"arranger"});
+        add(*file.ID3v2Tag(), {"producer", "Prod"});
+        CHECK(file.save());
+    }
+    const auto read = trackknife::metadata::read_local_metadata(source.native());
+    CHECK(read.has_value());
+    if (!read) {
+        return;
+    }
+    auto selection = selection_for(*read);
+    if (!selection) {
+        return;
+    }
+    const auto title = selection->field_index("title");
+    CHECK(title.has_value());
+    if (!title) {
+        return;
+    }
+    trackknife::metadata::StagedMetadataPatchSet patches;
+    CHECK(patches.replace_values(*selection, 0U, *title, {"Credited"}).has_value());
+    auto plan = make_plan(*selection, patches);
+    CHECK(plan && plan->ready());
+    if (!plan || !plan->ready()) {
+        return;
+    }
+    const auto prepared = directory.path() / "credits-written.mp3";
+    const auto written = trackknife::metadata::prepare_mp3_metadata_write_copy(
+        plan->sources.front(), prepared.native());
+    if (!written) {
+        std::cerr << written.error().message << '\n';
+    }
+    CHECK(written.has_value());
+    TagLib::MPEG::File file{prepared.c_str()};
+    std::vector<std::string> credits;
+    for (const auto* frame : file.ID3v2Tag()->frameList("TIPL")) {
+        credits.push_back(frame->toString().to8Bit(true));
+    }
+    std::ranges::sort(credits);
+    CHECK((credits ==
+           std::vector<std::string>{"arranger", "orchestration Someone", "producer Prod"}));
+}
+
 // ADR-0281: a write that fits is made in place -- the ranges it answers, laid
 // on the file, are byte for byte what the prepared copy would be -- and one
 // that outgrows its room is not.
@@ -830,6 +888,7 @@ int main(const int argc, char** argv) {
         keepsMp4FreeFormNamesWithColons(fixture_directory);
         dropsEmptyFieldsOfFilesWritten(fixture_directory);
         keepsMp4FreeFormSpellings(fixture_directory);
+        keepsInvolvedPeopleTagLibCannotExpress(fixture_directory);
         writesInPlaceExactlyAsACopyWould(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }

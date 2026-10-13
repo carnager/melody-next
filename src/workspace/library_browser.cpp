@@ -382,6 +382,10 @@ void LibraryBrowser::enqueue(Task task) {
     pump();
 }
 
+std::shared_ptr<engine::Catalogue> LibraryBrowser::openCatalogue() const {
+    return catalogues_->openDeferred();
+}
+
 void LibraryBrowser::pump() {
     if (querying_ || tasks_.empty() || stopped_) {
         return;
@@ -391,10 +395,9 @@ void LibraryBrowser::pump() {
     completion_ = std::move(task.done);
     querying_ = true;
     query_watcher_.setFuture(
-        QtConcurrent::run(&pool_, [catalogues = catalogues_, work = std::move(task.work)] {
+        QtConcurrent::run(&pool_, [catalogue = openCatalogue(), work = std::move(task.work)] {
             // ADR-0220: the task is given the core's front door, never the
             // database, and never learns which side of a socket it is on.
-            auto catalogue = catalogues->open();
             return work(*catalogue);
         }));
 }
@@ -1580,13 +1583,12 @@ void LibraryBrowser::startScan() {
     progress_ = std::make_shared<persistence::LibraryScanProgress>();
     poll_timer_.start();
     updateProgress();
-    scan_watcher_.setFuture(QtConcurrent::run(&pool_, [catalogues = catalogues_,
+    scan_watcher_.setFuture(QtConcurrent::run(&pool_, [catalogue = openCatalogue(),
                                                        cancellation = scan_cancellation_.token(),
                                                        progress = progress_] {
         ScanOutcome outcome;
         // ADR-0220: ask the core, do not open its database. Remotely it
         // becomes a job, and the same counters are fed from its progress.
-        auto catalogue = catalogues->open();
         auto result = catalogue->scan(cancellation, *progress);
         if (result) {
             outcome.result = *result;
@@ -1654,7 +1656,7 @@ void LibraryBrowser::pumpCovers() {
         artwork_cancellation_ = core::CancellationSource{};
         artwork_running_ = true;
         artwork_watcher_.setFuture(
-            QtConcurrent::run(&artwork_pool_, [catalogues = catalogues_, key = key.toStdString(),
+            QtConcurrent::run(&artwork_pool_, [catalogue = openCatalogue(), key = key.toStdString(),
                                                cancellation = artwork_cancellation_.token()] {
                 if (cancellation.is_cancellation_requested()) {
                     return QImage{};
@@ -1662,7 +1664,6 @@ void LibraryBrowser::pumpCovers() {
                 // ADR-0220: ask the core, do not open its database. Read by
                 // the engine, where the files are: a remote library shows its
                 // covers with nothing of it mounted here.
-                auto catalogue = catalogues->open();
                 const auto source = catalogue->artwork_source(key, cancellation);
                 if (!source || !source->has_value() || cancellation.is_cancellation_requested()) {
                     return QImage{};

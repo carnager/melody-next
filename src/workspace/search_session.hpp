@@ -178,7 +178,9 @@ class SearchSession final : public QObject {
     [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
     [[nodiscard]] bool databaseScope() const;
     [[nodiscard]] EngineKey scopeEngine() const;
-    [[nodiscard]] const CatalogueSource* scopeCatalogues() const;
+    // The scope's library, for a worker: it connects there and holds what it
+    // needs, so it outlives this session's sources being torn down.
+    [[nodiscard]] std::shared_ptr<engine::Catalogue> scopeCatalogue() const;
     [[nodiscard]] QString resultName() const;
     // Rows for the chosen results, read on a worker, then rowsRequested.
     void resolveTracks(std::vector<std::string> paths,

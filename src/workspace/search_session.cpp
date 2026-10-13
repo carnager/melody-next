@@ -178,10 +178,10 @@ EngineKey SearchSession::scopeEngine() const {
     return scope == QStringLiteral("tab") ? EngineKey::local() : EngineKey::fromText(scope);
 }
 
-const CatalogueSource* SearchSession::scopeCatalogues() const {
+std::shared_ptr<engine::Catalogue> SearchSession::scopeCatalogue() const {
     const auto engine = scopeEngine();
     const auto other = std::ranges::find(others_, engine, &OtherLibrary::engine);
-    return other != others_.end() ? other->catalogues : catalogues_;
+    return (other != others_.end() ? other->catalogues : catalogues_)->openDeferred();
 }
 
 QStringList SearchSession::savedNames() const {
@@ -478,12 +478,11 @@ void SearchSession::startSearch() {
         // -- artists, albums, tracks -- each a short indexed query, so the
         // results follow the typing.
         searching_ = true;
-        watcher_.setFuture(QtConcurrent::run([catalogues = scopeCatalogues(),
+        watcher_.setFuture(QtConcurrent::run([handle = scopeCatalogue(),
                                               text = utf8Bytes(result_query_),
                                               token = cancellation_.token()]() {
             Outcome outcome;
             outcome.grouped = true;
-            auto handle = catalogues->open();
             auto& catalogue = *handle;
             const auto find = [&](const persistence::LibraryEntryKind kind, const std::size_t limit)
                 -> std::optional<std::vector<persistence::LibraryEntry>> {
@@ -530,12 +529,11 @@ void SearchSession::startSearch() {
     if (databaseScope()) {
         searching_ = true;
         watcher_.setFuture(
-            QtConcurrent::run([catalogues = scopeCatalogues(),
+            QtConcurrent::run([handle = scopeCatalogue(),
                                shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
                                token = cancellation_.token()]() {
                 Outcome outcome;
                 // ADR-0220: ask the core, do not open its database.
-                auto handle = catalogues->open();
                 auto& catalogue = *handle;
                 auto paths = catalogue.filter_paths(*shared, token);
                 if (!paths) {
@@ -572,147 +570,144 @@ void SearchSession::startSearch() {
     }
     searching_ = true;
     const auto needs_technicals = references_technicals(*compiled);
-    watcher_.setFuture(
-        QtConcurrent::run([catalogues = catalogues_, rows = std::move(snapshot->rows),
-                           shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
-                           needs_technicals, token = cancellation_.token()]() mutable {
-            Outcome outcome;
-            if (rows.size() > 100'000U) {
-                outcome.error =
-                    QStringLiteral("Current-tab searches support at most 100,000 rows.");
-                return outcome;
-            }
-            const bool needs_history = (shared->sort && !shared->sort->history.empty()) ||
-                                       std::ranges::any_of(shared->predicates, [](const auto& p) {
-                                           return p.operand == query::TkqOperandKind::history;
-                                       });
-            std::vector<std::array<std::int64_t, 6>> histories;
-            if (needs_history) {
-                // ADR-0220: ask the core, do not open its database.
-                auto handle = catalogues->open();
-                auto& catalogue = *handle;
-                std::vector<persistence::LibraryHistorySource> sources;
-                for (const auto& row : rows) {
-                    if (token.is_cancellation_requested()) {
-                        outcome.error = QStringLiteral("Search cancelled");
-                        return outcome;
-                    }
-                    persistence::ListItem source;
-                    source.source = persistence::ListSource::local;
-                    source.source_reference = row.raw_path;
-                    source.source_revision = row.source_revision;
-                    source.source_selection = persistence::ListItemSourceSelection{
-                        row.selection.stream_index, row.selection.subsong_index};
-                    if (row.segment)
-                        source.segment = persistence::ListItemSegment{row.segment->start_sample,
-                                                                      row.segment->end_sample};
-                    sources.push_back({std::move(source),
-                                       row.album.empty() ? std::string{} : row.album_rating_hash});
-                }
-                auto loaded = catalogue.history_facts(sources, token);
-                if (!loaded) {
-                    outcome.error = displayText(loaded.error().message);
-                    return outcome;
-                }
-                histories = std::move(*loaded);
-            }
-            // ADR-0153: probe exactly the rows a technical query needs and
-            // report the results back so the next search is instant.
-            std::map<std::string, std::optional<LocalTrackTechnicals>> probed;
-            if (needs_technicals) {
-                for (auto& row : rows) {
-                    if (row.technicals || token.is_cancellation_requested()) {
-                        continue;
-                    }
-                    auto cached = probed.find(row.raw_path);
-                    if (cached == probed.end()) {
-                        std::optional<LocalTrackTechnicals> technicals;
-                        if (auto probe = formats::probe_local_media(row.raw_path, token);
-                            probe && probe->best_audio_stream) {
-                            const auto found =
-                                std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
-                                                  &formats::AudioStreamInfo::stream_index);
-                            if (found != probe->audio_streams.end()) {
-                                technicals = LocalTrackTechnicals{
-                                    .codec = found->codec_name,
-                                    .sample_rate = found->sample_rate,
-                                    .bits = formats::bits_per_sample_hint(found->sample_format),
-                                    .channels = found->channels,
-                                    .bit_rate =
-                                        found->bit_rate > 0 ? found->bit_rate : probe->bit_rate,
-                                };
-                            }
-                        }
-                        cached = probed.emplace(row.raw_path, std::move(technicals)).first;
-                        ++outcome.scanned;
-                    }
-                    if (cached->second) {
-                        row.technicals = *cached->second;
-                    }
-                }
-                for (auto& [path, technicals] : probed) {
-                    if (technicals) {
-                        outcome.probed.emplace_back(path, *technicals);
-                    }
-                }
-            }
-            struct Keyed {
-                std::string key;
-                std::size_t position;
-            };
-            std::vector<Keyed> keyed;
-            for (std::size_t position = 0U; position < rows.size(); ++position) {
+    watcher_.setFuture(QtConcurrent::run([handle = std::shared_ptr{catalogues_->openDeferred()},
+                                          rows = std::move(snapshot->rows),
+                                          shared = std::make_shared<query::CompiledTkq>(
+                                              std::move(*compiled)),
+                                          needs_technicals,
+                                          token = cancellation_.token()]() mutable {
+        Outcome outcome;
+        if (rows.size() > 100'000U) {
+            outcome.error = QStringLiteral("Current-tab searches support at most 100,000 rows.");
+            return outcome;
+        }
+        const bool needs_history = (shared->sort && !shared->sort->history.empty()) ||
+                                   std::ranges::any_of(shared->predicates, [](const auto& p) {
+                                       return p.operand == query::TkqOperandKind::history;
+                                   });
+        std::vector<std::array<std::int64_t, 6>> histories;
+        if (needs_history) {
+            // ADR-0220: ask the core, do not open its database.
+            auto& catalogue = *handle;
+            std::vector<persistence::LibraryHistorySource> sources;
+            for (const auto& row : rows) {
                 if (token.is_cancellation_requested()) {
                     outcome.error = QStringLiteral("Search cancelled");
                     return outcome;
                 }
-                const auto& row = rows[position];
-                auto facts = persistence::make_tkq_row_facts(
-                    row.metadata, row.title, row.artist, row.album, row.duration_ms,
-                    row.technicals ? std::optional{persistence::TkqRowTechnicals{
-                                         .codec = row.technicals->codec,
-                                         .sample_rate = row.technicals->sample_rate,
-                                         .bits = row.technicals->bits,
-                                         .channels = row.technicals->channels}}
-                                   : std::nullopt);
-                // ADR-0179: tab rows carry their loaded content-identity ratings;
-                // an unrated row keeps the facts' unrated default.
-                if (row.rating > 0U) {
-                    facts.rating = row.rating;
-                }
-                if (row.album_rating > 0U) {
-                    facts.album_rating = row.album_rating;
-                }
-                if (needs_history)
-                    facts.history = histories[position];
-                if (!persistence::tkq_matches(*shared, facts, token)) {
+                persistence::ListItem source;
+                source.source = persistence::ListSource::local;
+                source.source_reference = row.raw_path;
+                source.source_revision = row.source_revision;
+                source.source_selection = persistence::ListItemSourceSelection{
+                    row.selection.stream_index, row.selection.subsong_index};
+                if (row.segment)
+                    source.segment = persistence::ListItemSegment{row.segment->start_sample,
+                                                                  row.segment->end_sample};
+                sources.push_back(
+                    {std::move(source), row.album.empty() ? std::string{} : row.album_rating_hash});
+            }
+            auto loaded = catalogue.history_facts(sources, token);
+            if (!loaded) {
+                outcome.error = displayText(loaded.error().message);
+                return outcome;
+            }
+            histories = std::move(*loaded);
+        }
+        // ADR-0153: probe exactly the rows a technical query needs and
+        // report the results back so the next search is instant.
+        std::map<std::string, std::optional<LocalTrackTechnicals>> probed;
+        if (needs_technicals) {
+            for (auto& row : rows) {
+                if (row.technicals || token.is_cancellation_requested()) {
                     continue;
                 }
-                std::string key;
-                if (shared->sort) {
-                    auto sort_key = persistence::tkq_sort_key(*shared, facts, token);
-                    if (!sort_key) {
-                        outcome.error = displayText(sort_key.error().message);
-                        return outcome;
+                auto cached = probed.find(row.raw_path);
+                if (cached == probed.end()) {
+                    std::optional<LocalTrackTechnicals> technicals;
+                    if (auto probe = formats::probe_local_media(row.raw_path, token);
+                        probe && probe->best_audio_stream) {
+                        const auto found =
+                            std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
+                                              &formats::AudioStreamInfo::stream_index);
+                        if (found != probe->audio_streams.end()) {
+                            technicals = LocalTrackTechnicals{
+                                .codec = found->codec_name,
+                                .sample_rate = found->sample_rate,
+                                .bits = formats::bits_per_sample_hint(found->sample_format),
+                                .channels = found->channels,
+                                .bit_rate = found->bit_rate > 0 ? found->bit_rate : probe->bit_rate,
+                            };
+                        }
                     }
-                    key = std::move(*sort_key);
+                    cached = probed.emplace(row.raw_path, std::move(technicals)).first;
+                    ++outcome.scanned;
                 }
-                keyed.push_back({std::move(key), position});
+                if (cached->second) {
+                    row.technicals = *cached->second;
+                }
             }
+            for (auto& [path, technicals] : probed) {
+                if (technicals) {
+                    outcome.probed.emplace_back(path, *technicals);
+                }
+            }
+        }
+        struct Keyed {
+            std::string key;
+            std::size_t position;
+        };
+        std::vector<Keyed> keyed;
+        for (std::size_t position = 0U; position < rows.size(); ++position) {
+            if (token.is_cancellation_requested()) {
+                outcome.error = QStringLiteral("Search cancelled");
+                return outcome;
+            }
+            const auto& row = rows[position];
+            auto facts = persistence::make_tkq_row_facts(
+                row.metadata, row.title, row.artist, row.album, row.duration_ms,
+                row.technicals ? std::optional{persistence::TkqRowTechnicals{
+                                     .codec = row.technicals->codec,
+                                     .sample_rate = row.technicals->sample_rate,
+                                     .bits = row.technicals->bits,
+                                     .channels = row.technicals->channels}}
+                               : std::nullopt);
+            // ADR-0179: tab rows carry their loaded content-identity ratings;
+            // an unrated row keeps the facts' unrated default.
+            if (row.rating > 0U) {
+                facts.rating = row.rating;
+            }
+            if (row.album_rating > 0U) {
+                facts.album_rating = row.album_rating;
+            }
+            if (needs_history)
+                facts.history = histories[position];
+            if (!persistence::tkq_matches(*shared, facts, token)) {
+                continue;
+            }
+            std::string key;
             if (shared->sort) {
-                const auto descending =
-                    shared->sort->direction == query::TkqSortDirection::descending;
-                std::ranges::stable_sort(
-                    keyed, [descending](const Keyed& left, const Keyed& right) {
-                        return descending ? right.key < left.key : left.key < right.key;
-                    });
+                auto sort_key = persistence::tkq_sort_key(*shared, facts, token);
+                if (!sort_key) {
+                    outcome.error = displayText(sort_key.error().message);
+                    return outcome;
+                }
+                key = std::move(*sort_key);
             }
-            for (const auto& entry : keyed) {
-                outcome.rows.push_back(std::move(rows[entry.position]));
-                outcome.labels.push_back(result_label(outcome.rows.back()));
-            }
-            return outcome;
-        }));
+            keyed.push_back({std::move(key), position});
+        }
+        if (shared->sort) {
+            const auto descending = shared->sort->direction == query::TkqSortDirection::descending;
+            std::ranges::stable_sort(keyed, [descending](const Keyed& left, const Keyed& right) {
+                return descending ? right.key < left.key : left.key < right.key;
+            });
+        }
+        for (const auto& entry : keyed) {
+            outcome.rows.push_back(std::move(rows[entry.position]));
+            outcome.labels.push_back(result_label(outcome.rows.back()));
+        }
+        return outcome;
+    }));
 }
 
 void SearchSession::finishSearch() {
@@ -887,9 +882,8 @@ void SearchSession::resolveTracks(std::vector<std::string> paths,
                 }
             });
     watcher->setFuture(QtConcurrent::run(
-        [catalogues = scopeCatalogues(), entries = std::move(entries), paths = std::move(paths)] {
+        [handle = scopeCatalogue(), entries = std::move(entries), paths = std::move(paths)] {
             std::vector<LocalTrackRow> found;
-            auto handle = catalogues->open();
             const auto read = [&handle, &found](const std::vector<std::string>& files) {
                 auto cached = handle->cached_tracks(files);
                 if (!cached) {

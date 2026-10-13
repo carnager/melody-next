@@ -58,9 +58,9 @@ void BenchMainWindow::showDynamicPlaylists() {
                         watcher->deleteLater();
                     });
             watcher->setFuture(
-                QtConcurrent::run([catalogues, selection = std::move(selection),
+                QtConcurrent::run([catalogue = std::shared_ptr{catalogues->openDeferred()},
+                                   selection = std::move(selection),
                                    cancellation]() -> DynamicPlaylistService::Result {
-                    const auto catalogue = catalogues->open();
                     return selectDynamicLibrary(*catalogue, selection, cancellation);
                 }));
         };

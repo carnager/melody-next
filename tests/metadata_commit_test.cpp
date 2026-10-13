@@ -934,7 +934,8 @@ void recovers_a_commit_interrupted_after_moving_the_original(
     }
     auto record = interrupted_record(*plan, core::StableId::random());
     CHECK(journal->create(record).has_value());
-    const auto prepared = metadata::prepare_flac_metadata_write_copy(*plan, record.prepared_raw_path);
+    const auto prepared =
+        metadata::prepare_flac_metadata_write_copy(*plan, record.prepared_raw_path);
     CHECK(prepared.has_value());
     if (!prepared) {
         return;
@@ -978,9 +979,9 @@ void commits_in_place_where_the_tags_fit(const std::filesystem::path& fixture_di
     }
     operations::use_prepared_copies_only_for_testing(true);
     auto padding = title_plan(source, "A first title, long enough to grow the tags and pad them");
-    const auto padded =
-        padding ? operations::commit_metadata_source(*padding, *journal, successful_dependent_commit)
-                : std::unexpected(core::Error{});
+    const auto padded = padding ? operations::commit_metadata_source(*padding, *journal,
+                                                                     successful_dependent_commit)
+                                : std::unexpected(core::Error{});
     operations::use_prepared_copies_only_for_testing(false);
     CHECK(padded.has_value());
     if (!padded) {
@@ -1056,9 +1057,9 @@ void recovers_a_write_interrupted_in_place(const std::filesystem::path& fixture_
     }
     operations::use_prepared_copies_only_for_testing(true);
     auto padding = title_plan(source, "A first title, long enough to grow the tags and pad them");
-    CHECK(padding && operations::commit_metadata_source(*padding, *journal,
-                                                        successful_dependent_commit)
-                         .has_value());
+    CHECK(padding &&
+          operations::commit_metadata_source(*padding, *journal, successful_dependent_commit)
+              .has_value());
     operations::use_prepared_copies_only_for_testing(false);
     const auto original_bytes = read_bytes(source);
     auto plan = title_plan(source, std::string(70U, 'T'));

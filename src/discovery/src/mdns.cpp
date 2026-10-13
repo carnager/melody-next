@@ -3,6 +3,7 @@
 
 #include "trackknife/discovery/mdns.hpp"
 
+#include "trackknife/core/environment.hpp"
 #include "trackknife/discovery/dns.hpp"
 
 #include <arpa/inet.h>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <span>
+#include <system_error>
 #include <utility>
 
 namespace trackknife::discovery {
@@ -35,7 +37,8 @@ constexpr std::uint32_t record_ttl = 120U;
 
 [[nodiscard]] core::Error socket_error(const std::string& what) {
     return core::Error{.code = core::ErrorCode::io,
-                       .message = "multicast DNS: " + what + ": " + std::strerror(errno),
+                       .message = "multicast DNS: " + what + ": " +
+                                  std::error_code{errno, std::generic_category()}.message(),
                        .context = {}};
 }
 
@@ -224,7 +227,8 @@ void send_to_group(const int socket, const Message& message) {
 // their engines are neither found by nor find the real ones on the network.
 [[nodiscard]] std::string resolved_service(std::string service) {
     if (service == engine_service) {
-        if (const char* other = std::getenv("TRACKKNIFE_DISCOVERY_SERVICE");
+        if (const char* other =
+                trackknife::core::environment_variable("TRACKKNIFE_DISCOVERY_SERVICE");
             other != nullptr && *other != '\0') {
             return other;
         }
@@ -293,7 +297,10 @@ void Announcer::answer_to(const bool goodbye,
                 .strings = {},
                 .address = 0};
     for (const auto& [key, value] : advertisement_.txt) {
-        text.strings.push_back(key + "=" + value);
+        auto pair = key;
+        pair += '=';
+        pair += value;
+        text.strings.push_back(std::move(pair));
     }
     message.additionals.push_back(std::move(text));
     // One who asked to be answered directly is, with the address this

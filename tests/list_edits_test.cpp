@@ -23,7 +23,7 @@ using persistence::ListEdit;
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
         std::cerr << "FAILED: " << message << '\n';
-        std::exit(EXIT_FAILURE);
+        std::abort();
     }
 }
 
@@ -37,6 +37,7 @@ void require(const bool condition, const std::string_view message) {
 [[nodiscard]] std::vector<persistence::ListEntryPrint>
 prints(const std::vector<persistence::EngineListItem>& items) {
     std::vector<persistence::ListEntryPrint> printed;
+    printed.reserve(items.size());
     for (const auto& each : items) {
         printed.push_back({.entry = each.entry_id,
                            .print = std::hash<std::string>{}(each.raw_path + '\0' + each.title)});
@@ -86,6 +87,7 @@ round_trip(const std::vector<persistence::EngineListItem>& before,
 
 int main() {
     std::vector<persistence::EngineListItem> list;
+    list.reserve(10U);
     for (int index = 0; index < 10; ++index) {
         list.push_back(item("t" + std::to_string(index)));
     }
@@ -175,6 +177,7 @@ int main() {
     for (int round = 0; round < 2000; ++round) {
         std::vector<persistence::EngineListItem> before;
         const auto length = random() % 40U;
+        before.reserve(before.size() + length);
         for (std::size_t index = 0; index < length; ++index) {
             before.push_back(item("r" + std::to_string(round) + "-" + std::to_string(index)));
         }
@@ -216,6 +219,7 @@ int main() {
     // A sorted 66,000-entry list is planned and applied without trouble.
     {
         std::vector<persistence::EngineListItem> large;
+        large.reserve(66'000U);
         for (int index = 0; index < 66'000; ++index) {
             large.push_back(item("l" + std::to_string(index)));
         }

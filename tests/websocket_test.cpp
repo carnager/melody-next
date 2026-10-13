@@ -41,6 +41,7 @@ void require(const bool condition, const std::string_view message) {
 
 [[nodiscard]] int connect_to(const std::uint16_t port) {
     const int connection = trackknife::core::socket_cloexec(AF_INET, SOCK_STREAM, 0);
+    require(connection >= 0, "a socket to connect with");
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);

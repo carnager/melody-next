@@ -205,8 +205,7 @@ QVariant MetadataGridModel::data(const QModelIndex& index, const int role) const
             return QStringLiteral("—");
         }
         const auto values = visible_values(*projected.values);
-        return values.empty() ? QStringLiteral("(empty field)")
-                              : one_line(values);
+        return values.empty() ? QStringLiteral("(empty field)") : one_line(values);
     }
     if (role == metadata_cell_staged_source_role) {
         return projected.patch == nullptr ? QString{} : stagedSourceLabel(item_index, field_index);
@@ -1240,8 +1239,7 @@ QVariant MetadataAggregateModel::originalData(const std::size_t field_index, con
         case metadata::MetadataSelectionFieldState::common: {
             const auto values =
                 representative == nullptr ? QStringList{} : visible_values(representative->values);
-            return values.empty() ? QStringLiteral("(empty field)")
-                                  : one_line(values);
+            return values.empty() ? QStringLiteral("(empty field)") : one_line(values);
         }
         case metadata::MetadataSelectionFieldState::mixed:
             return QStringLiteral("(various across %1 files)").arg(item_indexes_.size());
@@ -1325,8 +1323,7 @@ QVariant MetadataAggregateModel::draftData(const std::size_t field_index, const 
                     return QStringLiteral("(remove)");
                 }
                 const auto values = visible_values(uniform->second.values);
-                return values.empty() ? QStringLiteral("(empty field)")
-                                      : one_line(values);
+                return values.empty() ? QStringLiteral("(empty field)") : one_line(values);
             }
         } else {
             if (role == metadata_field_state_role) {
@@ -1378,8 +1375,7 @@ QVariant MetadataAggregateModel::draftData(const std::size_t field_index, const 
         switch (projection.state) {
         case metadata::MetadataSelectionFieldState::common: {
             const auto values = visible_values(projection.common_values);
-            return values.empty() ? QStringLiteral("(empty field)")
-                                  : one_line(values);
+            return values.empty() ? QStringLiteral("(empty field)") : one_line(values);
         }
         case metadata::MetadataSelectionFieldState::mixed:
             return QStringLiteral("(various across %1 files)").arg(item_indexes_.size());

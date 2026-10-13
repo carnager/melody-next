@@ -106,9 +106,9 @@ constexpr std::size_t maximum_text_bytes = 4U * 1024U * 1024U;
 
 } // namespace
 
-core::Result<LocalMetadataRead> read_metadata_from_stream(const std::string& raw_path,
-                                                          TagLib::IOStream& stream,
-                                                          const core::CancellationToken& cancellation) {
+core::Result<LocalMetadataRead>
+read_metadata_from_stream(const std::string& raw_path, TagLib::IOStream& stream,
+                          const core::CancellationToken& cancellation) {
     TagLib::FileRef reference{&stream, false};
     if (reference.isNull() || reference.file() == nullptr) {
         return std::unexpected(error(core::ErrorCode::unsupported,

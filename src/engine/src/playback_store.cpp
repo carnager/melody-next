@@ -58,7 +58,14 @@ PlaybackStore::PlaybackStore(Player& player, Workspace& workspace,
                              const std::chrono::milliseconds interval)
     : player_(&player), workspace_(&workspace), interval_(interval) {}
 
-PlaybackStore::~PlaybackStore() { stop(); }
+PlaybackStore::~PlaybackStore() {
+    // Stopping joins the writer; a destructor has nowhere to send a failure
+    // to join, and the process is going either way.
+    try {
+        stop();
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+    }
+}
 
 bool PlaybackStore::restore() {
     if (auto output = workspace_->load_engine_state(output_key); output && *output) {

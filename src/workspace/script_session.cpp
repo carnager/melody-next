@@ -340,7 +340,7 @@ QString ScriptSession::actionText(const metadata::MetadataTransformationAction& 
             } else if constexpr (std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
                 const auto scale =
                     typed.scale == metadata::PlainRatingScale::hundred ? QStringLiteral("0–100")
-                    : typed.scale == metadata::PlainRatingScale::ten   ? QStringLiteral("0–10")
+                    : typed.scale == metadata::PlainRatingScale::ten ? QStringLiteral("0–10")
                                                                      : QStringLiteral("0–5 stars");
                 return QStringLiteral("%1. Convert the rating in %2 (%3) to %4")
                     .arg(index + 1U)

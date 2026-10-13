@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "trackknife/metadata/artwork_writers.hpp"
 #include "mp4_item_factory_detail.hpp"
+#include "trackknife/metadata/artwork_writers.hpp"
 
 #include "container_preservation_detail.hpp"
 #include "text_writer_detail.hpp"

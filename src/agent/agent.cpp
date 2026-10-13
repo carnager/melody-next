@@ -75,6 +75,10 @@ constexpr std::chrono::seconds handshake_timeout{10};
             continue;
         }
         char byte = 0;
+        // No lock is held here. clang-tidy 19 loses track of the unique_lock in
+        // InterruptiblePause::wait and believes its mutex is still held; later
+        // versions follow it correctly.
+        // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
         const auto received = ::recv(descriptor, &byte, 1, 0);
         if (received <= 0) {
             return std::unexpected(handshake_error("the engine closed the connection"));

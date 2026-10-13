@@ -15,11 +15,18 @@ permissions:
 env:
   DEPENDENCIES: >-
     build-essential cmake ninja-build pkg-config git ca-certificates
-    clang clang-format clang-tidy libclang-rt-dev
+    clang clang-format clang-tidy libclang-rt-dev llvm
     qt6-base-dev libutf8proc-dev nlohmann-json3-dev
     libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
     libebur128-dev libmpdclient-dev libopenmpt-dev libpipewire-0.3-dev
     libsqlite3-dev libtag-dev libupnp-dev libcurl4-openssl-dev libssl-dev
+    pipewire pipewire-bin wireplumber dbus-daemon dbus-bin netcat-openbsd
+  # The tests play through a PipeWire null sink (.github/with-silent-audio.sh);
+  # configuring already reads where its socket is.
+  XDG_RUNTIME_DIR: /tmp/ci-runtime
+  # Shared runners time too unevenly to judge the UI budgets; they are
+  # reported, and held on real hardware.
+  TRACKKNIFE_BENCHMARK_REPORT_ONLY: "1"
 
 jobs:
   build-and-test:
@@ -37,16 +44,15 @@ jobs:
       - name: Install build dependencies
         run: apt-get update && apt-get install -y --no-install-recommends $DEPENDENCIES
       - uses: actions/checkout@v4
+      # Lint and formatting are checked in the arch job: clang-tidy and
+      # clang-format change their verdicts between versions, and Debian's
+      # trail the ones the code is written with.
       - name: Configure
-        run: >-
-          cmake --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
-          -DCMAKE_CXX_COMPILER="$CXX"
+        run: cmake --preset dev -DCMAKE_CXX_COMPILER="$CXX"
       - name: Build
-        run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
+        run: cmake --build --preset dev
       - name: Test
-        run: ctest --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
-      - name: Check formatting
-        run: cmake --build --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }} --target format-check
+        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure
 
   sanitizers:
     runs-on: ubuntu-24.04
@@ -64,7 +70,33 @@ jobs:
       - name: Build
         run: cmake --build --preset asan
       - name: Test
-        run: ctest --preset asan
+        run: .github/with-silent-audio.sh ctest --preset asan --output-on-failure
+
+  # What the people running it run: the current Arch packages, FFmpeg and
+  # TagLib as they are now. Debian above is what the release is built on.
+  arch:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      XDG_RUNTIME_DIR: /tmp/ci-runtime
+    steps:
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel cmake ninja pkgconf git clang qt6-base libutf8proc nlohmann-json
+          ffmpeg libebur128 libmpdclient libopenmpt taglib sqlite libupnp curl openssl
+          pipewire wireplumber dbus openbsd-netcat
+      - uses: actions/checkout@v4
+      # Current clang, clang-tidy and clang-format: the lint gate.
+      - name: Configure
+        run: cmake --preset tidy
+      - name: Build
+        run: cmake --build --preset tidy
+      - name: Test
+        run: .github/with-silent-audio.sh ctest --preset tidy --output-on-failure
+      - name: Check formatting
+        run: cmake --build --preset tidy --target format-check
 
   fuzz-smoke:
     runs-on: ubuntu-24.04

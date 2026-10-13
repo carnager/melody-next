@@ -7,6 +7,11 @@
 
 set -euo pipefail
 
+# grep -q stops reading at the first match, and under pipefail the writer
+# then dying of SIGPIPE fails the pipe: a slow writer (a sanitizer build)
+# made that a race. This reads everything.
+matches() { grep "$@" >/dev/null; }
+
 melodyd="$1"
 agent="$2"
 work="$(mktemp -d)"
@@ -58,7 +63,7 @@ outputs() {
 }
 for _ in $(seq 1 150); do
     listed="$(outputs)"
-    if echo "${listed}" | grep -q '"id":"agent:beta"' && echo "${listed}" | grep -q '"id":"agent:gamma"'; then
+    if echo "${listed}" | matches '"id":"agent:beta"' && echo "${listed}" | matches '"id":"agent:gamma"'; then
         break
     fi
     sleep 0.1
@@ -67,10 +72,15 @@ if grep -q "no audio here" "${work}/beta.log" "${work}/gamma.log"; then
     echo "discovery: no audio output here; skipping"
     exit 0
 fi
-echo "${listed}" | grep -q '"id":"agent:beta"' || fail "an engine with --agent finds alpha and plays for it"
-echo "${listed}" | grep -q '"id":"agent:gamma"' || fail "a melody-agent with no --server finds alpha"
+echo "${listed}" | matches '"id":"agent:beta"' || fail "an engine with --agent finds alpha and plays for it"
+echo "${listed}" | matches '"id":"agent:gamma"' || fail "a melody-agent with no --server finds alpha"
+# Said once its agent is started, which may register before the line is out.
+for _ in $(seq 1 50); do
+    grep -q "playing for alpha" "${work}/beta.log" && break
+    sleep 0.1
+done
 grep -q "playing for alpha" "${work}/beta.log" || fail "beta says whom it plays for"
 # Not for itself: beta does not listen, so is not announced; alpha, which
 # does, is not among its own outputs.
-echo "${listed}" | grep -q '"id":"agent:alpha"' && fail "an engine does not play for itself"
+echo "${listed}" | matches '"id":"agent:alpha"' && fail "an engine does not play for itself"
 echo "discovery: engines found each other"

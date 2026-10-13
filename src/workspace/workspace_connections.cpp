@@ -238,7 +238,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
     // placeholder: "remote" for the one remote of an older release, whose
     // lists say so, or its address for one added since.
     added->key = !setting.id.isEmpty() ? EngineKey::fromText(setting.id)
-                 : first               ? EngineKey::remote()
+                 : first ? EngineKey::remote()
                          : EngineKey::fromText(QStringLiteral("address:") + setting.address);
     added->setting = setting;
     added->password = setting.effectivePassword();

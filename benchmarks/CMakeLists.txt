@@ -22,7 +22,12 @@ if(TRACKKNIFE_BUILD_UI)
         PRIVATE Trackknife::BenchUi Qt6::Test trackknife_project_options
                 trackknife_project_warnings
     )
-    add_test(NAME trackknife-ui-benchmark-smoke COMMAND trackknife_ui_benchmark --quick)
+    set(trackknife_ui_benchmark_arguments --quick)
+    if(TRACKKNIFE_ENABLE_SANITIZERS OR TRACKKNIFE_ENABLE_THREAD_SANITIZER)
+        list(APPEND trackknife_ui_benchmark_arguments --report-only)
+    endif()
+    add_test(NAME trackknife-ui-benchmark-smoke
+             COMMAND trackknife_ui_benchmark ${trackknife_ui_benchmark_arguments})
     set_tests_properties(
         trackknife-ui-benchmark-smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )

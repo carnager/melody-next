@@ -38,8 +38,6 @@
 namespace trackknife::ui {
 namespace {
 
-constexpr int artwork_padding = side_artwork_padding;
-
 [[nodiscard]] int viewColumn(const QTableView* view, const char* property, const int fallback) {
     return view->property(property).isValid() ? view->property(property).toInt() : fallback;
 }

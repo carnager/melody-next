@@ -244,11 +244,12 @@ class FakeLastFm final {
                     answer = R"({"scrobbles":{"@attr":{"accepted":1,"ignored":0}}})";
                 }
             }
-            const auto response = "HTTP/1.1 " + status +
-                                  "\r\nContent-Type: application/json\r\n"
-                                  "Content-Length: " +
-                                  std::to_string(answer.size()) + "\r\nConnection: close\r\n\r\n" +
-                                  answer;
+            std::string response = "HTTP/1.1 ";
+            response += status;
+            response += "\r\nContent-Type: application/json\r\nContent-Length: ";
+            response += std::to_string(answer.size());
+            response += "\r\nConnection: close\r\n\r\n";
+            response += answer;
             static_cast<void>(::send(connection, response.data(), response.size(), MSG_NOSIGNAL));
             ::close(connection);
         }

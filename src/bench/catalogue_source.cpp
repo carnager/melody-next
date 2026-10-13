@@ -164,7 +164,8 @@ class DeferredCatalogue final : public engine::Catalogue {
         return get().artwork(raw_path, cancellation);
     }
     [[nodiscard]] core::Result<std::optional<metadata::Lyrics>>
-    lyrics(const std::string& raw_path, const core::CancellationToken& cancellation) const override {
+    lyrics(const std::string& raw_path,
+           const core::CancellationToken& cancellation) const override {
         return get().lyrics(raw_path, cancellation);
     }
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>

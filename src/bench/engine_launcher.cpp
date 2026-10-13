@@ -4,6 +4,7 @@
 
 #include "bench/remote_engines.hpp"
 #include "bench/settings_keys.hpp"
+#include "trackknife/core/environment.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -17,11 +18,15 @@
 #include <signal.h>
 #ifdef __APPLE__
 #include <libproc.h>
+#include <sys/proc.h>
 #endif
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstdlib>
+#include <fstream>
+#include <string>
 #include <thread>
 
 namespace trackknife::bench {
@@ -33,7 +38,8 @@ namespace {
 }
 
 [[nodiscard]] std::filesystem::path runtime_directory() {
-    if (const auto* runtime = std::getenv("XDG_RUNTIME_DIR"); runtime != nullptr && *runtime) {
+    if (const auto* runtime = trackknife::core::environment_variable("XDG_RUNTIME_DIR");
+        runtime != nullptr && *runtime) {
         return runtime;
     }
     return std::filesystem::temp_directory_path();
@@ -43,7 +49,8 @@ namespace {
 // workspace starts and one started by hand or by the user service are the
 // same engine on the same socket.
 [[nodiscard]] std::filesystem::path standard_state() {
-    if (const auto* data_home = std::getenv("XDG_DATA_HOME"); data_home != nullptr && *data_home) {
+    if (const auto* data_home = trackknife::core::environment_variable("XDG_DATA_HOME");
+        data_home != nullptr && *data_home) {
         return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
 #ifdef __APPLE__
@@ -272,9 +279,7 @@ core::Result<void> stopLocalEngine(const LocalEngine& engine) {
     }
     // SIGTERM saves the queue first; it comes back paused.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    const auto alive = [&holders] {
-        return std::ranges::any_of(holders, [](const pid_t pid) { return ::kill(pid, 0) == 0; });
-    };
+    const auto alive = [&holders] { return std::ranges::any_of(holders, processRunning); };
     while (alive() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
@@ -324,6 +329,31 @@ bool localEngineOutdated(const LocalEngine& engine) {
         }
     }
     return false;
+}
+
+bool processRunning(const pid_t pid) {
+    if (::kill(pid, 0) != 0 && errno != EPERM) {
+        return false;
+    }
+#ifdef __APPLE__
+    proc_bsdinfo info{};
+    if (::proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) ==
+        static_cast<int>(sizeof(info))) {
+        return info.pbi_status != SZOMB;
+    }
+    return true;
+#else
+    // The state follows the command name, which is in parentheses and may
+    // itself contain them: "1234 (melodyd) Z ...".
+    std::ifstream stat{"/proc/" + std::to_string(pid) + "/stat"};
+    std::string line;
+    if (!std::getline(stat, line)) {
+        return true;
+    }
+    const auto name_end = line.rfind(')');
+    return name_end == std::string::npos || name_end + 2 >= line.size() ||
+           line[name_end + 2] != 'Z';
+#endif
 }
 
 std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
@@ -401,14 +431,16 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
             return started;
         }
         // An engine that exited has said why in its log; waiting on would
-        // only delay saying so. Another engine winning a start race exits
-        // too, and is then the one that answers.
-        if (pid > 0 && ::kill(static_cast<pid_t>(pid), 0) != 0) {
+        // only delay saying so. One that lost a start race exits too, and
+        // the winner, holding the lock, answers once it is listening.
+        if (pid > 0 && !processRunning(static_cast<pid_t>(pid))) {
             if (auto other = protocol::Client::connect(endpoint)) {
                 return other;
             }
-            return std::unexpected(
-                launch_error("melodyd stopped at startup; see " + log.toStdString()));
+            if (lockHolders(engine.state / "engine.lock").empty()) {
+                return std::unexpected(
+                    launch_error("melodyd stopped at startup; see " + log.toStdString()));
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }

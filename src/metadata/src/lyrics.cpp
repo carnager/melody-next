@@ -36,9 +36,8 @@ constexpr std::size_t directory_limit = 10'000U;
 }
 
 [[nodiscard]] bool digits(const std::string_view text) {
-    return !text.empty() && std::ranges::all_of(text, [](const char c) {
-        return c >= '0' && c <= '9';
-    });
+    return !text.empty() &&
+           std::ranges::all_of(text, [](const char c) { return c >= '0' && c <= '9'; });
 }
 
 [[nodiscard]] std::int64_t number(const std::string_view text) {
@@ -248,9 +247,8 @@ Lyrics parse_lyrics(const std::string_view text) {
         for (auto& line : synced.lines) {
             line.time_ms = std::max<std::int64_t>(0, *line.time_ms - offset_ms);
         }
-        std::ranges::stable_sort(synced.lines, {}, [](const LyricsLine& line) {
-            return *line.time_ms;
-        });
+        std::ranges::stable_sort(synced.lines, {},
+                                 [](const LyricsLine& line) { return *line.time_ms; });
         synced.declared_length_ms = declared_length_ms;
         return synced;
     }
@@ -324,18 +322,19 @@ core::Result<std::optional<Lyrics>> read_lyrics(const std::string& raw_path,
             mpeg != nullptr && mpeg->hasID3v2Tag()) {
             for (auto* frame : mpeg->ID3v2Tag()->frameList("SYLT")) {
                 const auto* sylt = dynamic_cast<TagLib::ID3v2::SynchronizedLyricsFrame*>(frame);
-                if (sylt == nullptr || sylt->timestampFormat() !=
-                                           TagLib::ID3v2::SynchronizedLyricsFrame::AbsoluteMilliseconds) {
+                if (sylt == nullptr ||
+                    sylt->timestampFormat() !=
+                        TagLib::ID3v2::SynchronizedLyricsFrame::AbsoluteMilliseconds) {
                     continue;
                 }
-                Lyrics lyrics{.source = "sylt", .synced = true, .lines = {}, .declared_length_ms = {}};
+                Lyrics lyrics{
+                    .source = "sylt", .synced = true, .lines = {}, .declared_length_ms = {}};
                 for (const auto& entry : sylt->synchedText()) {
                     lyrics.lines.push_back({.time_ms = static_cast<std::int64_t>(entry.time),
                                             .text = std::string{trimmed(entry.text.to8Bit(true))}});
                 }
-                std::ranges::stable_sort(lyrics.lines, {}, [](const LyricsLine& line) {
-                    return *line.time_ms;
-                });
+                std::ranges::stable_sort(lyrics.lines, {},
+                                         [](const LyricsLine& line) { return *line.time_ms; });
                 found.push_back(std::move(lyrics));
                 break;
             }

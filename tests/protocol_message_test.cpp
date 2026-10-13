@@ -8,6 +8,7 @@
 #include "trackknife/protocol/message.hpp"
 
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -206,10 +207,16 @@ void display_text_is_made_valid() {
     require(!document.dump().empty(), "sanitised text can always be written as JSON");
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
     require(argc > 1, "the corpus path must be given");
     run_corpus(std::filesystem::path{argv[1]});
     malformed_encodings_are_refused();
     display_text_is_made_valid();
     return EXIT_SUCCESS;
+} catch (const std::exception& error) {
+    std::cerr << "FAILED: " << error.what() << '\n';
+    return EXIT_FAILURE;
+} catch (...) {
+    std::cerr << "FAILED: an unknown exception\n";
+    return EXIT_FAILURE;
 }

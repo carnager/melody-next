@@ -8,6 +8,11 @@
 
 set -euo pipefail
 
+# grep -q stops reading at the first match, and under pipefail the writer
+# then dying of SIGPIPE fails the pipe: a slow writer (a sanitizer build)
+# made that a race. This reads everything.
+matches() { grep "$@" >/dev/null; }
+
 binary="$1"
 work="$(mktemp -d)"
 socket="${work}/melodyd.sock"
@@ -55,14 +60,14 @@ done
 # rather than waiting for a close that is not coming. -q is GNU netcat only
 # and is silently ignored by the OpenBSD one, so the timeout is external.
 answer="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
-echo "${answer}" | grep -q '"id":1' || fail "the daemon must answer the id asked"
-echo "${answer}" | grep -q '"roots":\[\]' || fail "a fresh catalogue has no roots"
+echo "${answer}" | matches '"id":1' || fail "the daemon must answer the id asked"
+echo "${answer}" | matches '"roots":\[\]' || fail "a fresh catalogue has no roots"
 
 # A job streams its events down the same connection that submitted it.
 job="$(printf '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}\n' \
     | timeout 5 nc -U "${socket}" || true)"
-echo "${job}" | grep -q '"job_id"' || fail "submitting must answer with an identity"
-echo "${job}" | grep -q '"event":"job.finished"' || fail "and the job must report a finish"
+echo "${job}" | matches '"job_id"' || fail "submitting must answer with an identity"
+echo "${job}" | matches '"event":"job.finished"' || fail "and the job must report a finish"
 
 # A second engine must not steal a live socket, nor share the database.
 if "${binary}" --socket "${socket}" --state "${work}/other" --local-only > "${work}/second.txt" 2>&1; then
@@ -102,20 +107,20 @@ grep -q "with a password" "${work}/tcp-log.txt" || fail "--listen must say it wa
 [ -f "${state}/engine.token" ] && fail "no token file is made any more"
 
 denied="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${denied}" | grep -q '"unauthorized"' || fail "TCP without the password must be refused"
+echo "${denied}" | matches '"unauthorized"' || fail "TCP without the password must be refused"
 
 admitted="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"catalogue.roots"}\n' \
     | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${admitted}" | grep -q '"authenticated":true' || fail "the right password must be accepted"
-echo "${admitted}" | grep -q '"roots":\[\]' || fail "and the engine must then answer over TCP"
+echo "${admitted}" | matches '"authenticated":true' || fail "the right password must be accepted"
+echo "${admitted}" | matches '"roots":\[\]' || fail "and the engine must then answer over TCP"
 
 named="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"engine.info"}\n' \
     | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${named}" | grep -q '"name":"living room"' || fail "the engine must say the name it was given"
+echo "${named}" | matches '"name":"living room"' || fail "the engine must say the name it was given"
 
 # The unix socket is unchanged: no handshake.
 plain="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
-echo "${plain}" | grep -q '"roots":\[\]' || fail "the unix socket must need no token"
+echo "${plain}" | matches '"roots":\[\]' || fail "the unix socket must need no token"
 
 kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true

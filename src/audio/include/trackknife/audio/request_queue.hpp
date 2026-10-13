@@ -26,6 +26,7 @@ template <class Source> class RequestQueue {
         undo_ = pending_;
         position = std::min(position, pending_.size());
         std::vector<Entry> entries;
+        entries.reserve(sources.size());
         for (auto& source : sources)
             entries.push_back({++serial_, std::move(source)});
         pending_.insert(pending_.begin() + static_cast<std::ptrdiff_t>(position),

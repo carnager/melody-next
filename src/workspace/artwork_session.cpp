@@ -1654,7 +1654,7 @@ void ArtworkSession::save() {
     if (!canSave()) {
         return;
     }
-    const auto intents = pending_intents_;
+    auto intents = pending_intents_;
     const auto policy = SettingsKeys::artworkPolicy();
     const auto change_count = pending_model_->rowCount();
     mutation_cancellation_.request_cancellation();

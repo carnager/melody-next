@@ -1700,8 +1700,7 @@ void put_u64(std::string& out, const std::uint64_t value) {
     }
 }
 
-[[nodiscard]] std::optional<std::uint64_t> get_u64(const std::string_view bytes,
-                                                   std::size_t& at) {
+[[nodiscard]] std::optional<std::uint64_t> get_u64(const std::string_view bytes, std::size_t& at) {
     if (at + 8U > bytes.size()) {
         return std::nullopt;
     }
@@ -1917,11 +1916,11 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
         return std::unexpected(std::move(created.error()));
     }
     const auto expected = record.expected_revision;
-    const auto fail = [&](const State state, const std::optional<core::LocalSourceRevision>& published,
-                          core::Error failure,
-                          const bool restored) -> core::Result<MetadataCommitResult> {
-        auto terminal = record_terminal_failure(journal, record, state, expected, published,
-                                                failure, restored);
+    const auto fail =
+        [&](const State state, const std::optional<core::LocalSourceRevision>& published,
+            core::Error failure, const bool restored) -> core::Result<MetadataCommitResult> {
+        auto terminal =
+            record_terminal_failure(journal, record, state, expected, published, failure, restored);
         if (!terminal) {
             return std::unexpected(std::move(terminal.error()));
         }
@@ -1934,8 +1933,8 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
     if (!backup_revision) {
         return fail(State::planned, std::nullopt, backup_revision.error(), true);
     }
-    if (auto prepared = transition(journal, record, State::planned, State::prepared, expected,
-                                   std::nullopt);
+    if (auto prepared =
+            transition(journal, record, State::planned, State::prepared, expected, std::nullopt);
         !prepared) {
         static_cast<void>(::unlink(record.backup_raw_path.c_str()));
         return fail(State::planned, std::nullopt, prepared.error(), true);
@@ -1960,7 +1959,8 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
                              const std::optional<core::LocalSourceRevision>& published,
                              const core::Error& failure) {
         const auto rolled_back = roll_back(record, backup);
-        return fail(state, published, rolled_back ? failure : not_rolled_back(failure, rolled_back.error()),
+        return fail(state, published,
+                    rolled_back ? failure : not_rolled_back(failure, rolled_back.error()),
                     rolled_back.has_value());
     };
     if (cancellation.is_cancellation_requested()) {
@@ -2036,9 +2036,9 @@ commit(const metadata::MetadataWritePlanSource& source_plan,
             .issue = restored ? std::nullopt : std::optional{std::move(issue)},
         };
     };
-    const auto rolled = operation_error(core::ErrorCode::cancelled,
-                                        "interrupted in-place write was rolled back",
-                                        record.source_raw_path, record.id);
+    const auto rolled =
+        operation_error(core::ErrorCode::cancelled, "interrupted in-place write was rolled back",
+                        record.source_raw_path, record.id);
     if (record.state == State::planned || !record.backup_revision) {
         // The file was not yet touched; a backup half written is ours.
         static_cast<void>(::unlink(record.backup_raw_path.c_str()));
@@ -2078,9 +2078,9 @@ undo(MetadataOperationBackupRecord backup_record, MetadataOperationJournal& jour
      const core::CancellationToken& cancellation) {
     const auto& record = backup_record.operation;
     const auto reconcile = [&](core::Error issue) -> core::Result<MetadataCommitResult> {
-        auto marked = transition_backup(journal, record.id, BackupState::undoing,
-                                        BackupState::needs_reconciliation, backup_record.undo_id,
-                                        issue);
+        auto marked =
+            transition_backup(journal, record.id, BackupState::undoing,
+                              BackupState::needs_reconciliation, backup_record.undo_id, issue);
         return std::unexpected(marked ? std::move(issue) : std::move(marked.error()));
     };
     auto backup = read_backup(record);
@@ -2463,7 +2463,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         // filesystem, copying nothing. Only where that rename cannot be made
         // -- the undo folder on another disk -- is it copied.
         std::optional<core::LocalSourceRevision> moved;
-        if (hard_link_refused(number) && !copied_backups_for_testing.load(std::memory_order_relaxed) &&
+        if (hard_link_refused(number) &&
+            !copied_backups_for_testing.load(std::memory_order_relaxed) &&
             ::rename(record.source_raw_path.c_str(), record.backup_raw_path.c_str()) == 0) {
             auto observed = core::observe_local_source_revision(record.backup_raw_path);
             if (observed && core::same_file_after_rename(record.backup_raw_path,
@@ -3673,13 +3674,13 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             if (::rename(record.backup_raw_path.c_str(), record.source_raw_path.c_str()) != 0) {
                 issue = system_error("putting the moved original back failed", errno,
                                      record.source_raw_path, record.id);
-            } else if (auto synced = fsync_parent(record.source_raw_path, record.source_raw_path,
-                                                  record.id);
+            } else if (auto synced =
+                           fsync_parent(record.source_raw_path, record.source_raw_path, record.id);
                        !synced) {
                 issue = std::move(synced.error());
-            } else if (auto removed = unlink_if_matches(record.prepared_raw_path,
-                                                        record.prepared_revision,
-                                                        record.source_raw_path, record.id, true);
+            } else if (auto removed =
+                           unlink_if_matches(record.prepared_raw_path, record.prepared_revision,
+                                             record.source_raw_path, record.id, true);
                        !removed) {
                 issue = std::move(removed.error());
             }

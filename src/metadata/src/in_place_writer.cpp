@@ -21,6 +21,7 @@
 #include <cstring>
 #include <map>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace trackknife::metadata {
@@ -52,9 +53,8 @@ class OverlayStream final : public TagLib::IOStream {
         if (resized_ || position_ >= length_ || length == 0U) {
             return {};
         }
-        const auto wanted =
-            static_cast<std::size_t>(std::min<TagLib::offset_t>(
-                static_cast<TagLib::offset_t>(length), length_ - position_));
+        const auto wanted = static_cast<std::size_t>(
+            std::min<TagLib::offset_t>(static_cast<TagLib::offset_t>(length), length_ - position_));
         std::string bytes(wanted, '\0');
         std::size_t done = 0U;
         while (done < wanted) {
@@ -192,7 +192,8 @@ class OverlayStream final : public TagLib::IOStream {
     bool failed_{false};
 };
 
-[[nodiscard]] bool read_exactly(const int descriptor, const std::uint64_t offset, std::string& bytes) {
+[[nodiscard]] bool read_exactly(const int descriptor, const std::uint64_t offset,
+                                std::string& bytes) {
     std::size_t done = 0U;
     while (done < bytes.size()) {
         const auto count = ::pread(descriptor, bytes.data() + done, bytes.size() - done,
@@ -227,9 +228,8 @@ struct FlacHeader {
     std::uint64_t audio_offset{0U};
 };
 
-[[nodiscard]] std::optional<FlacHeader> parse_flac_header(const int descriptor,
-                                                          const OverlayStream* overlay,
-                                                          const std::uint64_t length) {
+[[nodiscard]] std::optional<FlacHeader>
+parse_flac_header(const int descriptor, const OverlayStream* overlay, const std::uint64_t length) {
     // Read through the overlay when one is given, else from the file.
     const auto read = [&](const std::uint64_t offset, const std::size_t size) {
         std::string bytes(size, '\0');
@@ -350,8 +350,8 @@ protected_spans(const std::string& adapter, const int descriptor, const std::uin
                 if (box.size() < 16U) {
                     return std::nullopt;
                 }
-                size = (static_cast<std::uint64_t>(big_endian(box, 8U)) << 32U) |
-                       big_endian(box, 12U);
+                size =
+                    (static_cast<std::uint64_t>(big_endian(box, 8U)) << 32U) | big_endian(box, 12U);
             } else if (size == 0U) {
                 size = length - offset;
             }
@@ -391,8 +391,8 @@ protected_spans(const std::string& adapter, const int descriptor, const std::uin
             return std::unexpected(
                 in_place_error(core::ErrorCode::backend, "TagLib rejected the FLAC file", path));
         }
-        return text_writer_detail::apply_text_changes_to_properties("FLAC", source_plan, file,
-                                                                    path, cancellation);
+        return text_writer_detail::apply_text_changes_to_properties("FLAC", source_plan, file, path,
+                                                                    cancellation);
     }
     if (adapter == "taglib-mpeg-v1") {
         {
@@ -449,19 +449,19 @@ prepare_in_place_metadata_write(const MetadataWritePlanSource& source_plan,
         return std::unexpected(in_place_error(
             core::ErrorCode::conflict, "the source changed after the write was planned", path));
     }
-    auto originals =
-        text_writer_detail::verify_plan_originals(label_of(adapter), before->document,
-                                                  source_plan, path);
+    auto originals = text_writer_detail::verify_plan_originals(label_of(adapter), before->document,
+                                                               source_plan, path);
     if (!originals) {
         return std::unexpected(std::move(originals.error()));
     }
 
     const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (descriptor < 0) {
-        return std::unexpected(in_place_error(core::ErrorCode::io,
-                                              std::string{"opening the file failed: "} +
-                                                  std::strerror(errno),
-                                              path));
+        return std::unexpected(
+            in_place_error(core::ErrorCode::io,
+                           std::string{"opening the file failed: "} +
+                               std::error_code{errno, std::generic_category()}.message(),
+                           path));
     }
     struct Closer {
         int descriptor;
@@ -511,9 +511,9 @@ prepare_in_place_metadata_write(const MetadataWritePlanSource& source_plan,
             return blocks;
         };
         if (kept(*old_header) != kept(*new_header)) {
-            return std::unexpected(in_place_error(
-                core::ErrorCode::conflict,
-                "an in-place FLAC write changed a preserved metadata block", path));
+            return std::unexpected(
+                in_place_error(core::ErrorCode::conflict,
+                               "an in-place FLAC write changed a preserved metadata block", path));
         }
     }
 
@@ -537,15 +537,15 @@ prepare_in_place_metadata_write(const MetadataWritePlanSource& source_plan,
                                       ? std::optional{popularimeter_byte(**planned)}
                                       : std::nullopt;
             if (expected && after->popularimeter != expected) {
-                return std::unexpected(in_place_error(
-                    core::ErrorCode::conflict, "an in-place MP3 rating frame differs from the plan",
-                    path));
+                return std::unexpected(
+                    in_place_error(core::ErrorCode::conflict,
+                                   "an in-place MP3 rating frame differs from the plan", path));
             }
         }
     }
-    auto verified = text_writer_detail::verify_text_result(
-        label_of(adapter), before_document, after_document, source_plan, path,
-        adapter == "taglib-flac-v1");
+    auto verified =
+        text_writer_detail::verify_text_result(label_of(adapter), before_document, after_document,
+                                               source_plan, path, adapter == "taglib-flac-v1");
     if (!verified) {
         return std::unexpected(std::move(verified.error()));
     }
@@ -566,8 +566,8 @@ prepare_in_place_metadata_write(const MetadataWritePlanSource& source_plan,
             continue;
         }
         write.ranges.push_back(InPlaceRange{.offset = static_cast<std::uint64_t>(offset),
-                                           .before = std::move(old_bytes),
-                                           .after = bytes});
+                                            .before = std::move(old_bytes),
+                                            .after = bytes});
     }
     return std::optional{std::move(write)};
 }

@@ -533,6 +533,7 @@ void TaggerSession::startSelection() {
                            access = services_.tools.access, token = technical_cancellation_.token(),
                            reading = reading_, unread, self]() mutable {
             std::vector<std::string_view> cached_views;
+            cached_views.reserve(preferred.size());
             for (const auto& field : preferred) {
                 cached_views.emplace_back(field);
             }
@@ -2633,9 +2634,9 @@ void TaggerSession::finishWritePlan() {
                                   [](const auto& issue) { return issue.blocking; })) &&
             std::ranges::none_of(plan->metadata->cue_sheets,
                                  [](const auto& sheet) {
-                                     return std::ranges::any_of(sheet.issues, [](const auto& issue) {
-                                         return issue.blocking;
-                                     });
+                                     return std::ranges::any_of(
+                                         sheet.issues,
+                                         [](const auto& issue) { return issue.blocking; });
                                  }) &&
             std::ranges::none_of(plan->metadata->sidecars, [](const auto& sidecar) {
                 return std::ranges::any_of(sidecar.issues,

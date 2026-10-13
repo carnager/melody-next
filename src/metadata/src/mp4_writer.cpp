@@ -4,10 +4,10 @@
 
 #include "container_preservation_detail.hpp"
 #include "mp4_item_factory_detail.hpp"
-#include "writer_steps_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/ratings.hpp"
+#include "writer_steps_detail.hpp"
 
 #include <mp4file.h>
 #include <mp4tag.h>
@@ -267,7 +267,7 @@ namespace {
         // Closed before the rating atom is renamed: TagLib finishes its
         // writes only when the file is closed.
         TagLib::MP4::File file{prepared_raw_path.c_str(), false, TagLib::AudioProperties::Average,
-                           mp4_detail::FreeFormFactory::instance()};
+                               mp4_detail::FreeFormFactory::instance()};
         if (!file.isValid()) {
             return std::unexpected(writer_error(core::ErrorCode::backend,
                                                 "TagLib rejected the prepared MP4 copy",

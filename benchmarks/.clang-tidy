@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Tests and benchmarks keep the project's checks but three that guard the
+# product, not them: a test ends by abort or exit when a check fails, lets an
+# exception end it as a failure, and fills its vectors as plainly as it can.
+InheritParentConfig: true
+Checks: >
+  -bugprone-exception-escape,
+  -concurrency-mt-unsafe,
+  -performance-inefficient-vector-operation

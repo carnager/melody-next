@@ -366,7 +366,7 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
                   .url = std::nullopt,
                   .selection = selection,
                   .segment = segment,
-                  .replay_gain = std::move(replay_gain)};
+                  .replay_gain = replay_gain};
     bool files = true;
     {
         const std::lock_guard guard{mutex_};
@@ -429,7 +429,7 @@ core::Result<void> AgentAudition::arm(std::string raw_path, Source source,
 core::Result<void>
 AgentAudition::load_selected_and_play(std::string raw_path, formats::AudioSourceSelection selection,
                                       std::optional<formats::ReplayGainInfo> replay_gain_override) {
-    auto source = source_for(raw_path, selection, std::nullopt, std::move(replay_gain_override));
+    auto source = source_for(raw_path, selection, std::nullopt, replay_gain_override);
     if (!source) {
         return std::unexpected(std::move(source.error()));
     }
@@ -439,7 +439,7 @@ AgentAudition::load_selected_and_play(std::string raw_path, formats::AudioSource
 core::Result<void> AgentAudition::load_selected_segment_and_play(
     std::string raw_path, formats::AudioSourceSelection selection, formats::SampleRange segment,
     std::optional<formats::ReplayGainInfo> replay_gain_override) {
-    auto source = source_for(raw_path, selection, segment, std::move(replay_gain_override));
+    auto source = source_for(raw_path, selection, segment, replay_gain_override);
     if (!source) {
         return std::unexpected(std::move(source.error()));
     }
@@ -452,7 +452,7 @@ core::Result<void> AgentAudition::restore_paused(
     std::optional<formats::ReplayGainInfo> replay_gain_override) {
     // The revision is this machine's view of the file; the agent sees its own
     // copy through its own mount, with its own inode numbers.
-    auto source = source_for(raw_path, selection, segment, std::move(replay_gain_override));
+    auto source = source_for(raw_path, selection, segment, replay_gain_override);
     if (!source) {
         return std::unexpected(std::move(source.error()));
     }
@@ -463,7 +463,7 @@ core::Result<void> AgentAudition::queue_gapless_next_selected(
     std::string raw_path, formats::AudioSourceSelection selection,
     std::optional<formats::ReplayGainInfo> replay_gain_override,
     const std::uint64_t occurrence_token) {
-    auto source = source_for(raw_path, selection, std::nullopt, std::move(replay_gain_override));
+    auto source = source_for(raw_path, selection, std::nullopt, replay_gain_override);
     if (!source) {
         return std::unexpected(std::move(source.error()));
     }
@@ -474,7 +474,7 @@ core::Result<void> AgentAudition::queue_gapless_next_selected_segment(
     std::string raw_path, formats::AudioSourceSelection selection, formats::SampleRange segment,
     std::optional<formats::ReplayGainInfo> replay_gain_override,
     const std::uint64_t occurrence_token) {
-    auto source = source_for(raw_path, selection, segment, std::move(replay_gain_override));
+    auto source = source_for(raw_path, selection, segment, replay_gain_override);
     if (!source) {
         return std::unexpected(std::move(source.error()));
     }

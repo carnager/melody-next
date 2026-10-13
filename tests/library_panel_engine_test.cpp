@@ -187,6 +187,8 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
     persistence::LibraryScanProgress progress;
     QVERIFY(catalogue.scan({}, progress).has_value());
     // Twelve thousand more of it under long names: far past 1 MiB of paths.
+    // Each a release of its own, as a library's are -- not one album of
+    // twelve thousand tracks, whose every track looks up all the others.
     {
         sqlite3* db = nullptr;
         QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
@@ -195,7 +197,7 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
             INSERT INTO local_library_tracks(raw_path,root,revision,title,artist,album,album_key,
                 release_id,date,disc,track,search_track,search_album,available,seen)
             SELECT CAST(t.raw_path || '/a-rather-long-folder-name-for-a-release/' || n || '.flac'
-                        AS BLOB),root,revision,title,artist,album,album_key,release_id,date,disc,
+                        AS BLOB),root,revision,title,artist,album,album_key || '/' || n,release_id,date,disc,
                    track,search_track,search_album,available,seen
             FROM local_library_tracks t CROSS JOIN numbers
         )SQL";
@@ -323,7 +325,7 @@ void LibraryPanelEngineTest::aChangeSaysWhichAlbumsItTouched() {
     const auto gone = std::ranges::find_if(listed->entries,
                                            [&](const auto& entry) { return entry.key == touched; });
     QVERIFY(gone != listed->entries.end());
-    const auto deleted_album = touched;
+    const auto& deleted_album = touched;
     heard.clear();
     held.unlock();
 

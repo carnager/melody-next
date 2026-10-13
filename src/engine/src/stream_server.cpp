@@ -23,6 +23,7 @@
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -38,9 +39,11 @@ constexpr std::chrono::seconds head_timeout{10};
 constexpr std::size_t maximum_transfers = 32U;
 
 [[nodiscard]] core::Error system_error(std::string message) {
-    return core::Error{.code = core::ErrorCode::io,
-                       .message = std::move(message),
-                       .context = {{.key = "errno", .value = std::strerror(errno)}}};
+    return core::Error{
+        .code = core::ErrorCode::io,
+        .message = std::move(message),
+        .context = {
+            {.key = "errno", .value = std::error_code{errno, std::generic_category()}.message()}}};
 }
 
 [[nodiscard]] bool send_all(const int descriptor, const std::string_view bytes) {

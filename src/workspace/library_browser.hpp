@@ -276,6 +276,9 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] QString emptyLibraryText() const;
 
     const CatalogueSource* catalogues_{nullptr};
+    // For a worker: it connects there and holds what it needs, so a task
+    // still running when the engine's source is torn down finishes safely.
+    [[nodiscard]] std::shared_ptr<engine::Catalogue> openCatalogue() const;
     EngineKey engine_;
     QStandardItemModel* model_{nullptr};
     QThreadPool pool_;

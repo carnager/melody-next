@@ -104,7 +104,7 @@ void a_track_source_reports_emptiness_and_compares_by_value() {
 
     // Raw OS bytes, not assumed to be UTF-8.
     audio::TrackSource invalid_utf8;
-    invalid_utf8.raw_path = std::string{"/music/broken-\xff.flac", 22U};
+    invalid_utf8.raw_path = "/music/broken-\xff.flac";
     require(!invalid_utf8.empty(), "an undecodable path is still a path");
 
     // The selection and segment are part of identity: the same file, a
@@ -212,6 +212,7 @@ struct Fixture {
 
     static std::vector<trackknife::core::StableId> make_ids(const int count) {
         std::vector<trackknife::core::StableId> ids;
+        ids.reserve(static_cast<std::size_t>(count));
         for (int index = 0; index < count; ++index) {
             ids.push_back(trackknife::core::StableId::random());
         }

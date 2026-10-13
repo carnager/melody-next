@@ -411,7 +411,7 @@ void LocalPlayback::set_replay_gain_preamps(const ReplayGainPreamps preamps) noe
 }
 
 void LocalPlayback::set_replay_gain_info(formats::ReplayGainInfo info) noexcept {
-    implementation_->replay_gain = std::move(info);
+    implementation_->replay_gain = info;
 }
 
 const formats::PcmFormat& LocalPlayback::output_format() const noexcept {

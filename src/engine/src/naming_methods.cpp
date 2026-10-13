@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/naming_methods.hpp"
 
+#include "trackknife/core/environment.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -170,7 +171,7 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
             }
             folder = std::filesystem::path{*decoded}.lexically_normal();
         } else {
-            const auto* home = std::getenv("HOME");
+            const auto* home = trackknife::core::environment_variable("HOME");
             folder = home != nullptr && *home == '/' ? std::filesystem::path{home}
                                                      : std::filesystem::path{"/"};
         }

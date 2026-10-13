@@ -39,12 +39,12 @@ class FreeFormFactory final : public TagLib::MP4::ItemFactory {
         TagLib::ByteVector data;
         data.append(renderAtom("mean", TagLib::ByteVector::fromUInt(0) +
                                            header[1].data(TagLib::String::UTF8)));
-        data.append(renderAtom("name", TagLib::ByteVector::fromUInt(0) +
-                                           name.data(TagLib::String::UTF8)));
+        data.append(
+            renderAtom("name", TagLib::ByteVector::fromUInt(0) + name.data(TagLib::String::UTF8)));
         auto type = item.atomDataType();
         if (type == TagLib::MP4::TypeUndefined) {
-            type = item.toStringList().isEmpty() ? TagLib::MP4::TypeImplicit
-                                                 : TagLib::MP4::TypeUTF8;
+            type =
+                item.toStringList().isEmpty() ? TagLib::MP4::TypeImplicit : TagLib::MP4::TypeUTF8;
         }
         if (type == TagLib::MP4::TypeUTF8) {
             for (const auto& value : item.toStringList()) {

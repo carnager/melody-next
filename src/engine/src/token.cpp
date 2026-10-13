@@ -6,6 +6,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <system_error>
 
 namespace trackknife::engine {
 namespace {
@@ -19,10 +20,11 @@ namespace {
             if (errno == EINTR) {
                 continue;
             }
-            return std::unexpected(
-                core::Error{.code = core::ErrorCode::io,
-                            .message = "could not gather randomness",
-                            .context = {{.key = "errno", .value = std::strerror(errno)}}});
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::io,
+                .message = "could not gather randomness",
+                .context = {{.key = "errno",
+                             .value = std::error_code{errno, std::generic_category()}.message()}}});
         }
         filled += static_cast<std::size_t>(got);
     }

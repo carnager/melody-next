@@ -244,7 +244,9 @@ int main() {
     require(eventually([&] { return !outputs.list().empty() && outputs.list().front().selected; }),
             "the phone is what the engine plays on");
     player->replace_queue(queue);
-    require(player->play_entry(queue[0].entry_id).has_value(), "playing starts");
+    const auto started = player->play_entry(queue[0].entry_id);
+    require(started.has_value(),
+            "playing starts" + (started ? std::string{} : ": " + started.error().message));
     require(eventually([&] { return std::ranges::contains(speaker->asked(), "audition.load"); }),
             "the phone is given the track");
     speaker->tell(report(true, 1'000));

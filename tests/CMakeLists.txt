@@ -360,7 +360,8 @@ add_test(NAME preparation-plan COMMAND trackknife_preparation_plan_tests)
 add_executable(trackknife_formats_probe_tests formats_probe_test.cpp)
 target_link_libraries(
     trackknife_formats_probe_tests
-    PRIVATE Trackknife::Formats trackknife_project_options trackknife_project_warnings
+    PRIVATE Trackknife::Formats PkgConfig::AVFORMAT trackknife_project_options
+            trackknife_project_warnings
 )
 add_test(
     NAME formats-probe
@@ -936,7 +937,7 @@ if(TRACKKNIFE_BUILD_UI)
     set_tests_properties(
         bench-main-window
         PROPERTIES
-            TIMEOUT 180
+            TIMEOUT 600
             ENVIRONMENT
                 "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
     )

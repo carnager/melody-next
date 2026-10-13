@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -100,10 +101,12 @@ create_workspace_database_backup(const std::filesystem::path& source,
     const auto descriptor =
         ::open(destination.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR);
     if (descriptor < 0) {
-        return std::unexpected(
-            error(core::ErrorCode::io, errno == EEXIST ? "Workspace backup destination exists"
-                                                       : "Could not reserve workspace backup: " +
-                                                             std::string{std::strerror(errno)}));
+        return std::unexpected(error(
+            core::ErrorCode::io,
+            errno == EEXIST
+                ? "Workspace backup destination exists"
+                : "Could not reserve workspace backup: " +
+                      std::string{std::error_code{errno, std::generic_category()}.message()}));
     }
     static_cast<void>(::close(descriptor));
     const auto remove_failed_destination = [&destination] {

@@ -65,7 +65,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {
         auto roots = catalogue.roots();
         if (!roots) {
-            return std::unexpected(std::move(roots.error()));
+            return std::unexpected(roots.error());
         }
         auto rendered = Json::array();
         for (const auto& root : *roots) {
@@ -658,7 +658,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         "catalogue.folder", [&catalogue, render_page](const Json& params) -> core::Result<Json> {
             const auto roots = catalogue.roots();
             if (!roots) {
-                return std::unexpected(std::move(roots.error()));
+                return std::unexpected(roots.error());
             }
             const auto given = params.find("path");
             if (given == params.end() || given->is_null()) {
@@ -750,8 +750,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
     dispatcher.on(
-        "catalogue.artwork",
-        [&catalogue, holds](const Json& params) -> core::Result<Json> {
+        "catalogue.artwork", [&catalogue, holds](const Json& params) -> core::Result<Json> {
             // By a track, or by an album: a grid of albums knows their keys, not
             // their files, and asking for a file first would double the trips.
             std::string raw_path;
@@ -818,8 +817,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                       }
                       auto raw_path = protocol::decode_raw_path(*encoded);
                       if (!raw_path) {
-                          return std::unexpected(
-                              bad_params("path is not an encoded path", "path"));
+                          return std::unexpected(bad_params("path is not an encoded path", "path"));
                       }
                       auto lyrics = holds && holds(*raw_path) ? metadata::read_lyrics(*raw_path)
                                                               : catalogue.lyrics(*raw_path);

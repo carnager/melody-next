@@ -9,6 +9,7 @@
 #include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 
+#include <QFile>
 #include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
@@ -40,15 +41,16 @@ class EngineLauncherTest final : public QObject {
 
 namespace {
 
-// The daemon's pid, from the lock it holds: fuser would work too, but this
-// needs nothing installed.
+// The daemon's pid, from the lock it holds.
 [[nodiscard]] pid_t enginePid(const LocalEngine& engine) {
-    QProcess fuser;
-    fuser.start(QStringLiteral("fuser"),
-                {QString::fromStdString((engine.state / "engine.lock").string())});
-    fuser.waitForFinished();
-    const auto text = QString::fromUtf8(fuser.readAllStandardOutput()).trimmed();
-    return static_cast<pid_t>(text.section(QLatin1Char(' '), 0, 0).toInt());
+    const auto holders = lockHolders(engine.state / "engine.lock");
+    return holders.empty() ? 0 : holders.front();
+}
+
+// What the engine said, for a failure that needs it.
+[[nodiscard]] QByteArray engineLog(const LocalEngine& engine) {
+    QFile log{QString::fromStdString((engine.state / "melodyd.log").string())};
+    return log.open(QIODevice::ReadOnly) ? log.readAll() : QByteArray{"(no log)"};
 }
 
 void stop(const LocalEngine& engine) {
@@ -57,7 +59,7 @@ void stop(const LocalEngine& engine) {
         return;
     }
     ::kill(pid, SIGTERM);
-    for (int attempt = 0; attempt < 100 && ::kill(pid, 0) == 0; ++attempt) {
+    for (int attempt = 0; attempt < 100 && processRunning(pid); ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
 }
@@ -94,7 +96,7 @@ void EngineLauncherTest::startsAnEngineAndFindsItAgain() {
     QVERIFY2(first.has_value(), first ? "" : first.error().message.c_str());
     QVERIFY((*first)->call("catalogue.roots").has_value());
     const auto pid = enginePid(scratch.engine);
-    QVERIFY(pid > 0);
+    QVERIFY2(pid > 0, engineLog(scratch.engine).constData());
     // Its own database, the one the workspace would have used.
     QVERIFY(std::filesystem::exists(scratch.engine.state / "lists.sqlite"));
     // The client going away leaves the engine running; the next finds it.
@@ -110,10 +112,10 @@ void EngineLauncherTest::startsItAgainAfterItStops() {
     QVERIFY(connectLocalEngine(scratch.engine).has_value());
     const auto pid = enginePid(scratch.engine);
     stop(scratch.engine);
-    QVERIFY(::kill(pid, 0) != 0);
+    QVERIFY(!processRunning(pid));
     auto again = connectLocalEngine(scratch.engine);
     QVERIFY(again.has_value());
-    QVERIFY(enginePid(scratch.engine) > 0);
+    QVERIFY2(enginePid(scratch.engine) > 0, engineLog(scratch.engine).constData());
     QVERIFY(enginePid(scratch.engine) != pid);
 }
 
@@ -127,14 +129,7 @@ void EngineLauncherTest::twoClientsStartingAtOnceShareOneEngine() {
     QVERIFY2(left.has_value(), left ? "" : left.error().message.c_str());
     QVERIFY2(right.has_value(), right ? "" : right.error().message.c_str());
     // One engine answers both: the loser of the race exited on the lock.
-    QProcess fuser;
-    fuser.start(QStringLiteral("fuser"),
-                {QString::fromStdString((scratch.engine.state / "engine.lock").string())});
-    fuser.waitForFinished();
-    QCOMPARE(QString::fromUtf8(fuser.readAllStandardOutput())
-                 .split(QLatin1Char(' '), Qt::SkipEmptyParts)
-                 .size(),
-             1);
+    QCOMPARE(lockHolders(scratch.engine.state / "engine.lock").size(), std::size_t{1U});
 }
 
 void EngineLauncherTest::aMissingProgramSaysSo() {
@@ -399,7 +394,7 @@ void EngineLauncherTest::anOutdatedEngineIsSeenAndStopped() {
     const auto pid = enginePid(scratch.engine);
     QVERIFY(pid > 0);
     QVERIFY(stopLocalEngine(scratch.engine).has_value());
-    QVERIFY(::kill(pid, 0) != 0);
+    QVERIFY(!processRunning(pid));
     QVERIFY(lockHolders(scratch.engine.state / "engine.lock").empty());
 }
 

@@ -71,6 +71,7 @@ void Guests::stop() {
 std::vector<std::string> Guests::engines() const {
     const std::lock_guard guard{mutex_};
     std::vector<std::string> names;
+    names.reserve(guests_.size());
     for (const auto& [identity, guest] : guests_) {
         names.push_back(guest.name);
     }

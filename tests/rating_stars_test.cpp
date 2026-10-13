@@ -84,7 +84,9 @@ void RatingStarsTest::aRatingRowClosesEveryMenuOpen() {
         }
         return found;
     }();
-    QVERIFY(row != nullptr);
+    if (row == nullptr) {
+        QFAIL("the rating row is in the menu");
+    }
     QTest::mouseClick(row, Qt::LeftButton, {}, row->rect().center());
 
     QCOMPARE(triggered.count(), 1);

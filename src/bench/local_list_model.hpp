@@ -191,8 +191,8 @@ class LocalListModel final : public QAbstractTableModel {
     // ADR-0268: the rows at these paths -- or under them, a folder; or,
     // `everything`, every row -- whose files changed, to be described again.
     // A CUE track is described by its sheet, and is left out.
-    [[nodiscard]] std::vector<core::StableId>
-    entriesAt(const std::vector<std::string>& raw_paths, bool everything) const;
+    [[nodiscard]] std::vector<core::StableId> entriesAt(const std::vector<std::string>& raw_paths,
+                                                        bool everything) const;
     // Refreshes every duplicate/logical occurrence of one verified physical
     // source while retaining annotation, segment, and sidecar layers.
     [[nodiscard]] core::Result<std::size_t>

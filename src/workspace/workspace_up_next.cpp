@@ -104,6 +104,7 @@ void Workspace::editUpNextRows(std::vector<bool> selected, int operation, int de
         order.insert(order.begin() + destination - before, moving.begin(), moving.end());
     }
     std::vector<std::uint64_t> ids;
+    ids.reserve(order.size());
     for (const auto row : order)
         ids.push_back(up_next_display_ids_[static_cast<std::size_t>(row)]);
     if (ids == up_next_display_ids_)

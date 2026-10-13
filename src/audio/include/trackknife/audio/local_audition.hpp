@@ -147,7 +147,7 @@ class LocalAuditionService final : public Audition {
     LocalAuditionService& operator=(const LocalAuditionService&) = delete;
     LocalAuditionService(LocalAuditionService&&) = delete;
     LocalAuditionService& operator=(LocalAuditionService&&) = delete;
-    ~LocalAuditionService();
+    ~LocalAuditionService() override;
 
     [[nodiscard]] LocalAuditionSnapshot snapshot() const override;
 

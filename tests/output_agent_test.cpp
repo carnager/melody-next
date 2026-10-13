@@ -111,6 +111,9 @@ void require(const bool condition, const std::string_view message) {
 // response's head and body together.
 [[nodiscard]] std::string fetch(const std::uint16_t port, const std::string& request) {
     const auto descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (descriptor < 0) {
+        return {};
+    }
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
@@ -194,7 +197,7 @@ start_agent(const std::uint16_t port, const std::optional<std::filesystem::path>
         .name = name,
         .music_root = root,
         .stream_only = !root.has_value(),
-        .stream = std::move(stream)});
+        .stream = stream});
     if (!agent) {
         return nullptr;
     }

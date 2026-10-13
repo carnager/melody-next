@@ -486,8 +486,8 @@ struct LocalAuditionService::Impl {
             suspend_for_output_loss();
         } else if (!was_available && now_available) {
             recover_suspended_output();
-        } else if (source && default_output_left(previous_default, devices,
-                                                 config.output.target_object)) {
+        } else if (source &&
+                   default_output_left(previous_default, devices, config.output.target_object)) {
             // The system moves the stream to the next device by itself; a
             // pause, as the person would give it, keeps it from playing there
             // until they say so.
@@ -1604,7 +1604,7 @@ core::Result<void> LocalAuditionService::set_replay_gain_mode(const ReplayGainMo
 core::Result<void> LocalAuditionService::set_replay_gain_info(formats::ReplayGainInfo info) {
     Command command;
     command.kind = CommandKind::set_replay_gain_info;
-    command.replay_gain_override = std::move(info);
+    command.replay_gain_override = info;
     return implementation_->enqueue(std::move(command));
 }
 

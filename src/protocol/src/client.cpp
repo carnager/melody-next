@@ -17,15 +17,18 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <system_error>
 #include <utility>
 
 namespace trackknife::protocol {
 namespace {
 
 [[nodiscard]] core::Error transport_error(std::string message) {
-    return core::Error{.code = core::ErrorCode::io,
-                       .message = std::move(message),
-                       .context = {{.key = "errno", .value = std::strerror(errno)}}};
+    return core::Error{
+        .code = core::ErrorCode::io,
+        .message = std::move(message),
+        .context = {
+            {.key = "errno", .value = std::error_code{errno, std::generic_category()}.message()}}};
 }
 
 } // namespace

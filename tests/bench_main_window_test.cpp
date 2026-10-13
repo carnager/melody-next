@@ -13,10 +13,10 @@
 #include "bench/identify_albums_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/lists_panel.hpp"
-#include "bench/lyrics_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
+#include "bench/lyrics_panel.hpp"
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_properties_dialog.hpp"
@@ -32,7 +32,6 @@
 #include "bench/trackknife_style.hpp"
 #include "bench/up_next_delegate.hpp"
 #include "bench/widget_color_scheme.hpp"
-#include "workspace/keep_awake.hpp"
 #include "drag_position.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -43,6 +42,7 @@
 #include "workspace/color_scheme.hpp"
 #include "workspace/identify_session.hpp"
 #include "workspace/interface_scale.hpp"
+#include "workspace/keep_awake.hpp"
 #include "workspace/lastfm_settings_session.hpp"
 #include "workspace/settings_session.hpp"
 #include "workspace/tab_store.hpp"
@@ -97,6 +97,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
+#include <QDBusArgument>
+#include <QDBusConnection>
+#include <QDBusMessage>
 #include <QDataStream>
 #include <QDeadlineTimer>
 #include <QDialog>
@@ -129,10 +132,6 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalSpy>
-#include <QDBusMessage>
-#include <QDBusConnection>
-#include <QDBusArgument>
-#include <QWheelEvent>
 #include <QSlider>
 #include <QSpinBox>
 #include <QSplitter>
@@ -152,6 +151,7 @@
 #include <QToolButton>
 #include <QTreeView>
 #include <QTreeWidget>
+#include <QWheelEvent>
 #include <QtTest>
 
 #include <array>
@@ -3983,7 +3983,8 @@ void BenchMainWindowTest::applyReadsAgainAFileChangedElsewhere() {
                      QStringLiteral("bench-metadata-fields"))) != nullptr);
     auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
     auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
-    auto* apply = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
     QVERIFY(aggregate_model != nullptr && status != nullptr && apply != nullptr);
     // Read and ready: the status says so, or has moved on to the draft.
     QTRY_VERIFY2_WITH_TIMEOUT(status->text().contains(QStringLiteral("Tags read")) ||
@@ -4006,8 +4007,7 @@ void BenchMainWindowTest::applyReadsAgainAFileChangedElsewhere() {
 
     QTRY_VERIFY(apply->isEnabled());
     QTest::mouseClick(apply, Qt::LeftButton);
-    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(QStringLiteral("Changed since read")),
-                             10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(QStringLiteral("Changed since read")), 10'000);
     QVERIFY(status->text().contains(QStringLiteral("1 draft kept")));
     QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
     QTRY_COMPARE(aggregate_model->index(*title_row, 2).data(Qt::DisplayRole).toString(),
@@ -8309,6 +8309,9 @@ void BenchMainWindowTest::localArtworkSurvivesInvalidation() {
         }
         return false;
     }());
+    if (model == nullptr) {
+        QFAIL("the list's model is found");
+    }
     QTRY_VERIFY(model->rows().front().probed);
     const auto artwork = [&] {
         return model->data(model->index(0, 0), static_cast<int>(ui::track_album_artwork_role))
@@ -15123,8 +15126,9 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
         return std::abs(rect.center().y() - lines->viewport()->height() / 2) <= rect.height();
     };
     QTRY_VERIFY_WITH_TIMEOUT(centred(), 2'000);
-    QWheelEvent wheel{QPointF{10, 10}, lines->viewport()->mapToGlobal(QPointF{10, 10}),
-                      QPoint{}, QPoint{0, 120}, Qt::NoButton, Qt::NoModifier,
+    QWheelEvent wheel{QPointF{10, 10},   lines->viewport()->mapToGlobal(QPointF{10, 10}),
+                      QPoint{},          QPoint{0, 120},
+                      Qt::NoButton,      Qt::NoModifier,
                       Qt::NoScrollPhase, false};
     QApplication::sendEvent(lines->viewport(), &wheel);
     const auto scrolled_to = lines->verticalScrollBar()->value();
@@ -15233,7 +15237,7 @@ void BenchMainWindowTest::settingsLeftOffReadAsOff() {
     stored.setValue(QLatin1String(SettingsKeys::rating_tag_scale_key), QStringLiteral("10"));
     stored.sync();
     const SettingsSession session;
-    const auto values = session.values();
+    const auto& values = session.values();
     const auto in_tags = values.value(QLatin1String(SettingsKeys::ratings_in_tags_key));
     QCOMPARE(in_tags.metaType(), QMetaType::fromType<bool>());
     QVERIFY(!in_tags.toBool());
@@ -17451,6 +17455,9 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
         return false;
     };
     QTRY_VERIFY(find_view());
+    if (view == nullptr) {
+        QFAIL("the list's view is found");
+    }
     auto* model = qobject_cast<LocalListModel*>(view->model());
     QVERIFY(model != nullptr);
     // The probe projection derives the Melody-compatible content identity.

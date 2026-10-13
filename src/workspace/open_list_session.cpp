@@ -51,8 +51,8 @@ OpenListSession::OpenListSession(Workspace& work, QObject* parent) : QObject(par
                           }
                           shown.note =
                               !lists.empty() ? QString{}
-                              : answer       ? tr("No lists")
-                                             : tr("Cannot say: %1")
+                              : answer ? tr("No lists")
+                                       : tr("Cannot say: %1")
                                              .arg(QString::fromStdString(answer.error().message));
                           shown.answered = true;
                           emit self->changed();

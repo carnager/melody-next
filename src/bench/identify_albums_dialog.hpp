@@ -63,7 +63,7 @@ class IdentifyAlbumsDialog final : public QDialog {
     [[nodiscard]] bool mayClose();
     void sync();
     void showVersion(int version);
-    void accept();
+    void accept() override;
     void skip();
     void backToList();
     void showDetail();

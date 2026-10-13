@@ -431,14 +431,16 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
             return started;
         }
         // An engine that exited has said why in its log; waiting on would
-        // only delay saying so. Another engine winning a start race exits
-        // too, and is then the one that answers.
+        // only delay saying so. One that lost a start race exits too, and
+        // the winner, holding the lock, answers once it is listening.
         if (pid > 0 && !processRunning(static_cast<pid_t>(pid))) {
             if (auto other = protocol::Client::connect(endpoint)) {
                 return other;
             }
-            return std::unexpected(
-                launch_error("melodyd stopped at startup; see " + log.toStdString()));
+            if (lockHolders(engine.state / "engine.lock").empty()) {
+                return std::unexpected(
+                    launch_error("melodyd stopped at startup; see " + log.toStdString()));
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }

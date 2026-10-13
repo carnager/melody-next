@@ -789,6 +789,14 @@ struct LocalAuditionService::Impl {
         track_base = 0;
         clear_pending_next();
         if (!stopped) {
+            // Cancelled: a load asked for since has superseded this source,
+            // and replaces it next. Not a failure -- reported, it reached the
+            // player after the load, which took it for the new track's and
+            // stopped.
+            if (stopped.error().code == core::ErrorCode::cancelled) {
+                publish();
+                return;
+            }
             fail(std::move(stopped.error()));
             return;
         }
@@ -964,6 +972,11 @@ struct LocalAuditionService::Impl {
         auto sought = source->seek_to_sample(track_base + target_sample);
         clear_pending_next();
         if (!sought) {
+            // Superseded by a load, as a stop can be.
+            if (sought.error().code == core::ErrorCode::cancelled) {
+                publish();
+                return;
+            }
             publish(std::move(sought.error()));
             return;
         }

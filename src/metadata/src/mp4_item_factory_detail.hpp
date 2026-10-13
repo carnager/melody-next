@@ -2,13 +2,17 @@
 
 #pragma once
 
+#include <mp4file.h>
 #include <mp4item.h>
 #include <mp4itemfactory.h>
+#include <mp4tag.h>
 #include <tbytevector.h>
+#include <tpropertymap.h>
 #include <tstring.h>
 #include <tstringlist.h>
 
 #include <iterator>
+#include <vector>
 
 namespace trackknife::metadata::mp4_detail {
 
@@ -64,5 +68,64 @@ class FreeFormFactory final : public TagLib::MP4::ItemFactory {
   private:
     FreeFormFactory() = default;
 };
+
+// The planned properties, applied atom by atom. TagLib's setProperties
+// rewrites every property under the atom name it would give it: a free-form
+// atom the file spells otherwise -- `----:com.apple.iTunes:label`, or
+// `encodedby` where TagLib's own is `\251enc` -- was kept and written again in
+// TagLib's spelling, so every write doubled such atoms, and one being removed
+// was not. Here only the properties that change are touched: every atom that
+// reads as one is removed, and its new values are written under the
+// file's own free-form spelling where it had one. Returns what could not be
+// mapped to an atom, as setProperties does.
+[[nodiscard]] inline TagLib::PropertyMap set_changed_properties(TagLib::MP4::File& file,
+                                                                const TagLib::PropertyMap& before,
+                                                                const TagLib::PropertyMap& after) {
+    TagLib::PropertyMap unsupported;
+    auto* tag = file.tag();
+    if (tag == nullptr) {
+        return after;
+    }
+    const auto* factory = FreeFormFactory::instance();
+    std::vector<TagLib::String> changed;
+    for (const auto& [property, values] : before) {
+        if (!after.contains(property) || after[property] != values) {
+            changed.push_back(property);
+        }
+    }
+    for (const auto& [property, values] : after) {
+        if (!before.contains(property)) {
+            changed.push_back(property);
+        }
+    }
+    for (const auto& property : changed) {
+        TagLib::String spelled;
+        // A copy: atoms are removed from the tag as it is walked.
+        const auto items = tag->itemMap();
+        for (const auto& [key, item] : items) {
+            // As TagLib's own properties() names an atom: the free-form name
+            // as spelled, capitalised by the property map.
+            const auto read = factory->itemToProperty(key.data(TagLib::String::Latin1), item);
+            if (read.first.upper() != property) {
+                continue;
+            }
+            if (spelled.isEmpty() && key.startsWith("----:")) {
+                spelled = key;
+            }
+            tag->removeItem(key);
+        }
+        if (!after.contains(property) || after[property].isEmpty()) {
+            continue;
+        }
+        const auto [name, item] = factory->itemFromProperty(property, after[property]);
+        if (name.isEmpty()) {
+            unsupported.insert(property, after[property]);
+            continue;
+        }
+        const TagLib::String key{name, TagLib::String::Latin1};
+        tag->setItem(key.startsWith("----:") && !spelled.isEmpty() ? spelled : key, item);
+    }
+    return unsupported;
+}
 
 } // namespace trackknife::metadata::mp4_detail

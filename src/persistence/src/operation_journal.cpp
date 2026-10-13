@@ -31,7 +31,10 @@ constexpr std::size_t maximum_values_per_change = 16'384U;
 constexpr std::size_t maximum_total_values = 100'000U;
 constexpr std::size_t maximum_total_intents = 100'000U;
 constexpr std::size_t maximum_incomplete_records = 10'000U;
-constexpr std::size_t maximum_backup_records = 10'000U;
+// Every write of a session keeps its backup until the next start's
+// maintenance, so a session may leave as many as it wrote files: a bound for
+// memory, not for how much is tagged at once.
+constexpr std::size_t maximum_backup_records = 1'000'000U;
 constexpr std::size_t maximum_artwork_items = 64U;
 constexpr std::size_t maximum_text_bytes = 64U * 1024U * 1024U;
 
@@ -1471,10 +1474,20 @@ SqliteMetadataOperationJournal::load_backup(const core::StableId& id) const {
 core::Result<std::vector<operations::MetadataOperationBackupRecord>>
 SqliteMetadataOperationJournal::load_backups() const {
     std::scoped_lock lock{implementation_->mutex};
-    constexpr auto sql = "SELECT journal_id, state, undo_id, completed_at_unix_seconds, "
-                         "updated_at_unix_seconds, error_code, error_message "
-                         "FROM metadata_operation_backups "
-                         "ORDER BY completed_at_unix_seconds DESC, rowid DESC LIMIT 10001";
+    // Only files that still have a backup -- retained, being undone, or
+    // waiting for reconciliation (states 0, 1 and 4) -- with every record of
+    // theirs, so maintenance knows which is newest. The rest is history: a
+    // record stays for every write ever made, and reading it all made a
+    // library tagged once in full too much for recovery and maintenance.
+    constexpr auto sql =
+        "SELECT b.journal_id, b.state, b.undo_id, b.completed_at_unix_seconds, "
+        "b.updated_at_unix_seconds, b.error_code, b.error_message "
+        "FROM metadata_operation_backups b JOIN operation_journal o ON o.id = b.journal_id "
+        "WHERE o.source_path IN (SELECT live_operation.source_path "
+        "FROM metadata_operation_backups live "
+        "JOIN operation_journal live_operation ON live_operation.id = live.journal_id "
+        "WHERE live.state IN (0, 1, 4)) "
+        "ORDER BY b.completed_at_unix_seconds DESC, b.rowid DESC";
     auto backups =
         load_backup_records(implementation_->database, sql, {}, DamagedEvidence::reconcile);
     if (!backups) {

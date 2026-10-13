@@ -242,7 +242,8 @@ void MusicBrainzClientTest::transportParsesRetryAfter() {
     QCOMPARE(response->body, QByteArray{"busy"});
     QVERIFY(response->retry_after_ms.has_value());
     QVERIFY(*response->retry_after_ms <= 30'000 && *response->retry_after_ms >= 28'000);
-    QVERIFY(request.contains("User-Agent: Trackknife-test/1.0"));
+    // Header names are case-insensitive, and Qt versions spell this one differently.
+    QVERIFY(request.toLower().contains("user-agent: trackknife-test/1.0"));
 }
 
 void MusicBrainzClientTest::successStoresIntoTheCache() {

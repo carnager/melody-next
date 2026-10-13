@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# grep -q stops reading at the first match, and under pipefail the writer
+# then dying of SIGPIPE fails the pipe: a slow writer (a sanitizer build)
+# made that a race. This reads everything.
+matches() { grep "$@" >/dev/null; }
+
 melodyd="$1"
 cli="$2"
 work="$(mktemp -d)"
@@ -85,12 +90,12 @@ PY
 }
 encoded="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' "${work}/music")"
 engine "{\"id\":1,\"method\":\"catalogue.add_root\",\"params\":{\"path\":\"${encoded}\"}}" > /dev/null
-engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished | grep -q job.finished \
+engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished | matches job.finished \
     || fail "the library is scanned"
 
 cli() { "${cli}" --server "${socket}" "$@"; }
 
-cli --help | grep -q "play  album|track WORDS" || fail "--help says how to play an album"
+cli --help | matches "play  album|track WORDS" || fail "--help says how to play an album"
 
 # The library's revision: the same after a scan that finds nothing new,
 # another once a track comes.
@@ -114,7 +119,7 @@ engine '{"id":9,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.fi
 [ "$(cli revision)" != "${second_revision}" ] || fail "and one that went"
 
 # The library, by words and by what is newest.
-cli tracks alpha | grep -q "alpha" || fail "a track is found by its title"
+cli tracks alpha | matches "alpha" || fail "a track is found by its title"
 
 # A query, formatted by the engine with the library's whole row.
 [ "$(cli find alpha --format '%title%|$info(samplerate)|$info(bitspersample)')" = "alpha|44100|16" ] \
@@ -123,7 +128,7 @@ cli tracks alpha | grep -q "alpha" || fail "a track is found by its title"
     || fail "the engine looks names up folded: case, spaces, underscores, hyphens"
 [ "$(cli find 'ALL SORT DESCENDING BY %title%' --format '%title%' | tr '\n' ' ')" = "gamma beta alpha " ] \
     || fail "find keeps the query's order"
-cli find --keys alpha | grep -qP "^.+\t[A-Za-z0-9+/=]+$" || fail "find --keys gives each line its key"
+cli find --keys alpha | matches -P "^.+\t[A-Za-z0-9+/=]+$" || fail "find --keys gives each line its key"
 if cli find 'title IS' 2>"${work}/query.txt"; then
     fail "a query that does not parse is refused"
 fi
@@ -139,10 +144,10 @@ cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)
 cli volume 0 > /dev/null
 [ "$(cli volume)" = "0" ] || fail "the volume is set and read back"
 [ -z "$(cli current)" ] || fail "current prints nothing while nothing plays"
-cli play track alpha 2>/dev/null | grep -q "^playing: .*alpha" || fail "play track plays it"
-cli current | grep -q "alpha" || fail "current names the playing track"
+cli play track alpha 2>/dev/null | matches "^playing: .*alpha" || fail "play track plays it"
+cli current | matches "alpha" || fail "current names the playing track"
 cli current --format '%playback_state%|%title%|$if(%rating%,rated,unrated)|%length%' \
-    | grep -qE "^playing\|[^|]*alpha[^|]*\|unrated\|0:[0-9]{2}$" \
+    | matches -E "^playing\|[^|]*alpha[^|]*\|unrated\|0:[0-9]{2}$" \
     || fail "current formats the track and where playback is, in tkfmt-1"
 [ "$(cli current --format '$info(samplerate)/$info(bitspersample)/$info(channels)')" = "44100/16/2" ] \
     || fail "current has the library's technicals, through \$info"
@@ -152,17 +157,17 @@ if cli current --format '$nosuch(%title%)' 2>"${work}/format.txt"; then
     fail "a format that does not compile is refused"
 fi
 grep -q "unknown format function" "${work}/format.txt" || fail "and says why"
-cli status | grep -q "queue 1" || fail "status shows the queue it replaced"
-cli status | grep -q " / ?" && fail "the library's duration travels with what is queued"
+cli status | matches "queue 1" || fail "status shows the queue it replaced"
+cli status | matches " / ?" && fail "the library's duration travels with what is queued"
 
 # Pause and toggle.
-cli pause | grep -q "^paused:" || fail "pause pauses"
-cli toggle | grep -q "^playing:" || fail "toggle resumes"
+cli pause | matches "^paused:" || fail "pause pauses"
+cli toggle | matches "^playing:" || fail "toggle resumes"
 
 # Added after it, the queue grows and what plays keeps playing.
 cli add track gamma 2>/dev/null > /dev/null
-cli status | grep -q "^playing: .*alpha" || fail "adding leaves what plays alone"
-cli status | grep -q "queue 2" || fail "and appends"
+cli status | matches "^playing: .*alpha" || fail "adding leaves what plays alone"
+cli status | matches "queue 2" || fail "and appends"
 
 # Up Next, first and last.
 cli queue track beta 2>/dev/null > /dev/null
@@ -170,10 +175,10 @@ cli next track gamma 2>/dev/null > /dev/null
 requests="$(engine '{"id":3,"method":"playback.requests"}')"
 [ "$(echo "${requests}" | python3 -c 'import json,sys; print(len(json.loads(sys.stdin.read())["result"]["entries"]))')" = "2" ] \
     || fail "two are asked for in Up Next"
-cli status | grep -q "up next 2" || fail "status counts them"
+cli status | matches "up next 2" || fail "status counts them"
 
 # Skipping plays what was asked first: gamma.
-cli next | grep -q "^playing: .*gamma" || fail "next plays what Up Next has first"
+cli next | matches "^playing: .*gamma" || fail "next plays what Up Next has first"
 
 cli seek 10 > /dev/null
 position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["position_ms"])')"
@@ -181,7 +186,7 @@ position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys
 
 # Ratings for what plays, 1-10 as the engine keeps them; 0 clears.
 [ "$(cli rating)" = "0" ] || fail "an unrated track says 0"
-cli rating 7 | grep -q "^rated 7: .*gamma" || fail "rating rates what plays"
+cli rating 7 | matches "^rated 7: .*gamma" || fail "rating rates what plays"
 [ "$(cli rating)" = "7" ] || fail "rating reads it back"
 [ "$(cli current --format '%rating%')" = "7" ] || fail "current's rating is the same 1-10"
 cli rate 10 > /dev/null || fail "rate is rating by another name"
@@ -196,11 +201,11 @@ done
 
 # The album of what plays has its own rating.
 [ "$(cli albumrating)" = "0" ] || fail "an unrated album says 0"
-cli albumrating 8 | grep -q "^rated 8: " || fail "albumrating rates the album"
+cli albumrating 8 | matches "^rated 8: " || fail "albumrating rates the album"
 [ "$(cli albumrating)" = "8" ] || fail "albumrating reads it back"
 [ "$(cli current --format '%albumrating%')" = "8" ] || fail "current formats the album's rating"
 [ "$(cli rating)" = "10" ] || fail "and leaves the track's own alone"
-cli albumrating 0 | grep -q "^cleared: " || fail "0 clears the album's"
+cli albumrating 0 | matches "^cleared: " || fail "0 clears the album's"
 [ "$(cli albumrating)" = "0" ] || fail "cleared, it says 0"
 
 # No Last.fm account here: love says why and fails.
@@ -263,7 +268,7 @@ done
 ENGINE_SOCKET="${second}" engine \
     "{\"id\":1,\"method\":\"catalogue.add_root\",\"params\":{\"path\":\"${encoded}\"}}" > /dev/null
 ENGINE_SOCKET="${second}" engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' \
-    job.finished | grep -q job.finished || fail "the second library is scanned"
+    job.finished | matches job.finished || fail "the second library is scanned"
 cli2() { "${cli}" --server "${second}" "$@"; }
 cli2 volume 0 > /dev/null
 "${cli}" --server "${socket}" --server "${second}" --json watch --all > "${work}/all.txt" &
@@ -276,27 +281,27 @@ last_all() { tail -1 "${work}/all.txt" | python3 -c '
 import json, sys
 state = json.load(sys.stdin)
 print(state["engine"]["server"], state["status"], (state.get("track") or {}).get("title", ""))'; }
-last_all | grep -q "^${socket} playing .*gamma" || fail "watch --all starts on the engine that plays"
+last_all | matches "^${socket} playing .*gamma" || fail "watch --all starts on the engine that plays"
 cli2 play track alpha 2>/dev/null > /dev/null
 for _ in $(seq 1 100); do
-    last_all | grep -q "^${second} playing .*alpha" && break
+    last_all | matches "^${second} playing .*alpha" && break
     sleep 0.05
 done
-last_all | grep -q "^${second} playing .*alpha" || fail "it follows the engine that started last"
+last_all | matches "^${second} playing .*alpha" || fail "it follows the engine that started last"
 cli2 stop > /dev/null
 for _ in $(seq 1 100); do
-    last_all | grep -q "^${socket} playing" && break
+    last_all | matches "^${socket} playing" && break
     sleep 0.05
 done
-last_all | grep -q "^${socket} playing .*gamma" || fail "and back to the one still playing"
+last_all | matches "^${socket} playing .*gamma" || fail "and back to the one still playing"
 kill "${watch_pid}" 2>/dev/null || true
 wait "${watch_pid}" 2>/dev/null || true
 kill "${second_pid}" 2>/dev/null || true
 wait "${second_pid}" 2>/dev/null || true
 second_pid=""
 
-cli outputs | grep -q "^\*" || fail "outputs marks the one in use"
-cli stop | grep -q "^stopped:" || fail "stop stops"
+cli outputs | matches "^\*" || fail "outputs marks the one in use"
+cli stop | matches "^stopped:" || fail "stop stops"
 
 # Only the fields asked for, and the key; every track without words.
 cli --fields title --json tracks | python3 -c '
@@ -339,13 +344,13 @@ entry="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 engine "{\"id\":1,\"method\":\"playback.replace_queue\",\"params\":{\"entries\":[{\"entry\":\"${entry}\",\"path\":\"${bare}\"}]}}" > /dev/null
 engine "{\"id\":2,\"method\":\"playback.play\",\"params\":{\"entry\":\"${entry}\"}}" > /dev/null
 library_says="$(cli tracks beta | head -1)"
-cli status | head -1 | grep -qF "${library_says}" \
+cli status | head -1 | matches -F "${library_says}" \
     || fail "a bare entry is shown as the library knows it (${library_says}), not by its name"
 cli stop > /dev/null
 
 # Chosen by the engine: random tracks, as many as asked, each once; and a
 # whole album.
-cli play random tracks 2 2>/dev/null | grep -q "^playing:" || fail "play random tracks plays"
+cli play random tracks 2 2>/dev/null | matches "^playing:" || fail "play random tracks plays"
 cli --json status | python3 -c '
 import json, sys
 assert json.load(sys.stdin)["queue_size"] == 2' || fail "as many as asked for"
@@ -353,7 +358,7 @@ engine '{"id":11,"method":"playback.queue"}' | python3 -c '
 import json, sys
 paths = [entry["path"] for entry in json.load(sys.stdin)["result"]["entries"]]
 assert len(set(paths)) == 2, paths' || fail "each track once"
-cli play random album 2>/dev/null | grep -q "^playing:" || fail "play random album plays"
+cli play random album 2>/dev/null | matches "^playing:" || fail "play random album plays"
 album_size="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
 cli --json albums | python3 -c "
 import json, sys
@@ -372,8 +377,8 @@ engine "{\"id\":21,\"method\":\"list.save\",\"params\":{\"name\":\"Road work\",\
 cli lists > "${work}/lists.txt" || fail "lists lists"
 grep -q "^Road trip (2 tracks)$" "${work}/lists.txt" || fail "a saved list, by name and size"
 grep -q "^Road work (1 tracks, working)$" "${work}/lists.txt" || fail "a working list says so"
-cli --keys lists | grep -qP "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
-cli play list trip 2>/dev/null | grep -q "^playing:" || fail "play list plays one by a word of its name"
+cli --keys lists | matches -P "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
+cli play list trip 2>/dev/null | matches "^playing:" || fail "play list plays one by a word of its name"
 cli --json status | python3 -c '
 import json, sys
 assert json.load(sys.stdin)["queue_size"] == 2' || fail "the whole list is the queue"

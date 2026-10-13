@@ -187,8 +187,10 @@ int main(int argc, char* argv[]) {
 
     const auto quick = application.arguments().contains(QStringLiteral("--quick"));
     // Measured and reported, not judged: a sanitizer build is several times
-    // slower, and its timings say nothing about the budgets.
-    const auto report_only = application.arguments().contains(QStringLiteral("--report-only"));
+    // slower, and a shared CI machine's timings, taken once, are noise. Its
+    // timings say nothing about the budgets, which hold on real hardware.
+    const auto report_only = application.arguments().contains(QStringLiteral("--report-only")) ||
+                             qEnvironmentVariableIsSet("TRACKKNIFE_BENCHMARK_REPORT_ONLY");
     const auto row_count = requestedRowCount(application.arguments(), quick);
     const auto sample_count = quick ? 12 : 120;
 

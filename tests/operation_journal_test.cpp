@@ -2,9 +2,11 @@
 
 #include "trackknife/persistence/operation_journal.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -240,10 +242,10 @@ void journal_round_trips_and_guards_state_transitions() {
                                                             .failure = std::nullopt})
             .has_value(),
         "a completed undo must retain its idempotency identity");
+    // Undone, it is history: its record stays, but the list of what still has
+    // a backup leaves it out.
     const auto backups = journal.load_backups();
-    require(backups && backups->size() == 1U && backups->front().state == BackupState::undone &&
-                backups->front().undo_id == undo_id,
-            "backup lifecycle evidence must load in deterministic history order");
+    require(backups && backups->empty(), "a file whose backups are all undone has none to keep");
 
     auto reopened = trackknife::persistence::SqliteMetadataOperationJournal::open(database.path());
     require(reopened.has_value(), "operation journal must reopen after a clean close");
@@ -255,6 +257,77 @@ void journal_round_trips_and_guards_state_transitions() {
     require(durable_backup && *durable_backup && (**durable_backup).state == BackupState::undone &&
                 (**durable_backup).undo_id == undo_id,
             "the backup lifecycle and undo identity must survive reopening");
+}
+
+// A file written and its write completed: a retained backup.
+[[nodiscard]] trackknife::core::StableId
+completed_write(trackknife::persistence::SqliteMetadataOperationJournal& journal,
+                const std::string& path) {
+    auto record = planned_record();
+    record.source_raw_path = path;
+    require(journal.create(record).has_value(), "a write is planned");
+    const auto prepared = revision(30U);
+    const auto published = revision(50U);
+    for (const auto& [from, to] :
+         {std::pair{State::planned, State::prepared}, std::pair{State::prepared, State::published},
+          std::pair{State::published, State::complete}}) {
+        require(journal
+                    .transition(record.id,
+                                Transition{.expected_state = from,
+                                           .state = to,
+                                           .prepared_revision = prepared,
+                                           .published_revision = to == State::prepared
+                                                                     ? std::nullopt
+                                                                     : std::optional{published},
+                                           .failure = std::nullopt})
+                    .has_value(),
+                "a write completes");
+    }
+    return record.id;
+}
+
+void release(trackknife::persistence::SqliteMetadataOperationJournal& journal,
+             const trackknife::core::StableId& id) {
+    require(journal
+                .transition_backup(id, BackupTransition{.expected_state = BackupState::retained,
+                                                        .state = BackupState::released,
+                                                        .undo_id = std::nullopt,
+                                                        .failure = std::nullopt})
+                .has_value(),
+            "a backup is released");
+}
+
+// Recovery and maintenance read the files that still have a backup, with all
+// their records, newest first -- not the history of every write ever made. A
+// library tagged in full left more than the ten thousand records they would
+// read, and neither could run again.
+void only_files_with_a_backup_are_loaded() {
+    TemporaryDatabase database;
+    auto opened = trackknife::persistence::SqliteMetadataOperationJournal::open(database.path());
+    require(opened.has_value(), "operation journal opens");
+    auto journal = std::move(*opened);
+
+    const auto first = completed_write(journal, "music/kept.flac");
+    release(journal, first);
+    const auto second = completed_write(journal, "music/kept.flac");
+    release(journal, completed_write(journal, "music/history.flac"));
+    for (std::size_t index = 0U; index < 10'050U; ++index) {
+        static_cast<void>(completed_write(journal, "music/many-" + std::to_string(index)));
+    }
+
+    const auto backups = journal.load_backups();
+    require(backups.has_value(), "more than ten thousand retained backups load");
+    require(backups->size() == 10'052U, "every record of a file with a backup, and no other");
+    require(
+        !std::ranges::contains(*backups, std::string{"music/history.flac"},
+                               [](const auto& backup) { return backup.operation.source_raw_path; }),
+        "a file whose backups are all released is history");
+    const auto kept =
+        std::ranges::find(*backups, std::string{"music/kept.flac"},
+                          [](const auto& backup) { return backup.operation.source_raw_path; });
+    require(kept != backups->end() && kept->operation.id == second &&
+                std::next(kept) != backups->end() && std::next(kept)->operation.id == first,
+            "a file's records come newest first, its released one too");
 }
 
 void artwork_evidence_survives_reopen_without_image_payloads() {
@@ -310,5 +383,6 @@ void artwork_evidence_survives_reopen_without_image_payloads() {
 int main() {
     journal_round_trips_and_guards_state_transitions();
     artwork_evidence_survives_reopen_without_image_payloads();
+    only_files_with_a_backup_are_loaded();
     return EXIT_SUCCESS;
 }

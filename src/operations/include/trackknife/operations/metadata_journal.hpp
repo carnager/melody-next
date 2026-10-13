@@ -173,6 +173,9 @@ class MetadataOperationJournal {
     }
     [[nodiscard]] virtual core::Result<std::optional<MetadataOperationBackupRecord>>
     load_backup(const core::StableId& id) const = 0;
+    // Newest first: every record of each file that still has a backup
+    // (retained, undoing, needing reconciliation). Records of files whose
+    // backups are all released or undone may be left out.
     [[nodiscard]] virtual core::Result<std::vector<MetadataOperationBackupRecord>>
     load_backups() const = 0;
     [[nodiscard]] virtual core::Result<void>

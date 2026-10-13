@@ -91,6 +91,11 @@ struct LocalEngineSharing final {
 // so without this it would go on answering in yesterday's terms.
 [[nodiscard]] bool localEngineOutdated(const LocalEngine& engine);
 
+// Whether a process still runs. One that has exited but not yet been reaped
+// is not: the engine is started detached, so it is reaped by whatever
+// adopted it, and in a container that may be a PID 1 that never reaps.
+[[nodiscard]] bool processRunning(pid_t pid);
+
 // The processes holding a lock file open: the engine, for its engine.lock.
 [[nodiscard]] std::vector<pid_t> lockHolders(const std::filesystem::path& lock);
 

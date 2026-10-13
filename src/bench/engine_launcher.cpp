@@ -18,11 +18,15 @@
 #include <signal.h>
 #ifdef __APPLE__
 #include <libproc.h>
+#include <sys/proc.h>
 #endif
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstdlib>
+#include <fstream>
+#include <string>
 #include <thread>
 
 namespace trackknife::bench {
@@ -275,9 +279,7 @@ core::Result<void> stopLocalEngine(const LocalEngine& engine) {
     }
     // SIGTERM saves the queue first; it comes back paused.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    const auto alive = [&holders] {
-        return std::ranges::any_of(holders, [](const pid_t pid) { return ::kill(pid, 0) == 0; });
-    };
+    const auto alive = [&holders] { return std::ranges::any_of(holders, processRunning); };
     while (alive() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
@@ -327,6 +329,31 @@ bool localEngineOutdated(const LocalEngine& engine) {
         }
     }
     return false;
+}
+
+bool processRunning(const pid_t pid) {
+    if (::kill(pid, 0) != 0 && errno != EPERM) {
+        return false;
+    }
+#ifdef __APPLE__
+    proc_bsdinfo info{};
+    if (::proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) ==
+        static_cast<int>(sizeof(info))) {
+        return info.pbi_status != SZOMB;
+    }
+    return true;
+#else
+    // The state follows the command name, which is in parentheses and may
+    // itself contain them: "1234 (melodyd) Z ...".
+    std::ifstream stat{"/proc/" + std::to_string(pid) + "/stat"};
+    std::string line;
+    if (!std::getline(stat, line)) {
+        return true;
+    }
+    const auto name_end = line.rfind(')');
+    return name_end == std::string::npos || name_end + 2 >= line.size() ||
+           line[name_end + 2] != 'Z';
+#endif
 }
 
 std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
@@ -406,7 +433,7 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
         // An engine that exited has said why in its log; waiting on would
         // only delay saying so. Another engine winning a start race exits
         // too, and is then the one that answers.
-        if (pid > 0 && ::kill(static_cast<pid_t>(pid), 0) != 0) {
+        if (pid > 0 && !processRunning(static_cast<pid_t>(pid))) {
             if (auto other = protocol::Client::connect(endpoint)) {
                 return other;
             }

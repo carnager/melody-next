@@ -17,6 +17,7 @@
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
+#include "id3_involved_people_detail.hpp"
 #include "mp4_item_factory_detail.hpp"
 
 #include <tfile.h>
@@ -352,7 +353,14 @@ verify_text_result(const std::string_view format_label, const MetadataDocument& 
                 .canonical_name = identity.canonical_name, .values = intent.values};
         }
     }
-    if (before.unsupported_native_objects != after.unsupported_native_objects) {
+    // The same objects, in any order: none lost, none gained. Order is not
+    // metadata, and an ID3 frame TagLib cannot rebuild is put back last.
+    const auto objects = [](const MetadataDocument& document) {
+        auto identities = document.unsupported_native_objects;
+        std::ranges::sort(identities, {}, &NativeObjectIdentity::identity);
+        return identities;
+    };
+    if (objects(before) != objects(after)) {
         return std::unexpected(writer_error(core::ErrorCode::conflict,
                                             "prepared " + std::string{format_label} +
                                                 " changed unsupported native metadata identities",
@@ -503,6 +511,11 @@ template <typename File>
     const auto unsupported = [&] {
         if constexpr (std::is_same_v<File, TagLib::MP4::File>) {
             return mp4_detail::set_changed_properties(file, before, properties);
+        } else if constexpr (std::is_same_v<File, TagLib::MPEG::File>) {
+            const auto kept = id3_detail::unexpressed_involved_people(file);
+            auto rejected = file.setProperties(properties);
+            id3_detail::restore_involved_people(file, kept);
+            return rejected;
         } else {
             return file.setProperties(properties);
         }

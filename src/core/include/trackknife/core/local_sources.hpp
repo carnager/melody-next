@@ -83,6 +83,11 @@ struct LocalSourceRevision {
 // Best effort: where a filesystem refuses to set times -- some sshfs and
 // FUSE mounts do -- the file keeps the time it has, as before.
 void settle_written_file_time(const std::string& raw_path) noexcept;
+// The same for a file written in place, where size and inode stay as they
+// were: the time set is always later than `before`'s, so the write -- and
+// one made in the two seconds after it -- is still seen as a change.
+void settle_rewritten_file_time(const std::string& raw_path,
+                                const LocalSourceRevision& before) noexcept;
 
 // ADR-0249: whether `after` is `before` after this process renamed the file
 // to `raw_path`. Equal, or -- on a filesystem whose renames give a file a new

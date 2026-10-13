@@ -270,6 +270,20 @@ void settle_written_file_time(const std::string& raw_path) noexcept {
     static_cast<void>(::utimensat(AT_FDCWD, raw_path.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
 }
 
+void settle_rewritten_file_time(const std::string& raw_path,
+                                const LocalSourceRevision& before) noexcept {
+    struct timespec now{};
+    ::clock_gettime(CLOCK_REALTIME, &now);
+    auto seconds = now.tv_sec - (now.tv_sec % 2);
+    if (seconds <= before.modification_time_seconds) {
+        const auto previous = before.modification_time_seconds;
+        seconds = previous - (previous % 2) + 2;
+    }
+    const struct timespec settled{.tv_sec = seconds, .tv_nsec = 0};
+    const std::array times{settled, settled};
+    static_cast<void>(::utimensat(AT_FDCWD, raw_path.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
+}
+
 namespace {
 
 std::atomic<bool> renumbering_simulated{false};

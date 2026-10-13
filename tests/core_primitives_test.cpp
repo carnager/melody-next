@@ -361,6 +361,27 @@ void listenAccountingCreditsRealListeningOnly() {
     CHECK(credits == 2); // Clips of thirty seconds or less never count.
 }
 
+// A file written in place keeps its size and inode, so its time is all that
+// says it changed: two rewrites within the same two seconds must still differ.
+void rewrittenFilesAlwaysMoveForwardInTime() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("trackknife-rewrite-" + trackknife::core::StableId::random().to_string());
+    std::ofstream{path} << "bytes";
+    const auto& raw = path.native();
+    auto previous = trackknife::core::observe_local_source_revision(raw);
+    CHECK(previous.has_value());
+    for (int rewrite = 0; rewrite < 3 && previous; ++rewrite) {
+        trackknife::core::settle_rewritten_file_time(raw, *previous);
+        const auto now = trackknife::core::observe_local_source_revision(raw);
+        CHECK(now.has_value());
+        CHECK(now && now->modification_time_seconds > previous->modification_time_seconds);
+        CHECK(now && now->modification_time_seconds % 2 == 0 &&
+              now->modification_time_nanoseconds == 0);
+        previous = now;
+    }
+    std::filesystem::remove(path);
+}
+
 int main() {
     stableIdsRoundTrip();
     cancellationIsSharedAndMonotonic();
@@ -373,5 +394,6 @@ int main() {
     containedSourceRevalidationFollowsSymlinksAndRejectsEscapes();
     noReplacePublicationLaddersAndRefusesOccupiedTargets();
     listenAccountingCreditsRealListeningOnly();
+    rewrittenFilesAlwaysMoveForwardInTime();
     return failures == 0 ? 0 : 1;
 }

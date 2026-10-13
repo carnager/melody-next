@@ -1201,7 +1201,7 @@ void LocalListModel::setArtwork(const QString& key, QImage image) {
     if (image.isNull()) {
         artwork_.remove(key);
     } else {
-        artwork_.insert(key, std::move(image));
+        artwork_.insert(key, image); // Implicitly shared: a copy is a reference.
     }
     if (!rows_.empty()) {
         emit dataChanged(index(0, local_artwork_column),

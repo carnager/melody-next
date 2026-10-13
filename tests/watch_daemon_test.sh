@@ -134,10 +134,19 @@ expect "a folder moved in is read" "Back/CD1/three.wav" "Second/two.wav"
 # And then it is quiet. The engine reading a file used to open it for
 # writing, which inotify reports as a change when it is closed: the watcher
 # sent it again, the engine read it again, and round it went.
-sent="$(grep -c "sent " "${work}/watch.log" || true)"
-sleep 2
-[ "$(grep -c "sent " "${work}/watch.log" || true)" = "${sent}" ] ||
-    fail "the engine reading a file is not taken for the file changing"
+# A last batch from the move may still be on its way, so this asks for it to
+# settle -- two seconds without a send -- which the loop never did.
+sends() { grep -c "sent " "${work}/watch.log" || true; }
+settled=no
+for _ in 1 2 3 4 5; do
+    sent="$(sends)"
+    sleep 2
+    if [ "$(sends)" = "${sent}" ]; then
+        settled=yes
+        break
+    fi
+done
+[ "${settled}" = yes ] || fail "the engine reading a file is not taken for the file changing"
 
 # A wrong password is said, and the watcher keeps what it has for later.
 kill "${watch_pid}"; wait "${watch_pid}" 2>/dev/null || true

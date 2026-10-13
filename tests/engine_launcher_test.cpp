@@ -9,6 +9,7 @@
 #include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 
+#include <QFile>
 #include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
@@ -44,6 +45,12 @@ namespace {
 [[nodiscard]] pid_t enginePid(const LocalEngine& engine) {
     const auto holders = lockHolders(engine.state / "engine.lock");
     return holders.empty() ? 0 : holders.front();
+}
+
+// What the engine said, for a failure that needs it.
+[[nodiscard]] QByteArray engineLog(const LocalEngine& engine) {
+    QFile log{QString::fromStdString((engine.state / "melodyd.log").string())};
+    return log.open(QIODevice::ReadOnly) ? log.readAll() : QByteArray{"(no log)"};
 }
 
 void stop(const LocalEngine& engine) {
@@ -89,7 +96,7 @@ void EngineLauncherTest::startsAnEngineAndFindsItAgain() {
     QVERIFY2(first.has_value(), first ? "" : first.error().message.c_str());
     QVERIFY((*first)->call("catalogue.roots").has_value());
     const auto pid = enginePid(scratch.engine);
-    QVERIFY(pid > 0);
+    QVERIFY2(pid > 0, engineLog(scratch.engine).constData());
     // Its own database, the one the workspace would have used.
     QVERIFY(std::filesystem::exists(scratch.engine.state / "lists.sqlite"));
     // The client going away leaves the engine running; the next finds it.
@@ -108,7 +115,7 @@ void EngineLauncherTest::startsItAgainAfterItStops() {
     QVERIFY(!processRunning(pid));
     auto again = connectLocalEngine(scratch.engine);
     QVERIFY(again.has_value());
-    QVERIFY(enginePid(scratch.engine) > 0);
+    QVERIFY2(enginePid(scratch.engine) > 0, engineLog(scratch.engine).constData());
     QVERIFY(enginePid(scratch.engine) != pid);
 }
 

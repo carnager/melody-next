@@ -8,3 +8,8 @@ leak:FcFontRenderPrepare
 # factory/cache allocations even after pw_deinit(). Adapter-owned streams,
 # contexts, and loops are still destroyed normally.
 leak:pw_context_load_module
+
+# The same, where the plugins are built without frame pointers (Debian): the
+# stack ends in the plugin itself. PIPEWIRE_DLCLOSE=false (the asan test
+# preset) keeps it loaded so the frame has a module name to match.
+leak:libspa-

@@ -73,6 +73,19 @@ class Context final : public titleformat::EvaluationContext {
   private:
     const Entry& entry_;
 };
+auto identity(const Entry& entry) {
+    return std::tuple{std::string_view{entry.raw_path},
+                      entry.logical_reference
+                          ? std::optional{std::string_view{*entry.logical_reference}}
+                          : std::nullopt,
+                      entry.selection.stream_index,
+                      entry.selection.subsong_index,
+                      entry.segment.has_value(),
+                      entry.segment ? entry.segment->start_sample : 0,
+                      entry.segment ? entry.segment->end_sample : std::nullopt};
+}
+} // namespace
+
 // Compare ASCII digit runs numerically without integer overflow. Equal numeric
 // runs (including leading zeros) preserve stability; other text is byte ordered
 // after repository-owned Unicode simple lowercase mapping.
@@ -106,19 +119,6 @@ bool natural_less(std::string_view left, std::string_view right) {
     }
     return a == left.size() && b != right.size();
 }
-
-auto identity(const Entry& entry) {
-    return std::tuple{std::string_view{entry.raw_path},
-                      entry.logical_reference
-                          ? std::optional{std::string_view{*entry.logical_reference}}
-                          : std::nullopt,
-                      entry.selection.stream_index,
-                      entry.selection.subsong_index,
-                      entry.segment.has_value(),
-                      entry.segment ? entry.segment->start_sample : 0,
-                      entry.segment ? entry.segment->end_sample : std::nullopt};
-}
-} // namespace
 
 core::Result<EditPlan> plan_reverse(std::size_t rows, const core::CancellationToken& cancellation) {
     if (cancellation.is_cancellation_requested())

@@ -264,6 +264,14 @@ target_link_libraries(
 )
 add_test(NAME list-edits COMMAND trackknife_list_edits_tests)
 
+# ADR-0282: list views -- columns and groups of tkfmt-1 expressions.
+add_executable(trackknife_list_view_tests list_view_test.cpp)
+target_link_libraries(
+    trackknife_list_view_tests
+    PRIVATE Trackknife::Lists trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME list-view COMMAND trackknife_list_view_tests)
+
 add_executable(trackknife_dynamic_selection_tests dynamic_selection_test.cpp)
 target_link_libraries(
     trackknife_dynamic_selection_tests

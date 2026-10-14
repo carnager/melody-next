@@ -47,6 +47,12 @@ struct ViewColumn {
     // ADR-0283: how its cell is drawn, as a style expression says (below);
     // empty, as its row is.
     std::string style;
+    // ADR-0284: what its cell says beneath, smaller, in a view of rows of
+    // more than one line -- any column, built-in or not; empty, nothing.
+    std::string second_line;
+    // How wide it starts, in pixels, until a list is given a width of its
+    // own; 0, as wide as such a column usually is.
+    int width{0};
 
     [[nodiscard]] bool builtin() const { return is_builtin_column(id); }
     friend bool operator==(const ViewColumn&, const ViewColumn&) = default;
@@ -74,6 +80,9 @@ struct ListView {
     // In their order; every built-in column is here, shown or not.
     std::vector<ViewColumn> columns;
     bool builtin{false};
+    // ADR-0284: how many lines each row has, 1-3: its cells' first line, and
+    // their second lines beneath.
+    int row_lines{1};
 
     friend bool operator==(const ListView&, const ListView&) = default;
 };
@@ -81,6 +90,10 @@ struct ListView {
 // The shipped views: albums with side artwork, and plain columns.
 inline constexpr std::string_view albums_beside_view_id = "albums-side-artwork";
 inline constexpr std::string_view columns_view_id = "plain-columns";
+// ADR-0284: tracks in two lines -- the title with its artist and album
+// beneath, the year with its genre, the length with its format, the rating
+// with how often it played.
+inline constexpr std::string_view two_line_view_id = "two-line-tracks";
 [[nodiscard]] const std::vector<ListView>& shipped_list_views();
 [[nodiscard]] const ListView* shipped_list_view(std::string_view id);
 // A view once shipped and since retired -- header artwork, the compact
@@ -207,6 +220,11 @@ class CompiledListView final {
     // field in an expression, or a history column shown -- so the list's
     // history is fetched before its rows are evaluated.
     [[nodiscard]] bool reads_history() const noexcept { return reads_history_; }
+    // ADR-0284: the columns with a second line, built-in or not, in the
+    // view's order -- EvaluatedRow::second_lines holds theirs so.
+    [[nodiscard]] const std::vector<std::string>& second_line_columns() const noexcept {
+        return second_line_ids_;
+    }
 
   private:
     friend struct ListViewEvaluator;
@@ -221,6 +239,8 @@ class CompiledListView final {
     std::optional<titleformat::Program> subgroup_label_;
     std::optional<titleformat::Program> row_style_;
     std::vector<std::optional<titleformat::Program>> cell_styles_;
+    std::vector<std::string> second_line_ids_;
+    std::vector<titleformat::Program> second_lines_;
     bool reads_history_{false};
 };
 
@@ -232,12 +252,21 @@ struct EvaluatedRow {
     // (empty where it has no style expression).
     std::string row_style;
     std::vector<std::string> cell_styles;
+    // ADR-0284: each column's second line, by second_line_columns() order.
+    std::vector<std::string> second_lines;
     // An expression grouping's.
     std::string group_key;
     std::string subgroup_key;
     std::string subgroup_label;
     friend bool operator==(const EvaluatedRow&, const EvaluatedRow&) = default;
 };
+
+// One expression of a view, on one row, as an editor shows what it gives:
+// a header's with group_tracks and group_length as `tracks` and
+// `length_ms` say. The error when it does not compile.
+[[nodiscard]] core::Result<std::string>
+evaluate_view_expression(std::string_view source, titleformat::FormatContextKind context,
+                         const ViewRow& row, std::size_t tracks = 1U, std::int64_t length_ms = 0);
 
 // Evaluates rows; an expression that fails leaves its cell empty -- a list
 // is not refused for one odd file.

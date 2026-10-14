@@ -434,6 +434,7 @@ class BenchMainWindowTest final : public QObject {
     void listViewEditorChecksAndSavesACopy();
     void listViewsReadListeningHistory();
     void groupsFoldToTheirHeaders();
+    void rowsHaveMoreLines();
     void listLayoutsFromBeforeViewsMigrate();
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
@@ -15698,7 +15699,9 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
                                 .sort = {},
                                 .alignment = lists::ColumnAlignment::right,
                                 .expands = false,
-                                .style = {}});
+                                .style = {},
+                                .second_line = {},
+                                .width = 0});
     by_label.grouping = lists::ViewGrouping::expression;
     by_label.group_key = "%label%";
     by_label.group_title = "%label%";
@@ -15855,7 +15858,9 @@ void BenchMainWindowTest::listViewsReadListeningHistory() {
                              .sort = {},
                              .alignment = lists::ColumnAlignment::left,
                              .expands = false,
-                             .style = {}});
+                             .style = {},
+                             .second_line = {},
+                             .width = 0});
     QVERIFY(saveCustomListViews({plays}).has_value());
     BenchMainWindow window;
     window.show();
@@ -15954,6 +15959,76 @@ void BenchMainWindowTest::groupsFoldToTheirHeaders() {
     }
 }
 
+// ADR-0284: a view of two-line rows -- the title's artist and album beneath
+// it -- draws every row taller by a line, grouped or not.
+void BenchMainWindowTest::rowsHaveMoreLines() {
+    auto two_lines = *lists::shipped_list_view(lists::columns_view_id);
+    two_lines.id = "view-two-lines";
+    two_lines.name = "Two lines";
+    two_lines.builtin = false;
+    two_lines.row_lines = 2;
+    std::ranges::find(two_lines.columns, std::string{"title"}, &lists::ViewColumn::id)
+        ->second_line = "%artist% · %album%";
+    auto grouped = two_lines;
+    grouped.id = "view-two-lines-albums";
+    grouped.name = "Two lines, albums";
+    grouped.grouping = lists::ViewGrouping::album;
+    grouped.artwork = lists::ViewArtwork::beside;
+    QVERIFY(saveCustomListViews({two_lines, grouped}).has_value());
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    LocalTrackRow first;
+    first.raw_path = "/music/one.flac";
+    first.title = "One";
+    first.artist = "Air";
+    first.album = "Moon Safari";
+    first.probed = true;
+    first.rating_hash = "rating-one";
+    auto second = first;
+    second.raw_path = "/music/two.flac";
+    second.title = "Two";
+    second.rating_hash = "rating-two";
+    model->appendRows({first, second});
+    window.chooseListView(QStringLiteral("view-two-lines"));
+    const auto tall = ui::track_row_height + ui::track_second_line_height;
+    QTRY_COMPARE(view->rowHeight(1), tall);
+    QCOMPARE(view->property(ui::track_row_lines_property).toInt(), 2);
+    QVERIFY(qobject_cast<ui::TrackLinesDelegate*>(view->itemDelegate()) != nullptr);
+    QTRY_COMPARE(model->index(0, local_title_column).data(ui::track_second_line_role).toString(),
+                 QStringLiteral("Air · Moon Safari"));
+    QCOMPARE(model->index(0, local_length_column).data(ui::track_second_line_role).toString(),
+             QString{});
+    // A rating coming later evaluates its row again, and the second lines of
+    // built-in columns are drawn anew though the view has no columns of its
+    // own.
+    QSignalSpy redrawn{model, &QAbstractItemModel::dataChanged};
+    model->applyRatings({{QStringLiteral("rating-one"), 8U}});
+    QTRY_VERIFY(std::ranges::any_of(redrawn, [](const QList<QVariant>& signal) {
+        return signal.at(0).toModelIndex().row() == 0 &&
+               signal.at(0).toModelIndex().column() <= local_title_column &&
+               signal.at(2).value<QList<int>>().contains(ui::track_second_line_role);
+    }));
+    QCOMPARE(model->index(0, local_title_column).data(ui::track_second_line_role).toString(),
+             QStringLiteral("Air · Moon Safari"));
+    // Grouped, the header above the first row, every row a line taller.
+    window.chooseListView(QStringLiteral("view-two-lines-albums"));
+    QTRY_VERIFY(view->albumGroupingEnabled());
+    QTRY_COMPARE(view->rowHeight(1), tall);
+    QVERIFY(view->rowHeight(0) >= tall + ui::QueueItemDelegate::album_header_height);
+    // Covers beside the rows: the cover column is the view's artwork, shown
+    // though this copy of plain columns had it hidden.
+    QCOMPARE(view->albumArtworkColumn(), local_artwork_column);
+    QVERIFY(!view->isColumnHidden(local_artwork_column));
+    // And back to one line.
+    window.chooseListView(QStringLiteral("plain-columns"));
+    QTRY_COMPARE(view->rowHeight(1), ui::track_row_height);
+    QVERIFY(window.close());
+}
+
 // ADR-0282: the editor shows an expression's error and will not save the
 // view until it is right; a shipped view is edited as a copy, which the list
 // it was opened from is then drawn by.
@@ -15964,27 +16039,65 @@ void BenchMainWindowTest::listViewEditorChecksAndSavesACopy() {
     QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(static_cast<QTableView*>(tabs->currentWidget())->model());
+    LocalTrackRow first;
+    first.raw_path = "/music/one.flac";
+    first.title = "La Femme d'Argent";
+    first.artist = "Air";
+    first.album = "Moon Safari";
+    first.probed = true;
+    auto second = first;
+    second.raw_path = "/music/two.flac";
+    second.title = "Sexy Boy";
+    model->appendRows({first, second});
     window.chooseListView(QStringLiteral("plain-columns"));
     window.editListView(false);
     ListViewDialog* dialog = nullptr;
     QTRY_VERIFY((dialog = window.findChild<ListViewDialog*>()) != nullptr);
     auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("bench-list-view-name"));
     QCOMPARE(name->text(), QStringLiteral("Plain columns (copy)"));
-    auto* columns = dialog->findChild<QTableWidget*>(QStringLiteral("bench-list-view-columns"));
+    auto* columns = dialog->findChild<QListWidget*>(QStringLiteral("bench-list-view-columns"));
     auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-list-view-add-column"));
     auto* buttons = dialog->findChild<QDialogButtonBox*>();
     auto* save = buttons->button(QDialogButtonBox::Save);
     QVERIFY(save->isEnabled());
+    // The title is chosen first: a built-in column, only its second line the
+    // view's.
+    QCOMPARE(columns->currentItem()->text(), QStringLiteral("Title"));
+    const auto type = [](QLineEdit* field, const QString& value) {
+        field->setText(value);
+        emit field->textEdited(value);
+    };
+    const auto field = [dialog](const char* object) {
+        return dialog->findChild<QLineEdit*>(QString::fromLatin1(object));
+    };
+    const auto note = [dialog](const char* object) {
+        return dialog->findChild<QLabel*>(QString::fromLatin1(object) + QStringLiteral("-note"))
+            ->text();
+    };
     add->click();
-    const auto added = columns->rowCount() - 1;
-    columns->item(added, 2)->setText(QStringLiteral("$if(%genre%"));
+    QCOMPARE(columns->currentRow(), columns->count() - 1);
+    auto* display = field("bench-list-view-column-display");
+    QVERIFY(display->isVisible());
+    // Beneath an expression, what it gives for the list's first track.
+    type(display, QStringLiteral("%artist% · %title%"));
+    QCOMPARE(note("bench-list-view-column-display"), QStringLiteral("→ Air · La Femme d'Argent"));
+    type(display, QStringLiteral("$if(%genre%"));
     QVERIFY(!save->isEnabled());
-    QVERIFY(!columns->item(added, 2)->toolTip().isEmpty());
+    QVERIFY(!note("bench-list-view-column-display").startsWith(QStringLiteral("→")));
     auto* problems = dialog->findChild<QLabel*>(QStringLiteral("bench-list-view-problems"));
     QVERIFY(problems->isVisible());
-    columns->item(added, 1)->setText(QStringLiteral("Codec"));
-    columns->item(added, 2)->setText(QStringLiteral("$info(codec)"));
+    QVERIFY(problems->text().contains(QStringLiteral("shows")));
+    type(field("bench-list-view-column-title"), QStringLiteral("Codec"));
+    QCOMPARE(columns->currentItem()->text(), QStringLiteral("Codec"));
+    type(display, QStringLiteral("$info(codec)"));
     QVERIFY(save->isEnabled());
+    QVERIFY(problems->isHidden());
+    // The preview draws the view as edited.
+    auto* preview = dialog->findChild<QTableView*>(QStringLiteral("bench-list-view-preview"));
+    QTRY_COMPARE(preview->model()->columnCount(), local_column_count + 1);
+    QCOMPARE(preview->model()->headerData(local_column_count, Qt::Horizontal).toString(),
+             QStringLiteral("Codec"));
+    QCOMPARE(preview->model()->rowCount(), 2);
     save->click();
     QTRY_VERIFY(window.findChild<ListViewDialog*>() == nullptr);
     const auto bound = window.currentListTab()->view_layout.view;

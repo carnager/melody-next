@@ -706,8 +706,10 @@ class Workspace final : public QObject {
     // ADR-0282: a listen the engine recorded: its lists' play counts of
     // the file are asked for again.
     void adoptListen(const EngineKey& engine, const std::string& raw_path);
-    // The listening history a list's view reads, asked of its engine.
+    // The listening history a list's view reads, asked of its engine --
+    // a tab's, or one drawn from its rows elsewhere (the view editor's).
     void loadListHistory(ListTab& tab);
+    void loadListHistory(LocalListModel& model, const EngineKey& engine);
     void adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                             const std::vector<std::string>& albums, bool everything);
     // ADR-0268: a list's rows whose files are not there, asked of its engine

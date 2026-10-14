@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QRegularExpression>
 #include <QStyle>
 #include <QTableView>
@@ -126,6 +127,107 @@ void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& pale
             detail_metrics.elidedText(text.details, Qt::ElideRight, area.width() - used));
     }
     painter->restore();
+}
+
+int trackRowLines(const QObject* view) {
+    const auto lines = view != nullptr ? view->property(track_row_lines_property) : QVariant{};
+    return lines.isValid() ? std::clamp(lines.toInt(), 1, 3) : 1;
+}
+
+void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, const QRect& area,
+                     const QString& text, const int lines) {
+    if (text.isEmpty() || area.height() <= 0) {
+        return;
+    }
+    const auto* widget = first_line.widget;
+    auto* style = widget != nullptr ? widget->style() : QApplication::style();
+    // Indented as the first line's text is.
+    const auto text_rect = style->subElementRect(QStyle::SE_ItemViewItemText, &first_line, widget);
+    const QRect target{text_rect.left() + 2, area.top(), text_rect.width() - 4, area.height() - 2};
+    auto font = first_line.font;
+    font.setWeight(QFont::Normal);
+    font.setPointSizeF(font.pointSizeF() * 0.9);
+    painter->save();
+    painter->setFont(font);
+    const bool selected = first_line.state.testFlag(QStyle::State_Selected);
+    painter->setPen(selected ? first_line.palette.color(QPalette::HighlightedText)
+                             : first_line.palette.color(QPalette::PlaceholderText));
+    const auto horizontal = first_line.displayAlignment & Qt::AlignHorizontal_Mask;
+    const QFontMetrics metrics{font};
+    if (lines > 2) {
+        // Two lines of it, wrapped, the rest cut.
+        painter->setClipRect(target);
+        painter->drawText(target, static_cast<int>(horizontal | Qt::AlignTop | Qt::TextWordWrap),
+                          text);
+    } else {
+        painter->drawText(target, static_cast<int>(horizontal | Qt::AlignTop),
+                          metrics.elidedText(text, Qt::ElideRight, target.width()));
+    }
+    painter->restore();
+}
+
+TrackLinesDelegate::TrackLinesDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
+
+void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+                               const QModelIndex& index) const {
+    // A list not grouped, each row its own cover where the cover column is.
+    if (const auto* view = qobject_cast<const QTableView*>(parent());
+        view != nullptr && view->property(track_row_covers_property).toBool() &&
+        index.column() ==
+            configuredColumn(this, track_artwork_column_property, track_artwork_column)) {
+        auto item = option;
+        initStyleOption(&item, index);
+        const auto* widget = item.widget;
+        auto* style = widget != nullptr ? widget->style() : QApplication::style();
+        item.text.clear();
+        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &item, painter, widget);
+        const auto extent = std::max(0, option.rect.height() - 4);
+        const QRect target{option.rect.left() + (option.rect.width() - extent) / 2,
+                           option.rect.top() + 2, extent, extent};
+        const auto cover = index.data(track_album_artwork_role).value<QImage>();
+        if (!cover.isNull()) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+            // The middle square of the cover, filling the tile.
+            const auto side = std::min(cover.width(), cover.height());
+            const QRect middle{(cover.width() - side) / 2, (cover.height() - side) / 2, side, side};
+            QPainterPath rounded;
+            rounded.addRoundedRect(target, 3, 3);
+            painter->setClipPath(rounded, Qt::IntersectClip);
+            painter->drawImage(target, cover, middle);
+            painter->restore();
+        } else {
+            const auto album = index
+                                   .siblingAtColumn(configuredColumn(
+                                       this, track_album_column_property, track_album_column))
+                                   .data()
+                                   .toString();
+            paintInitialsTile(painter, target, album, option.palette);
+        }
+        return;
+    }
+    const auto lines = trackRowLines(parent());
+    if (lines <= 1) {
+        QStyledItemDelegate::paint(painter, option, index);
+        return;
+    }
+    auto item = option;
+    initStyleOption(&item, index);
+    const auto* widget = item.widget;
+    auto* style = widget != nullptr ? widget->style() : QApplication::style();
+    // The selection and stripes under every line, the text on the first.
+    auto background = item;
+    background.text.clear();
+    background.icon = {};
+    style->drawPrimitive(QStyle::PE_PanelItemViewItem, &background, painter, widget);
+    const auto full = item.rect;
+    item.rect.setHeight(track_row_height);
+    style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+    paintSecondLine(painter, item,
+                    QRect{full.left(), full.top() + track_row_height, full.width(),
+                          full.height() - track_row_height},
+                    index.data(track_second_line_role).toString(), lines);
 }
 
 QueueItemDelegate::QueueItemDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
@@ -280,6 +382,18 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         item.font.setItalic(true);
     }
     item.text = cell.text;
+    // ADR-0284: rows of more than one line -- the cell's tint under every
+    // line, its text on the first, its second line beneath.
+    const auto lines = trackRowLines(view);
+    QRect second_area;
+    if (lines > 1 && !artwork_cell) {
+        second_area = QRect{item.rect.left(), item.rect.top() + track_row_height, item.rect.width(),
+                            item.rect.height() - track_row_height};
+        if (item.backgroundBrush.style() != Qt::NoBrush) {
+            painter->fillRect(second_area, item.backgroundBrush);
+        }
+        item.rect.setHeight(track_row_height);
+    }
     const auto inline_artwork = cell.inline_cover;
     const auto& title_suffix = cell.suffix;
     const auto* widget = item.widget;
@@ -334,6 +448,10 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 icon.paint(painter, target, Qt::AlignCenter, QIcon::Disabled);
             }
         }
+    }
+    if (!second_area.isEmpty()) {
+        paintSecondLine(painter, item, second_area, index.data(track_second_line_role).toString(),
+                        lines);
     }
 }
 

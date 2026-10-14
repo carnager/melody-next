@@ -260,6 +260,7 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] bool hasArtwork(const QString& key) const { return artwork_.contains(key); }
     void setArtwork(const QString& key, QImage image);
     [[nodiscard]] QImage artwork(const QString& key) const { return artwork_.value(key); }
+    [[nodiscard]] const QHash<QString, QImage>& artworks() const noexcept { return artwork_; }
     [[nodiscard]] const std::vector<LocalTrackRow>& rows() const noexcept { return rows_; }
     // Goes up with every change to what the list holds -- rows, their order,
     // their tags -- so a save writes only lists that changed (and a ratings

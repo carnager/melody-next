@@ -358,7 +358,11 @@ void Workspace::adoptListen(const EngineKey& engine, const std::string& raw_path
 }
 
 void Workspace::loadListHistory(ListTab& tab) {
-    auto requests = tab.model->takeHistoryRequests();
+    loadListHistory(*tab.model, EngineKey::of(tab.document));
+}
+
+void Workspace::loadListHistory(LocalListModel& model, const EngineKey& engine) {
+    auto requests = model.takeHistoryRequests();
     if (requests.empty()) {
         return;
     }
@@ -370,25 +374,24 @@ void Workspace::loadListHistory(ListTab& tab) {
         entries.push_back(request.entry);
         sources.push_back(std::move(request.source));
     }
-    auto* catalogues = catalogueOf(EngineKey::of(tab.document));
+    auto* catalogues = catalogueOf(engine);
     if (catalogues == nullptr) {
-        tab.model->historyUnavailable(entries);
+        model.historyUnavailable(entries);
         return;
     }
     // ADR-0220: asked of the list's engine, off the window's thread.
-    const auto document = tab.document.id;
     QtConcurrent::run([catalogue = std::shared_ptr{catalogues->openDeferred()},
                        sources = std::move(sources)] { return catalogue->history_facts(sources); })
-        .then(this, [this, document, entries = std::move(entries)](
+        .then(this, [loaded = QPointer{&model}, entries = std::move(entries)](
                         core::Result<std::vector<std::array<std::int64_t, 6>>> history) {
-            auto* loaded = tabForDocument(document);
+            // Its list closed meanwhile.
             if (loaded == nullptr) {
                 return;
             }
             if (history) {
-                loaded->model->applyHistory(entries, *history);
+                loaded->applyHistory(entries, *history);
             } else {
-                loaded->model->historyUnavailable(entries);
+                loaded->historyUnavailable(entries);
             }
         });
 }

@@ -26,6 +26,23 @@ void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& pale
 void paintInitialsTile(QPainter* painter, const QRect& rect, const QString& name,
                        const QPalette& palette);
 
+// ADR-0284: the lines a row of `view` has, and a cell's second line drawn
+// in `area` beneath its first -- smaller, quieter, as it is aligned.
+[[nodiscard]] int trackRowLines(const QObject* view);
+void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, const QRect& area,
+                     const QString& text, int lines);
+
+// A plain list's cells in rows of more than one line: the first as any
+// cell, the second beneath it.
+class TrackLinesDelegate final : public QStyledItemDelegate {
+    Q_OBJECT
+
+  public:
+    explicit TrackLinesDelegate(QObject* parent = nullptr);
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override;
+};
+
 class QueueItemDelegate final : public QStyledItemDelegate {
     Q_OBJECT
 

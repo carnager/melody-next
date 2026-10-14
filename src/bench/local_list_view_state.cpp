@@ -309,9 +309,17 @@ void LocalListModel::mergeEvaluation(const std::uint64_t view,
         first = first < 0 ? row : std::min(first, row);
         last = std::max(last, row);
     }
-    if (first >= 0 && expression_columns_ > 0) {
-        emit dataChanged(index(first, local_column_count), index(last, columnCount() - 1),
-                         {Qt::DisplayRole});
+    if (first < 0) {
+        return;
+    }
+    // Built-in columns take their second lines and styles from the
+    // evaluation too -- not their text, which the list's jobs read as an edit.
+    emit dataChanged(index(first, 0), index(last, local_column_count - 1),
+                     {ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole});
+    if (expression_columns_ > 0) {
+        emit dataChanged(
+            index(first, local_column_count), index(last, columnCount() - 1),
+            {Qt::DisplayRole, ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole});
     }
 }
 
@@ -461,6 +469,18 @@ QVariant LocalListModel::viewStyle(const QModelIndex& index, const int role) con
 QVariant LocalListModel::viewData(const QModelIndex& index, const int role) const {
     const auto at = static_cast<std::size_t>(index.row());
     const auto& row = rows_[at];
+    // ADR-0284: the cell's second line, where its column has one.
+    if (role == ui::track_second_line_role) {
+        if (!evaluatedNow(row)) {
+            return QString{};
+        }
+        const auto& ids = list_view_->second_line_columns();
+        const auto found = std::ranges::find(ids, columnId(index.column()).toStdString());
+        const auto line = static_cast<std::size_t>(found - ids.begin());
+        return found == ids.end() || line >= row.evaluated->second_lines.size()
+                   ? QString{}
+                   : QString::fromStdString(row.evaluated->second_lines[line]);
+    }
     if (index.column() >= local_column_count) {
         const auto expression = static_cast<std::size_t>(index.column() - local_column_count);
         if (role == Qt::DisplayRole) {

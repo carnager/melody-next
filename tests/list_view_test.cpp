@@ -47,7 +47,9 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
             .sort = std::move(sort),
             .alignment = lists::ColumnAlignment::left,
             .expands = false,
-            .style = {}};
+            .style = {},
+            .second_line = {},
+            .width = 0};
 }
 
 // A copy of a shipped view with expression columns and a grouping of its own.
@@ -74,8 +76,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
 
 void shippedViewsAreValidAndAsTheyWere() {
     const auto& shipped = lists::shipped_list_views();
-    // Two: albums with side artwork, and plain columns.
-    CHECK(shipped.size() == 2U);
+    // Albums with side artwork, plain columns, and two-line tracks.
+    CHECK(shipped.size() == 3U);
     for (const auto& view : shipped) {
         CHECK(view.builtin);
         CHECK(lists::validate_list_view(view).empty());
@@ -280,6 +282,86 @@ void stylesAreWordsExpressionsAnswer() {
                                 &lists::ViewProblem::where));
 }
 
+// ADR-0284: rows of more than one line -- any column, built in or not, says
+// more beneath; the view says how many lines.
+void rowsHaveMoreLines() {
+    auto view = user_view();
+    view.row_lines = 2;
+    std::ranges::find(view.columns, std::string{"title"}, &lists::ViewColumn::id)->second_line =
+        "%artist% · %album%";
+    view.columns.back().second_line = "$info(filename_ext)";
+    CHECK(lists::validate_list_view(view).empty());
+    const auto saved = lists::serialize_list_views({view});
+    const auto restored = lists::deserialize_list_views(saved);
+    CHECK(restored && restored->size() == 1U && restored->front() == view);
+    const auto compiled = lists::CompiledListView::compile(view);
+    CHECK(compiled && (compiled->second_line_columns() ==
+                       std::vector<std::string>{"title", view.columns.back().id}));
+    const auto document = tags({{"ARTIST", {"Air"}}, {"ALBUM", {"Moon Safari"}}});
+    lists::ViewRow row;
+    row.raw_path = "/music/La Femme d'Argent.flac";
+    row.metadata = &document;
+    const std::vector rows{row};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && (evaluated->front().second_lines ==
+                        std::vector<std::string>{"Air · Moon Safari", "La Femme d'Argent.flac"}));
+    for (const auto lines : {0, 4}) {
+        auto wrong = user_view();
+        wrong.row_lines = lines;
+        CHECK(!lists::validate_list_view(wrong).empty());
+    }
+    auto bad = user_view();
+    bad.columns.front().second_line = "$if(";
+    CHECK(std::ranges::contains(lists::validate_list_view(bad),
+                                "column:" + bad.columns.front().id + ":second_line",
+                                &lists::ViewProblem::where));
+}
+
+// An editor says what one expression gives for a row -- a group header's
+// with the group's tracks and length -- or why it cannot.
+void oneExpressionSaysWhatItGives() {
+    using trackknife::titleformat::FormatContextKind;
+    const auto document = tags({{"ARTIST", {"Air"}}, {"GENRE", {"Downtempo"}}});
+    lists::ViewRow row;
+    row.raw_path = "/music/Talisman.flac";
+    row.metadata = &document;
+    const auto genre =
+        lists::evaluate_view_expression("%genre% · %artist%", FormatContextKind::list_item, row);
+    CHECK(genre && *genre == "Downtempo · Air");
+    const auto group = lists::evaluate_view_expression(
+        "%group_tracks% tracks", FormatContextKind::list_item, row, 7U, 420'000);
+    CHECK(group && *group == "7 tracks");
+    CHECK(!lists::evaluate_view_expression("$if(", FormatContextKind::list_item, row));
+}
+
+// ADR-0284: the shipped two-line view says, beneath each line, what its
+// columns would have needed columns for.
+void twoLineTracksSayWhatTheyShow() {
+    const auto* view = lists::shipped_list_view(lists::two_line_view_id);
+    CHECK(view != nullptr && view->row_lines == 2 && lists::validate_list_view(*view).empty());
+    const auto compiled = lists::CompiledListView::compile(*view);
+    CHECK(compiled && compiled->reads_history());
+    if (!compiled) {
+        return;
+    }
+    const auto document = tags({{"ARTIST", {"Air"}},
+                                {"ALBUM", {"Moon Safari"}},
+                                {"DATE", {"1998-01-16"}},
+                                {"GENRE", {"Electronic"}}});
+    lists::ViewRow row;
+    row.metadata = &document;
+    row.codec = "flac";
+    row.bits = 16;
+    row.sample_rate = 44'100;
+    row.history = std::array<std::int64_t, 6>{12, -1, -1, -1, -1, -1};
+    const std::vector rows{row};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && evaluated->front().cells == std::vector<std::string>{"1998"});
+    CHECK(evaluated && (evaluated->front().second_lines ==
+                        std::vector<std::string>{"Air · Moon Safari", "Electronic",
+                                                 "flac · 16/44.1", "12 plays"}));
+}
+
 void historyIsReadByExpressions() {
     auto view = user_view();
     CHECK(lists::CompiledListView::compile(view).has_value() &&
@@ -378,6 +460,9 @@ int main() {
     rowsAreEvaluatedAndGrouped();
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
+    rowsHaveMoreLines();
+    oneExpressionSaysWhatItGives();
+    twoLineTracksSayWhatTheyShow();
     stylesAreWordsExpressionsAnswer();
     rowsSayWhatTheyAre();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

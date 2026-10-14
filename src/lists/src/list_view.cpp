@@ -295,9 +295,51 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
                            .sort = {},
                            .alignment = ColumnAlignment::left,
                            .expands = false,
-                           .style = {}});
+                           .style = {},
+                           .second_line = {},
+                           .width = 0});
     }
     return columns;
+}
+
+// ADR-0284: a list that says much in little width -- no column for what a
+// second line can carry.
+[[nodiscard]] ListView two_line_tracks() {
+    auto columns = builtin_columns({"title", "length", "rating"});
+    const auto line = [&columns](std::string_view id, std::string second) {
+        std::ranges::find(columns, id, &ViewColumn::id)->second_line = std::move(second);
+    };
+    line("title", "%artist%$if(%album%, · %album%,)");
+    line("length", "$info(codec)$if($info(bitspersample), · $info(bitspersample)/"
+                   "$decimal($info(samplerate),1000,1),)");
+    line("rating", "$if(%playcount%,%playcount% $if($eq(%playcount%,1),play,plays),)");
+    // Room for the format beneath the length.
+    std::ranges::find(columns, std::string_view{"length"}, &ViewColumn::id)->width = 112;
+    std::ranges::find(columns, std::string_view{"rating"}, &ViewColumn::id)->width = 96;
+    // The year where a date column would be, its genre beneath.
+    const auto title = std::ranges::find(columns, std::string_view{"title"}, &ViewColumn::id);
+    columns.insert(std::next(title), ViewColumn{.id = "year",
+                                                .visible = true,
+                                                .title = "Year",
+                                                .display = "$left(%date%,4)",
+                                                .sort = "%date%",
+                                                .alignment = ColumnAlignment::left,
+                                                .expands = false,
+                                                .style = {},
+                                                .second_line = "%genre%",
+                                                .width = 96});
+    return {.id = std::string{two_line_view_id},
+            .name = "Two-line tracks",
+            .artwork = ViewArtwork::none,
+            .grouping = ViewGrouping::none,
+            .group_key = {},
+            .group_title = {},
+            .group_details = {},
+            .subgroup = std::nullopt,
+            .row_style = {},
+            .columns = std::move(columns),
+            .builtin = true,
+            .row_lines = 2};
 }
 
 } // namespace
@@ -323,7 +365,8 @@ const std::vector<ListView>& shipped_list_views() {
          // The album's header says the artist, album and date; a track whose
          // artist differs says so after its title.
          .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
-         .builtin = true},
+         .builtin = true,
+         .row_lines = 1},
         {.id = std::string{columns_view_id},
          .name = "Plain columns",
          .artwork = ViewArtwork::none,
@@ -334,7 +377,9 @@ const std::vector<ListView>& shipped_list_views() {
          .subgroup = std::nullopt,
          .row_style = {},
          .columns = builtin_columns({"artist", "track-number", "title", "album", "date", "length"}),
-         .builtin = true},
+         .builtin = true,
+         .row_lines = 1},
+        two_line_tracks(),
     };
     return views;
 }
@@ -408,6 +453,9 @@ std::vector<ViewProblem> validate_list_view(const ListView& view) {
     if (view.columns.size() > maximum_columns) {
         add({}, "A view may have at most 64 columns");
     }
+    if (view.row_lines < 1 || view.row_lines > 3) {
+        add({}, "A row has one to three lines");
+    }
     std::set<std::string> ids;
     bool shown = false;
     for (const auto& column : view.columns) {
@@ -415,6 +463,8 @@ std::vector<ViewProblem> validate_list_view(const ListView& view) {
             add({}, "Every column needs an id of its own");
             continue;
         }
+        expression("column:" + column.id + ":second_line", column.second_line,
+                   FormatContextKind::list_item, false);
         shown = shown || (column.visible && column.id != "artwork");
         if (column.builtin()) {
             continue;
@@ -459,6 +509,12 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
         auto columns = Json::array();
         for (const auto& column : view.columns) {
             Json entry{{"id", column.id}, {"visible", column.visible}};
+            if (!column.second_line.empty()) {
+                entry["second_line"] = column.second_line;
+            }
+            if (column.width > 0) {
+                entry["width"] = column.width;
+            }
             if (!column.builtin()) {
                 entry["title"] = column.title;
                 entry["display"] = column.display;
@@ -478,6 +534,9 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
                    {"columns", std::move(columns)}};
         if (!view.row_style.empty()) {
             entry["row_style"] = view.row_style;
+        }
+        if (view.row_lines != 1) {
+            entry["row_lines"] = view.row_lines;
         }
         if (view.grouping == ViewGrouping::expression) {
             entry["group"] = Json{{"key", view.group_key},
@@ -541,6 +600,7 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
             view.group_details = text_of(*group, "details");
         }
         view.row_style = text_of(entry, "row_style");
+        view.row_lines = entry.value("row_lines", 1);
         if (const auto subgroup = entry.find("subgroup");
             subgroup != entry.end() && subgroup->is_object()) {
             view.subgroup = ViewSubgroup{.key = text_of(*subgroup, "key"),
@@ -562,6 +622,8 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                                                  : ColumnAlignment::left,
                 .expands = saved.value("expands", false),
                 .style = text_of(saved, "style"),
+                .second_line = text_of(saved, "second_line"),
+                .width = std::clamp(saved.value("width", 0), 0, 4'096),
             });
         }
         // A built-in column added since it was saved goes last, hidden.
@@ -574,7 +636,9 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                                         .sort = {},
                                         .alignment = ColumnAlignment::left,
                                         .expands = false,
-                                        .style = {}});
+                                        .style = {},
+                                        .second_line = {},
+                                        .width = 0});
             }
         }
         if (const auto problems = validate_list_view(view); !problems.empty()) {
@@ -596,6 +660,17 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
     }
     CompiledListView compiled;
     compiled.view_ = view;
+    for (const auto& column : view.columns) {
+        if (column.second_line.empty()) {
+            continue;
+        }
+        auto line = compiled_program(column.second_line, FormatContextKind::list_item);
+        if (!line) {
+            return std::unexpected(std::move(line.error()));
+        }
+        compiled.second_line_ids_.push_back(column.id);
+        compiled.second_lines_.push_back(std::move(*line));
+    }
     const auto reads = [](const titleformat::Program& program) {
         return std::ranges::any_of(program.fieldDependencies(), [](const std::string& field) {
             return std::ranges::contains(history_field_names,
@@ -605,6 +680,8 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
     compiled.reads_history_ = std::ranges::any_of(view.columns, [](const ViewColumn& column) {
         return column.visible && (column.id == "play-count" || column.id == "last-played");
     });
+    compiled.reads_history_ =
+        compiled.reads_history_ || std::ranges::any_of(compiled.second_lines_, reads);
     for (const auto& column : view.columns) {
         if (column.builtin()) {
             continue;
@@ -698,6 +775,10 @@ struct ListViewEvaluator {
             }
             if (compiled.row_style_) {
                 row.row_style = format(*compiled.row_style_, context, cancellation);
+            }
+            row.second_lines.reserve(compiled.second_lines_.size());
+            for (const auto& line : compiled.second_lines_) {
+                row.second_lines.push_back(format(line, context, cancellation));
             }
             if (std::ranges::any_of(compiled.cell_styles_,
                                     [](const auto& style) { return style.has_value(); })) {
@@ -865,6 +946,20 @@ evaluate_list_groups(const CompiledListView& compiled, const std::span<const Vie
         groups.push_back(std::move(group));
     }
     return groups;
+}
+
+core::Result<std::string> evaluate_view_expression(const std::string_view source,
+                                                   const FormatContextKind context,
+                                                   const ViewRow& row, const std::size_t tracks,
+                                                   const std::int64_t length_ms) {
+    auto program = compiled_program(std::string{source}, context);
+    if (!program) {
+        return std::unexpected(std::move(program.error()));
+    }
+    const std::map<std::string, std::string> host{{"grouptracks", std::to_string(tracks)},
+                                                  {"grouplength", clock(length_ms)}};
+    const ViewRowContext evaluation{row, context, &host};
+    return format(*program, evaluation, {});
 }
 
 CellStyle parse_cell_style(const std::string_view words) {

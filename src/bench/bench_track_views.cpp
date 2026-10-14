@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/list_view_apply.hpp"
 #include "bench/list_view_dialog.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
@@ -33,25 +34,12 @@ void BenchMainWindow::applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayo
     applyTrackViewLayout(tab.view, tab.view_layout, layout);
 }
 
-void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout& state,
-                                           const ui::TrackViewLayout& layout) {
-    if (view == nullptr) {
-        return;
-    }
+ui::TrackViewLayout drawListView(QTableView* view, const lists::ListView& definition,
+                                 const std::shared_ptr<const lists::CompiledListView>& compiled,
+                                 const ui::TrackViewLayout& layout) {
     auto* queue_view = static_cast<ui::QueueTableView*>(view);
     auto* model = qobject_cast<LocalListModel*>(view->model());
-    // ADR-0282: the list view the tab is drawn by; one that is gone, the
-    // default.
-    auto view_id = layout.view.isEmpty() ? default_list_view_id : layout.view;
-    auto definition = findListView(view_id);
-    auto compiled = definition ? compiledListView(view_id) : nullptr;
-    if (!definition || !compiled) {
-        view_id = default_list_view_id;
-        definition = findListView(view_id);
-        compiled = compiledListView(view_id);
-    }
-    const auto applied = Workspace::trackViewLayoutFor(*definition, layout.columns);
-    applying_track_view_layout_ = true;
+    auto applied = Workspace::trackViewLayoutFor(definition, layout.columns);
     if (model != nullptr && model->listView() != compiled.get()) {
         model->setListView(compiled);
     }
@@ -67,26 +55,37 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
     view->setProperty(ui::track_length_column_property, local_length_column);
     view->setProperty(ui::track_separate_number_property, true);
     // Grouped by an expression: drawn grouped once the groups are known.
-    const auto by_expression = definition->grouping == lists::ViewGrouping::expression;
-    const auto grouped = definition->grouping == lists::ViewGrouping::album ||
+    const auto by_expression = definition.grouping == lists::ViewGrouping::expression;
+    const auto grouped = definition.grouping == lists::ViewGrouping::album ||
                          (by_expression && model != nullptr && model->expressionGroupsReady());
-    const auto side_artwork = grouped && definition->artwork == lists::ViewArtwork::beside;
+    // The cover column is the view's artwork, not a column of its own to
+    // show or hide: covers beside a group's rows, in its header -- or, in a
+    // list not grouped, each row's own.
+    const auto artwork_shown = definition.artwork != lists::ViewArtwork::none;
+    const auto side_artwork = grouped && definition.artwork == lists::ViewArtwork::beside;
+    const auto row_covers = !grouped && artwork_shown;
+    view->setProperty(ui::track_row_covers_property, row_covers);
     view->setProperty(ui::track_side_artwork_property, side_artwork);
     view->setProperty(ui::track_album_rules_property, !by_expression);
     // Albums and their headers already group the rows; stripes on top of
     // that are noise.
     view->setAlternatingRowColors(!grouped);
 
+    // ADR-0284: rows of as many lines as the view says.
+    const auto lines = std::clamp(definition.row_lines, 1, 3);
+    view->setProperty(ui::track_row_lines_property, lines);
     auto* previous_delegate = view->itemDelegate();
-    view->setItemDelegate(grouped
-                              ? static_cast<QAbstractItemDelegate*>(new ui::QueueItemDelegate(view))
-                              : static_cast<QAbstractItemDelegate*>(new QStyledItemDelegate(view)));
+    view->setItemDelegate(
+        grouped ? static_cast<QAbstractItemDelegate*>(new ui::QueueItemDelegate(view))
+                : static_cast<QAbstractItemDelegate*>(new ui::TrackLinesDelegate(view)));
     if (previous_delegate != nullptr && previous_delegate->parent() == view) {
         previous_delegate->deleteLater();
     }
-    view->verticalHeader()->setDefaultSectionSize(22);
+    view->verticalHeader()->setDefaultSectionSize(ui::track_row_height +
+                                                  (lines - 1) * ui::track_second_line_height);
     view->verticalHeader()->setMinimumSectionSize(18);
     queue_view->setAlbumGroupingEnabled(grouped);
+    queue_view->refreshRowGeometry();
 
     auto* header = view->horizontalHeader();
     const QSignalBlocker header_blocker{header};
@@ -107,7 +106,8 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         }
         const bool history_column =
             logical == local_play_count_column || logical == local_last_played_column;
-        view->setColumnHidden(logical, !column.visible || (history_column && model == nullptr));
+        const auto shown = logical == local_artwork_column ? artwork_shown : column.visible;
+        view->setColumnHidden(logical, !shown || (history_column && model == nullptr));
         view->setColumnWidth(logical, column.width);
     }
     queue_view->setAlbumArtworkColumn(side_artwork ? local_artwork_column : -1);
@@ -125,19 +125,23 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
             // spare room when it says so.
             preferred_widths.insert(logical, column.width);
             minimum_widths.insert(logical, 48);
-            const auto found = std::ranges::find(definition->columns, column.id.toStdString(),
+            const auto found = std::ranges::find(definition.columns, column.id.toStdString(),
                                                  &lists::ViewColumn::id);
-            if (found != definition->columns.end() && found->expands) {
+            if (found != definition.columns.end() && found->expands) {
                 expanding.push_back(logical);
             }
             continue;
         }
         // Covers beside the rows: the cover gutter and the numbers fixed
         // (ADR-0250).
-        const auto fixed = !side_artwork                          ? 0
-                           : logical == local_artwork_column      ? ui::side_cover_gutter
-                           : logical == local_track_number_column ? ui::side_number_width
-                                                                  : 0;
+        // A row's own cover: as wide as the row is tall.
+        const auto row_cover =
+            ui::track_row_height + (lines - 1) * ui::track_second_line_height + 6;
+        const auto fixed = row_covers && logical == local_artwork_column ? row_cover
+                           : !side_artwork                               ? 0
+                           : logical == local_artwork_column             ? ui::side_cover_gutter
+                           : logical == local_track_number_column        ? ui::side_number_width
+                                                                         : 0;
         preferred_widths.insert(logical, fixed > 0 ? fixed : column.width);
         minimum_widths.insert(logical, fixed > 0 ? fixed : spec->minimum_width);
     }
@@ -145,10 +149,29 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
                                    std::move(minimum_widths));
     // ADR-0283: the groups it had folded.
     queue_view->setCollapsedGroups({layout.collapsed.begin(), layout.collapsed.end()});
-    state = applied;
-    state.collapsed = layout.collapsed;
-    applying_track_view_layout_ = false;
+    applied.collapsed = layout.collapsed;
     view->viewport()->update();
+    return applied;
+}
+
+void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout& state,
+                                           const ui::TrackViewLayout& layout) {
+    if (view == nullptr) {
+        return;
+    }
+    // ADR-0282: the list view the tab is drawn by; one that is gone, the
+    // default.
+    auto view_id = layout.view.isEmpty() ? default_list_view_id : layout.view;
+    auto definition = findListView(view_id);
+    auto compiled = definition ? compiledListView(view_id) : nullptr;
+    if (!definition || !compiled) {
+        view_id = default_list_view_id;
+        definition = findListView(view_id);
+        compiled = compiledListView(view_id);
+    }
+    applying_track_view_layout_ = true;
+    state = drawListView(view, *definition, compiled, layout);
+    applying_track_view_layout_ = false;
     refreshTrackViewActions();
 }
 
@@ -211,8 +234,15 @@ void BenchMainWindow::chooseListView(const QString& id) {
     }
     tab->view_layout_persistence_protected = false;
     tab->preserved_view_layout.clear();
-    applyTrackViewLayout(*tab,
-                         Workspace::trackViewLayoutFor(*definition, tab->view_layout.columns));
+    // The tab's widths, but a view chosen that says how wide a column starts
+    // has it so.
+    auto widths = tab->view_layout.columns;
+    std::erase_if(widths, [&definition](const ui::TrackViewColumnLayout& column) {
+        const auto found =
+            std::ranges::find(definition->columns, column.id.toStdString(), &lists::ViewColumn::id);
+        return found != definition->columns.end() && found->width > 0;
+    });
+    applyTrackViewLayout(*tab, Workspace::trackViewLayoutFor(*definition, widths));
     schedulePersist();
 }
 
@@ -411,9 +441,10 @@ void BenchMainWindow::refreshTrackViewActions() {
                          track_layout_reset_action_, track_layout_copy_action_}) {
         action->setEnabled(available);
     }
-    for (auto* action : track_column_actions_) {
-        action->setVisible(true);
-        action->setEnabled(available);
+    for (auto it = track_column_actions_.cbegin(); it != track_column_actions_.cend(); ++it) {
+        // The cover column follows the view's artwork, not this menu.
+        it.value()->setVisible(it.key() != QStringLiteral("artwork"));
+        it.value()->setEnabled(available);
     }
     if (!available) {
         return;
@@ -466,7 +497,9 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
     connect(make, &QAction::triggered, this, [this] { editListView(true); });
     auto* columns = menu.addMenu(QStringLiteral("Columns"));
     for (const auto& spec : track_column_specs) {
-        columns->addAction(track_column_actions_.value(QString::fromLatin1(spec.id)));
+        if (spec.logical != local_artwork_column) {
+            columns->addAction(track_column_actions_.value(QString::fromLatin1(spec.id)));
+        }
     }
     // The view's own columns, after the built-in ones.
     if (const auto* model = tab != nullptr ? tab->model : nullptr;
@@ -517,15 +550,27 @@ void BenchMainWindow::editListView(const bool make_new) {
         edited.id = newListViewId().toStdString();
         edited.name = make_new ? "New view" : current->name + " (copy)";
     }
-    std::vector<lists::OwnedViewRow> sample;
+    // A few of the list's rows, and their covers, to preview.
+    std::vector<LocalTrackRow> sample;
+    QHash<QString, QImage> covers;
     if (tab != nullptr && tab->model != nullptr) {
-        auto rows = tab->model->viewRows();
-        rows.resize(std::min<std::size_t>(rows.size(), 40U));
-        sample = std::move(rows);
+        const auto& rows = tab->model->rows();
+        sample.assign(rows.begin(), rows.begin() + static_cast<std::ptrdiff_t>(
+                                                       std::min<std::size_t>(rows.size(), 40U)));
+        covers = tab->model->artworks();
     }
     const auto removable = !make_new && !current->builtin;
-    auto* dialog = new ListViewDialog(std::move(edited), std::move(sample), removable, this);
+    auto* dialog =
+        new ListViewDialog(std::move(edited), std::move(sample), covers, removable, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    // ADR-0282: the preview's play counts, from the list's engine.
+    if (tab != nullptr) {
+        auto* preview = dialog->previewModel();
+        connect(preview, &LocalListModel::historyWanted, dialog,
+                [this, preview, engine = EngineKey::of(tab->document)] {
+                    workspace_.loadListHistory(*preview, engine);
+                });
+    }
     const auto document = tab != nullptr ? std::optional{tab->document.id} : std::nullopt;
     connect(dialog, &ListViewDialog::saved, this, [this, document](const lists::ListView& view) {
         auto custom = customListViews();

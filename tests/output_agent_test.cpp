@@ -218,7 +218,9 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(engine_root);
     std::filesystem::create_directories(agent_root);
     for (const auto& root : {engine_root, agent_root}) {
-        require(write_silence(root / "one.wav", 30) && write_silence(root / "two.wav", 2),
+        // A listen needs a track over 30 seconds, half of it heard.
+        require(write_silence(root / "one.wav", 30) && write_silence(root / "two.wav", 2) &&
+                    write_silence(root / "long.wav", 32),
                 "the test audio must be written");
     }
 
@@ -281,6 +283,25 @@ int main(int argc, char** argv) {
 
     // Played on the agent, from the agent's own copy.
     require(outputs.select("agent:bedside").has_value(), "the agent can be chosen");
+    // A track heard on an agent is a listen, as on the engine's own output:
+    // the engine knows the revision of the file it gave, which listening is
+    // credited to -- without it, nothing played on an agent ever counted.
+    {
+        const std::vector<engine::QueueEntry> heard{entry(engine_root / "long.wav")};
+        player->replace_queue(heard);
+        require(player->play_entry(heard[0].entry_id).has_value(), "a track plays");
+        const auto started = std::chrono::steady_clock::now();
+        require(eventually(
+                    [&] {
+                        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             std::chrono::steady_clock::now() - started)
+                                             .count();
+                        return player->observe(now).listened_entry == heard[0].entry_id;
+                    },
+                    std::chrono::seconds{30}),
+                "and, half of it heard, is a listen");
+        require(player->stop().has_value(), "and stops");
+    }
     const std::vector<engine::QueueEntry> entries{entry(engine_root / "one.wav"),
                                                   entry(engine_root / "two.wav")};
     player->replace_queue(entries);

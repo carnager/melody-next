@@ -30,6 +30,29 @@ trap cleanup EXIT
 
 fail() { echo "FAILED: $1" >&2; exit 1; }
 
+# A half-closed connection stays open by design, so nc never sees the end of
+# an answer: ask sends the request and reads until a line contains `until`,
+# then puts nc away -- at most five seconds, the most it waits for a slow
+# (sanitizer) engine. -q is GNU netcat only and is silently ignored by the
+# OpenBSD one, so the time limit is external.
+ask() {
+    local until="$1" request="$2" answer="" line
+    shift 2
+    coproc timeout 5 nc "$@"
+    # An nc already gone (refused) must fail the checks, not kill the script.
+    # Not in a subshell: bash closes a coprocess's descriptors in those.
+    trap '' PIPE
+    printf '%b' "${request}" >&"${COPROC[1]}" 2>/dev/null || true
+    trap - PIPE
+    while IFS= read -r line <&"${COPROC[0]}"; do
+        answer+="${line}"$'\n'
+        [[ "${line}" == *"${until}"* ]] && break
+    done
+    kill "${COPROC_PID}" 2>/dev/null || true
+    wait "${COPROC_PID}" 2>/dev/null || true
+    printf '%s' "${answer}"
+}
+
 # --help must work without touching any state, so it stays usable when the
 # databases are unreadable.
 "${binary}" --help > "${work}/help.txt" 2>&1 || fail "--help must succeed"
@@ -56,16 +79,13 @@ done
 [ -f "${state}/lists.sqlite" ] || fail "the database must be created"
 [ -f "${state}/library.sqlite3" ] && fail "the catalogue must not be a second database"
 
-# A half-closed connection stays open by design, so nc needs a read timeout
-# rather than waiting for a close that is not coming. -q is GNU netcat only
-# and is silently ignored by the OpenBSD one, so the timeout is external.
-answer="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
+answer="$(ask '"id":1' '{"id":1,"method":"catalogue.roots"}\n' -U "${socket}")"
 echo "${answer}" | matches '"id":1' || fail "the daemon must answer the id asked"
 echo "${answer}" | matches '"roots":\[\]' || fail "a fresh catalogue has no roots"
 
 # A job streams its events down the same connection that submitted it.
-job="$(printf '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}\n' \
-    | timeout 5 nc -U "${socket}" || true)"
+job="$(ask '"event":"job.finished"' \
+    '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}\n' -U "${socket}")"
 echo "${job}" | matches '"job_id"' || fail "submitting must answer with an identity"
 echo "${job}" | matches '"event":"job.finished"' || fail "and the job must report a finish"
 
@@ -106,20 +126,20 @@ done
 grep -q "with a password" "${work}/tcp-log.txt" || fail "--listen must say it wants a password"
 [ -f "${state}/engine.token" ] && fail "no token file is made any more"
 
-denied="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
+denied="$(ask '"unauthorized"' '{"id":1,"method":"catalogue.roots"}\n' 127.0.0.1 "${port}")"
 echo "${denied}" | matches '"unauthorized"' || fail "TCP without the password must be refused"
 
-admitted="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"catalogue.roots"}\n' \
-    | timeout 5 nc 127.0.0.1 "${port}" || true)"
+admitted="$(ask '"id":2' '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"catalogue.roots"}\n' \
+    127.0.0.1 "${port}")"
 echo "${admitted}" | matches '"authenticated":true' || fail "the right password must be accepted"
 echo "${admitted}" | matches '"roots":\[\]' || fail "and the engine must then answer over TCP"
 
-named="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"engine.info"}\n' \
-    | timeout 5 nc 127.0.0.1 "${port}" || true)"
+named="$(ask '"id":2' '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"engine.info"}\n' \
+    127.0.0.1 "${port}")"
 echo "${named}" | matches '"name":"living room"' || fail "the engine must say the name it was given"
 
 # The unix socket is unchanged: no handshake.
-plain="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
+plain="$(ask '"id":1' '{"id":1,"method":"catalogue.roots"}\n' -U "${socket}")"
 echo "${plain}" | matches '"roots":\[\]' || fail "the unix socket must need no token"
 
 kill "${daemon_pid}"

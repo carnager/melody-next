@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -152,9 +153,13 @@ void events_reach_the_client(const std::filesystem::path& path) {
 }
 
 void a_vanished_engine_fails_rather_than_hangs(const std::filesystem::path& path) {
+    // Unanswered until the test lets it go: stopping the server waits for
+    // its handlers, so a handler that only slept would hold the stop as long.
+    std::promise<void> release;
+    const auto released = release.get_future().share();
     protocol::Dispatcher dispatcher;
-    dispatcher.on("never", [](const protocol::Json&) -> core::Result<protocol::Json> {
-        std::this_thread::sleep_for(std::chrono::seconds{30});
+    dispatcher.on("never", [released](const protocol::Json&) -> core::Result<protocol::Json> {
+        released.wait_for(std::chrono::seconds{30});
         return protocol::Json{};
     });
 
@@ -177,6 +182,7 @@ void a_vanished_engine_fails_rather_than_hangs(const std::filesystem::path& path
 
     // An engine that goes away mid-call is reported too, rather than leaving
     // the caller waiting for a socket that will never speak again.
+    release.set_value();
     (*server)->stop();
     const auto after =
         (*client)->call("never", protocol::Json::object(), std::chrono::milliseconds{500});

@@ -46,10 +46,11 @@
 #include <unistd.h>
 
 #include <array>
-#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -58,13 +59,34 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 
 namespace {
 
-std::atomic_bool stop_requested{false};
+// SIGINT and SIGTERM write a byte here and main() blocks reading it, so a
+// stop is taken up at once rather than at the next turn of a polling loop.
+std::array<int, 2> stop_pipe{-1, -1};
 
-void request_stop(int) { stop_requested.store(true); }
+void request_stop(int) {
+    const char byte = 1;
+    // write() is async-signal-safe; a full pipe already holds a stop.
+    static_cast<void>(::write(stop_pipe[1], &byte, 1));
+}
+
+[[nodiscard]] bool open_stop_pipe() {
+    if (::pipe(stop_pipe.data()) != 0) {
+        return false;
+    }
+    for (const auto fd : stop_pipe) {
+        static_cast<void>(::fcntl(fd, F_SETFD, FD_CLOEXEC));
+    }
+    return true;
+}
+
+void wait_for_stop() {
+    char byte = 0;
+    while (::read(stop_pipe[0], &byte, 1) < 0 && errno == EINTR) {
+    }
+}
 
 // Where Trackknife has always kept its data (Qt's AppDataLocation for the
 // "trackknife" organisation and application), so the engine a workspace
@@ -969,6 +991,10 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (!open_stop_pipe()) {
+        std::cerr << "melodyd: cannot wait for a stop: " << std::strerror(errno) << "\n";
+        return EXIT_FAILURE;
+    }
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
     // A client hanging up must not take the engine with it.
@@ -1000,9 +1026,7 @@ int main(int argc, char** argv) {
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
 
-    while (!stop_requested.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
-    }
+    wait_for_stop();
 
     std::cerr << "melodyd: stopping\n";
 #if TRACKKNIFE_ENABLE_UPNP

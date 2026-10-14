@@ -51,6 +51,7 @@
 
 #include <signal.h>
 
+#include "qtest_shard.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -166,6 +167,7 @@
 #include <future>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace trackknife::bench {
@@ -484,6 +486,30 @@ class BenchMainWindowTest final : public QObject {
 
 namespace {
 
+// A key click whose press is taken as a shortcut, or takes its widget away,
+// can leave its modifier held: QGuiApplication then reports Ctrl or Shift
+// down for every case after. Releases whatever is held on `on`, a widget
+// that is still there.
+void releaseHeldModifiers(QWidget* on) {
+    constexpr std::array<std::pair<Qt::KeyboardModifier, Qt::Key>, 4> modifiers{{
+        {Qt::ShiftModifier, Qt::Key_Shift},
+        {Qt::ControlModifier, Qt::Key_Control},
+        {Qt::AltModifier, Qt::Key_Alt},
+        {Qt::MetaModifier, Qt::Key_Meta},
+    }};
+    auto held = QGuiApplication::keyboardModifiers();
+    for (const auto& [modifier, key] : modifiers) {
+        if (held.testFlag(modifier)) {
+            held.setFlag(modifier, false);
+            QTest::keyRelease(on, key, held);
+        }
+    }
+}
+
+} // namespace
+
+namespace {
+
 // Fetch cover opens a picker; choose the row from this place with this type.
 [[nodiscard]] bool chooseInCoverPicker(QWidget* owner, const QString& from, const QString& type) {
     QTreeWidget* list = nullptr;
@@ -611,6 +637,14 @@ void BenchMainWindowTest::discsOfAnAlbumAreNamed() {
 void BenchMainWindowTest::init() { QVERIFY2(engine_.start(), engine_.log().constData()); }
 
 void BenchMainWindowTest::cleanup() {
+    // A modifier left held turns the next case's clicks into Shift- or
+    // Ctrl-clicks, so a case's outcome would hang on which case ran before
+    // it. Released here, and the case that left it fails.
+    const auto held = QGuiApplication::keyboardModifiers();
+    if (held != Qt::NoModifier) {
+        QWidget sink;
+        releaseHeldModifiers(&sink);
+    }
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     engine_.stop();
     QSettings settings;
@@ -618,6 +652,7 @@ void BenchMainWindowTest::cleanup() {
     settings.sync();
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
     QDir{QStandardPaths::writableLocation(QStandardPaths::CacheLocation)}.removeRecursively();
+    QCOMPARE(held, Qt::NoModifier);
 }
 
 void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
@@ -1457,6 +1492,8 @@ void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
     QTest::keyClicks(popup->input(), QStringLiteral("unknown"));
     QTRY_COMPARE(popup->results()->count(), 1);
     QTest::keyClick(popup->input(), Qt::Key_Return, Qt::ShiftModifier);
+    // Return puts the popup away before the click's Shift release.
+    releaseHeldModifiers(&window);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(window.localPlayback()->state().status, QStringLiteral("playing"),
                               10'000);
@@ -12893,6 +12930,7 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
     }
     QApplication::clipboard()->setImage(image);
     QTest::keyClick(thumbnail, Qt::Key_V, Qt::ControlModifier);
+    releaseHeldModifiers(thumbnail);
     QTRY_VERIFY(!section->isBusy());
     QTRY_VERIFY(section->hasPendingChanges());
     QCOMPARE(section->pendingIntents().size(), embed ? 2U : 1U);
@@ -14596,6 +14634,7 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     QVERIFY(bar->isHidden());
     view->setFocus();
     QTest::keyClick(view, Qt::Key_F, Qt::ControlModifier);
+    releaseHeldModifiers(view);
     QTRY_VERIFY(!bar->isHidden());
     auto* query = bar->findChild<QLineEdit*>(QStringLiteral("bench-list-find-query"));
     QVERIFY(query != nullptr);
@@ -14605,6 +14644,7 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     QTest::keyClick(query, Qt::Key_F3);
     QTRY_COMPARE(view->currentIndex().row(), 1);
     QTest::keyClick(query, Qt::Key_F3, Qt::ShiftModifier);
+    releaseHeldModifiers(query);
     QTRY_COMPARE(view->currentIndex().row(), 0);
     view->setFocus();
     QTest::keyClick(view, Qt::Key_Escape);
@@ -14633,6 +14673,7 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     other->model->replaceRows({elsewhere});
     other->view->setFocus();
     QTest::keyClick(other->view, Qt::Key_F, Qt::ControlModifier);
+    releaseHeldModifiers(other->view);
     QTRY_VERIFY(query->hasFocus());
     query->setText(QStringLiteral("elsewhere song"));
     auto* status = bar->findChild<QLabel*>(QStringLiteral("bench-list-find-status"));
@@ -15265,10 +15306,12 @@ void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {
     QVERIFY(undo->isEnabled());
     QVERIFY(undo->text().contains(QStringLiteral("Remove tracks")));
     QTest::keyClick(view, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(view);
     QCOMPARE(model->rowCount(), 3);
     QCOMPARE(view->selectionModel()->selectedRows().size(), 1);
     QCOMPARE(view->selectionModel()->selectedRows().front().row(), 1);
     QTest::keyClick(view, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+    releaseHeldModifiers(view);
     QCOMPARE(model->rowCount(), 2);
     // Undo follows the list on screen: another list has its own (empty)
     // history, and undoing there never reaches back into this one.
@@ -15297,6 +15340,7 @@ void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {
     search->insert(QStringLiteral("c"));
     search->setFocus();
     QTest::keyClick(search, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(search);
     QCOMPARE(search->text(), QStringLiteral("ab"));
     QCOMPARE(model->rowCount(), 2);
     view->setFocus();
@@ -15370,6 +15414,7 @@ void BenchMainWindowTest::localListOrderingActionsRespectAuthorityAndPersist() {
     expression->setCursorPosition(static_cast<int>(expression->text().size()));
     expression->insert(QStringLiteral("x"));
     QTest::keyClick(expression, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(expression);
     QCOMPARE(expression->text(), QStringLiteral("%title%"));
     QCOMPARE(model->rowCount(), 3);
     // Closing cancels a pending edit before the durable workspace flush.
@@ -16940,6 +16985,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY(fields->findChild<QPlainTextEdit*>(QStringLiteral("metadata-long-text-editor")) !=
             nullptr);
     QTest::keyClick(lyrics_editor, Qt::Key_Return, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(fields->findChild<QPlainTextEdit*>(QStringLiteral("metadata-long-text-editor")) ==
                 nullptr);
     QCOMPARE(grid_model->index(0, *lyrics_column).data(metadata_cell_values_role).toStringList(),
@@ -17059,6 +17105,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QTRY_COMPARE(aggregate_model->selectedItemCount(), std::size_t{1U});
     QTRY_COMPARE(custom_draft.data(metadata_cell_values_role).toStringList(), custom_draft_values);
     QTest::keyClick(fields, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(!first_custom.data(metadata_cell_staged_role).toBool());
     QCOMPARE(
         first_custom.data(metadata_cell_values_role).toStringList(),
@@ -17081,6 +17128,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     fields->setCurrentIndex(title_draft);
     fields->setFocus();
     QTest::keyClick(fields, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(!grid_model->index(0, *title_column).data(metadata_cell_staged_role).toBool());
     QTRY_VERIFY(aggregate_model->draftPreviewReady());
     QTRY_COMPARE(title_draft.data(metadata_field_state_role).toInt(),
@@ -17130,6 +17178,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QCOMPARE(artist_draft.data(metadata_cell_values_role).toStringList(), artist_draft_values);
     QVERIFY(summary->text().contains(QStringLiteral("2 staged changes")));
     QTest::keyClick(fields, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(!grid_model->index(0, *artist_column).data(metadata_cell_staged_role).toBool());
     QVERIFY(!grid_model->index(1, *artist_column).data(metadata_cell_staged_role).toBool());
 
@@ -17147,6 +17196,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QCOMPARE(grid_model->index(1, *genre_column).data(metadata_cell_values_role).toStringList(),
              (QStringList{QStringLiteral("Rock")}));
     QTest::keyClick(fields, Qt::Key_Z, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(!grid_model->index(0, *genre_column).data(metadata_cell_staged_role).toBool());
     QVERIFY(!grid_model->index(1, *genre_column).data(metadata_cell_staged_role).toBool());
 
@@ -17173,6 +17223,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY(!grid_model->index(other_file, *date_column).data(metadata_cell_staged_role).toBool());
     QCOMPARE(date_draft.data(Qt::DisplayRole).toString(), QStringLiteral("(remove)"));
     QTest::keyClick(fields, Qt::Key_Backspace, Qt::ControlModifier);
+    releaseHeldModifiers(fields);
     QTRY_VERIFY(
         !grid_model->index(date_file, *date_column).data(metadata_cell_staged_role).toBool());
 
@@ -18183,6 +18234,6 @@ void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {
 
 } // namespace trackknife::bench
 
-QTEST_MAIN(trackknife::bench::BenchMainWindowTest)
+TRACKKNIFE_QTEST_SHARDED_MAIN(trackknife::bench::BenchMainWindowTest)
 
 #include "bench_main_window_test.moc"

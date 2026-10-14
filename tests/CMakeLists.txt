@@ -2,6 +2,11 @@
 
 find_package(Threads REQUIRED)
 
+# A test's moc needs its own source, not its libraries built: without this
+# each test waited for every library it links before even starting, and the
+# window test -- the longest compile -- started last.
+set(CMAKE_AUTOGEN_ORIGIN_DEPENDS OFF)
+
 # Asked of the Qt at hand, not guessed from its version: whether QTRY_ keeps
 # its types under the project's warnings. Where it does not, the tests are
 # built without the conversion warning (qtry_narrowing.hpp).
@@ -883,7 +888,22 @@ if(TRACKKNIFE_BUILD_UI)
         PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options
                 trackknife_project_warnings
     )
-    add_test(NAME bench-main-window COMMAND trackknife_bench_main_window_tests)
+    # The window's cases start an engine each and run for minutes in one
+    # process; as shares (qtest_shard.hpp) they run side by side. Each process
+    # has a home of its own, so the shares cannot meet.
+    set(TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS 12 CACHE STRING
+        "Processes ctest runs the main window tests as")
+    math(EXPR last_shard "${TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS} - 1")
+    foreach(shard RANGE ${last_shard})
+        add_test(NAME bench-main-window-${shard} COMMAND trackknife_bench_main_window_tests)
+        set_tests_properties(
+            bench-main-window-${shard}
+            PROPERTIES
+                TIMEOUT 600
+                ENVIRONMENT
+                    "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp;TRACKKNIFE_TEST_SHARD=${shard}/${TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS}"
+        )
+    endforeach()
     qt_add_executable(trackknife_m3u8_tests m3u8_test.cpp)
     target_link_libraries(trackknife_m3u8_tests PRIVATE Trackknife::BenchUi Qt6::Test
         trackknife_project_options trackknife_project_warnings)
@@ -949,13 +969,6 @@ if(TRACKKNIFE_BUILD_UI)
     add_test(NAME single-instance COMMAND trackknife_single_instance_tests)
     set_tests_properties(m3u8 local-list-edit track-list-find single-instance PROPERTIES TIMEOUT 30 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
-    set_tests_properties(
-        bench-main-window
-        PROPERTIES
-            TIMEOUT 600
-            ENVIRONMENT
-                "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
-    )
 
     add_test(
         NAME ui-smoke

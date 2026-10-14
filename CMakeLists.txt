@@ -44,6 +44,22 @@ option(TRACKKNIFE_BUILD_WATCH "Build the Linux inotify melody-watch utility"
 # libraries, so a package of just the CLI builds in seconds.
 option(TRACKKNIFE_CLI_ONLY "Build only melody-cli, without the media libraries" OFF)
 
+# Linking is most of an incremental Debug build: about a hundred test binaries
+# each link the libraries whole, and lld does each about nine times faster
+# than GNU ld. Debug only -- release packages are built with GCC's -flto,
+# whose objects lld cannot link -- and only where lld is installed.
+set(TRACKKNIFE_LINKER AUTO CACHE STRING "Linker: AUTO uses lld for Debug builds where found")
+set_property(CACHE TRACKKNIFE_LINKER PROPERTY STRINGS AUTO LLD DEFAULT)
+if(TRACKKNIFE_LINKER STREQUAL "LLD")
+    set(CMAKE_LINKER_TYPE LLD)
+elseif(TRACKKNIFE_LINKER STREQUAL "AUTO" AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT APPLE
+       AND NOT DEFINED CMAKE_LINKER_TYPE)
+    find_program(TRACKKNIFE_LLD NAMES ld.lld)
+    if(TRACKKNIFE_LLD)
+        set(CMAKE_LINKER_TYPE LLD)
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

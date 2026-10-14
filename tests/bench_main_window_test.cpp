@@ -12,6 +12,7 @@
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/identify_albums_dialog.hpp"
 #include "bench/lastfm_service.hpp"
+#include "bench/list_view_dialog.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -44,6 +45,7 @@
 #include "workspace/interface_scale.hpp"
 #include "workspace/keep_awake.hpp"
 #include "workspace/lastfm_settings_session.hpp"
+#include "workspace/list_view_definitions.hpp"
 #include "workspace/settings_session.hpp"
 #include "workspace/tab_store.hpp"
 
@@ -428,6 +430,9 @@ class BenchMainWindowTest final : public QObject {
     void filesDroppedOnTheTabBarMakeATab();
     void panelLayoutPersistsAndPreservesFutureState();
     void trackViewLayoutMatchesGroupedQueueAndPersists();
+    void listViewsShowExpressionsGroupAndSort();
+    void listViewEditorChecksAndSavesACopy();
+    void listLayoutsFromBeforeViewsMigrate();
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
     void localListHistoryBranchesAndBounds();
@@ -15672,6 +15677,240 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         QStringLiteral("local:%1").arg(QString::fromStdString(kept.tabs.front().id.to_string())),
         binding);
     QCOMPARE(kept.tabs.front().layout, future_layout);
+}
+
+// ADR-0282: a list view of the user's own -- an expression column, rows
+// grouped by an expression with a header and subgroups of their own -- and a
+// header click sorting the list by a column, again the other way. Changing
+// a shipped view makes a copy, which the list is then drawn by after a
+// restart too.
+void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
+    auto by_label = *lists::shipped_list_view(lists::columns_view_id);
+    by_label.id = "view-test";
+    by_label.name = "By label";
+    by_label.builtin = false;
+    by_label.columns.push_back({.id = "expression-1",
+                                .visible = true,
+                                .title = "Label",
+                                .display = "%label%",
+                                .sort = {},
+                                .alignment = lists::ColumnAlignment::right,
+                                .expands = false});
+    by_label.grouping = lists::ViewGrouping::expression;
+    by_label.group_key = "%label%";
+    by_label.group_title = "%label%";
+    by_label.group_details = "%group_tracks% tracks";
+    by_label.subgroup = lists::ViewSubgroup{.key = "%discnumber%", .label = "Disc %discnumber%"};
+    QVERIFY(saveCustomListViews({by_label}).has_value());
+
+    const auto row = [](const char* title, const char* label, const char* disc) {
+        LocalTrackRow made;
+        made.raw_path = std::string{"/music/"} + title + ".flac";
+        made.title = title;
+        made.artist = "Artist";
+        made.duration_ms = 60'000;
+        for (const auto& [name, value] : {std::pair{"TITLE", title}, std::pair{"LABEL", label},
+                                          std::pair{"DISCNUMBER", disc}}) {
+            made.metadata.fields.push_back(
+                {.canonical_name = metadata::canonicalize_field_name(name),
+                 .native_name = name,
+                 .values = {value},
+                 .qualifier = {},
+                 .provenance = metadata::FieldProvenance::embedded});
+        }
+        made.probed = true;
+        return made;
+    };
+    QString customised;
+    {
+        BenchMainWindow window;
+        window.show();
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        QVERIFY(model != nullptr);
+        model->appendRows({row("Beta", "Warp", "1"), row("alpha", "Warp", "2"),
+                           row("Gamma", "Warp", "2"), row("Delta", "Interscope", "1")});
+        window.chooseListView(QStringLiteral("view-test"));
+
+        QCOMPARE(model->columnCount(), local_column_count + 1);
+        const auto label = model->columnOf(QStringLiteral("expression-1"));
+        QCOMPARE(label, local_column_count);
+        QCOMPARE(model->headerData(label, Qt::Horizontal, Qt::DisplayRole).toString(),
+                 QStringLiteral("Label"));
+        QTRY_COMPARE(model->index(0, label).data().toString(), QStringLiteral("Warp"));
+        QCOMPARE(model->index(3, label).data().toString(), QStringLiteral("Interscope"));
+        QCOMPARE(model->index(0, label).data(Qt::TextAlignmentRole).value<Qt::Alignment>() &
+                     Qt::AlignRight,
+                 Qt::AlignRight);
+        QVERIFY(!view->isColumnHidden(label));
+
+        // Grouped by label once every row is known; the groups are not
+        // albums, so nothing is left to their headers.
+        QTRY_VERIFY(model->expressionGroupsReady());
+        QTRY_VERIFY(view->albumGroupingEnabled());
+        QVERIFY(!view->property(ui::track_album_rules_property).toBool());
+        const auto starts = [model] {
+            QList<bool> found;
+            for (int at = 0; at < model->rowCount(); ++at) {
+                found << model->index(at, 0).data(ui::track_album_group_start_role).toBool();
+            }
+            return found;
+        };
+        QCOMPARE(starts(), (QList<bool>{true, false, false, true}));
+        QTRY_COMPARE(model->index(0, 0).data(ui::track_group_title_role).toString(),
+                     QStringLiteral("Warp"));
+        QCOMPARE(model->index(0, 0).data(ui::track_group_details_role).toString(),
+                 QStringLiteral("3 tracks"));
+        QCOMPARE(model->index(0, 0).data(ui::track_disc_start_role).toString(),
+                 QStringLiteral("Disc 1"));
+        QCOMPARE(model->index(1, 0).data(ui::track_disc_start_role).toString(),
+                 QStringLiteral("Disc 2"));
+        QCOMPARE(model->index(2, 0).data(ui::track_disc_start_role).toString(), QString{});
+        // One disc only: nothing to tell apart.
+        QCOMPARE(model->index(3, 0).data(ui::track_disc_start_role).toString(), QString{});
+        // Drawn as the view says: its header above the group, not the album's.
+        QTRY_VERIFY(view->rowHeight(0) > view->rowHeight(2));
+
+        const auto titles = [model] {
+            QStringList found;
+            for (int at = 0; at < model->rowCount(); ++at) {
+                found << model->index(at, local_title_column).data().toString();
+            }
+            return found;
+        };
+        // A click on Title sorts the list by it -- natural, case ignored --
+        // as an edit that can be undone; again, the other way.
+        emit view->horizontalHeader()->sectionClicked(local_title_column);
+        QTRY_COMPARE(titles(), (QStringList{QStringLiteral("alpha"), QStringLiteral("Beta"),
+                                            QStringLiteral("Delta"), QStringLiteral("Gamma")}));
+        QVERIFY(model->canUndo());
+        QCOMPARE(model->undoLabel(), QStringLiteral("Sort by Title"));
+        // Groups follow the list's order.
+        QTRY_COMPARE(starts(), (QList<bool>{true, false, true, true}));
+        emit view->horizontalHeader()->sectionClicked(local_title_column);
+        QTRY_COMPARE(titles(), (QStringList{QStringLiteral("Gamma"), QStringLiteral("Delta"),
+                                            QStringLiteral("Beta"), QStringLiteral("alpha")}));
+        // The Label column sorts by what it shows.
+        emit view->horizontalHeader()->sectionClicked(label);
+        QTRY_COMPARE(model->index(0, label).data().toString(), QStringLiteral("Interscope"));
+
+        // A shipped view is not changed: hiding one of its columns makes a
+        // copy, which the list is drawn by.
+        window.chooseListView(QStringLiteral("plain-columns"));
+        QCOMPARE(model->columnCount(), local_column_count);
+        QVERIFY(!view->isColumnHidden(local_date_column));
+        window.setTrackColumnVisible(QStringLiteral("date"), false);
+        auto* tab = window.currentListTab();
+        customised = tab->view_layout.view;
+        QVERIFY(customised.startsWith(QStringLiteral("view-")));
+        const auto copy = findListView(customised);
+        QVERIFY(copy.has_value());
+        QCOMPARE(copy->name, std::string{"Plain columns (customised)"});
+        QVERIFY(view->isColumnHidden(local_date_column));
+        QVERIFY(lists::shipped_list_view(lists::columns_view_id)->columns ==
+                findListView(QStringLiteral("plain-columns"))->columns);
+        QVERIFY(window.close());
+    }
+    {
+        BenchMainWindow restored;
+        restored.show();
+        auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+        QCOMPARE(restored.currentListTab()->view_layout.view, customised);
+        QVERIFY(view->isColumnHidden(local_date_column));
+        QVERIFY(restored.close());
+    }
+}
+
+// ADR-0282: the editor shows an expression's error and will not save the
+// view until it is right; a shipped view is edited as a copy, which the list
+// it was opened from is then drawn by.
+void BenchMainWindowTest::listViewEditorChecksAndSavesACopy() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* model =
+        qobject_cast<LocalListModel*>(static_cast<QTableView*>(tabs->currentWidget())->model());
+    window.chooseListView(QStringLiteral("plain-columns"));
+    window.editListView(false);
+    ListViewDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<ListViewDialog*>()) != nullptr);
+    auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("bench-list-view-name"));
+    QCOMPARE(name->text(), QStringLiteral("Plain columns (copy)"));
+    auto* columns = dialog->findChild<QTableWidget*>(QStringLiteral("bench-list-view-columns"));
+    auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-list-view-add-column"));
+    auto* buttons = dialog->findChild<QDialogButtonBox*>();
+    auto* save = buttons->button(QDialogButtonBox::Save);
+    QVERIFY(save->isEnabled());
+    add->click();
+    const auto added = columns->rowCount() - 1;
+    columns->item(added, 2)->setText(QStringLiteral("$if(%genre%"));
+    QVERIFY(!save->isEnabled());
+    QVERIFY(!columns->item(added, 2)->toolTip().isEmpty());
+    auto* problems = dialog->findChild<QLabel*>(QStringLiteral("bench-list-view-problems"));
+    QVERIFY(problems->isVisible());
+    columns->item(added, 1)->setText(QStringLiteral("Codec"));
+    columns->item(added, 2)->setText(QStringLiteral("$info(codec)"));
+    QVERIFY(save->isEnabled());
+    save->click();
+    QTRY_VERIFY(window.findChild<ListViewDialog*>() == nullptr);
+    const auto bound = window.currentListTab()->view_layout.view;
+    QVERIFY(bound.startsWith(QStringLiteral("view-")));
+    const auto copy = findListView(bound);
+    QVERIFY(copy.has_value());
+    QCOMPARE(copy->name, std::string{"Plain columns (copy)"});
+    QCOMPARE(model->columnCount(), local_column_count + 1);
+    QCOMPARE(model->headerData(local_column_count, Qt::Horizontal, Qt::DisplayRole).toString(),
+             QStringLiteral("Codec"));
+    QVERIFY(window.close());
+}
+
+// ADR-0282: a layout saved before list views is drawn by its presentation's
+// shipped view -- or, where its columns were arranged otherwise, by a copy
+// arranged so, made once.
+void BenchMainWindowTest::listLayoutsFromBeforeViewsMigrate() {
+    {
+        BenchMainWindow window;
+        window.show();
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        QVERIFY(window.close());
+    }
+    auto state = TabStore::loadState();
+    QCOMPARE(state.tabs.size(), 1U);
+    QByteArray layout{R"({"schema":2,"presentation":"plain-columns","columns":[)"};
+    QStringList columns;
+    for (const auto& spec : track_column_specs) {
+        // As plain columns are, but without the date.
+        const auto shown = spec.logical != local_artwork_column &&
+                           spec.logical != local_date_column && spec.logical < local_rating_column;
+        columns << QStringLiteral(R"({"id":"%1","width":%2,"visible":%3})")
+                       .arg(QString::fromLatin1(spec.id))
+                       .arg(spec.default_width)
+                       .arg(shown ? QStringLiteral("true") : QStringLiteral("false"));
+    }
+    layout += columns.join(QLatin1Char(',')).toUtf8() + "]}";
+    state.tabs.front().layout = layout;
+    TabStore::saveState(state);
+    {
+        BenchMainWindow migrated;
+        migrated.show();
+        auto* tabs = migrated.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<QTableView*>(tabs->currentWidget());
+        const auto bound = migrated.currentListTab()->view_layout.view;
+        QVERIFY(bound.startsWith(QStringLiteral("view-")));
+        QCOMPARE(findListView(bound)->name, std::string{"Plain columns (customised)"});
+        QVERIFY(view->isColumnHidden(local_date_column));
+        QVERIFY(!view->isColumnHidden(local_title_column));
+        QVERIFY(migrated.close());
+    }
+    const auto custom = customListViews();
+    QVERIFY(custom && custom->size() == 1U);
 }
 
 // ADR-0259: the window keeps which lists it has open, and a cache of their

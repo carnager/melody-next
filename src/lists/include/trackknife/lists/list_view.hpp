@@ -123,6 +123,44 @@ struct ViewRow {
     unsigned rating{0U};
 };
 
+// A row's own copy of all that, for a worker: the list it came from may
+// change while it is evaluated.
+struct OwnedViewRow {
+    std::string raw_path;
+    metadata::MetadataDocument metadata;
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string album_artist;
+    std::string date;
+    std::string track_number;
+    std::optional<std::int64_t> duration_ms;
+    std::string codec;
+    int sample_rate{0};
+    int bits{0};
+    int channels{0};
+    std::int64_t bit_rate{0};
+    unsigned rating{0U};
+
+    [[nodiscard]] ViewRow view() const {
+        return {.raw_path = raw_path,
+                .metadata = &metadata,
+                .title = title,
+                .artist = artist,
+                .album = album,
+                .album_artist = album_artist,
+                .date = date,
+                .track_number = track_number,
+                .duration_ms = duration_ms,
+                .codec = codec,
+                .sample_rate = sample_rate,
+                .bits = bits,
+                .channels = channels,
+                .bit_rate = bit_rate,
+                .rating = rating};
+    }
+};
+
 // A view's expressions, compiled once.
 class CompiledListView final {
   public:
@@ -166,7 +204,32 @@ struct EvaluatedRow {
 // is not refused for one odd file.
 [[nodiscard]] core::Result<std::vector<EvaluatedRow>>
 evaluate_list_rows(const CompiledListView& compiled, std::span<const ViewRow> rows,
-                   std::size_t first_index = 0U, const core::CancellationToken& cancellation = {});
+                   const core::CancellationToken& cancellation = {});
+
+// An expression grouping's groups by their keys alone, nothing evaluated:
+// runs of equal key in the list's order, each one's length, and where its
+// subgroups begin -- only in a group with more than one.
+struct GroupRun {
+    std::size_t first{0U};
+    std::size_t count{0U};
+    std::int64_t length_ms{0};
+    std::vector<std::size_t> subgroup_starts;
+    friend bool operator==(const GroupRun&, const GroupRun&) = default;
+};
+[[nodiscard]] std::vector<GroupRun> list_group_runs(std::span<const EvaluatedRow* const> rows,
+                                                    std::span<const std::int64_t> durations_ms);
+
+// A group's header, read from its first row with group_tracks and
+// group_length beside its tags.
+struct GroupHeader {
+    std::string title;
+    std::string details;
+    friend bool operator==(const GroupHeader&, const GroupHeader&) = default;
+};
+[[nodiscard]] GroupHeader evaluate_group_header(const CompiledListView& compiled,
+                                                const ViewRow& first, std::size_t tracks,
+                                                std::int64_t length_ms,
+                                                const core::CancellationToken& cancellation = {});
 
 // An expression grouping's groups, from evaluated rows: runs of equal key in
 // the list's order.

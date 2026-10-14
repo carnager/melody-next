@@ -22,6 +22,10 @@ inline constexpr auto track_date_column_property = "trackknife-track-date-column
 inline constexpr auto track_length_column_property = "trackknife-track-length-column";
 inline constexpr auto track_separate_number_property = "trackknife-track-separate-number";
 inline constexpr auto track_side_artwork_property = "trackknife-track-side-artwork";
+// ADR-0282: false when a list's groups are not albums -- an expression
+// grouping -- so inside a group album and date are not taken as said by its
+// header, nor the artist hidden where it is the group's.
+inline constexpr auto track_album_rules_property = "trackknife-track-album-rules";
 
 // Shared role and column contract for the album-grouped track presentation
 // (QueueItemDelegate/QueueTableView). Any model rendered by the shared
@@ -48,6 +52,13 @@ enum TrackRowRole : int {
     track_disc_start_role,
     // bool: the row's file is not there (ADR-0268) -- shown greyed.
     track_missing_role,
+    // ADR-0282, an expression grouping's: QString, what the row's group is
+    // keyed by; invalid where the model groups by album.
+    track_group_key_role,
+    // QString, on a group's first row: its header's title and details;
+    // invalid where the header is the album's.
+    track_group_title_role,
+    track_group_details_role,
 };
 
 // Complete physical column layout used by both authority-bound queues:

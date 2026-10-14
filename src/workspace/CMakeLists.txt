@@ -45,6 +45,8 @@ qt_add_library(
     folder_browser.hpp
     library_browser.cpp
     library_view_definitions.cpp
+    list_view_definitions.cpp
+    list_view_definitions.hpp
     library_view_definitions.hpp
     library_browser.hpp
     list_edit_job.cpp
@@ -125,6 +127,7 @@ qt_add_library(
     ../bench/lastfm_service.hpp
     ../bench/local_list_history.cpp
     ../bench/local_list_model.cpp
+    ../bench/local_list_view_state.cpp
     ../bench/local_list_model.hpp
     ../bench/local_playback_service.hpp
     ../bench/metadata_dialog_helpers.cpp

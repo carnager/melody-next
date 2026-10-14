@@ -42,7 +42,7 @@ so nothing new has to cross the protocol.
   count and last played are history, fetched for the rows on screen; they are
   columns, not fields an expression can read, in this version.
 - **Expressions read the row as the engine's formatting does.** Tags by name;
-  host fields `length` (m:ss), `path`, `rating` (1-10) and `list_index`;
+  host fields `length` (m:ss), `path` and `rating` (1-10);
   technicals and the file through `$info(...)` -- `codec`, `samplerate`,
   `bitspersample`, `channels`, `bitrate`, `filename`, `filename_ext`,
   `directory`, `extension`. A group header also reads `group_tracks` and

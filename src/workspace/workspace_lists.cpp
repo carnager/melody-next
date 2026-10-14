@@ -8,6 +8,7 @@
 #include "uicommon/debug_log.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
+#include "workspace/list_view_definitions.hpp"
 #include "workspace/tab_store.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -778,57 +779,100 @@ void Workspace::closeList(ListTab& tab) {
 
 ui::TrackViewLayout
 Workspace::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) {
+    const auto* view =
+        lists::shipped_list_view(ui::trackViewPresentationId(presentation).toStdString());
+    return trackViewLayoutFor(view != nullptr ? *view : lists::shipped_list_views().front());
+}
+
+ui::TrackViewLayout
+Workspace::trackViewLayoutFor(const lists::ListView& view,
+                              const std::vector<ui::TrackViewColumnLayout>& widths) {
     std::vector<ui::TrackViewColumnLayout> columns;
-    columns.reserve(track_column_specs.size());
-    for (const auto& spec : track_column_specs) {
-        auto width = spec.default_width;
-        // Ratings stay one click away in the Columns menu rather than
-        // claiming space in every default view.
-        bool visible = spec.logical < local_rating_column;
-        if (presentation == ui::TrackViewPresentation::albums_side_artwork &&
-            (spec.logical == local_artist_column || spec.logical == local_album_column ||
-             spec.logical == local_date_column)) {
-            // The album's header says these; a track whose artist differs
-            // says so after its title.
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
-                   spec.logical == local_artwork_column) {
-            width = 42;
-        } else if (presentation == ui::TrackViewPresentation::plain_columns &&
-                   spec.logical == local_artwork_column) {
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::compact_queue) {
-            visible = spec.logical == local_artist_column ||
-                      spec.logical == local_track_number_column ||
-                      spec.logical == local_title_column || spec.logical == local_album_column ||
-                      spec.logical == local_length_column;
+    columns.reserve(view.columns.size());
+    for (const auto& column : view.columns) {
+        const auto id = QString::fromStdString(column.id);
+        const auto saved = std::ranges::find(widths, id, &ui::TrackViewColumnLayout::id);
+        auto width = 150;
+        if (saved != widths.end()) {
+            width = saved->width;
+        } else if (const auto logical = trackColumnLogical(id); logical >= 0) {
+            const auto spec =
+                std::ranges::find(track_column_specs, logical, &TrackColumnSpec::logical);
+            width = spec->default_width;
+            // A cover in the header strip needs no more than its own width.
+            if (logical == local_artwork_column && view.artwork == lists::ViewArtwork::header) {
+                width = 42;
+            }
         }
-        columns.push_back(ui::TrackViewColumnLayout{
-            .id = QString::fromLatin1(spec.id), .width = width, .visible = visible});
+        columns.push_back({.id = id, .width = width, .visible = column.visible});
+    }
+    // What the window's presentation actions say: the shipped view this is,
+    // or the one it looks like.
+    auto presentation = ui::TrackViewPresentation::plain_columns;
+    if (const auto shipped = ui::trackViewPresentationFromId(QString::fromStdString(view.id))) {
+        presentation = *shipped;
+    } else if (view.grouping != lists::ViewGrouping::none) {
+        presentation = view.artwork == lists::ViewArtwork::beside
+                           ? ui::TrackViewPresentation::albums_side_artwork
+                           : ui::TrackViewPresentation::albums_header_artwork;
     }
     return ui::TrackViewLayout{.schema_version = ui::track_view_layout_schema_version,
                                .presentation = presentation,
-                               .columns = std::move(columns)};
+                               .columns = std::move(columns),
+                               .view = QString::fromStdString(view.id)};
 }
 
 ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
     auto layout = defaultTrackViewLayout();
     const auto binding = QStringLiteral("local:%1").arg(document_text(tab.document.id));
-    if (const auto stored = restored_track_view_layouts_.value(binding); !stored.isEmpty()) {
-        QString layout_error;
-        if (auto decoded = ui::deserializeTrackViewLayout(stored, trackColumnIds(), &layout_error);
-            decoded) {
-            layout = std::move(*decoded);
+    const auto stored = restored_track_view_layouts_.value(binding);
+    if (stored.isEmpty()) {
+        return layout;
+    }
+    QString layout_error;
+    auto decoded = ui::deserializeTrackViewLayout(stored, trackColumnIds(), &layout_error);
+    if (!decoded) {
+        tab.view_layout_persistence_protected = true;
+        tab.preserved_view_layout = stored;
+        view_->showMessage(
+            QStringLiteral("Track layout was not loaded (%1); the saved value was preserved")
+                .arg(layout_error),
+            7'000);
+        return layout;
+    }
+    if (decoded->view.isEmpty()) {
+        // ADR-0282: a layout from before list views is its presentation's
+        // shipped view -- or, where its columns were arranged otherwise, a
+        // copy arranged so, shared by every tab arranged the same.
+        const auto* shipped = lists::shipped_list_view(
+            ui::trackViewPresentationId(decoded->presentation).toStdString());
+        std::vector<lists::ViewColumn> arranged;
+        for (const auto& column : decoded->columns) {
+            const auto found = std::ranges::find(shipped->columns, column.id.toStdString(),
+                                                 &lists::ViewColumn::id);
+            if (found != shipped->columns.end()) {
+                auto placed = *found;
+                placed.visible = column.visible;
+                arranged.push_back(std::move(placed));
+            }
+        }
+        if (arranged == shipped->columns) {
+            decoded->view = QString::fromStdString(shipped->id);
+        } else if (auto copy = listViewCopy(*shipped, arranged,
+                                            QString::fromStdString(shipped->name) +
+                                                QStringLiteral(" (customised)"))) {
+            decoded->view = *copy;
         } else {
-            tab.view_layout_persistence_protected = true;
-            tab.preserved_view_layout = stored;
-            view_->showMessage(
-                QStringLiteral("Track layout was not loaded (%1); the saved value was preserved")
-                    .arg(layout_error),
-                7'000);
+            decoded->view = QString::fromStdString(shipped->id);
         }
     }
-    return layout;
+    auto view = findListView(decoded->view);
+    if (!view) {
+        view_->showMessage(
+            QStringLiteral("This list's view is gone; it is shown as albums instead"), 7'000);
+        return layout;
+    }
+    return trackViewLayoutFor(*view, decoded->columns);
 }
 
 void Workspace::removeRows(ListTab& tab, std::vector<int> rows) {

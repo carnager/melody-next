@@ -56,8 +56,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
     view.name = "By label";
     view.builtin = false;
     view.columns.push_back(expression_column("expression-1", "Label", "%label%"));
-    view.columns.push_back(expression_column("expression-2", "Where",
-                                             "$info(filename_ext) · %length% · #%list_index%"));
+    view.columns.push_back(
+        expression_column("expression-2", "Where", "$info(filename_ext) · %length%"));
     view.columns.push_back(
         expression_column("expression-3", "Kind", "$info(codec) $info(samplerate)"));
     view.grouping = lists::ViewGrouping::expression;
@@ -171,8 +171,8 @@ void rowsAreEvaluatedAndGrouped() {
         return;
     }
     CHECK((evaluated->front().cells ==
-           std::vector<std::string>{"Interscope", "One.flac · 1:01 · #1", "flac 44100"}));
-    CHECK(evaluated->back().cells[1] == "Four.flac · 0:01 · #4");
+           std::vector<std::string>{"Interscope", "One.flac · 1:01", "flac 44100"}));
+    CHECK(evaluated->back().cells[1] == "Four.flac · 0:01");
     const auto groups = lists::evaluate_list_groups(*compiled, rows, *evaluated);
     CHECK(groups && groups->size() == 2U);
     if (!groups || groups->size() != 2U) {
@@ -216,8 +216,17 @@ void columnsSortNaturallyAndStably() {
     CHECK(numbers && (lists::list_sort_order(*numbers, false) == std::vector<int>{1, 3, 0, 2}));
     // History is not on the rows.
     CHECK(!lists::list_sort_keys(*compiled, "play-count", rows));
-    const auto labels = lists::list_sort_keys(*compiled, "expression-1", rows);
-    CHECK(labels && labels->size() == rows.size());
+    // An expression column with no sort expression sorts by what it shows.
+    const auto labelled = tags({{"LABEL", {"Warp"}}});
+    const auto other_label = tags({{"LABEL", {"Interscope"}}});
+    std::vector<lists::ViewRow> labelled_rows;
+    for (const auto* document : {&labelled, &other_label}) {
+        lists::ViewRow row;
+        row.metadata = document;
+        labelled_rows.push_back(row);
+    }
+    const auto labels = lists::list_sort_keys(*compiled, "expression-1", labelled_rows);
+    CHECK(labels && (*labels == std::vector<std::string>{"warp", "interscope"}));
 }
 
 } // namespace

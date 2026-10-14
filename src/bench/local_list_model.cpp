@@ -159,10 +159,16 @@ void LocalListModel::appendPaths(std::vector<std::string> raw_paths, const int i
 
 void LocalListModel::applyTechnicals(const std::string& raw_path,
                                      const LocalTrackTechnicals& technicals) {
+    bool changed = false;
     for (auto& row : rows_) {
         if (row.raw_path == raw_path) {
             row.technicals = technicals;
+            forgetEvaluation(row);
+            changed = true;
         }
+    }
+    if (changed) {
+        scheduleEvaluation();
     }
 }
 
@@ -189,7 +195,7 @@ void LocalListModel::setMissing(const std::vector<std::string>& checked,
         // How it looks, not what it is: no list edit, no search gone stale.
         if (changed.contains(rows_[row].raw_path)) {
             emit dataChanged(index(static_cast<int>(row), 0),
-                             index(static_cast<int>(row), local_column_count - 1),
+                             index(static_cast<int>(row), columnCount() - 1),
                              {ui::track_missing_role, Qt::ToolTipRole});
         }
     }
@@ -203,6 +209,7 @@ void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
             const auto rating = ratings.value(track_hash);
             if (row.rating != rating) {
                 row.rating = rating;
+                forgetEvaluation(row);
                 changed = true;
             }
         }
@@ -214,6 +221,9 @@ void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
                 changed = true;
             }
         }
+    }
+    if (changed) {
+        scheduleEvaluation();
     }
     if (changed && !rows_.empty()) {
         // Album ratings paint over the artwork gutter, so both ends of the
@@ -1026,7 +1036,7 @@ int LocalListModel::rowCount(const QModelIndex& parent) const {
 }
 
 int LocalListModel::columnCount(const QModelIndex& parent) const {
-    return parent.isValid() ? 0 : local_column_count;
+    return parent.isValid() ? 0 : local_column_count + expression_columns_;
 }
 
 QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
@@ -1034,6 +1044,17 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return {};
     }
     const auto& row = rows_[static_cast<std::size_t>(index.row())];
+    // ADR-0282: the view's expression columns, and its groups.
+    if (index.column() >= local_column_count &&
+        (role == Qt::DisplayRole || role == Qt::TextAlignmentRole)) {
+        return viewData(index, role);
+    }
+    if (expressionGrouping() &&
+        (role == ui::track_group_key_role || role == ui::track_album_group_start_role ||
+         role == ui::track_disc_start_role || role == ui::track_group_title_role ||
+         role == ui::track_group_details_role)) {
+        return viewData(index, role);
+    }
     if (index.column() == local_play_count_column || index.column() == local_last_played_column) {
         if (role == Qt::DisplayRole || role == Qt::ToolTipRole || role == Qt::TextAlignmentRole)
             return listeningHistoryData(index, role);
@@ -1107,8 +1128,14 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
 QVariant LocalListModel::headerData(const int section, const Qt::Orientation orientation,
                                     const int role) const {
     if (orientation != Qt::Horizontal || role != Qt::DisplayRole || section < 0 ||
-        section >= local_column_count) {
+        section >= columnCount()) {
         return {};
+    }
+    if (section >= local_column_count) {
+        const auto id = columnId(section).toStdString();
+        const auto& columns = list_view_->view().columns;
+        const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
+        return found == columns.end() ? QString{} : QString::fromStdString(found->title);
     }
     return QString::fromLatin1(ui::track_column_headers.at(static_cast<std::size_t>(section)));
 }
@@ -1225,11 +1252,16 @@ void LocalListModel::refreshCurrentRow() {
 }
 
 void LocalListModel::emitRowChanged(const int row) {
-    emit dataChanged(index(row, 0), index(row, local_column_count - 1));
+    // What the row says changed, so what its view made of it is made again.
+    if (row >= 0 && row < static_cast<int>(rows_.size())) {
+        forgetEvaluation(rows_[static_cast<std::size_t>(row)]);
+        scheduleEvaluation();
+    }
+    emit dataChanged(index(row, 0), index(row, columnCount() - 1));
 }
 
 void LocalListModel::emitCurrentRowChanged(const int row) {
-    emit dataChanged(index(row, 0), index(row, local_column_count - 1), {ui::track_current_role});
+    emit dataChanged(index(row, 0), index(row, columnCount() - 1), {ui::track_current_role});
 }
 
 } // namespace trackknife::bench

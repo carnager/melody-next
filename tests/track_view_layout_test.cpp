@@ -26,7 +26,10 @@ void TrackViewLayoutTest::roundTripsPresentationAndColumns() {
         .columns = {{.id = QStringLiteral("artwork"), .width = 118, .visible = true},
                     {.id = QStringLiteral("artist"), .width = 190, .visible = true},
                     {.id = QStringLiteral("title"), .width = 280, .visible = true},
-                    {.id = QStringLiteral("date"), .width = 72, .visible = false}},
+                    {.id = QStringLiteral("date"), .width = 72, .visible = false},
+                    // ADR-0282: an expression column's id is its view's own.
+                    {.id = QStringLiteral("expression-1"), .width = 140, .visible = true}},
+        .view = QStringLiteral("view-1"),
     };
     QString error;
     const auto decoded =
@@ -94,7 +97,9 @@ void TrackViewLayoutTest::rejectsInvalidLayouts_data() {
     QTest::addColumn<QByteArray>("json");
     QTest::newRow("malformed") << QByteArray{"{"};
     QTest::newRow("future") << QByteArray{
-        R"({"schema":3,"presentation":"plain-columns","columns":[]})"};
+        R"({"schema":4,"presentation":"plain-columns","view":"plain-columns","columns":[]})"};
+    QTest::newRow("no-view") << QByteArray{
+        R"({"schema":3,"presentation":"plain-columns","columns":[{"id":"artist","width":100,"visible":true}]})"};
     QTest::newRow("unknown-presentation")
         << QByteArray{R"({"schema":1,"presentation":"tiles","columns":[]})"};
     QTest::newRow("duplicate-column") << QByteArray{

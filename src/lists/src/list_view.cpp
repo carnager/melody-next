@@ -46,9 +46,9 @@ core::Error problem(std::string message, core::ErrorCode code = core::ErrorCode:
 // fields the engine's formatting offers, its technicals and file by $info.
 class ViewRowContext final : public titleformat::EvaluationContext {
   public:
-    ViewRowContext(const ViewRow& row, const FormatContextKind kind, const std::size_t index,
+    ViewRowContext(const ViewRow& row, const FormatContextKind kind,
                    const std::map<std::string, std::string>* group = nullptr)
-        : row_(row), kind_(kind), index_(index), group_(group) {}
+        : row_(row), kind_(kind), group_(group) {}
 
     FormatContextKind kind() const noexcept override { return kind_; }
 
@@ -168,15 +168,11 @@ class ViewRowContext final : public titleformat::EvaluationContext {
         if (canonical == "rating") {
             return row_.rating > 0U ? std::to_string(row_.rating) : std::string{};
         }
-        if (canonical == "listindex") {
-            return std::to_string(index_ + 1U);
-        }
         return std::nullopt;
     }
 
     const ViewRow& row_;
     FormatContextKind kind_;
-    std::size_t index_;
     const std::map<std::string, std::string>* group_;
 };
 
@@ -600,23 +596,22 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
 struct ListViewEvaluator {
     static core::Result<std::vector<EvaluatedRow>>
     rows(const CompiledListView& compiled, const std::span<const ViewRow> rows,
-         const std::size_t first_index, const core::CancellationToken& cancellation) {
+         const core::CancellationToken& cancellation) {
         std::vector<EvaluatedRow> evaluated;
         evaluated.reserve(rows.size());
-        for (std::size_t at = 0U; at < rows.size(); ++at) {
+        for (const auto& source : rows) {
             if (cancellation.is_cancellation_requested()) {
                 return std::unexpected(
                     problem("Evaluating the list was cancelled", core::ErrorCode::cancelled));
             }
-            const ViewRowContext context{rows[at], FormatContextKind::list_item, first_index + at};
+            const ViewRowContext context{source, FormatContextKind::list_item};
             EvaluatedRow row;
             row.cells.reserve(compiled.displays_.size());
             for (const auto& display : compiled.displays_) {
                 row.cells.push_back(format(display, context, cancellation));
             }
             if (compiled.group_key_) {
-                const ViewRowContext grouping{rows[at], FormatContextKind::grouping,
-                                              first_index + at};
+                const ViewRowContext grouping{source, FormatContextKind::grouping};
                 row.group_key = format(*compiled.group_key_, grouping, cancellation);
                 if (compiled.subgroup_key_) {
                     row.subgroup_key = format(*compiled.subgroup_key_, grouping, cancellation);
@@ -628,61 +623,19 @@ struct ListViewEvaluator {
         return evaluated;
     }
 
-    static core::Result<std::vector<EvaluatedGroup>>
-    groups(const CompiledListView& compiled, const std::span<const ViewRow> rows,
-           const std::span<const EvaluatedRow> evaluated,
-           const core::CancellationToken& cancellation) {
-        std::vector<EvaluatedGroup> groups;
-        if (!compiled.group_key_ || rows.size() != evaluated.size()) {
-            return groups;
+    static GroupHeader header(const CompiledListView& compiled, const ViewRow& first,
+                              const std::size_t tracks, const std::int64_t length_ms,
+                              const core::CancellationToken& cancellation) {
+        if (!compiled.group_title_) {
+            return {};
         }
-        for (std::size_t first = 0U; first < rows.size();) {
-            if (cancellation.is_cancellation_requested()) {
-                return std::unexpected(
-                    problem("Grouping the list was cancelled", core::ErrorCode::cancelled));
-            }
-            auto end = first + 1U;
-            while (end < rows.size() && evaluated[end].group_key == evaluated[first].group_key) {
-                ++end;
-            }
-            std::int64_t length = 0;
-            for (auto row = first; row < end; ++row) {
-                length += rows[row].duration_ms.value_or(0);
-            }
-            const std::map<std::string, std::string> host{
-                {"grouptracks", std::to_string(end - first)}, {"grouplength", clock(length)}};
-            const ViewRowContext context{rows[first], FormatContextKind::list_item, first, &host};
-            EvaluatedGroup group{.first = first,
-                                 .count = end - first,
-                                 .title = format(*compiled.group_title_, context, cancellation),
-                                 .details =
-                                     compiled.group_details_
-                                         ? format(*compiled.group_details_, context, cancellation)
-                                         : std::string{},
-                                 .subgroups = {}};
-            if (compiled.subgroup_key_) {
-                // Only a group with more than one subgroup says which is which,
-                // as an album says its discs only when it has several.
-                std::set<std::string_view> keys;
-                for (auto row = first; row < end; ++row) {
-                    if (!evaluated[row].subgroup_key.empty()) {
-                        keys.insert(evaluated[row].subgroup_key);
-                    }
-                }
-                if (keys.size() > 1U) {
-                    for (auto row = first; row < end; ++row) {
-                        const auto& key = evaluated[row].subgroup_key;
-                        if (!key.empty() &&
-                            (row == first || key != evaluated[row - 1U].subgroup_key)) {
-                            group.subgroups.emplace_back(row, evaluated[row].subgroup_label);
-                        }
-                    }
-                }
-            }
-            groups.push_back(std::move(group));
-            first = end;
-        }
-        return groups;
+        const std::map<std::string, std::string> host{{"grouptracks", std::to_string(tracks)},
+                                                      {"grouplength", clock(length_ms)}};
+        const ViewRowContext context{first, FormatContextKind::list_item, &host};
+        return {.title = format(*compiled.group_title_, context, cancellation),
+                .details = compiled.group_details_
+                               ? format(*compiled.group_details_, context, cancellation)
+                               : std::string{}};
     }
 
     static core::Result<std::vector<std::string>>
@@ -726,7 +679,8 @@ struct ListViewEvaluator {
                 return std::unexpected(
                     problem("Sorting the list was cancelled", core::ErrorCode::cancelled));
             }
-            const ViewRowContext context{rows[at], FormatContextKind::sort, at};
+            // In the context its program was compiled for: a display shown sorts too.
+            const ViewRowContext context{rows[at], program->context()};
             auto lowered = core::unicodeSimpleLower(format(*program, context, cancellation));
             keys.push_back(lowered ? std::move(*lowered) : std::string{});
         }
@@ -736,15 +690,82 @@ struct ListViewEvaluator {
 
 core::Result<std::vector<EvaluatedRow>>
 evaluate_list_rows(const CompiledListView& compiled, const std::span<const ViewRow> rows,
-                   const std::size_t first_index, const core::CancellationToken& cancellation) {
-    return ListViewEvaluator::rows(compiled, rows, first_index, cancellation);
+                   const core::CancellationToken& cancellation) {
+    return ListViewEvaluator::rows(compiled, rows, cancellation);
+}
+
+std::vector<GroupRun> list_group_runs(const std::span<const EvaluatedRow* const> rows,
+                                      const std::span<const std::int64_t> durations_ms) {
+    std::vector<GroupRun> runs;
+    for (std::size_t first = 0U; first < rows.size();) {
+        auto end = first + 1U;
+        while (end < rows.size() && rows[end]->group_key == rows[first]->group_key) {
+            ++end;
+        }
+        GroupRun run{.first = first, .count = end - first, .length_ms = 0, .subgroup_starts = {}};
+        std::set<std::string_view> keys;
+        for (auto row = first; row < end; ++row) {
+            run.length_ms += row < durations_ms.size() ? durations_ms[row] : 0;
+            if (!rows[row]->subgroup_key.empty()) {
+                keys.insert(rows[row]->subgroup_key);
+            }
+        }
+        // Only a group with more than one subgroup says which is which, as
+        // an album says its discs only when it has several.
+        if (keys.size() > 1U) {
+            for (auto row = first; row < end; ++row) {
+                const auto& key = rows[row]->subgroup_key;
+                if (!key.empty() && (row == first || key != rows[row - 1U]->subgroup_key)) {
+                    run.subgroup_starts.push_back(row);
+                }
+            }
+        }
+        runs.push_back(std::move(run));
+        first = end;
+    }
+    return runs;
+}
+
+GroupHeader evaluate_group_header(const CompiledListView& compiled, const ViewRow& first,
+                                  const std::size_t tracks, const std::int64_t length_ms,
+                                  const core::CancellationToken& cancellation) {
+    return ListViewEvaluator::header(compiled, first, tracks, length_ms, cancellation);
 }
 
 core::Result<std::vector<EvaluatedGroup>>
 evaluate_list_groups(const CompiledListView& compiled, const std::span<const ViewRow> rows,
                      const std::span<const EvaluatedRow> evaluated,
                      const core::CancellationToken& cancellation) {
-    return ListViewEvaluator::groups(compiled, rows, evaluated, cancellation);
+    std::vector<EvaluatedGroup> groups;
+    if (!compiled.groups_by_expression() || rows.size() != evaluated.size()) {
+        return groups;
+    }
+    std::vector<const EvaluatedRow*> pointers;
+    std::vector<std::int64_t> durations;
+    pointers.reserve(rows.size());
+    durations.reserve(rows.size());
+    for (std::size_t at = 0U; at < rows.size(); ++at) {
+        pointers.push_back(&evaluated[at]);
+        durations.push_back(rows[at].duration_ms.value_or(0));
+    }
+    for (auto& run : list_group_runs(pointers, durations)) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(
+                problem("Grouping the list was cancelled", core::ErrorCode::cancelled));
+        }
+        auto header = evaluate_group_header(compiled, rows[run.first], run.count, run.length_ms,
+                                            cancellation);
+        EvaluatedGroup group{.first = run.first,
+                             .count = run.count,
+                             .title = std::move(header.title),
+                             .details = std::move(header.details),
+                             .subgroups = {}};
+        for (const auto start : run.subgroup_starts) {
+            group.subgroups.emplace_back(start, evaluated[start].subgroup_label);
+        }
+        groups.push_back(std::move(group));
+    }
+    return groups;
 }
 
 core::Result<std::vector<std::string>> list_sort_keys(const CompiledListView& compiled,

@@ -334,9 +334,11 @@ Length remain normal independent columns. Compact semantic columns keep their
 preferred widths while Artist, Title, and Album proportionally fill the rest
 of the viewport on every panel/window resize. Cells and group labels remain
 single-line and elide instead of wrapping. Header and Workspace menus expose
-the same controls. Custom `tkfmt-1` column, sort, group, label, and summary
-expressions remain required extensions to this definition rather than being
-represented by ad-hoc Qt state.
+the same controls. ADR-0282 adds them as list views: expression columns with
+their own sort expressions, an expression grouping with a header and
+subgroups, the presentations as shipped views, a header click sorting the
+list, and an editor with a live preview -- definitions kept in Settings, not
+ad-hoc Qt state.
 
 ## Shipped presentation presets
 

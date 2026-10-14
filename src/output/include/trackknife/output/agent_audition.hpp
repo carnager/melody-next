@@ -167,6 +167,10 @@ class AgentAudition final : public audio::Audition {
     // the agent's are its own business.
     std::string current_raw_;
     std::string next_raw_;
+    // Each as this engine saw it when it was given: listening is credited
+    // to a file's revision, and without one no listen counted on an agent.
+    std::optional<core::LocalSourceRevision> current_revision_;
+    std::optional<core::LocalSourceRevision> next_revision_;
     // Gapless handovers as the engine counts them, which never go back --
     // a lower count reads as one more handover -- and as this agent process
     // last reported them, which a new process starts again from nothing.

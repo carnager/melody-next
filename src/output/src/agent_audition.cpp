@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/output/agent_audition.hpp"
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/formats/probe.hpp"
 #include <algorithm>
 
@@ -155,6 +156,8 @@ bool AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
             next_armed_ = false;
             current_raw_.clear();
             next_raw_.clear();
+            current_revision_.reset();
+            next_revision_.reset();
             agent_transitions_ = 0U;
         }
     }
@@ -233,6 +236,7 @@ void AgentAudition::adopt(const Json& report) {
     if (parsed.chain_transitions > agent_transitions_) {
         if (!next_raw_.empty()) {
             current_raw_ = std::exchange(next_raw_, {});
+            current_revision_ = std::exchange(next_revision_, std::nullopt);
         }
         seen_transitions_ += parsed.chain_transitions - agent_transitions_;
     }
@@ -260,7 +264,9 @@ audio::LocalAuditionSnapshot AgentAudition::snapshot() const {
         current.configured_buffer = *wanted_buffer_;
     }
     current.raw_path = current_raw_;
+    current.source_revision = current_revision_;
     current.next_raw_path = next_armed_ ? next_raw_ : std::string{};
+    current.next_source_revision = next_armed_ ? next_revision_ : std::nullopt;
     current.chain_transitions = seen_transitions_;
     if (!(client_ && client_->connected()) && sounding(current.state)) {
         // Gone mid-track: paused, not ended, so nothing advances past a
@@ -404,9 +410,12 @@ core::Result<void> AgentAudition::load(std::string raw_path, Source source, cons
     if (!answered) {
         return std::unexpected(std::move(answered.error()));
     }
+    auto revision = core::observe_local_source_revision(raw_path);
     const std::lock_guard guard{mutex_};
     current_raw_ = std::move(raw_path);
+    current_revision_ = revision ? std::optional{*revision} : std::nullopt;
     next_raw_.clear();
+    next_revision_.reset();
     next_armed_ = false;
     return {};
 }
@@ -419,8 +428,10 @@ core::Result<void> AgentAudition::arm(std::string raw_path, Source source,
     if (!answered) {
         return std::unexpected(std::move(answered.error()));
     }
+    auto revision = core::observe_local_source_revision(raw_path);
     const std::lock_guard guard{mutex_};
     next_raw_ = std::move(raw_path);
+    next_revision_ = revision ? std::optional{*revision} : std::nullopt;
     // Armed as far as the engine is concerned until the agent says otherwise.
     next_armed_ = true;
     return {};
@@ -488,6 +499,7 @@ core::Result<void> AgentAudition::clear_gapless_next() {
     }
     const std::lock_guard guard{mutex_};
     next_raw_.clear();
+    next_revision_.reset();
     next_armed_ = false;
     return {};
 }
@@ -509,6 +521,8 @@ core::Result<void> AgentAudition::stop() {
     // what it was playing is no longer this output's business.
     current_raw_.clear();
     next_raw_.clear();
+    current_revision_.reset();
+    next_revision_.reset();
     next_armed_ = false;
     reported_.state = audio::LocalAuditionState::empty;
     return answered ? core::Result<void>{} : std::unexpected(std::move(answered.error()));

@@ -709,9 +709,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* layout_swap_action_{nullptr};
     QAction* layout_reset_action_{nullptr};
     QAction* track_albums_side_action_{nullptr};
-    QAction* track_albums_header_action_{nullptr};
     QAction* track_plain_columns_action_{nullptr};
-    QAction* track_compact_queue_action_{nullptr};
     QAction* track_layout_reset_action_{nullptr};
     QAction* track_layout_copy_action_{nullptr};
     QSlider* seek_{nullptr};

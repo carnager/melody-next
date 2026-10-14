@@ -60,11 +60,11 @@ so nothing new has to cross the protocol.
   `ui-workspace.md` apply: no expression is evaluated while painting.
 - **Shipped views** replace the four presentations, each as it was: Albums
   (artwork beside), Albums (artwork in headers), Columns, Compact queue. Five
-  starting points ship beside them: Grouped by artist (albums as subgroups),
-  Grouped by genre, Grouped by label (with the catalogue number), Audio
-  details (codec, rate, bits, bitrate, file) and Listening history (rating,
-  play count, last played, days since). They are read-only and can be
-  copied.
+  starting points ship beside them. They are read-only and can be copied.
+  *(Amended 2026-10-14: two ship -- Albums with side artwork and Plain
+  columns. The rest were more menu than help; a list using one is drawn by
+  the one in its place, the header artwork by albums, the others by plain
+  columns. Everything else is made in the editor.)*
 - **Views live in Trackknife's settings** (`lists/views`), not in an engine:
   they are how this user wants lists to look, whichever engine they come
   from. The Android app keeps its own album layout.

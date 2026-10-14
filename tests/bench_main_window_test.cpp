@@ -16040,6 +16040,24 @@ void BenchMainWindowTest::listLayoutsFromBeforeViewsMigrate() {
     }
     const auto custom = customListViews();
     QVERIFY(custom && custom->size() == 1U);
+
+    // A view since retired -- the header artwork -- opens as the one in its
+    // place.
+    state = TabStore::loadState();
+    state.tabs.front().layout = QByteArray{
+        R"({"schema":3,"presentation":"albums-header-artwork","view":"albums-header-artwork",)"
+        R"("columns":[]})"};
+    TabStore::saveState(state);
+    {
+        BenchMainWindow retired;
+        retired.show();
+        auto* tabs = retired.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+        QCOMPARE(retired.currentListTab()->view_layout.view, QStringLiteral("albums-side-artwork"));
+        QCOMPARE(view->albumArtworkColumn(), local_artwork_column);
+        QVERIFY(retired.close());
+    }
 }
 
 // ADR-0259: the window keeps which lists it has open, and a cache of their

@@ -333,10 +333,6 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
         return;
     }
     found->visible = visible;
-    if (visible &&
-        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played"))) {
-        tab->model->invalidateListeningHistory();
-    }
     rearrangeListView(*tab, layout);
 }
 

@@ -139,7 +139,6 @@ Workspace::ListTab* Workspace::addList(persistence::ListDocument document, const
 Workspace::ListTab* Workspace::addList(PreparedList prepared, const bool select) {
     auto* model = new LocalListModel(view_->modelParent());
     model->replaceRows(std::move(prepared.rows));
-    model->setListeningHistoryService(persistence_);
     auto tab = std::make_unique<ListTab>();
     // Without its items: nothing reads them once the rows are made, and on a
     // big list they were the window's second copy of every tag.
@@ -998,9 +997,6 @@ bool Workspace::setColumnVisible(ListTab& tab, ui::TrackViewLayout layout, const
         return false;
     }
     found->visible = visible;
-    if (visible && (id == QStringLiteral("play-count") || id == QStringLiteral("last-played"))) {
-        tab.model->invalidateListeningHistory();
-    }
     setTrackViewLayout(tab, std::move(layout));
     return true;
 }

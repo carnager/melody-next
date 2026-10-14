@@ -164,8 +164,6 @@ class LocalListModel final : public QAbstractTableModel {
 
   public:
     explicit LocalListModel(QObject* parent = nullptr);
-    void setListeningHistoryService(ui::ListPersistenceService* service);
-    void invalidateListeningHistory();
 
     void replaceRows(std::vector<LocalTrackRow> rows, bool remember = false, QString label = {});
     void appendPaths(std::vector<std::string> raw_paths, int insertion_row = -1);
@@ -331,20 +329,11 @@ class LocalListModel final : public QAbstractTableModel {
   private:
     friend class BenchMainWindowTest;
     std::unordered_set<std::string> missing_;
-    struct ListeningCell {
-        bool loaded{false};
-        std::optional<persistence::LocalListeningHistory> history;
-        QString error;
-    };
+    // The built-in play count and last played columns: the row's history
+    // as its engine keeps it, fetched as a view reading history fetches it.
     [[nodiscard]] QVariant listeningHistoryData(const QModelIndex& index, int role) const;
-    void dispatchListeningHistory();
-    QPointer<ui::ListPersistenceService> listening_service_;
-    mutable QCache<int, ListeningCell> listening_cache_{512};
-    mutable QSet<int> listening_pending_;
-    mutable bool listening_overflow_{false};
-    QTimer* listening_timer_{nullptr};
-    std::uint64_t listening_generation_{0};
-    bool listening_busy_{false};
+    // History came, or will not: its rows' history columns say so.
+    void historyShown(int first, int last);
     struct Edit {
         enum class Kind : std::uint8_t { reorder, removal, addition, replacement };
         Kind kind{Kind::reorder};

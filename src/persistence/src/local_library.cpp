@@ -4,6 +4,7 @@
 
 #include "trackknife/metadata/ratings.hpp"
 
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -1499,13 +1500,24 @@ collect_history(sqlite3* db, const core::CancellationToken& cancellation,
         if (cancellation.is_cancellation_requested())
             fail("History query cancelled", core::ErrorCode::cancelled);
         const auto& source = additional[i];
-        auto observation = local_listening_observation(source.source);
-        if (!observation)
-            throw observation.error();
+        // The file as this engine sees it, where the asker could not say:
+        // a list's rows name a path, and the engine is what holds the file.
+        auto qualified = source.source;
+        if (!qualified.source_revision) {
+            if (auto seen = core::observe_local_source_revision(qualified.source_reference))
+                qualified.source_revision = *seen;
+        }
+        auto observation = local_listening_observation(qualified);
+        if (!observation) {
+            // Gone, or not a file: unknown for this row, not the whole list.
+            entries.push_back(
+                {std::string(1, '\0') + std::to_string(i), "unknown:" + std::to_string(i), -1, -1});
+            continue;
+        }
         auto key = *observation;
         std::pair<std::int64_t, std::int64_t> value{};
         if (const auto found = identities.find(*observation); found != identities.end()) {
-            key = local_listening_track_hash(found->second, source.source);
+            key = local_listening_track_hash(found->second, qualified);
             if (const auto statistic = statistics.find(key); statistic != statistics.end())
                 value = statistic->second;
         }

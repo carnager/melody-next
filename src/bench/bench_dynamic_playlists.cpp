@@ -80,8 +80,12 @@ void BenchMainWindow::showDynamicPlaylists() {
     auto layout = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(dialog->view(), layout, layout);
     auto* result_view = dialog->view();
+    // ADR-0282: play counts, where shown, from the engine the results come
+    // from.
     if (auto* local_model = qobject_cast<LocalListModel*>(result_view->model()))
-        local_model->setListeningHistoryService(persistence_);
+        connect(local_model, &LocalListModel::historyWanted, dialog, [this, dialog, local_model] {
+            workspace_.loadListHistory(*local_model, dialog->engine());
+        });
     for (const bool prepend : {true, false}) {
         auto* original = findChild<QAction*>(prepend ? QStringLiteral("action-queue-next")
                                                      : QStringLiteral("action-queue-end"));

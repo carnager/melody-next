@@ -169,6 +169,8 @@ void LocalListModel::applyHistory(const std::vector<core::StableId>& entries,
         historyUnavailable(entries);
         return;
     }
+    int first = -1;
+    int last = -1;
     int hint = 0;
     for (std::size_t at = 0U; at < entries.size(); ++at) {
         const auto row = rowOfEntry(entries[at], hint);
@@ -186,11 +188,16 @@ void LocalListModel::applyHistory(const std::vector<core::StableId>& entries,
         target.history_requested = false;
         target.history_loaded = true;
         forgetEvaluation(target);
+        first = first < 0 ? row : std::min(first, row);
+        last = std::max(last, row);
     }
+    historyShown(first, last);
     scheduleEvaluation();
 }
 
 void LocalListModel::historyUnavailable(const std::vector<core::StableId>& entries) {
+    int first = -1;
+    int last = -1;
     int hint = 0;
     for (const auto& entry : entries) {
         const auto row = rowOfEntry(entry, hint);
@@ -204,7 +211,10 @@ void LocalListModel::historyUnavailable(const std::vector<core::StableId>& entri
         target.history_requested = false;
         target.history_loaded = true;
         forgetEvaluation(target);
+        first = first < 0 ? row : std::min(first, row);
+        last = std::max(last, row);
     }
+    historyShown(first, last);
     scheduleEvaluation();
 }
 

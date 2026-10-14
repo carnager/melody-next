@@ -1046,6 +1046,11 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
          role == ui::track_group_details_role)) {
         return viewData(index, role);
     }
+    // ADR-0285: a built-in column showing an expression of its own.
+    if ((role == Qt::DisplayRole || role == Qt::TextAlignmentRole) &&
+        index.column() < local_column_count && showsOwnExpression(index.column())) {
+        return viewData(index, role);
+    }
     if (index.column() == local_play_count_column || index.column() == local_last_played_column) {
         if (role == Qt::DisplayRole || role == Qt::ToolTipRole || role == Qt::TextAlignmentRole)
             return listeningHistoryData(index, role);
@@ -1105,7 +1110,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
             return {};
         }
     }
-    if (role == Qt::ForegroundRole && index.column() == local_rating_column && row.rating > 0U) {
+    if (role == Qt::ForegroundRole && index.column() == local_rating_column && row.rating > 0U &&
+        !showsOwnExpression(local_rating_column)) {
         return QBrush{ui::ratingStarColor()};
     }
     if (role == Qt::ToolTipRole) {
@@ -1127,6 +1133,15 @@ QVariant LocalListModel::headerData(const int section, const Qt::Orientation ori
         const auto& columns = list_view_->view().columns;
         const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
         return found == columns.end() ? QString{} : QString::fromStdString(found->title);
+    }
+    // ADR-0285: a built-in column under a header of the view's.
+    if (list_view_ != nullptr) {
+        const auto id = columnId(section).toStdString();
+        const auto& columns = list_view_->view().columns;
+        if (const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
+            found != columns.end() && !found->title.empty()) {
+            return QString::fromStdString(found->title);
+        }
     }
     return QString::fromLatin1(ui::track_column_headers.at(static_cast<std::size_t>(section)));
 }

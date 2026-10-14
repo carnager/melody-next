@@ -336,6 +336,8 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
         }
         if (transport_ == link->playback) {
             reattachToEngine();
+            // Connected now: its controls are offered.
+            view_->refreshLocalPlaybackControls();
         }
     };
     connect(link->playback, &EnginePlayback::connected, this, attached);

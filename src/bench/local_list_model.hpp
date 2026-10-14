@@ -332,6 +332,8 @@ class LocalListModel final : public QAbstractTableModel {
     // The built-in play count and last played columns: the row's history
     // as its engine keeps it, fetched as a view reading history fetches it.
     [[nodiscard]] QVariant listeningHistoryData(const QModelIndex& index, int role) const;
+    // ADR-0285: the built-in column shows an expression of the view's.
+    [[nodiscard]] bool showsOwnExpression(int column) const;
     // History came, or will not: its rows' history columns say so.
     void historyShown(int first, int last);
     struct Edit {

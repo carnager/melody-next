@@ -431,6 +431,7 @@ class BenchMainWindowTest final : public QObject {
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void listViewsShowExpressionsGroupAndSort();
     void listViewEditorChecksAndSavesACopy();
+    void builtinColumnsShowTheirExpressions();
     void listViewsReadListeningHistory();
     void groupsFoldToTheirHeaders();
     void rowsHaveMoreLines();
@@ -15932,7 +15933,7 @@ void BenchMainWindowTest::rowsHaveMoreLines() {
     second.rating_hash = "rating-two";
     model->appendRows({first, second});
     window.chooseListView(QStringLiteral("view-two-lines"));
-    const auto tall = ui::track_row_height + ui::track_second_line_height;
+    const auto tall = ui::track_row_height + ui::trackSecondLineHeight(view->font());
     QTRY_COMPARE(view->rowHeight(1), tall);
     QCOMPARE(view->property(ui::track_row_lines_property).toInt(), 2);
     QVERIFY(qobject_cast<ui::TrackLinesDelegate*>(view->itemDelegate()) != nullptr);
@@ -15940,6 +15941,22 @@ void BenchMainWindowTest::rowsHaveMoreLines() {
                  QStringLiteral("Air · Moon Safari"));
     QCOMPARE(model->index(0, local_length_column).data(ui::track_second_line_role).toString(),
              QString{});
+    // A larger font: the second line is measured, its descenders kept
+    // inside the row rather than cut off at a fixed height.
+    {
+        auto large = view->font();
+        large.setPointSizeF(24.0);
+        view->setFont(large);
+        window.chooseListView(QStringLiteral("view-two-lines-albums"));
+        window.chooseListView(QStringLiteral("view-two-lines"));
+        const QFontMetrics beneath{ui::trackSecondLineFont(large)};
+        QTRY_VERIFY(view->rowHeight(1) >= ui::track_row_height + beneath.height());
+        QVERIFY(view->rowHeight(1) > ui::track_row_height + 16);
+        view->setFont(QFont{});
+        window.chooseListView(QStringLiteral("view-two-lines-albums"));
+        window.chooseListView(QStringLiteral("view-two-lines"));
+        QTRY_COMPARE(view->rowHeight(1), tall);
+    }
     // A rating coming later evaluates its row again, and the second lines of
     // built-in columns are drawn anew though the view has no columns of its
     // own.
@@ -16046,6 +16063,70 @@ void BenchMainWindowTest::listViewEditorChecksAndSavesACopy() {
     QCOMPARE(model->columnCount(), local_column_count + 1);
     QCOMPARE(model->headerData(local_column_count, Qt::Horizontal, Qt::DisplayRole).toString(),
              QStringLiteral("Codec"));
+    QVERIFY(window.close());
+}
+
+// ADR-0285: a built-in column shows an expression of the view's -- plain
+// columns' number, year and length are theirs -- and the editor changes one
+// as it changes any column.
+void BenchMainWindowTest::builtinColumnsShowTheirExpressions() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* model =
+        qobject_cast<LocalListModel*>(static_cast<QTableView*>(tabs->currentWidget())->model());
+    LocalTrackRow row;
+    row.raw_path = "/music/one.flac";
+    row.title = "La Femme d'Argent";
+    row.artist = "Air";
+    row.album = "Moon Safari";
+    row.track_number = "3";
+    row.date = "1998-01-16";
+    row.duration_ms = 429'000;
+    row.probed = true;
+    model->appendRows({row});
+    window.chooseListView(QStringLiteral("plain-columns"));
+    QCOMPARE(
+        model->headerData(local_track_number_column, Qt::Horizontal, Qt::DisplayRole).toString(),
+        QStringLiteral("#"));
+    QTRY_COMPARE(model->index(0, local_track_number_column).data().toString(),
+                 QStringLiteral("03"));
+    QCOMPARE(model->index(0, local_date_column).data().toString(), QStringLiteral("1998"));
+    QVERIFY(model->index(0, local_date_column)
+                .data(Qt::TextAlignmentRole)
+                .value<Qt::Alignment>()
+                .testFlag(Qt::AlignRight));
+    QCOMPARE(model->index(0, local_artist_column).data().toString(), QStringLiteral("Air"));
+
+    window.editListView(false);
+    ListViewDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<ListViewDialog*>()) != nullptr);
+    auto* columns = dialog->findChild<QListWidget*>(QStringLiteral("bench-list-view-columns"));
+    const auto artist = columns->findItems(QStringLiteral("Artist"), Qt::MatchExactly);
+    QCOMPARE(artist.size(), 1);
+    columns->setCurrentItem(artist.front());
+    auto* shows = dialog->findChild<QLineEdit*>(QStringLiteral("bench-list-view-column-display"));
+    // What it always showed, to change.
+    QCOMPARE(shows->text(), QStringLiteral("%artist%"));
+    QVERIFY(dialog->findChild<QPushButton*>(QStringLiteral("bench-list-view-column-reset"))
+                ->isVisible());
+    shows->setText(QStringLiteral("$upper(%artist%)"));
+    emit shows->textEdited(shows->text());
+    QCOMPARE(
+        dialog->findChild<QLabel*>(QStringLiteral("bench-list-view-column-display-note"))->text(),
+        QStringLiteral("→ AIR"));
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    QTRY_VERIFY(window.findChild<ListViewDialog*>() == nullptr);
+    const auto copy = findListView(window.currentListTab()->view_layout.view);
+    QVERIFY(copy.has_value());
+    QCOMPARE(
+        std::ranges::find(copy->columns, std::string{"artist"}, &lists::ViewColumn::id)->display,
+        std::string{"$upper(%artist%)"});
+    // Left as it was, the title is no expression of the view's.
+    QVERIFY(std::ranges::find(copy->columns, std::string{"title"}, &lists::ViewColumn::id)
+                ->display.empty());
+    QTRY_COMPARE(model->index(0, local_artist_column).data().toString(), QStringLiteral("AIR"));
     QVERIFY(window.close());
 }
 

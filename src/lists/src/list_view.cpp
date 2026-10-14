@@ -304,6 +304,29 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
 
 // ADR-0284: a list that says much in little width -- no column for what a
 // second line can carry.
+// A list's tracks a line each: who, the number, the title, the year, the
+// album, the rating and the length -- numbers right, where they line up.
+[[nodiscard]] std::vector<ViewColumn> plain_columns() {
+    const auto shown =
+        builtin_columns({"artist", "track-number", "title", "date", "album", "rating", "length"});
+    std::vector<ViewColumn> columns;
+    columns.reserve(shown.size());
+    for (const auto id : {"artwork", "artist", "track-number", "title", "date", "album", "rating",
+                          "length", "play-count", "last-played"}) {
+        columns.push_back(*std::ranges::find(shown, std::string_view{id}, &ViewColumn::id));
+    }
+    const auto own = [&columns](const std::string_view id, std::string title, std::string display) {
+        auto& column = *std::ranges::find(columns, id, &ViewColumn::id);
+        column.title = std::move(title);
+        column.display = std::move(display);
+        column.alignment = ColumnAlignment::right;
+    };
+    own("track-number", "#", "$num(%tracknumber%,2)");
+    own("date", "Date", "$left(%date%,4)");
+    own("length", {}, "%length%");
+    return columns;
+}
+
 [[nodiscard]] ListView two_line_tracks() {
     auto columns = builtin_columns({"rating"});
     // How often it played beneath its stars.
@@ -339,6 +362,26 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
 
 } // namespace
 
+std::string_view builtin_column_expression(const std::string_view id) {
+    static const std::map<std::string_view, std::string_view> expressions{
+        {"artist", "%artist%"},
+        {"track-number", "%tracknumber%"},
+        {"title", "%title%"},
+        {"album", "%album%"},
+        {"date", "%date%"},
+        {"length", "%length%"},
+        {"play-count", "%playcount%"},
+        {"last-played", "%lastplayed%"}};
+    const auto found = expressions.find(id);
+    return found == expressions.end() ? std::string_view{} : found->second;
+}
+
+bool CompiledListView::builtin_shows_expression(const std::string_view id) const {
+    const auto found = std::ranges::find(builtin_ids_, id);
+    return found != builtin_ids_.end() &&
+           builtin_displays_[static_cast<std::size_t>(found - builtin_ids_.begin())].has_value();
+}
+
 bool is_builtin_column(const std::string_view id) {
     return std::ranges::contains(builtin_column_ids, id);
 }
@@ -371,7 +414,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_details = {},
          .subgroup = std::nullopt,
          .row_style = {},
-         .columns = builtin_columns({"artist", "track-number", "title", "album", "date", "length"}),
+         .columns = plain_columns(),
          .builtin = true,
          .row_lines = 1},
         two_line_tracks(),
@@ -462,6 +505,13 @@ std::vector<ViewProblem> validate_list_view(const ListView& view) {
                    FormatContextKind::list_item, false);
         shown = shown || (column.visible && column.id != "artwork");
         if (column.builtin()) {
+            // ADR-0285: its own expressions, where it has them.
+            expression("column:" + column.id + ":display", column.display,
+                       FormatContextKind::list_item, false);
+            expression("column:" + column.id + ":sort", column.sort, FormatContextKind::sort,
+                       false);
+            expression("column:" + column.id + ":style", column.style, FormatContextKind::list_item,
+                       false);
             continue;
         }
         if (column.title.empty()) {
@@ -510,7 +560,19 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
             if (column.width > 0) {
                 entry["width"] = column.width;
             }
-            if (!column.builtin()) {
+            if (column.builtin()) {
+                // ADR-0285: what it was given of its own, and only that.
+                for (const auto& [name, value] :
+                     {std::pair{"title", &column.title}, std::pair{"display", &column.display},
+                      std::pair{"sort", &column.sort}, std::pair{"style", &column.style}}) {
+                    if (!value->empty()) {
+                        entry[name] = *value;
+                    }
+                }
+                if (column.alignment != ColumnAlignment::left) {
+                    entry["align"] = alignment_name(column.alignment);
+                }
+            } else {
                 entry["title"] = column.title;
                 entry["display"] = column.display;
                 entry["sort"] = column.sort;
@@ -678,6 +740,39 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
     compiled.reads_history_ =
         compiled.reads_history_ || std::ranges::any_of(compiled.second_lines_, reads);
     for (const auto& column : view.columns) {
+        if (!column.builtin() ||
+            (column.display.empty() && column.sort.empty() && column.style.empty())) {
+            continue;
+        }
+        // ADR-0285: a built-in column's own expressions.
+        const auto optional_program =
+            [&reads, &compiled](
+                const std::string& source,
+                const FormatContextKind kind) -> core::Result<std::optional<titleformat::Program>> {
+            if (source.empty()) {
+                return std::optional<titleformat::Program>{};
+            }
+            auto program = compiled_program(source, kind);
+            if (!program) {
+                return std::unexpected(std::move(program.error()));
+            }
+            compiled.reads_history_ = compiled.reads_history_ || reads(*program);
+            return std::optional{std::move(*program)};
+        };
+        auto display = optional_program(column.display, FormatContextKind::list_item);
+        auto sort = optional_program(column.sort, FormatContextKind::sort);
+        auto style = optional_program(column.style, FormatContextKind::list_item);
+        if (!display || !sort || !style) {
+            return std::unexpected(!display ? display.error()
+                                   : !sort  ? sort.error()
+                                            : style.error());
+        }
+        compiled.builtin_ids_.push_back(column.id);
+        compiled.builtin_displays_.push_back(std::move(*display));
+        compiled.builtin_sorts_.push_back(std::move(*sort));
+        compiled.builtin_styles_.push_back(std::move(*style));
+    }
+    for (const auto& column : view.columns) {
         if (column.builtin()) {
             continue;
         }
@@ -775,6 +870,18 @@ struct ListViewEvaluator {
             for (const auto& line : compiled.second_lines_) {
                 row.second_lines.push_back(format(line, context, cancellation));
             }
+            if (!compiled.builtin_ids_.empty()) {
+                row.builtin_cells.reserve(compiled.builtin_ids_.size());
+                row.builtin_styles.reserve(compiled.builtin_ids_.size());
+                for (std::size_t at = 0U; at < compiled.builtin_ids_.size(); ++at) {
+                    const auto& display = compiled.builtin_displays_[at];
+                    const auto& style = compiled.builtin_styles_[at];
+                    row.builtin_cells.push_back(display ? format(*display, context, cancellation)
+                                                        : std::string{});
+                    row.builtin_styles.push_back(style ? format(*style, context, cancellation)
+                                                       : std::string{});
+                }
+            }
             if (std::ranges::any_of(compiled.cell_styles_,
                                     [](const auto& style) { return style.has_value(); })) {
                 row.cell_styles.reserve(compiled.cell_styles_.size());
@@ -816,10 +923,16 @@ struct ListViewEvaluator {
               const std::span<const ViewRow> rows, const core::CancellationToken& cancellation) {
         const titleformat::Program* program = nullptr;
         std::optional<titleformat::Program> builtin;
+        const auto own = std::ranges::find(compiled.builtin_ids_, column_id);
+        const auto own_at = static_cast<std::size_t>(own - compiled.builtin_ids_.begin());
         if (const auto found = std::ranges::find(compiled.expression_ids_, column_id);
             found != compiled.expression_ids_.end()) {
             const auto at = static_cast<std::size_t>(found - compiled.expression_ids_.begin());
             program = compiled.sorts_[at] ? &*compiled.sorts_[at] : &compiled.displays_[at];
+        } else if (own != compiled.builtin_ids_.end() && compiled.builtin_sorts_[own_at]) {
+            // ADR-0285: a built-in column by its own sort; whatever it
+            // shows, it sorts as it always did otherwise.
+            program = &*compiled.builtin_sorts_[own_at];
         } else {
             // A built-in column sorts by what it shows; the number by disc
             // first, the history by the engine's (ADR-0282).

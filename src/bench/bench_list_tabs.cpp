@@ -451,10 +451,8 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
                 if (moved_tab == nullptr) {
                     return;
                 }
-                moved_tab->view_layout = captureTrackViewLayout(*moved_tab);
-                moved_tab->view_layout_persistence_protected = false;
-                moved_tab->preserved_view_layout.clear();
-                schedulePersist();
+                // ADR-0282: the order is the view's, so every tab of it.
+                rearrangeListView(*moved_tab, captureTrackViewLayout(*moved_tab));
                 refreshTrackViewActions();
             });
     connect(view->horizontalHeader(), &QHeaderView::sectionResized, this,
@@ -471,6 +469,27 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
                 resized_tab->preserved_view_layout.clear();
                 schedulePersist();
             });
+    // ADR-0282: a column's header sorts the list by it; an expression
+    // grouping's groups, once known, are drawn.
+    view->horizontalHeader()->setSectionsClickable(true);
+    connect(view->horizontalHeader(), &QHeaderView::sectionClicked, this,
+            [this, view](const int logical) { sortListByColumn(view, logical); });
+    // ADR-0282: a view reading listening history has it fetched from the
+    // list's engine.
+    connect(raw_tab->model, &LocalListModel::historyWanted, this, [this, id] {
+        if (auto* wanting = tabForDocument(id)) {
+            workspace_.loadListHistory(*wanting);
+        }
+    });
+    connect(raw_tab->model, &LocalListModel::expressionGroupsChanged, this, [this, id] {
+        // Not while a view is being applied: it is what said so.
+        if (applying_track_view_layout_) {
+            return;
+        }
+        if (auto* grouped_tab = tabForDocument(id)) {
+            applyTrackViewLayout(*grouped_tab, grouped_tab->view_layout);
+        }
+    });
     refreshTabChrome(*raw_tab);
     if (select) {
         tabs_->setCurrentIndex(index);

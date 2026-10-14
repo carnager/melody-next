@@ -14,6 +14,10 @@ QString trackGroupKey(const QAbstractItemModel& model, const int row,
     if (row < 0 || row >= model.rowCount()) {
         return {};
     }
+    // ADR-0282: a list grouped by an expression says what by.
+    if (const auto key = model.index(row, 0).data(track_group_key_role); key.isValid()) {
+        return key.toString();
+    }
     return model.index(row, 0).data(track_album_artist_role).toString() + QChar::Null +
            model.index(row, columns.album).data().toString() + QChar::Null +
            model.index(row, columns.date).data().toString();
@@ -183,7 +187,7 @@ TrackCell trackCell(const QAbstractItemModel& model, const int row, const int co
         cell.quiet = !cell.current;
     }
     const auto album_artist = model.index(row, 0).data(track_album_artist_role).toString();
-    if (cell.in_group && !cell.artwork_cell) {
+    if (cell.in_group && !cell.artwork_cell && context.album_rules) {
         if (column == context.groups.album || column == context.groups.date) {
             cell.text.clear();
         } else if (column == context.artist) {
@@ -205,7 +209,7 @@ TrackCell trackCell(const QAbstractItemModel& model, const int row, const int co
     }
     if (cell.artwork_cell) {
         cell.text.clear();
-    } else if (column == context.title) {
+    } else if (column == context.title && context.album_rules) {
         if (!context.separate_number) {
             const auto number =
                 formattedTrackNumber(model.index(row, context.number).data().toString());
@@ -246,6 +250,12 @@ QString formatTrackDuration(const qint64 milliseconds) {
 
 AlbumHeaderText albumHeaderText(const QAbstractItemModel& model, const int first_row,
                                 const int album_column, const int date_column) {
+    // ADR-0282: an expression grouping's header is the view's.
+    if (const auto title = model.index(first_row, 0).data(track_group_title_role);
+        title.isValid()) {
+        return {.album = title.toString(),
+                .details = model.index(first_row, 0).data(track_group_details_role).toString()};
+    }
     const TrackGroupColumns columns{.album = album_column, .date = date_column};
     const auto group = trackGroupKey(model, first_row, columns);
     int tracks = 0;

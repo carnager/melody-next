@@ -483,6 +483,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] ui::TrackViewLayout
     captureTrackViewLayout(const QTableView* view, const ui::TrackViewLayout& state) const;
     void setTrackViewPresentation(ui::TrackViewPresentation presentation);
+    // ADR-0282: the current tab drawn by a list view; every tab of a view
+    // drawn again when it changes; a column's header sorting its list.
+    void chooseListView(const QString& id);
+    void rearrangeListView(ListTab& tab, const ui::TrackViewLayout& captured);
+    void redrawListViews();
+    void sortListByColumn(QTableView* view, int logical);
+    void editListView(bool make_new);
     void setTrackColumnVisible(const QString& column_id, bool visible);
     void resetTrackViewLayout();
     void copyTrackViewLayoutToAllTabs();

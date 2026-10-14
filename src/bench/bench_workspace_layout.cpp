@@ -2,6 +2,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/undo_location_widget.hpp"
+#include "workspace/list_view_definitions.hpp"
 #include "workspace/undo_location_session.hpp"
 
 #include "bench/engine_launcher.hpp"
@@ -563,6 +564,16 @@ void BenchMainWindow::buildWorkspace() {
     track_presentation_group_->addAction(track_compact_queue_action_);
     connect(track_compact_queue_action_, &QAction::triggered, this,
             [this] { setTrackViewPresentation(ui::TrackViewPresentation::compact_queue); });
+    track_layout_menu->addSeparator();
+    // ADR-0282: list views of the user's own.
+    auto* edit_view = track_layout_menu->addAction(QStringLiteral("Edit list view…"));
+    edit_view->setObjectName(QStringLiteral("action-edit-list-view-menu"));
+    connect(edit_view, &QAction::triggered, this, [this] { editListView(false); });
+    auto* new_view = track_layout_menu->addAction(QStringLiteral("New list view…"));
+    new_view->setObjectName(QStringLiteral("action-new-list-view-menu"));
+    connect(new_view, &QAction::triggered, this, [this] { editListView(true); });
+    connect(&ListViewCatalog::instance(), &ListViewCatalog::changed, this,
+            &BenchMainWindow::redrawListViews);
     track_layout_menu->addSeparator();
     track_columns_menu_ = track_layout_menu->addMenu(QStringLiteral("Columns"));
     track_columns_menu_->setObjectName(QStringLiteral("menu-track-columns"));

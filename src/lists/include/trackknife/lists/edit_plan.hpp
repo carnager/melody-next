@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace trackknife::lists {
 
@@ -35,6 +36,10 @@ struct EditPlan {
     std::vector<int> positions;
     bool removal{false};
 };
+
+// Digit runs compared as numbers, the rest byte by byte: the order of every
+// list sort. Keys are lowercased by the caller.
+[[nodiscard]] bool natural_less(std::string_view left, std::string_view right);
 
 [[nodiscard]] core::Result<EditPlan> plan_reverse(std::size_t rows,
                                                   const core::CancellationToken& cancellation = {});

@@ -661,7 +661,14 @@ int main(int argc, char** argv) {
         watcher->set_tick(
             [&continuation, &player] { static_cast<void>(continuation.tick(*player)); });
         watcher->start();
-        recorder.emplace(*player, *workspace);
+        // ADR-0282: a listen recorded is told, so play counts shown follow.
+        recorder.emplace(*player, *workspace, std::chrono::milliseconds{1000},
+                         [sink](const std::string& raw_path) {
+                             sink(trackknife::protocol::Event{
+                                 .name = "catalogue.listened",
+                                 .data = trackknife::protocol::Json{
+                                     {"path", trackknife::protocol::encode_raw_path(raw_path)}}});
+                         });
         recorder->start();
         playback_store.emplace(*player, *workspace);
         if (playback_store->restore()) {

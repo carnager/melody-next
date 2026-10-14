@@ -103,6 +103,12 @@ class Workspace final : public QObject {
         ui::TrackViewLayout view_layout;
         QByteArray preserved_view_layout;
         bool view_layout_persistence_protected{false};
+        // ADR-0282: the column a header click last sorted the list by, and
+        // the list as that left it -- a click again, nothing else changed,
+        // sorts it the other way.
+        QString sorted_by;
+        bool sorted_descending{false};
+        std::uint64_t sorted_revision{0U};
         // What the last successful save wrote of this list -- its content
         // revision and header; none, not saved yet. Unchanged since, a save
         // writes its header only.
@@ -561,9 +567,15 @@ class Workspace final : public QObject {
     // Every list for a save: with items where they changed since the last.
     [[nodiscard]] std::vector<persistence::ListDocumentWrite> collectWrites();
     [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
-    // A presentation's columns as a new list shows them.
+    // A presentation's columns as a new list shows them: its shipped list
+    // view's (ADR-0282).
     [[nodiscard]] static ui::TrackViewLayout defaultTrackViewLayout(
         ui::TrackViewPresentation presentation = ui::TrackViewPresentation::albums_side_artwork);
+    // A list view's columns, in its order and shown as it shows them, at the
+    // widths `widths` has for them -- else their own.
+    [[nodiscard]] static ui::TrackViewLayout
+    trackViewLayoutFor(const lists::ListView& view,
+                       const std::vector<ui::TrackViewColumnLayout>& widths = {});
     // The columns a list was saved with, or the default when there are none
     // -- or they cannot be read, when what was saved is kept and not
     // overwritten.
@@ -691,6 +703,11 @@ class Workspace final : public QObject {
     // A rating an engine stored, shown in its lists.
     void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
     // What changed in an engine's library, followed by what shows it.
+    // ADR-0282: a listen the engine recorded: its lists' play counts of
+    // the file are asked for again.
+    void adoptListen(const EngineKey& engine, const std::string& raw_path);
+    // The listening history a list's view reads, asked of its engine.
+    void loadListHistory(ListTab& tab);
     void adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                             const std::vector<std::string>& albums, bool everything);
     // ADR-0268: a list's rows whose files are not there, asked of its engine

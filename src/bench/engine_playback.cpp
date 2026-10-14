@@ -101,6 +101,20 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
     client->on_event([self, this](const protocol::Event& event) {
         // Parsed here, on the reader thread, so the signal carries nothing
         // that needs decoding on the UI thread.
+        if (event.name == "catalogue.listened") {
+            auto raw = protocol::decode_raw_path(event.data.value("path", std::string{}));
+            if (self && raw) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, path = std::move(*raw)] {
+                        if (self) {
+                            emit self->listened(path);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "catalogue.rating_changed") {
             const auto hash = QString::fromStdString(event.data.value("hash", std::string{}));
             const auto rating = event.data.value("rating", 0U);

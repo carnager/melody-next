@@ -6,8 +6,10 @@
 #include "trackknife/audio/track_source.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/formats/decoder.hpp"
+#include "trackknife/lists/list_view.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/local_library.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractTableModel>
@@ -22,7 +24,9 @@ namespace trackknife::ui {
 class ListPersistenceService;
 }
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -100,6 +104,17 @@ struct LocalTrackRow {
     // True once a probe ran or persisted metadata was restored; unprobed rows
     // fall back to their file name and are queued for enrichment.
     bool probed{false};
+    // ADR-0282: what the list's view made of the row -- its expression
+    // cells and group keys -- and for which view; dropped when the row
+    // changes. Display state, so equality ignores it.
+    std::shared_ptr<const lists::EvaluatedRow> evaluated{};
+    std::uint64_t evaluated_view{0U};
+    std::uint64_t evaluation_ticket{0U};
+    // The engine's listening history of the row, fetched when its view reads
+    // it (lists::history_field_names order); asked for, and arrived.
+    std::optional<std::array<std::int64_t, 6>> history{};
+    bool history_requested{false};
+    bool history_loaded{false};
 
     friend bool operator==(const LocalTrackRow& left, const LocalTrackRow& right) {
         const auto salient = [](const LocalTrackRow& row) {
@@ -258,6 +273,38 @@ class LocalListModel final : public QAbstractTableModel {
     // that a QPersistentModelIndex is not silently tracking it.
     [[nodiscard]] int rowOfEntry(const core::StableId& entry, int hint_row) const;
 
+    // ADR-0282: the view the list is drawn by. Its expression columns come
+    // after the built-in ones; they are evaluated off the window's thread,
+    // and blank until they are.
+    void setListView(std::shared_ptr<const lists::CompiledListView> view);
+    [[nodiscard]] const lists::CompiledListView* listView() const noexcept {
+        return list_view_.get();
+    }
+    [[nodiscard]] int expressionColumnCount() const noexcept { return expression_columns_; }
+    // A column's id -- built-in or expression -- and the column of an id; -1
+    // when there is none.
+    [[nodiscard]] QString columnId(int column) const;
+    [[nodiscard]] int columnOf(const QString& id) const;
+    // Grouped by an expression, and every row evaluated: the groups are
+    // known. Until then the list is drawn ungrouped.
+    [[nodiscard]] bool expressionGrouping() const noexcept;
+    [[nodiscard]] bool expressionGroupsReady() const noexcept { return groups_ready_; }
+    // Each row's copy for a worker to evaluate -- a sort by a column.
+    [[nodiscard]] std::vector<lists::OwnedViewRow> viewRows() const;
+    // ADR-0282: listening history for a view that reads it. The rows whose
+    // history is wanted and not yet asked for -- now asked for -- with what
+    // the engine looks them up by; what it answered, or that it could not;
+    // and the files whose history changed, to be asked for again.
+    struct HistoryRequest {
+        core::StableId entry;
+        persistence::LibraryHistorySource source;
+    };
+    [[nodiscard]] std::vector<HistoryRequest> takeHistoryRequests();
+    void applyHistory(const std::vector<core::StableId>& entries,
+                      const std::vector<std::array<std::int64_t, 6>>& history);
+    void historyUnavailable(const std::vector<core::StableId>& entries);
+    void forgetHistory(const std::vector<std::string>& raw_paths);
+
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -267,6 +314,10 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] Qt::DropActions supportedDropActions() const override;
 
   signals:
+    // The groups of an expression grouping became known, or stopped being.
+    void expressionGroupsChanged();
+    // Rows of a view that reads listening history have none yet.
+    void historyWanted();
     void historyChanged();
     void historyRowsRestored(const QList<int>& rows);
     void historyDiscarded(const QString& reason);
@@ -303,7 +354,45 @@ class LocalListModel final : public QAbstractTableModel {
     void removePositions(const std::vector<int>& positions, std::vector<LocalTrackRow>* detached);
     void applyOrder(const std::vector<int>& order);
     [[nodiscard]] std::vector<LocalTrackRow*> retainedRows();
-    void touched() noexcept { ++content_revision_; }
+    void touched() {
+        ++content_revision_;
+        scheduleEvaluation();
+    }
+    // ADR-0282, in local_list_view_state.cpp.
+    struct PendingEvaluation {
+        core::StableId entry;
+        std::uint64_t ticket{0U};
+        int hint{-1};
+    };
+    struct GroupHeaderCache {
+        QString title;
+        QString details;
+    };
+    void forgetEvaluation(LocalTrackRow& row);
+    void scheduleEvaluation();
+    void evaluatePending();
+    void mergeEvaluation(std::uint64_t view, const std::vector<PendingEvaluation>& pending,
+                         std::vector<lists::EvaluatedRow> evaluated);
+    void regroup();
+    void mergeHeaders(std::uint64_t view, const std::vector<QString>& keys,
+                      std::vector<lists::GroupHeader> headers);
+    [[nodiscard]] bool evaluatedNow(const LocalTrackRow& row) const noexcept {
+        return row.evaluated != nullptr && row.evaluated_view == view_generation_;
+    }
+    [[nodiscard]] QVariant viewData(const QModelIndex& index, int role) const;
+    std::shared_ptr<const lists::CompiledListView> list_view_;
+    std::uint64_t view_generation_{0U};
+    int expression_columns_{0};
+    QTimer* evaluation_timer_{nullptr};
+    bool evaluating_{false};
+    bool headers_evaluating_{false};
+    bool groups_ready_{false};
+    // Per row once grouped: where a group starts, its header's cache key,
+    // and where a subgroup starts, its label.
+    std::vector<std::uint8_t> group_starts_;
+    std::vector<QString> group_header_keys_;
+    std::vector<QString> subgroup_labels_;
+    QHash<QString, GroupHeaderCache> group_headers_;
     std::uint64_t content_revision_{0};
     std::vector<Edit> history_;
     std::size_t history_cursor_{0};

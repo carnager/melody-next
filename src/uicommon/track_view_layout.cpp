@@ -58,6 +58,7 @@ QByteArray serializeTrackViewLayout(const TrackViewLayout& layout) {
         QJsonObject{
             {QStringLiteral("schema"), layout.schema_version},
             {QStringLiteral("presentation"), trackViewPresentationId(layout.presentation)},
+            {QStringLiteral("view"), layout.view},
             {QStringLiteral("columns"), columns},
         }}
         .toJson(QJsonDocument::Compact);
@@ -87,8 +88,14 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
     }
     const auto object = document.object();
     const auto schema = object.value(QStringLiteral("schema")).toInt();
-    if (schema != track_view_layout_schema_version && schema != 1) {
+    if (schema < 1 || schema > track_view_layout_schema_version) {
         return fail(QStringLiteral("Unsupported track-view layout version"));
+    }
+    // ADR-0282: from version 3 the view says which columns there are -- an
+    // expression column's id is its own -- and the layout which view.
+    const auto view = schema >= 3 ? object.value(QStringLiteral("view")).toString() : QString{};
+    if (schema >= 3 && view.isEmpty()) {
+        return fail(QStringLiteral("Track-view layout names no list view"));
     }
     const auto presentation =
         trackViewPresentationFromId(object.value(QStringLiteral("presentation")).toString());
@@ -100,7 +107,7 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
         return fail(QStringLiteral("Track-view columns are malformed"));
     }
     const auto array = column_values.toArray();
-    if (array.size() > registered.size()) {
+    if (array.size() > (schema >= 3 ? 128 : registered.size())) {
         return fail(QStringLiteral("Track-view layout does not place every registered column"));
     }
 
@@ -114,7 +121,7 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
         }
         const auto column = value.toObject();
         const auto id = column.value(QStringLiteral("id")).toString();
-        if (!registered.contains(id) || used.contains(id)) {
+        if ((schema < 3 && !registered.contains(id)) || id.isEmpty() || used.contains(id)) {
             return fail(
                 QStringLiteral("Track-view layout references an unavailable or duplicate column"));
         }
@@ -164,7 +171,8 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
     }
     return TrackViewLayout{.schema_version = track_view_layout_schema_version,
                            .presentation = *presentation,
-                           .columns = std::move(columns)};
+                           .columns = std::move(columns),
+                           .view = view};
 }
 
 } // namespace trackknife::ui

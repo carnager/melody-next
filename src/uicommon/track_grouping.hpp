@@ -114,6 +114,10 @@ struct TrackCellContext {
     bool separate_number{true};
     // Whether a column is hidden now.
     std::function<bool(int)> hidden;
+    // The groups are albums: their headers say album and date, and the
+    // artist where it is the album's (ADR-0282: not under an expression
+    // grouping).
+    bool album_rules{true};
 };
 
 struct TrackCell {

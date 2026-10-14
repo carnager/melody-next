@@ -258,6 +258,8 @@ class EnginePlayback final : public QObject {
     void versionNotice(const QString& message);
     // A rating was set on this engine, by any client: a track's or an
     // album's, by its rating hash. Emitted on this object's thread.
+    // ADR-0282: a listen of this file was recorded.
+    void listened(const std::string& raw_path);
     void ratingChanged(const QString& hash, unsigned rating);
     // ADR-0233: a list on this engine was written or deleted, by any client
     // -- this one included. Emitted on this object's thread.

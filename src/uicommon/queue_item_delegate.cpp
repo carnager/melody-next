@@ -227,6 +227,8 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         .separate_number = configuredFlag(this, track_separate_number_property),
         .hidden =
             [view](const int column) { return view != nullptr && view->isColumnHidden(column); },
+        .album_rules = view == nullptr || !view->property(track_album_rules_property).isValid() ||
+                       view->property(track_album_rules_property).toBool(),
     };
     const auto cell = trackCell(*index.model(), index.row(), index.column(), context);
     const auto current_track = cell.current;

@@ -48,7 +48,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
             .alignment = lists::ColumnAlignment::left,
             .expands = false,
             .style = {},
-            .second_line = {}};
+            .second_line = {},
+            .width = 0};
 }
 
 // A copy of a shipped view with expression columns and a grouping of its own.
@@ -75,8 +76,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
 
 void shippedViewsAreValidAndAsTheyWere() {
     const auto& shipped = lists::shipped_list_views();
-    // Two: albums with side artwork, and plain columns.
-    CHECK(shipped.size() == 2U);
+    // Albums with side artwork, plain columns, and two-line tracks.
+    CHECK(shipped.size() == 3U);
     for (const auto& view : shipped) {
         CHECK(view.builtin);
         CHECK(lists::validate_list_view(view).empty());
@@ -316,6 +317,34 @@ void rowsHaveMoreLines() {
                                 &lists::ViewProblem::where));
 }
 
+// ADR-0284: the shipped two-line view says, beneath each line, what its
+// columns would have needed columns for.
+void twoLineTracksSayWhatTheyShow() {
+    const auto* view = lists::shipped_list_view(lists::two_line_view_id);
+    CHECK(view != nullptr && view->row_lines == 2 && lists::validate_list_view(*view).empty());
+    const auto compiled = lists::CompiledListView::compile(*view);
+    CHECK(compiled && compiled->reads_history());
+    if (!compiled) {
+        return;
+    }
+    const auto document = tags({{"ARTIST", {"Air"}},
+                                {"ALBUM", {"Moon Safari"}},
+                                {"DATE", {"1998-01-16"}},
+                                {"GENRE", {"Electronic"}}});
+    lists::ViewRow row;
+    row.metadata = &document;
+    row.codec = "flac";
+    row.bits = 16;
+    row.sample_rate = 44'100;
+    row.history = std::array<std::int64_t, 6>{12, -1, -1, -1, -1, -1};
+    const std::vector rows{row};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && evaluated->front().cells == std::vector<std::string>{"1998"});
+    CHECK(evaluated && (evaluated->front().second_lines ==
+                        std::vector<std::string>{"Air · Moon Safari", "Electronic",
+                                                 "flac · 16/44.1", "12 plays"}));
+}
+
 void historyIsReadByExpressions() {
     auto view = user_view();
     CHECK(lists::CompiledListView::compile(view).has_value() &&
@@ -415,6 +444,7 @@ int main() {
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
     rowsHaveMoreLines();
+    twoLineTracksSayWhatTheyShow();
     stylesAreWordsExpressionsAnswer();
     rowsSayWhatTheyAre();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

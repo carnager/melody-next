@@ -466,7 +466,8 @@ void ListViewDialog::addColumn() {
                              .alignment = lists::ColumnAlignment::left,
                              .expands = false,
                              .style = {},
-                             .second_line = {}});
+                             .second_line = {},
+                             .width = 0});
     fillColumns();
     columns_->setCurrentCell(columns_->rowCount() - 1, title_column);
     edited();

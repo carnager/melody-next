@@ -222,8 +222,15 @@ void BenchMainWindow::chooseListView(const QString& id) {
     }
     tab->view_layout_persistence_protected = false;
     tab->preserved_view_layout.clear();
-    applyTrackViewLayout(*tab,
-                         Workspace::trackViewLayoutFor(*definition, tab->view_layout.columns));
+    // The tab's widths, but a view chosen that says how wide a column starts
+    // has it so.
+    auto widths = tab->view_layout.columns;
+    std::erase_if(widths, [&definition](const ui::TrackViewColumnLayout& column) {
+        const auto found =
+            std::ranges::find(definition->columns, column.id.toStdString(), &lists::ViewColumn::id);
+        return found != definition->columns.end() && found->width > 0;
+    });
+    applyTrackViewLayout(*tab, Workspace::trackViewLayoutFor(*definition, widths));
     schedulePersist();
 }
 

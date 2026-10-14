@@ -296,9 +296,50 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
                            .alignment = ColumnAlignment::left,
                            .expands = false,
                            .style = {},
-                           .second_line = {}});
+                           .second_line = {},
+                           .width = 0});
     }
     return columns;
+}
+
+// ADR-0284: a list that says much in little width -- no column for what a
+// second line can carry.
+[[nodiscard]] ListView two_line_tracks() {
+    auto columns = builtin_columns({"title", "length", "rating"});
+    const auto line = [&columns](std::string_view id, std::string second) {
+        std::ranges::find(columns, id, &ViewColumn::id)->second_line = std::move(second);
+    };
+    line("title", "%artist%$if(%album%, · %album%,)");
+    line("length", "$info(codec)$if($info(bitspersample), · $info(bitspersample)/"
+                   "$decimal($info(samplerate),1000,1),)");
+    line("rating", "$if(%playcount%,%playcount% $if($eq(%playcount%,1),play,plays),)");
+    // Room for the format beneath the length.
+    std::ranges::find(columns, std::string_view{"length"}, &ViewColumn::id)->width = 112;
+    std::ranges::find(columns, std::string_view{"rating"}, &ViewColumn::id)->width = 96;
+    // The year where a date column would be, its genre beneath.
+    const auto title = std::ranges::find(columns, std::string_view{"title"}, &ViewColumn::id);
+    columns.insert(std::next(title), ViewColumn{.id = "year",
+                                                .visible = true,
+                                                .title = "Year",
+                                                .display = "$left(%date%,4)",
+                                                .sort = "%date%",
+                                                .alignment = ColumnAlignment::left,
+                                                .expands = false,
+                                                .style = {},
+                                                .second_line = "%genre%",
+                                                .width = 96});
+    return {.id = std::string{two_line_view_id},
+            .name = "Two-line tracks",
+            .artwork = ViewArtwork::none,
+            .grouping = ViewGrouping::none,
+            .group_key = {},
+            .group_title = {},
+            .group_details = {},
+            .subgroup = std::nullopt,
+            .row_style = {},
+            .columns = std::move(columns),
+            .builtin = true,
+            .row_lines = 2};
 }
 
 } // namespace
@@ -338,6 +379,7 @@ const std::vector<ListView>& shipped_list_views() {
          .columns = builtin_columns({"artist", "track-number", "title", "album", "date", "length"}),
          .builtin = true,
          .row_lines = 1},
+        two_line_tracks(),
     };
     return views;
 }
@@ -470,6 +512,9 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
             if (!column.second_line.empty()) {
                 entry["second_line"] = column.second_line;
             }
+            if (column.width > 0) {
+                entry["width"] = column.width;
+            }
             if (!column.builtin()) {
                 entry["title"] = column.title;
                 entry["display"] = column.display;
@@ -578,6 +623,7 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                 .expands = saved.value("expands", false),
                 .style = text_of(saved, "style"),
                 .second_line = text_of(saved, "second_line"),
+                .width = std::clamp(saved.value("width", 0), 0, 4'096),
             });
         }
         // A built-in column added since it was saved goes last, hidden.
@@ -591,7 +637,8 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                                         .alignment = ColumnAlignment::left,
                                         .expands = false,
                                         .style = {},
-                                        .second_line = {}});
+                                        .second_line = {},
+                                        .width = 0});
             }
         }
         if (const auto problems = validate_list_view(view); !problems.empty()) {

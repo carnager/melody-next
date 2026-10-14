@@ -796,6 +796,8 @@ Workspace::trackViewLayoutFor(const lists::ListView& view,
         auto width = 150;
         if (saved != widths.end()) {
             width = saved->width;
+        } else if (column.width > 0) {
+            width = column.width;
         } else if (const auto logical = trackColumnLogical(id); logical >= 0) {
             const auto spec =
                 std::ranges::find(track_column_specs, logical, &TrackColumnSpec::logical);

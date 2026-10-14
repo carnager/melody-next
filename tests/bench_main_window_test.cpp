@@ -15700,7 +15700,8 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
                                 .alignment = lists::ColumnAlignment::right,
                                 .expands = false,
                                 .style = {},
-                                .second_line = {}});
+                                .second_line = {},
+                                .width = 0});
     by_label.grouping = lists::ViewGrouping::expression;
     by_label.group_key = "%label%";
     by_label.group_title = "%label%";
@@ -15858,7 +15859,8 @@ void BenchMainWindowTest::listViewsReadListeningHistory() {
                              .alignment = lists::ColumnAlignment::left,
                              .expands = false,
                              .style = {},
-                             .second_line = {}});
+                             .second_line = {},
+                             .width = 0});
     QVERIFY(saveCustomListViews({plays}).has_value());
     BenchMainWindow window;
     window.show();

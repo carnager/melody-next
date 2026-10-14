@@ -50,6 +50,9 @@ struct ViewColumn {
     // ADR-0284: what its cell says beneath, smaller, in a view of rows of
     // more than one line -- any column, built-in or not; empty, nothing.
     std::string second_line;
+    // How wide it starts, in pixels, until a list is given a width of its
+    // own; 0, as wide as such a column usually is.
+    int width{0};
 
     [[nodiscard]] bool builtin() const { return is_builtin_column(id); }
     friend bool operator==(const ViewColumn&, const ViewColumn&) = default;
@@ -87,6 +90,10 @@ struct ListView {
 // The shipped views: albums with side artwork, and plain columns.
 inline constexpr std::string_view albums_beside_view_id = "albums-side-artwork";
 inline constexpr std::string_view columns_view_id = "plain-columns";
+// ADR-0284: tracks in two lines -- the title with its artist and album
+// beneath, the year with its genre, the length with its format, the rating
+// with how often it played.
+inline constexpr std::string_view two_line_view_id = "two-line-tracks";
 [[nodiscard]] const std::vector<ListView>& shipped_list_views();
 [[nodiscard]] const ListView* shipped_list_view(std::string_view id);
 // A view once shipped and since retired -- header artwork, the compact

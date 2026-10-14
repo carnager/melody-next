@@ -28,6 +28,7 @@ enum Column : int {
     display_column,
     sort_column,
     style_column,
+    second_line_column,
     align_column,
     expands_column,
     column_count
@@ -106,9 +107,16 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<lists::OwnedVie
         expression_field("bench-list-view-row-style", QStringLiteral("$if(%playcount%,,quiet)"));
     row_style_->setToolTip(
         QStringLiteral("Answers style words: quiet, accent, warning, bold, italic"));
+    // ADR-0284: rows of more than one line, the second from each column's
+    // second line.
+    row_lines_ = new QComboBox(this);
+    row_lines_->setObjectName(QStringLiteral("bench-list-view-row-lines"));
+    row_lines_->addItems(
+        {QStringLiteral("One line"), QStringLiteral("Two lines"), QStringLiteral("Three lines")});
     auto* form = new QFormLayout;
     form->addRow(QStringLiteral("Name"), name_);
     form->addRow(QStringLiteral("Artwork"), artwork_);
+    form->addRow(QStringLiteral("Rows"), row_lines_);
     form->addRow(QStringLiteral("Row style"), row_style_);
     form->addRow(QStringLiteral("Grouping"), grouping_);
     form->addRow(expression_grouping_);
@@ -117,14 +125,15 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<lists::OwnedVie
     columns_->setObjectName(QStringLiteral("bench-list-view-columns"));
     columns_->setHorizontalHeaderLabels({QStringLiteral("Shown"), QStringLiteral("Title"),
                                          QStringLiteral("Shows"), QStringLiteral("Sorts by"),
-                                         QStringLiteral("Style"), QStringLiteral("Align"),
-                                         QStringLiteral("Expands")});
+                                         QStringLiteral("Style"), QStringLiteral("Second line"),
+                                         QStringLiteral("Align"), QStringLiteral("Expands")});
     columns_->verticalHeader()->hide();
     columns_->setSelectionBehavior(QAbstractItemView::SelectRows);
     columns_->setSelectionMode(QAbstractItemView::SingleSelection);
     columns_->horizontalHeader()->setSectionResizeMode(display_column, QHeaderView::Stretch);
     columns_->horizontalHeader()->setSectionResizeMode(sort_column, QHeaderView::Stretch);
     columns_->horizontalHeader()->setSectionResizeMode(style_column, QHeaderView::Stretch);
+    columns_->horizontalHeader()->setSectionResizeMode(second_line_column, QHeaderView::Stretch);
     connect(columns_, &QTableWidget::itemChanged, this, &ListViewDialog::edited);
     auto* add = new QPushButton(QStringLiteral("Add column"), this);
     add->setObjectName(QStringLiteral("bench-list-view-add-column"));
@@ -197,6 +206,7 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<lists::OwnedVie
 
     connect(name_, &QLineEdit::textEdited, this, &ListViewDialog::edited);
     connect(artwork_, &QComboBox::currentIndexChanged, this, &ListViewDialog::edited);
+    connect(row_lines_, &QComboBox::currentIndexChanged, this, &ListViewDialog::edited);
     connect(grouping_, &QComboBox::currentIndexChanged, this, &ListViewDialog::edited);
     connect(subgroup_, &QCheckBox::toggled, this, &ListViewDialog::edited);
     fill();
@@ -214,6 +224,7 @@ void ListViewDialog::fill() {
                                : view_.grouping == lists::ViewGrouping::album ? 1
                                                                               : 2);
     row_style_->setText(text(view_.row_style));
+    row_lines_->setCurrentIndex(std::clamp(view_.row_lines, 1, 3) - 1);
     group_key_->setText(text(view_.group_key));
     group_title_->setText(text(view_.group_title));
     group_details_->setText(text(view_.group_details));
@@ -252,6 +263,11 @@ void ListViewDialog::fillColumns() {
         style->setFlags(column.builtin() ? fixed : editable);
         style->setToolTip(QStringLiteral("Empty: as its row"));
         columns_->setItem(row, style_column, style);
+        // Any column, built in or not, may say more beneath.
+        auto* second = new QTableWidgetItem(text(column.second_line));
+        second->setFlags(editable);
+        second->setToolTip(QStringLiteral("Beneath it, in rows of more than one line"));
+        columns_->setItem(row, second_line_column, second);
         auto* align = new QComboBox(columns_);
         align->addItems(
             {QStringLiteral("Left"), QStringLiteral("Right"), QStringLiteral("Centre")});
@@ -282,6 +298,7 @@ void ListViewDialog::readEdits() {
                      : grouping_->currentIndex() == 1 ? lists::ViewGrouping::album
                                                       : lists::ViewGrouping::expression;
     view_.row_style = row_style_->text().toStdString();
+    view_.row_lines = row_lines_->currentIndex() + 1;
     view_.group_key = group_key_->text().toStdString();
     view_.group_title = group_title_->text().toStdString();
     view_.group_details = group_details_->text().toStdString();
@@ -293,6 +310,7 @@ void ListViewDialog::readEdits() {
     for (int row = 0; row < columns_->rowCount(); ++row) {
         auto& column = view_.columns[static_cast<std::size_t>(row)];
         column.visible = columns_->item(row, shown_column)->checkState() == Qt::Checked;
+        column.second_line = columns_->item(row, second_line_column)->text().toStdString();
         if (column.builtin()) {
             continue;
         }
@@ -343,7 +361,8 @@ void ListViewDialog::check() {
         const auto& column = view_.columns[static_cast<std::size_t>(row)];
         for (const auto& [cell, part] :
              {std::pair{title_column, ":title"}, std::pair{display_column, ":display"},
-              std::pair{sort_column, ":sort"}, std::pair{style_column, ":style"}}) {
+              std::pair{sort_column, ":sort"}, std::pair{style_column, ":style"},
+              std::pair{second_line_column, ":second_line"}}) {
             const auto where = "column:" + column.id + part;
             const auto found = std::ranges::find(problems, where, &lists::ViewProblem::where);
             auto* item = columns_->item(row, cell);
@@ -446,7 +465,8 @@ void ListViewDialog::addColumn() {
                              .sort = {},
                              .alignment = lists::ColumnAlignment::left,
                              .expands = false,
-                             .style = {}});
+                             .style = {},
+                             .second_line = {}});
     fillColumns();
     columns_->setCurrentCell(columns_->rowCount() - 1, title_column);
     edited();

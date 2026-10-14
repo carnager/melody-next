@@ -1056,6 +1056,9 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
             return styled;
         }
     }
+    if (role == ui::track_second_line_role) {
+        return list_view_ != nullptr ? viewData(index, role) : QVariant{QString{}};
+    }
     if (expressionGrouping() &&
         (role == ui::track_group_key_role || role == ui::track_album_group_start_role ||
          role == ui::track_disc_start_role || role == ui::track_group_title_role ||

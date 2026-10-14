@@ -47,7 +47,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
             .sort = std::move(sort),
             .alignment = lists::ColumnAlignment::left,
             .expands = false,
-            .style = {}};
+            .style = {},
+            .second_line = {}};
 }
 
 // A copy of a shipped view with expression columns and a grouping of its own.
@@ -280,6 +281,41 @@ void stylesAreWordsExpressionsAnswer() {
                                 &lists::ViewProblem::where));
 }
 
+// ADR-0284: rows of more than one line -- any column, built in or not, says
+// more beneath; the view says how many lines.
+void rowsHaveMoreLines() {
+    auto view = user_view();
+    view.row_lines = 2;
+    std::ranges::find(view.columns, std::string{"title"}, &lists::ViewColumn::id)->second_line =
+        "%artist% · %album%";
+    view.columns.back().second_line = "$info(filename_ext)";
+    CHECK(lists::validate_list_view(view).empty());
+    const auto saved = lists::serialize_list_views({view});
+    const auto restored = lists::deserialize_list_views(saved);
+    CHECK(restored && restored->size() == 1U && restored->front() == view);
+    const auto compiled = lists::CompiledListView::compile(view);
+    CHECK(compiled && (compiled->second_line_columns() ==
+                       std::vector<std::string>{"title", view.columns.back().id}));
+    const auto document = tags({{"ARTIST", {"Air"}}, {"ALBUM", {"Moon Safari"}}});
+    lists::ViewRow row;
+    row.raw_path = "/music/La Femme d'Argent.flac";
+    row.metadata = &document;
+    const std::vector rows{row};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && (evaluated->front().second_lines ==
+                        std::vector<std::string>{"Air · Moon Safari", "La Femme d'Argent.flac"}));
+    for (const auto lines : {0, 4}) {
+        auto wrong = user_view();
+        wrong.row_lines = lines;
+        CHECK(!lists::validate_list_view(wrong).empty());
+    }
+    auto bad = user_view();
+    bad.columns.front().second_line = "$if(";
+    CHECK(std::ranges::contains(lists::validate_list_view(bad),
+                                "column:" + bad.columns.front().id + ":second_line",
+                                &lists::ViewProblem::where));
+}
+
 void historyIsReadByExpressions() {
     auto view = user_view();
     CHECK(lists::CompiledListView::compile(view).has_value() &&
@@ -378,6 +414,7 @@ int main() {
     rowsAreEvaluatedAndGrouped();
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
+    rowsHaveMoreLines();
     stylesAreWordsExpressionsAnswer();
     rowsSayWhatTheyAre();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

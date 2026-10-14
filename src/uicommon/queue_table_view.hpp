@@ -46,6 +46,9 @@ class QueueTableView final : public QTableView {
     // receive one bounded per-section override; ordinary rows keep the fixed
     // default height.
     void setAlbumGroupingEnabled(bool enabled);
+    // Every row's height measured again: after the default row height
+    // changed -- rows of more lines (ADR-0284).
+    void refreshRowGeometry() { rebuildAlbumRowGeometry(); }
     [[nodiscard]] bool albumGroupingEnabled() const noexcept { return album_grouping_enabled_; }
     // A grouped presentation may reserve one ordinary model column as an
     // artwork gutter. Covers are painted across the visible rows of each

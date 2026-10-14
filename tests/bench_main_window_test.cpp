@@ -434,6 +434,7 @@ class BenchMainWindowTest final : public QObject {
     void listViewEditorChecksAndSavesACopy();
     void listViewsReadListeningHistory();
     void groupsFoldToTheirHeaders();
+    void rowsHaveMoreLines();
     void listLayoutsFromBeforeViewsMigrate();
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
@@ -15698,7 +15699,8 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
                                 .sort = {},
                                 .alignment = lists::ColumnAlignment::right,
                                 .expands = false,
-                                .style = {}});
+                                .style = {},
+                                .second_line = {}});
     by_label.grouping = lists::ViewGrouping::expression;
     by_label.group_key = "%label%";
     by_label.group_title = "%label%";
@@ -15855,7 +15857,8 @@ void BenchMainWindowTest::listViewsReadListeningHistory() {
                              .sort = {},
                              .alignment = lists::ColumnAlignment::left,
                              .expands = false,
-                             .style = {}});
+                             .style = {},
+                             .second_line = {}});
     QVERIFY(saveCustomListViews({plays}).has_value());
     BenchMainWindow window;
     window.show();
@@ -15952,6 +15955,61 @@ void BenchMainWindowTest::groupsFoldToTheirHeaders() {
         QVERIFY(!view->isRowHidden(1) && !view->isRowHidden(3));
         QVERIFY(restored.close());
     }
+}
+
+// ADR-0284: a view of two-line rows -- the title's artist and album beneath
+// it -- draws every row taller by a line, grouped or not.
+void BenchMainWindowTest::rowsHaveMoreLines() {
+    auto two_lines = *lists::shipped_list_view(lists::columns_view_id);
+    two_lines.id = "view-two-lines";
+    two_lines.name = "Two lines";
+    two_lines.builtin = false;
+    two_lines.row_lines = 2;
+    std::ranges::find(two_lines.columns, std::string{"title"}, &lists::ViewColumn::id)
+        ->second_line = "%artist% · %album%";
+    auto grouped = two_lines;
+    grouped.id = "view-two-lines-albums";
+    grouped.name = "Two lines, albums";
+    grouped.grouping = lists::ViewGrouping::album;
+    grouped.artwork = lists::ViewArtwork::beside;
+    QVERIFY(saveCustomListViews({two_lines, grouped}).has_value());
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    LocalTrackRow first;
+    first.raw_path = "/music/one.flac";
+    first.title = "One";
+    first.artist = "Air";
+    first.album = "Moon Safari";
+    first.probed = true;
+    auto second = first;
+    second.raw_path = "/music/two.flac";
+    second.title = "Two";
+    model->appendRows({first, second});
+    window.chooseListView(QStringLiteral("view-two-lines"));
+    const auto tall = ui::track_row_height + ui::track_second_line_height;
+    QTRY_COMPARE(view->rowHeight(1), tall);
+    QCOMPARE(view->property(ui::track_row_lines_property).toInt(), 2);
+    QVERIFY(qobject_cast<ui::TrackLinesDelegate*>(view->itemDelegate()) != nullptr);
+    QTRY_COMPARE(model->index(0, local_title_column).data(ui::track_second_line_role).toString(),
+                 QStringLiteral("Air · Moon Safari"));
+    QCOMPARE(model->index(0, local_length_column).data(ui::track_second_line_role).toString(),
+             QString{});
+    // Grouped, the header above the first row, every row a line taller.
+    window.chooseListView(QStringLiteral("view-two-lines-albums"));
+    QTRY_VERIFY(view->albumGroupingEnabled());
+    QTRY_COMPARE(view->rowHeight(1), tall);
+    QVERIFY(view->rowHeight(0) >= tall + ui::QueueItemDelegate::album_header_height);
+    // Covers beside the rows, but their column hidden: the headers are
+    // drawn in their strip rather than not at all.
+    QCOMPARE(view->albumArtworkColumn(), -1);
+    // And back to one line.
+    window.chooseListView(QStringLiteral("plain-columns"));
+    QTRY_COMPARE(view->rowHeight(1), ui::track_row_height);
+    QVERIFY(window.close());
 }
 
 // ADR-0282: the editor shows an expression's error and will not save the

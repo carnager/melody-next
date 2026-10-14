@@ -461,6 +461,18 @@ QVariant LocalListModel::viewStyle(const QModelIndex& index, const int role) con
 QVariant LocalListModel::viewData(const QModelIndex& index, const int role) const {
     const auto at = static_cast<std::size_t>(index.row());
     const auto& row = rows_[at];
+    // ADR-0284: the cell's second line, where its column has one.
+    if (role == ui::track_second_line_role) {
+        if (!evaluatedNow(row)) {
+            return QString{};
+        }
+        const auto& ids = list_view_->second_line_columns();
+        const auto found = std::ranges::find(ids, columnId(index.column()).toStdString());
+        const auto line = static_cast<std::size_t>(found - ids.begin());
+        return found == ids.end() || line >= row.evaluated->second_lines.size()
+                   ? QString{}
+                   : QString::fromStdString(row.evaluated->second_lines[line]);
+    }
     if (index.column() >= local_column_count) {
         const auto expression = static_cast<std::size_t>(index.column() - local_column_count);
         if (role == Qt::DisplayRole) {

@@ -70,23 +70,34 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
     const auto by_expression = definition->grouping == lists::ViewGrouping::expression;
     const auto grouped = definition->grouping == lists::ViewGrouping::album ||
                          (by_expression && model != nullptr && model->expressionGroupsReady());
-    const auto side_artwork = grouped && definition->artwork == lists::ViewArtwork::beside;
+    // Covers beside the rows need their column: without it the headers
+    // are drawn as in the header strip, or they would not be drawn at all.
+    const auto artwork_shown = std::ranges::any_of(definition->columns, [](const auto& column) {
+        return column.id == "artwork" && column.visible;
+    });
+    const auto side_artwork =
+        grouped && definition->artwork == lists::ViewArtwork::beside && artwork_shown;
     view->setProperty(ui::track_side_artwork_property, side_artwork);
     view->setProperty(ui::track_album_rules_property, !by_expression);
     // Albums and their headers already group the rows; stripes on top of
     // that are noise.
     view->setAlternatingRowColors(!grouped);
 
+    // ADR-0284: rows of as many lines as the view says.
+    const auto lines = std::clamp(definition->row_lines, 1, 3);
+    view->setProperty(ui::track_row_lines_property, lines);
     auto* previous_delegate = view->itemDelegate();
-    view->setItemDelegate(grouped
-                              ? static_cast<QAbstractItemDelegate*>(new ui::QueueItemDelegate(view))
-                              : static_cast<QAbstractItemDelegate*>(new QStyledItemDelegate(view)));
+    view->setItemDelegate(
+        grouped ? static_cast<QAbstractItemDelegate*>(new ui::QueueItemDelegate(view))
+                : static_cast<QAbstractItemDelegate*>(new ui::TrackLinesDelegate(view)));
     if (previous_delegate != nullptr && previous_delegate->parent() == view) {
         previous_delegate->deleteLater();
     }
-    view->verticalHeader()->setDefaultSectionSize(22);
+    view->verticalHeader()->setDefaultSectionSize(ui::track_row_height +
+                                                  (lines - 1) * ui::track_second_line_height);
     view->verticalHeader()->setMinimumSectionSize(18);
     queue_view->setAlbumGroupingEnabled(grouped);
+    queue_view->refreshRowGeometry();
 
     auto* header = view->horizontalHeader();
     const QSignalBlocker header_blocker{header};

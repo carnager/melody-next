@@ -47,6 +47,9 @@ struct ViewColumn {
     // ADR-0283: how its cell is drawn, as a style expression says (below);
     // empty, as its row is.
     std::string style;
+    // ADR-0284: what its cell says beneath, smaller, in a view of rows of
+    // more than one line -- any column, built-in or not; empty, nothing.
+    std::string second_line;
 
     [[nodiscard]] bool builtin() const { return is_builtin_column(id); }
     friend bool operator==(const ViewColumn&, const ViewColumn&) = default;
@@ -74,6 +77,9 @@ struct ListView {
     // In their order; every built-in column is here, shown or not.
     std::vector<ViewColumn> columns;
     bool builtin{false};
+    // ADR-0284: how many lines each row has, 1-3: its cells' first line, and
+    // their second lines beneath.
+    int row_lines{1};
 
     friend bool operator==(const ListView&, const ListView&) = default;
 };
@@ -207,6 +213,11 @@ class CompiledListView final {
     // field in an expression, or a history column shown -- so the list's
     // history is fetched before its rows are evaluated.
     [[nodiscard]] bool reads_history() const noexcept { return reads_history_; }
+    // ADR-0284: the columns with a second line, built-in or not, in the
+    // view's order -- EvaluatedRow::second_lines holds theirs so.
+    [[nodiscard]] const std::vector<std::string>& second_line_columns() const noexcept {
+        return second_line_ids_;
+    }
 
   private:
     friend struct ListViewEvaluator;
@@ -221,6 +232,8 @@ class CompiledListView final {
     std::optional<titleformat::Program> subgroup_label_;
     std::optional<titleformat::Program> row_style_;
     std::vector<std::optional<titleformat::Program>> cell_styles_;
+    std::vector<std::string> second_line_ids_;
+    std::vector<titleformat::Program> second_lines_;
     bool reads_history_{false};
 };
 
@@ -232,6 +245,8 @@ struct EvaluatedRow {
     // (empty where it has no style expression).
     std::string row_style;
     std::vector<std::string> cell_styles;
+    // ADR-0284: each column's second line, by second_line_columns() order.
+    std::vector<std::string> second_lines;
     // An expression grouping's.
     std::string group_key;
     std::string subgroup_key;

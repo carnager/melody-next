@@ -44,6 +44,9 @@ class ListViewDialog final : public QDialog {
                    const QHash<QString, QImage>& covers, bool removable, QWidget* parent);
 
     [[nodiscard]] const lists::ListView& view() const noexcept { return view_; }
+    // The preview's rows: their listening history, where the view reads it,
+    // is asked of the list's engine by whoever opened the editor.
+    [[nodiscard]] LocalListModel* previewModel() const noexcept { return preview_model_; }
 
   signals:
     // The view as edited, to be saved.
@@ -77,6 +80,8 @@ class ListViewDialog final : public QDialog {
     // Says beneath the field what it gives, or its problem.
     void note(Field& field, const std::vector<lists::ViewProblem>& problems) const;
     void preview();
+    // The first track again, once more is known of it (its history).
+    void refreshExample();
     void addColumn();
     void removeColumn();
     void moveColumn(int by);

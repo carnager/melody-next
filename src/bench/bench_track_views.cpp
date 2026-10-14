@@ -563,6 +563,14 @@ void BenchMainWindow::editListView(const bool make_new) {
     auto* dialog =
         new ListViewDialog(std::move(edited), std::move(sample), covers, removable, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    // ADR-0282: the preview's play counts, from the list's engine.
+    if (tab != nullptr) {
+        auto* preview = dialog->previewModel();
+        connect(preview, &LocalListModel::historyWanted, dialog,
+                [this, preview, engine = EngineKey::of(tab->document)] {
+                    workspace_.loadListHistory(*preview, engine);
+                });
+    }
     const auto document = tab != nullptr ? std::optional{tab->document.id} : std::nullopt;
     connect(dialog, &ListViewDialog::saved, this, [this, document](const lists::ListView& view) {
         auto custom = customListViews();

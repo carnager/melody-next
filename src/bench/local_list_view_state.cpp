@@ -309,9 +309,17 @@ void LocalListModel::mergeEvaluation(const std::uint64_t view,
         first = first < 0 ? row : std::min(first, row);
         last = std::max(last, row);
     }
-    if (first >= 0 && expression_columns_ > 0) {
-        emit dataChanged(index(first, local_column_count), index(last, columnCount() - 1),
-                         {Qt::DisplayRole});
+    if (first < 0) {
+        return;
+    }
+    // Built-in columns take their second lines and styles from the
+    // evaluation too -- not their text, which the list's jobs read as an edit.
+    emit dataChanged(index(first, 0), index(last, local_column_count - 1),
+                     {ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole});
+    if (expression_columns_ > 0) {
+        emit dataChanged(
+            index(first, local_column_count), index(last, columnCount() - 1),
+            {Qt::DisplayRole, ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole});
     }
 }
 

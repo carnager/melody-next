@@ -92,15 +92,25 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<LocalTrackRow> 
     if (rows.size() > preview_rows) {
         rows.resize(preview_rows);
     }
+    // Theirs to evaluate, and to ask history for, anew: the list's own
+    // answers are its own.
+    for (auto& row : rows) {
+        row.evaluated.reset();
+        row.history_requested = false;
+    }
     preview_model_ = new LocalListModel(this);
     preview_model_->replaceRows(std::move(rows));
     for (auto cover = covers.cbegin(); cover != covers.cend(); ++cover) {
         preview_model_->setArtwork(cover.key(), cover.value());
     }
-    if (auto copies = preview_model_->viewRows(); !copies.empty()) {
-        example_tracks_ = copies.size();
-        example_ = std::move(copies.front());
-    }
+    refreshExample();
+    // Rows evaluated again: their history came, and the notes say more.
+    connect(preview_model_, &QAbstractItemModel::dataChanged, this, [this] {
+        refreshExample();
+        if (buttons_ != nullptr) {
+            check();
+        }
+    });
     preview_ = new ui::QueueTableView(this);
     preview_->setObjectName(QStringLiteral("bench-list-view-preview"));
     preview_->setModel(preview_model_);
@@ -635,6 +645,16 @@ void ListViewDialog::preview() {
     static_cast<void>(drawListView(
         preview_, view_, std::make_shared<const lists::CompiledListView>(std::move(*compiled)),
         Workspace::trackViewLayoutFor(view_)));
+}
+
+void ListViewDialog::refreshExample() {
+    auto copies = preview_model_->viewRows();
+    example_tracks_ = copies.size();
+    if (copies.empty()) {
+        example_.reset();
+    } else {
+        example_ = std::move(copies.front());
+    }
 }
 
 void ListViewDialog::addColumn() {

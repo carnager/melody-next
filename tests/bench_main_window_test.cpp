@@ -15987,9 +15987,11 @@ void BenchMainWindowTest::rowsHaveMoreLines() {
     first.artist = "Air";
     first.album = "Moon Safari";
     first.probed = true;
+    first.rating_hash = "rating-one";
     auto second = first;
     second.raw_path = "/music/two.flac";
     second.title = "Two";
+    second.rating_hash = "rating-two";
     model->appendRows({first, second});
     window.chooseListView(QStringLiteral("view-two-lines"));
     const auto tall = ui::track_row_height + ui::track_second_line_height;
@@ -16000,6 +16002,18 @@ void BenchMainWindowTest::rowsHaveMoreLines() {
                  QStringLiteral("Air · Moon Safari"));
     QCOMPARE(model->index(0, local_length_column).data(ui::track_second_line_role).toString(),
              QString{});
+    // A rating coming later evaluates its row again, and the second lines of
+    // built-in columns are drawn anew though the view has no columns of its
+    // own.
+    QSignalSpy redrawn{model, &QAbstractItemModel::dataChanged};
+    model->applyRatings({{QStringLiteral("rating-one"), 8U}});
+    QTRY_VERIFY(std::ranges::any_of(redrawn, [](const QList<QVariant>& signal) {
+        return signal.at(0).toModelIndex().row() == 0 &&
+               signal.at(0).toModelIndex().column() <= local_title_column &&
+               signal.at(2).value<QList<int>>().contains(ui::track_second_line_role);
+    }));
+    QCOMPARE(model->index(0, local_title_column).data(ui::track_second_line_role).toString(),
+             QStringLiteral("Air · Moon Safari"));
     // Grouped, the header above the first row, every row a line taller.
     window.chooseListView(QStringLiteral("view-two-lines-albums"));
     QTRY_VERIFY(view->albumGroupingEnabled());

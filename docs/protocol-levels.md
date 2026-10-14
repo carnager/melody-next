@@ -7,6 +7,12 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 11 (2026-10-14)
+
+- The `catalogue.listened` event `{path}`: a listen was recorded for that
+  file, so play counts and last-played times shown of it follow (ADR-0282).
+  An older engine records them without saying so.
+
 ### Level 10 (2026-10-11)
 
 - A file-work result names what was written, not its tags: a commit

@@ -9,6 +9,7 @@
 #include "trackknife/lists/list_view.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/local_library.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractTableModel>
@@ -23,6 +24,7 @@ namespace trackknife::ui {
 class ListPersistenceService;
 }
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -108,6 +110,11 @@ struct LocalTrackRow {
     std::shared_ptr<const lists::EvaluatedRow> evaluated{};
     std::uint64_t evaluated_view{0U};
     std::uint64_t evaluation_ticket{0U};
+    // The engine's listening history of the row, fetched when its view reads
+    // it (lists::history_field_names order); asked for, and arrived.
+    std::optional<std::array<std::int64_t, 6>> history{};
+    bool history_requested{false};
+    bool history_loaded{false};
 
     friend bool operator==(const LocalTrackRow& left, const LocalTrackRow& right) {
         const auto salient = [](const LocalTrackRow& row) {
@@ -284,6 +291,19 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] bool expressionGroupsReady() const noexcept { return groups_ready_; }
     // Each row's copy for a worker to evaluate -- a sort by a column.
     [[nodiscard]] std::vector<lists::OwnedViewRow> viewRows() const;
+    // ADR-0282: listening history for a view that reads it. The rows whose
+    // history is wanted and not yet asked for -- now asked for -- with what
+    // the engine looks them up by; what it answered, or that it could not;
+    // and the files whose history changed, to be asked for again.
+    struct HistoryRequest {
+        core::StableId entry;
+        persistence::LibraryHistorySource source;
+    };
+    [[nodiscard]] std::vector<HistoryRequest> takeHistoryRequests();
+    void applyHistory(const std::vector<core::StableId>& entries,
+                      const std::vector<std::array<std::int64_t, 6>>& history);
+    void historyUnavailable(const std::vector<core::StableId>& entries);
+    void forgetHistory(const std::vector<std::string>& raw_paths);
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
@@ -296,6 +316,8 @@ class LocalListModel final : public QAbstractTableModel {
   signals:
     // The groups of an expression grouping became known, or stopped being.
     void expressionGroupsChanged();
+    // Rows of a view that reads listening history have none yet.
+    void historyWanted();
     void historyChanged();
     void historyRowsRestored(const QList<int>& rows);
     void historyDiscarded(const QString& reason);

@@ -70,7 +70,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
 
 void shippedViewsAreValidAndAsTheyWere() {
     const auto& shipped = lists::shipped_list_views();
-    CHECK(shipped.size() == 4U);
+    // The four presentations, then five starting points.
+    CHECK(shipped.size() == 9U);
     for (const auto& view : shipped) {
         CHECK(view.builtin);
         CHECK(lists::validate_list_view(view).empty());
@@ -160,7 +161,8 @@ void rowsAreEvaluatedAndGrouped() {
                               .bits = 16,
                               .channels = 2,
                               .bit_rate = 0,
-                              .rating = 0U};
+                              .rating = 0U,
+                              .history = std::nullopt};
     };
     const std::vector rows{
         make(first, "/music/a/One.flac", 61'000), make(second, "/music/a/Two.flac", 59'000),
@@ -186,6 +188,87 @@ void rowsAreEvaluatedAndGrouped() {
            std::vector<std::pair<std::size_t, std::string>>{{0U, "Disc 1"}, {1U, "Disc 2"}}));
     // One disc only: nothing to tell apart.
     CHECK(groups->back().first == 3U && groups->back().subgroups.empty());
+}
+
+// ADR-0282: listening history read by expressions, under tkq-1's names; a
+// view that reads it -- or shows a history column -- says so, so its list's
+// history is fetched first.
+// The starting points say what they should of an ordinary row.
+void startingPointsShowWhatTheySay() {
+    const auto document = tags({{"ALBUMARTIST", {"Massive Attack"}},
+                                {"ALBUM", {"Mezzanine"}},
+                                {"DATE", {"1998"}},
+                                {"LABEL", {"Virgin"}},
+                                {"CATALOGNUMBER", {"WBRCD4"}}});
+    lists::ViewRow row;
+    row.raw_path = "/music/Mezzanine/01 Angel.flac";
+    row.metadata = &document;
+    row.codec = "flac";
+    row.sample_rate = 44'100;
+    row.bits = 16;
+    row.bit_rate = 1'009'000;
+    row.duration_ms = 380'000;
+    const std::vector rows{row};
+    const auto run = [&rows](std::string_view id) {
+        const auto compiled = lists::CompiledListView::compile(*lists::shipped_list_view(id));
+        auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+        auto groups = lists::evaluate_list_groups(*compiled, rows, *evaluated);
+        return std::pair{std::move(evaluated->front()),
+                         groups->empty() ? lists::EvaluatedGroup{} : groups->front()};
+    };
+    const auto [audio, none] = run("audio-details");
+    CHECK((audio.cells ==
+           std::vector<std::string>{"flac", "44.1 kHz", "16-bit", "1009 kbps", "01 Angel.flac"}));
+    const auto [artist, by_artist] = run("grouped-by-artist");
+    CHECK(by_artist.title == "Massive Attack" && by_artist.details == "1 track · 6:20");
+    CHECK(artist.subgroup_label == "Mezzanine · 1998");
+    const auto [label, by_label] = run("grouped-by-label");
+    CHECK(by_label.title == "Virgin" && label.cells == std::vector<std::string>{"WBRCD4"});
+    const auto [genre, by_genre] = run("grouped-by-genre");
+    CHECK(by_genre.title == "No genre");
+    CHECK(lists::CompiledListView::compile(*lists::shipped_list_view("listening-history"))
+              ->reads_history());
+}
+
+void historyIsReadByExpressions() {
+    auto view = user_view();
+    CHECK(lists::CompiledListView::compile(view).has_value() &&
+          !lists::CompiledListView::compile(view)->reads_history());
+    view.columns.push_back(expression_column(
+        "expression-9", "Plays", "$if(%play_count%,%playcount%×,never) · %days_since_played%"));
+    auto compiled = lists::CompiledListView::compile(view);
+    CHECK(compiled && compiled->reads_history());
+    if (!compiled) {
+        return;
+    }
+    const auto document = tags({});
+    lists::ViewRow played;
+    played.metadata = &document;
+    played.history =
+        std::array<std::int64_t, 6>{7, 1'700'000'000'000, 12, 30, 1'700'000'000'000, 2};
+    lists::ViewRow unplayed;
+    unplayed.metadata = &document;
+    const std::vector rows{played, unplayed};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && evaluated->size() == 2U);
+    if (!evaluated) {
+        return;
+    }
+    CHECK(evaluated->front().cells.back() == "7× · 12");
+    CHECK(evaluated->back().cells.back() == "never · ");
+    // Last played as a date and time, which sorts as it reads.
+    auto dated = user_view();
+    dated.columns.push_back(expression_column("expression-9", "Last", "%lastplayed%"));
+    const auto with_date = lists::CompiledListView::compile(dated);
+    const auto shown = lists::evaluate_list_rows(*with_date, rows);
+    CHECK(shown && shown->front().cells.back().size() == 16U &&
+          shown->front().cells.back().starts_with("2023-11-1"));
+    // A history column shown is history read.
+    auto column = *lists::shipped_list_view(lists::columns_view_id);
+    for (auto& placed : column.columns) {
+        placed.visible = placed.visible || placed.id == "play-count";
+    }
+    CHECK(lists::CompiledListView::compile(column)->reads_history());
 }
 
 void columnsSortNaturallyAndStably() {
@@ -214,8 +297,15 @@ void columnsSortNaturallyAndStably() {
     CHECK((lists::list_sort_order(*keys, true) == std::vector<int>{0, 1, 3, 2}));
     const auto numbers = lists::list_sort_keys(*compiled, "track-number", rows);
     CHECK(numbers && (lists::list_sort_order(*numbers, false) == std::vector<int>{1, 3, 0, 2}));
-    // History is not on the rows.
-    CHECK(!lists::list_sort_keys(*compiled, "play-count", rows));
+    // Play counts as the engine keeps them: most played last ascending, the
+    // unknown after every one.
+    rows[0].history = std::array<std::int64_t, 6>{12, 1'700'000'000'000, 3, 40, 1, 1};
+    rows[1].history = std::array<std::int64_t, 6>{2, 1'600'000'000'000, 900, 2, 1, 1};
+    rows[3].history = std::array<std::int64_t, 6>{-1, -1, -1, -1, -1, -1};
+    const auto counts = lists::list_sort_keys(*compiled, "play-count", rows);
+    CHECK(counts && (lists::list_sort_order(*counts, false) == std::vector<int>{1, 0, 2, 3}));
+    const auto played = lists::list_sort_keys(*compiled, "last-played", rows);
+    CHECK(played && (lists::list_sort_order(*played, true) == std::vector<int>{0, 1, 2, 3}));
     // An expression column with no sort expression sorts by what it shows.
     const auto labelled = tags({{"LABEL", {"Warp"}}});
     const auto other_label = tags({{"LABEL", {"Interscope"}}});
@@ -237,5 +327,7 @@ int main() {
     problemsSayWhereTheyAre();
     rowsAreEvaluatedAndGrouped();
     columnsSortNaturallyAndStably();
+    historyIsReadByExpressions();
+    startingPointsShowWhatTheySay();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

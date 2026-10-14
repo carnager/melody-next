@@ -432,6 +432,7 @@ class BenchMainWindowTest final : public QObject {
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void listViewsShowExpressionsGroupAndSort();
     void listViewEditorChecksAndSavesACopy();
+    void listViewsReadListeningHistory();
     void listLayoutsFromBeforeViewsMigrate();
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
@@ -15823,6 +15824,56 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
         QVERIFY(view->isColumnHidden(local_date_column));
         QVERIFY(restored.close());
     }
+}
+
+// ADR-0282: a view that reads listening history has the list's history
+// fetched from its engine before its rows are shown; what arrives is read by
+// its expressions, and a listen the engine records is fetched again.
+void BenchMainWindowTest::listViewsReadListeningHistory() {
+    auto plays = *lists::shipped_list_view(lists::columns_view_id);
+    plays.id = "view-plays";
+    plays.name = "Plays";
+    plays.builtin = false;
+    plays.columns.push_back({.id = "expression-1",
+                             .visible = true,
+                             .title = "Plays",
+                             .display = "$if(%playcount%,%playcount% plays,none)",
+                             .sort = {},
+                             .alignment = lists::ColumnAlignment::left,
+                             .expands = false});
+    QVERIFY(saveCustomListViews({plays}).has_value());
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* model =
+        qobject_cast<LocalListModel*>(static_cast<QTableView*>(tabs->currentWidget())->model());
+    LocalTrackRow played;
+    played.raw_path = "/music/played.flac";
+    played.title = "Played";
+    played.probed = true;
+    model->appendRows({played});
+    QSignalSpy wanted{model, &LocalListModel::historyWanted};
+    window.chooseListView(QStringLiteral("view-plays"));
+    const auto column = model->columnOf(QStringLiteral("expression-1"));
+    // Asked of the engine, which knows no listens of it: none.
+    QTRY_VERIFY(wanted.count() > 0);
+    QTRY_COMPARE(model->index(0, column).data().toString(), QStringLiteral("none"));
+    QVERIFY(model->rows().front().history_loaded);
+
+    // History that says otherwise is read by the expression.
+    model->forgetHistory({played.raw_path});
+    const auto requests = model->takeHistoryRequests();
+    QCOMPARE(requests.size(), 1U);
+    QCOMPARE(requests.front().source.source.source_reference, played.raw_path);
+    model->applyHistory({requests.front().entry},
+                        {std::array<std::int64_t, 6>{7, 1'700'000'000'000, 2, 9, -1, -1}});
+    QTRY_COMPARE(model->index(0, column).data().toString(), QStringLiteral("7 plays"));
+
+    // A listen recorded: asked again, and the engine's answer shown.
+    window.workspace_.adoptListen(EngineKey::local(), played.raw_path);
+    QTRY_COMPARE(model->index(0, column).data().toString(), QStringLiteral("none"));
+    QVERIFY(window.close());
 }
 
 // ADR-0282: the editor shows an expression's error and will not save the

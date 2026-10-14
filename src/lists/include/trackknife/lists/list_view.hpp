@@ -121,7 +121,17 @@ struct ViewRow {
     std::int64_t bit_rate{0};
     // 1-10; 0 unrated.
     unsigned rating{0U};
+    // The engine's listening history (ADR-0282): play count, last played
+    // (UTC milliseconds), days since played, and the same for the album, -1
+    // where unknown -- or none at all when it was not asked for.
+    std::optional<std::array<std::int64_t, 6>> history;
 };
+
+// The history fields, in the order ViewRow::history holds them -- the names
+// tkq-1's HISTORY(...) reads them by.
+inline constexpr std::array<std::string_view, 6> history_field_names{
+    "playcount",      "lastplayed",      "dayssinceplayed",
+    "albumplaycount", "albumlastplayed", "albumdayssinceplayed"};
 
 // A row's own copy of all that, for a worker: the list it came from may
 // change while it is evaluated.
@@ -141,6 +151,7 @@ struct OwnedViewRow {
     int channels{0};
     std::int64_t bit_rate{0};
     unsigned rating{0U};
+    std::optional<std::array<std::int64_t, 6>> history;
 
     [[nodiscard]] ViewRow view() const {
         return {.raw_path = raw_path,
@@ -157,7 +168,8 @@ struct OwnedViewRow {
                 .bits = bits,
                 .channels = channels,
                 .bit_rate = bit_rate,
-                .rating = rating};
+                .rating = rating,
+                .history = history};
     }
 };
 
@@ -175,6 +187,10 @@ class CompiledListView final {
     [[nodiscard]] bool groups_by_expression() const noexcept {
         return view_.grouping == ViewGrouping::expression;
     }
+    // Something it shows or sorts by is listening history -- a history
+    // field in an expression, or a history column shown -- so the list's
+    // history is fetched before its rows are evaluated.
+    [[nodiscard]] bool reads_history() const noexcept { return reads_history_; }
 
   private:
     friend struct ListViewEvaluator;
@@ -187,6 +203,7 @@ class CompiledListView final {
     std::optional<titleformat::Program> group_details_;
     std::optional<titleformat::Program> subgroup_key_;
     std::optional<titleformat::Program> subgroup_label_;
+    bool reads_history_{false};
 };
 
 // What a view makes of one row.

@@ -44,6 +44,7 @@ constexpr std::size_t evaluation_batch = 2'000U;
         copy.bit_rate = row.technicals->bit_rate;
     }
     copy.rating = row.rating;
+    copy.history = row.history;
     return copy;
 }
 
@@ -127,6 +128,94 @@ std::vector<lists::OwnedViewRow> LocalListModel::viewRows() const {
     return copies;
 }
 
+std::vector<LocalListModel::HistoryRequest> LocalListModel::takeHistoryRequests() {
+    std::vector<HistoryRequest> requests;
+    if (!list_view_ || !list_view_->reads_history()) {
+        return requests;
+    }
+    for (auto& row : rows_) {
+        if (row.history_loaded || row.history_requested) {
+            continue;
+        }
+        row.history_requested = true;
+        persistence::ListItem source;
+        source.source = persistence::ListSource::local;
+        source.source_reference = row.raw_path;
+        source.source_revision = row.source_revision;
+        source.source_selection = persistence::ListItemSourceSelection{row.selection.stream_index,
+                                                                       row.selection.subsong_index};
+        if (row.segment) {
+            source.segment =
+                persistence::ListItemSegment{row.segment->start_sample, row.segment->end_sample};
+        }
+        // As the tab search asks: an unnamed album is no album.
+        requests.push_back(
+            {.entry = row.entry_id,
+             .source = {.source = std::move(source),
+                        .album_hash = row.album.empty() ? std::string{} : row.album_rating_hash}});
+    }
+    return requests;
+}
+
+void LocalListModel::applyHistory(const std::vector<core::StableId>& entries,
+                                  const std::vector<std::array<std::int64_t, 6>>& history) {
+    if (entries.size() != history.size()) {
+        historyUnavailable(entries);
+        return;
+    }
+    int hint = 0;
+    for (std::size_t at = 0U; at < entries.size(); ++at) {
+        const auto row = rowOfEntry(entries[at], hint);
+        if (row < 0) {
+            continue;
+        }
+        hint = row + 1;
+        auto& target = rows_[static_cast<std::size_t>(row)];
+        // Asked again since -- a listen recorded meanwhile: that answer is
+        // the one to take.
+        if (!target.history_requested) {
+            continue;
+        }
+        target.history = history[at];
+        target.history_requested = false;
+        target.history_loaded = true;
+        forgetEvaluation(target);
+    }
+    scheduleEvaluation();
+}
+
+void LocalListModel::historyUnavailable(const std::vector<core::StableId>& entries) {
+    int hint = 0;
+    for (const auto& entry : entries) {
+        const auto row = rowOfEntry(entry, hint);
+        if (row < 0) {
+            continue;
+        }
+        hint = row + 1;
+        // Shown without: an engine that cannot say does not hold the list.
+        auto& target = rows_[static_cast<std::size_t>(row)];
+        target.history.reset();
+        target.history_requested = false;
+        target.history_loaded = true;
+        forgetEvaluation(target);
+    }
+    scheduleEvaluation();
+}
+
+void LocalListModel::forgetHistory(const std::vector<std::string>& raw_paths) {
+    bool forgot = false;
+    for (auto& row : rows_) {
+        if (std::ranges::contains(raw_paths, row.raw_path)) {
+            row.history_loaded = false;
+            row.history_requested = false;
+            forgot = true;
+        }
+    }
+    if (forgot) {
+        scheduleEvaluation();
+    }
+}
+
 void LocalListModel::forgetEvaluation(LocalTrackRow& row) {
     row.evaluated.reset();
     ++row.evaluation_ticket;
@@ -150,14 +239,25 @@ void LocalListModel::evaluatePending() {
     }
     std::vector<PendingEvaluation> pending;
     std::vector<lists::OwnedViewRow> copies;
+    // A view that reads listening history evaluates a row once its history
+    // is here; the rows without are asked for.
+    const auto needs_history = list_view_->reads_history();
+    bool wanted = false;
     for (std::size_t at = 0U; at < rows_.size() && pending.size() < evaluation_batch; ++at) {
         const auto& row = rows_[at];
+        if (needs_history && !row.history_loaded) {
+            wanted = wanted || !row.history_requested;
+            continue;
+        }
         if (!evaluatedNow(row)) {
             pending.push_back({.entry = row.entry_id,
                                .ticket = row.evaluation_ticket,
                                .hint = static_cast<int>(at)});
             copies.push_back(owned(row));
         }
+    }
+    if (wanted) {
+        emit historyWanted();
     }
     if (pending.empty()) {
         regroup();

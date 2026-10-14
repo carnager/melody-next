@@ -474,6 +474,13 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
     view->horizontalHeader()->setSectionsClickable(true);
     connect(view->horizontalHeader(), &QHeaderView::sectionClicked, this,
             [this, view](const int logical) { sortListByColumn(view, logical); });
+    // ADR-0282: a view reading listening history has it fetched from the
+    // list's engine.
+    connect(raw_tab->model, &LocalListModel::historyWanted, this, [this, id] {
+        if (auto* wanting = tabForDocument(id)) {
+            workspace_.loadListHistory(*wanting);
+        }
+    });
     connect(raw_tab->model, &LocalListModel::expressionGroupsChanged, this, [this, id] {
         // Not while a view is being applied: it is what said so.
         if (applying_track_view_layout_) {

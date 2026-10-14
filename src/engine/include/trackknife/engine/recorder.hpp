@@ -9,6 +9,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <string>
 #include <thread>
 
 namespace trackknife::engine {
@@ -31,8 +33,12 @@ namespace trackknife::engine {
 // where these rules came from.
 class Recorder final {
   public:
+    // `listened` hears the file of each listen recorded (ADR-0282), so what
+    // shows its history can show it again.
+    using Listened = std::function<void(const std::string& raw_path)>;
     Recorder(Player& player, Workspace& workspace,
-             std::chrono::milliseconds interval = std::chrono::milliseconds{1000});
+             std::chrono::milliseconds interval = std::chrono::milliseconds{1000},
+             Listened listened = {});
     Recorder(const Recorder&) = delete;
     Recorder(Recorder&&) = delete;
     Recorder& operator=(const Recorder&) = delete;
@@ -48,6 +54,7 @@ class Recorder final {
     Player* player_;
     Workspace* workspace_;
     std::chrono::milliseconds interval_;
+    Listened listened_;
     std::atomic_bool running_{false};
     InterruptiblePause pause_;
     std::thread worker_;

@@ -703,6 +703,11 @@ class Workspace final : public QObject {
     // A rating an engine stored, shown in its lists.
     void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
     // What changed in an engine's library, followed by what shows it.
+    // ADR-0282: a listen the engine recorded: its lists' play counts of
+    // the file are asked for again.
+    void adoptListen(const EngineKey& engine, const std::string& raw_path);
+    // The listening history a list's view reads, asked of its engine.
+    void loadListHistory(ListTab& tab);
     void adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                             const std::vector<std::string>& albums, bool everything);
     // ADR-0268: a list's rows whose files are not there, asked of its engine

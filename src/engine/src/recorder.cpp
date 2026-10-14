@@ -30,8 +30,10 @@ persistence::ListItem listened_item(const audio::TrackSource& source) {
     return item;
 }
 
-Recorder::Recorder(Player& player, Workspace& workspace, const std::chrono::milliseconds interval)
-    : player_(&player), workspace_(&workspace), interval_(interval) {}
+Recorder::Recorder(Player& player, Workspace& workspace, const std::chrono::milliseconds interval,
+                   Listened listened)
+    : player_(&player), workspace_(&workspace), interval_(interval),
+      listened_(std::move(listened)) {}
 
 Recorder::~Recorder() { stop(); }
 
@@ -43,7 +45,9 @@ void Recorder::drain(const std::int64_t monotonic_ms, const std::int64_t wall_ms
         // A listen that cannot be attributed is dropped rather than recorded
         // against nothing: the store refuses an unqualified source, and
         // forcing one would invent a play count for a file it cannot name.
-        static_cast<void>(workspace_->record_local_listen(item, core::StableId::random(), wall_ms));
+        if (workspace_->record_local_listen(item, core::StableId::random(), wall_ms) && listened_) {
+            listened_(item.source_reference);
+        }
     }
 
     if (observations.resume_entry) {

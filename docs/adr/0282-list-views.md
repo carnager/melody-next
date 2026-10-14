@@ -38,23 +38,33 @@ so nothing new has to cross the protocol.
 - **The built-in columns stay built in.** They are drawn as now, with no
   expression to evaluate, and keep the album view's rules: inside an album the
   header says album and date, and the artist shows where it differs. Under an
-  expression grouping those rules are off -- the group is not an album. Play
-  count and last played are history, fetched for the rows on screen; they are
-  columns, not fields an expression can read, in this version.
+  expression grouping those rules are off -- the group is not an album.
 - **Expressions read the row as the engine's formatting does.** Tags by name;
   host fields `length` (m:ss), `path` and `rating` (1-10);
   technicals and the file through `$info(...)` -- `codec`, `samplerate`,
   `bitspersample`, `channels`, `bitrate`, `filename`, `filename_ext`,
   `directory`, `extension`. A group header also reads `group_tracks` and
   `group_length`, of its whole group.
+- **Listening history is read too**, under the names `tkq-1`'s `HISTORY(...)`
+  uses: `playcount`, `lastplayed` (local date and time, which sorts as it
+  reads), `dayssinceplayed`, and the album's of each. A view that reads one,
+  or shows the Play count or Last played column, has its list's history
+  asked of the list's engine (`catalogue.history_facts`) before those rows
+  are evaluated -- the whole list, not the rows on screen, so it can sort and
+  group by it. The engine says when it records a listen (`catalogue.listened
+  {path}`, protocol level 11), and that file's history is asked for again.
 - **Evaluated off the window's thread.** Each expression is compiled once per
   view; a list's rows are evaluated in batches on a worker and the results
   kept with the rows, evaluated again only for rows that change. Until a
   batch lands, its cells are blank and its rows ungrouped. The budgets of
   `ui-workspace.md` apply: no expression is evaluated while painting.
 - **Shipped views** replace the four presentations, each as it was: Albums
-  (artwork beside), Albums (artwork in headers), Columns, Compact queue. They
-  are read-only and can be copied.
+  (artwork beside), Albums (artwork in headers), Columns, Compact queue. Five
+  starting points ship beside them: Grouped by artist (albums as subgroups),
+  Grouped by genre, Grouped by label (with the catalogue number), Audio
+  details (codec, rate, bits, bitrate, file) and Listening history (rating,
+  play count, last played, days since). They are read-only and can be
+  copied.
 - **Views live in Trackknife's settings** (`lists/views`), not in an engine:
   they are how this user wants lists to look, whichever engine they come
   from. The Android app keeps its own album layout.
@@ -84,8 +94,8 @@ so nothing new has to cross the protocol.
   expression columns; the group key, header and subgroup are roles the model
   answers from what it evaluated, which the shared delegate prefers to its
   album rules.
-- History in expressions -- sorting or grouping by play count -- needs the
-  whole list's history up front, not the visible rows'; a later step.
+- A view reading history waits for the engine's answer before its rows are
+  evaluated; an engine that cannot say shows them without it.
 - Sorting a list by a column is a list edit with undo, never a hidden view
   state.
 - Views are per computer. Sharing them with the Android app or between

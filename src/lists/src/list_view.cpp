@@ -9,7 +9,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <map>
 #include <numeric>
 #include <set>
@@ -40,6 +42,20 @@ core::Error problem(std::string message, core::ErrorCode code = core::ErrorCode:
     };
     return hours > 0 ? std::to_string(hours) + ":" + two(minutes) + ":" + two(rest)
                      : std::to_string(minutes) + ":" + two(rest);
+}
+
+// A moment as the history fields show it: local date and time, which sorts
+// as it reads.
+[[nodiscard]] std::string local_time(const std::int64_t utc_milliseconds) {
+    const std::chrono::sys_time<std::chrono::seconds> moment{
+        std::chrono::seconds{utc_milliseconds / 1000}};
+    try {
+        return std::format("{:%Y-%m-%d %H:%M}",
+                           std::chrono::zoned_time{std::chrono::current_zone(), moment});
+    } catch (const std::exception&) {
+        // No time zone database: as UTC, still in order.
+        return std::format("{:%Y-%m-%d %H:%M}", moment);
+    }
 }
 
 // A row as a list's expressions read it (ADR-0282): its tags, the host
@@ -168,6 +184,16 @@ class ViewRowContext final : public titleformat::EvaluationContext {
         if (canonical == "rating") {
             return row_.rating > 0U ? std::to_string(row_.rating) : std::string{};
         }
+        // Listening history, as the engine keeps it; absent where unknown.
+        if (const auto found = std::ranges::find(history_field_names, canonical);
+            found != history_field_names.end()) {
+            const auto at = static_cast<std::size_t>(found - history_field_names.begin());
+            const auto value = row_.history ? (*row_.history)[at] : -1;
+            if (value < 0) {
+                return std::string{};
+            }
+            return canonical.ends_with("lastplayed") ? local_time(value) : std::to_string(value);
+        }
         return std::nullopt;
     }
 
@@ -258,6 +284,25 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
     return columns;
 }
 
+// A shipped view's own column.
+[[nodiscard]] ViewColumn expression(std::string id, std::string title, std::string display,
+                                    std::string sort = {},
+                                    const ColumnAlignment alignment = ColumnAlignment::left) {
+    return {.id = std::move(id),
+            .visible = true,
+            .title = std::move(title),
+            .display = std::move(display),
+            .sort = std::move(sort),
+            .alignment = alignment,
+            .expands = false};
+}
+
+[[nodiscard]] std::vector<ViewColumn> with(std::vector<ViewColumn> columns,
+                                           std::initializer_list<ViewColumn> more) {
+    columns.insert(columns.end(), more.begin(), more.end());
+    return columns;
+}
+
 } // namespace
 
 bool is_builtin_column(const std::string_view id) {
@@ -308,6 +353,74 @@ const std::vector<ListView>& shipped_list_views() {
          .group_details = {},
          .subgroup = std::nullopt,
          .columns = builtin_columns({"artist", "track-number", "title", "album", "length"}),
+         .builtin = true},
+        // ADR-0282: common starting points -- grouped by artist, genre or
+        // label, the files' audio, and their listening -- to use or copy.
+        {.id = "grouped-by-artist",
+         .name = "Grouped by artist",
+         .artwork = ViewArtwork::beside,
+         .grouping = ViewGrouping::expression,
+         .group_key = "%albumartist%",
+         .group_title = "%albumartist%",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup =
+             ViewSubgroup{.key = "%album%|%date%", .label = "%album%$if(%date%, · %date%,)"},
+         .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
+         .builtin = true},
+        {.id = "grouped-by-genre",
+         .name = "Grouped by genre",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "%genre%",
+         .group_title = "$if2(%genre%,No genre)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup = std::nullopt,
+         .columns = builtin_columns({"artist", "title", "album", "date", "length"}),
+         .builtin = true},
+        {.id = "grouped-by-label",
+         .name = "Grouped by label",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "%label%",
+         .group_title = "$if2(%label%,No label)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup = ViewSubgroup{.key = "%album%", .label = "%album%"},
+         .columns = with(builtin_columns({"artist", "title", "date", "length"}),
+                         {expression("catalog", "Catalogue", "%catalognumber%")}),
+         .builtin = true},
+        {.id = "audio-details",
+         .name = "Audio details",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::none,
+         .group_key = {},
+         .group_title = {},
+         .group_details = {},
+         .subgroup = std::nullopt,
+         .columns =
+             with(builtin_columns({"artist", "title", "album", "length"}),
+                  {expression("codec", "Codec", "$info(codec)"),
+                   expression("rate", "Rate",
+                              "$if($info(samplerate),"
+                              "$decimal($info(samplerate),1000,1) kHz,)",
+                              "$info(samplerate)", ColumnAlignment::right),
+                   expression("bits", "Bits", "$if($info(bitspersample),$info(bitspersample)-bit,)",
+                              "$info(bitspersample)", ColumnAlignment::right),
+                   expression("bitrate", "Bitrate", "$if($info(bitrate),$info(bitrate) kbps,)",
+                              "$info(bitrate)", ColumnAlignment::right),
+                   expression("file", "File", "$info(filename_ext)")}),
+         .builtin = true},
+        {.id = "listening-history",
+         .name = "Listening history",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::none,
+         .group_key = {},
+         .group_title = {},
+         .group_details = {},
+         .subgroup = std::nullopt,
+         .columns = with(builtin_columns({"artist", "title", "album", "length", "rating",
+                                          "play-count", "last-played"}),
+                         {expression("since", "Days since", "%dayssinceplayed%",
+                                     "%dayssinceplayed%", ColumnAlignment::right)}),
          .builtin = true},
     };
     return views;
@@ -542,6 +655,15 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
     }
     CompiledListView compiled;
     compiled.view_ = view;
+    const auto reads = [](const titleformat::Program& program) {
+        return std::ranges::any_of(program.fieldDependencies(), [](const std::string& field) {
+            return std::ranges::contains(history_field_names,
+                                         metadata::canonicalize_field_name(field));
+        });
+    };
+    compiled.reads_history_ = std::ranges::any_of(view.columns, [](const ViewColumn& column) {
+        return column.visible && (column.id == "play-count" || column.id == "last-played");
+    });
     for (const auto& column : view.columns) {
         if (column.builtin()) {
             continue;
@@ -550,6 +672,7 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
         if (!display) {
             return std::unexpected(std::move(display.error()));
         }
+        compiled.reads_history_ = compiled.reads_history_ || reads(*display);
         compiled.expression_ids_.push_back(column.id);
         compiled.displays_.push_back(std::move(*display));
         if (column.sort.empty()) {
@@ -559,6 +682,7 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
             if (!sort) {
                 return std::unexpected(std::move(sort.error()));
             }
+            compiled.reads_history_ = compiled.reads_history_ || reads(*sort);
             compiled.sorts_.emplace_back(std::move(*sort));
         }
     }
@@ -570,6 +694,7 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
         if (!key || !title) {
             return std::unexpected(!key ? key.error() : title.error());
         }
+        compiled.reads_history_ = compiled.reads_history_ || reads(*key) || reads(*title);
         compiled.group_key_ = std::move(*key);
         compiled.group_title_ = std::move(*title);
         if (!view.group_details.empty()) {
@@ -577,6 +702,7 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
             if (!details) {
                 return std::unexpected(std::move(details.error()));
             }
+            compiled.reads_history_ = compiled.reads_history_ || reads(*details);
             compiled.group_details_ = std::move(*details);
         }
         if (view.subgroup) {
@@ -585,6 +711,7 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
             if (!sub_key || !label) {
                 return std::unexpected(!sub_key ? sub_key.error() : label.error());
             }
+            compiled.reads_history_ = compiled.reads_history_ || reads(*sub_key) || reads(*label);
             compiled.subgroup_key_ = std::move(*sub_key);
             compiled.subgroup_label_ = std::move(*label);
         }
@@ -649,7 +776,7 @@ struct ListViewEvaluator {
             program = compiled.sorts_[at] ? &*compiled.sorts_[at] : &compiled.displays_[at];
         } else {
             // A built-in column sorts by what it shows; the number by disc
-            // first. History is not on the rows (ADR-0282).
+            // first, the history by the engine's (ADR-0282).
             const std::map<std::string_view, std::string_view> sources{
                 {"artist", "%artist%"},
                 {"track-number", "$if(%discnumber%,%discnumber%|)%tracknumber%"},
@@ -658,6 +785,8 @@ struct ListViewEvaluator {
                 {"date", "%date%"},
                 {"length", "$info(lengthms)"},
                 {"rating", "%rating%"},
+                {"play-count", "%playcount%"},
+                {"last-played", "%lastplayed%"},
                 {"artwork", "%album%"}};
             const auto source = sources.find(column_id);
             if (source == sources.end()) {

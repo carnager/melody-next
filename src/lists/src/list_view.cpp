@@ -305,32 +305,27 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
 // ADR-0284: a list that says much in little width -- no column for what a
 // second line can carry.
 [[nodiscard]] ListView two_line_tracks() {
-    auto columns = builtin_columns({"title", "length", "rating"});
-    const auto line = [&columns](std::string_view id, std::string second) {
-        std::ranges::find(columns, id, &ViewColumn::id)->second_line = std::move(second);
-    };
-    line("title", "%artist%$if(%album%, · %album%,)");
-    line("length", "$info(codec)$if($info(bitspersample), · $info(bitspersample)/"
-                   "$decimal($info(samplerate),1000,1),)");
-    line("rating", "$if(%playcount%,%playcount% $if($eq(%playcount%,1),play,plays),)");
-    // Room for the format beneath the length.
-    std::ranges::find(columns, std::string_view{"length"}, &ViewColumn::id)->width = 112;
-    std::ranges::find(columns, std::string_view{"rating"}, &ViewColumn::id)->width = 96;
-    // The year where a date column would be, its genre beneath.
-    const auto title = std::ranges::find(columns, std::string_view{"title"}, &ViewColumn::id);
-    columns.insert(std::next(title), ViewColumn{.id = "year",
-                                                .visible = true,
-                                                .title = "Year",
-                                                .display = "$left(%date%,4)",
-                                                .sort = "%date%",
-                                                .alignment = ColumnAlignment::left,
-                                                .expands = false,
-                                                .style = {},
-                                                .second_line = "%genre%",
-                                                .width = 96});
+    auto columns = builtin_columns({"rating"});
+    // How often it played beneath its stars.
+    const auto rating = std::ranges::find(columns, std::string_view{"rating"}, &ViewColumn::id);
+    rating->second_line = "$if(%playcount%,%playcount% $if($eq(%playcount%,1),play,plays),)";
+    rating->width = 96;
+    // The song and its length, and beneath, whose and from where: a list
+    // of tracks from everywhere, each saying what it is in one place.
+    columns.insert(
+        rating, ViewColumn{.id = "song",
+                           .visible = true,
+                           .title = "Song",
+                           .display = "%title%$if(%length%, [%length%],)",
+                           .sort = {},
+                           .alignment = ColumnAlignment::left,
+                           .expands = true,
+                           .style = {},
+                           .second_line = "%artist%$if(%album%, • %album%,)$if(%date%, [%date%],)",
+                           .width = 0});
     return {.id = std::string{two_line_view_id},
             .name = "Two-line tracks",
-            .artwork = ViewArtwork::none,
+            .artwork = ViewArtwork::beside,
             .grouping = ViewGrouping::none,
             .group_key = {},
             .group_title = {},

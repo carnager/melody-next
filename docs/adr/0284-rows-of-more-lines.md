@@ -30,10 +30,13 @@ other than Qt's table.
   stay one line.
 - Each cell's first line is still single-line, as ADR-0027 says; what is
   amended is that a row is one line.
-- **Two-line tracks ships**, a third view beside albums and plain columns:
-  the title with its artist and album beneath, the year with its genre, the
-  length with its format (`flac · 16/44.1`), the rating with how often it
-  played -- no column for what a second line carries.
+- **Two-line tracks ships**, a third view beside albums and plain columns,
+  made for lists of tracks from everywhere: each row its own cover, the song
+  and its length (`La Femme d'Argent [7:09]`) with its artist, album and date
+  beneath, and the rating with how often it played -- two columns saying
+  what plain columns need seven for. (First shipped with the year, length
+  and format as columns of their own; the user's arrangement of it replaced
+  that, 2026-10-14.)
 - A column may say how wide it starts. A tab keeps the widths it was given;
   choosing a view gives its columns the widths the view says.
 - **Covers follow the view, grouped or not.** Grouped, a group has one

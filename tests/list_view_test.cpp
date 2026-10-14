@@ -354,12 +354,22 @@ void twoLineTracksSayWhatTheyShow() {
     row.bits = 16;
     row.sample_rate = 44'100;
     row.history = std::array<std::int64_t, 6>{12, -1, -1, -1, -1, -1};
-    const std::vector rows{row};
-    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
-    CHECK(evaluated && evaluated->front().cells == std::vector<std::string>{"1998"});
+    row.title = "La Femme d'Argent";
+    row.duration_ms = 429'000;
+    auto bare = row;
+    const auto untagged = tags({{"ARTIST", {"Air"}}});
+    bare.metadata = &untagged;
+    bare.history = std::array<std::int64_t, 6>{1, -1, -1, -1, -1, -1};
+    const std::vector both{row, bare};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, both);
+    CHECK(view->artwork == lists::ViewArtwork::beside);
+    CHECK(evaluated &&
+          evaluated->front().cells == std::vector<std::string>{"La Femme d'Argent [7:09]"});
     CHECK(evaluated && (evaluated->front().second_lines ==
-                        std::vector<std::string>{"Air · Moon Safari", "Electronic",
-                                                 "flac · 16/44.1", "12 plays"}));
+                        std::vector<std::string>{"Air • Moon Safari [1998-01-16]", "12 plays"}));
+    // No album, no date: no separators left hanging.
+    CHECK(evaluated &&
+          (evaluated->back().second_lines == std::vector<std::string>{"Air", "1 play"}));
 }
 
 void historyIsReadByExpressions() {

@@ -102,26 +102,7 @@ void project_display_metadata(LocalTrackRow& row) {
 
 } // namespace
 
-LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {
-    listening_timer_ = new QTimer(this);
-    listening_timer_->setSingleShot(true);
-    connect(listening_timer_, &QTimer::timeout, this, &LocalListModel::dispatchListeningHistory);
-    connect(this, &QAbstractItemModel::modelReset, this,
-            &LocalListModel::invalidateListeningHistory);
-    connect(this, &QAbstractItemModel::layoutChanged, this,
-            &LocalListModel::invalidateListeningHistory);
-    connect(this, &QAbstractItemModel::rowsInserted, this,
-            &LocalListModel::invalidateListeningHistory);
-    connect(this, &QAbstractItemModel::rowsRemoved, this,
-            &LocalListModel::invalidateListeningHistory);
-    connect(this, &QAbstractItemModel::rowsMoved, this,
-            &LocalListModel::invalidateListeningHistory);
-    connect(this, &QAbstractItemModel::dataChanged, this,
-            [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
-                if (roles.isEmpty())
-                    invalidateListeningHistory();
-            });
-}
+LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {}
 
 void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows, const bool remember,
                                  QString label) {

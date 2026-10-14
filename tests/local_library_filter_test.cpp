@@ -332,9 +332,16 @@ int main(const int argc, char** argv) {
     CHECK(repository->record_local_listen(logical, core::StableId::random(), 2000).has_value());
     const auto logical_history = library->history_facts({{logical, ""}, {listened, ""}});
     CHECK(logical_history && (*logical_history)[0][1] == 2000 && (*logical_history)[1][1] == 1000);
+    // A list's row names a path, not a revision: the engine, which holds the
+    // file, sees it for itself -- and a file it cannot see is unknown for its
+    // row alone, not a refusal of the whole list.
     auto missing_revision = listened;
     missing_revision.source_revision.reset();
-    CHECK(!library->history_facts({{missing_revision, ""}}));
+    auto gone = missing_revision;
+    gone.source_reference = (root / "not-there.flac").string();
+    const auto unrevisioned = library->history_facts({{missing_revision, ""}, {gone, ""}});
+    CHECK(unrevisioned && (*unrevisioned)[0][0] == 1 && (*unrevisioned)[0][1] == 1000);
+    CHECK(unrevisioned && (*unrevisioned)[1][0] == -1 && (*unrevisioned)[1][1] == -1);
     core::CancellationSource stopped;
     stopped.request_cancellation();
     CHECK(!library->history_facts({{listened, ""}}, stopped.token()));

@@ -33,8 +33,6 @@ class ListPersistenceService final : public QObject {
     using WorkspaceCallback = std::function<void(PersistedWorkspace, QString)>;
     using CompletionCallback = std::function<void(QString)>;
     using UiStateCallback = std::function<void(QByteArray, QString)>;
-    using ListeningHistoryCallback = std::function<void(
-        std::vector<std::optional<persistence::LocalListeningHistory>>, QString)>;
     using TransformationChainsCallback =
         std::function<void(std::vector<persistence::SavedMetadataTransformationChain>, QString)>;
     using OutputProfilesCallback =
@@ -77,9 +75,6 @@ class ListPersistenceService final : public QObject {
     void backupDatabase(std::filesystem::path destination, CompletionCallback callback);
     void recordLocalListen(persistence::ListItem source, core::StableId occurrence_id,
                            std::int64_t played_at_ms, CompletionCallback callback);
-    // At most 64 qualified sources per read and four pending reads across views.
-    void loadListeningHistory(std::vector<persistence::ListItem> sources,
-                              ListeningHistoryCallback callback);
 
     // Window shutdown is the only blocking persistence boundary. Database work
     // still runs on the service thread and the call guarantees durable edits.
@@ -101,7 +96,6 @@ class ListPersistenceService final : public QObject {
     QObject* worker_{nullptr};
     std::shared_ptr<State> state_;
     unsigned pending_listens_{0};
-    unsigned pending_history_reads_{0};
     unsigned pending_resume_writes_{0};
 };
 

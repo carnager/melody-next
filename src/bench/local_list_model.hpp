@@ -101,6 +101,11 @@ struct LocalTrackRow {
     std::string album_rating_hash{};
     unsigned rating{0U};
     unsigned album_rating{0U};
+    // ADR-0283: when the track, and its album's newest track, came into its
+    // engine's library -- Unix seconds, 0 not known. Display state, as the
+    // ratings are.
+    std::int64_t added{0};
+    std::int64_t album_added{0};
     // True once a probe ran or persisted metadata was restored; unprobed rows
     // fall back to their file name and are queued for enrichment.
     bool probed{false};
@@ -380,6 +385,7 @@ class LocalListModel final : public QAbstractTableModel {
         return row.evaluated != nullptr && row.evaluated_view == view_generation_;
     }
     [[nodiscard]] QVariant viewData(const QModelIndex& index, int role) const;
+    [[nodiscard]] QVariant viewStyle(const QModelIndex& index, int role) const;
     std::shared_ptr<const lists::CompiledListView> list_view_;
     std::uint64_t view_generation_{0U};
     int expression_columns_{0};

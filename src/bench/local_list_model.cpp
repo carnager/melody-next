@@ -1049,6 +1049,13 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         (role == Qt::DisplayRole || role == Qt::TextAlignmentRole)) {
         return viewData(index, role);
     }
+    // ADR-0283: as the view's style expressions say -- the row's, and an
+    // expression cell's own over it.
+    if ((role == Qt::ForegroundRole || role == Qt::FontRole) && list_view_ != nullptr) {
+        if (auto styled = viewStyle(index, role); styled.isValid()) {
+            return styled;
+        }
+    }
     if (expressionGrouping() &&
         (role == ui::track_group_key_role || role == ui::track_album_group_start_role ||
          role == ui::track_disc_start_role || role == ui::track_group_title_role ||

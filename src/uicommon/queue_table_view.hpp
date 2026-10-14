@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QSet>
 #include <QTableView>
 
 #include <functional>
@@ -50,6 +51,20 @@ class QueueTableView final : public QTableView {
     // artwork gutter. Covers are painted across the visible rows of each
     // album without row spans, preserving normal row hit-testing and drops.
     void setAlbumArtworkColumn(int column);
+    // ADR-0283: groups folded to their headers, by their keys (as
+    // trackGroupKey has them). Their rows stay in the list -- played,
+    // selected with the group -- and are not drawn. `changed` hears a group
+    // folded or unfolded by a click on its header's mark.
+    void setCollapsedGroups(QSet<QString> keys);
+    [[nodiscard]] const QSet<QString>& collapsedGroups() const noexcept {
+        return collapsed_groups_;
+    }
+    [[nodiscard]] bool groupCollapsed(int row) const;
+    void setGroupCollapsed(int row, bool collapsed);
+    void setAllGroupsCollapsed(bool collapsed);
+    void setCollapseCallback(std::function<void()> changed);
+    // How wide the mark at a header's right end is, which folds it.
+    static constexpr int collapse_mark_width = 24;
     // What an empty list says in its middle: a line, and a quieter hint of
     // how to fill it. Empty strings show nothing.
     void setEmptyMessage(QString title, QString hint);
@@ -108,6 +123,8 @@ class QueueTableView final : public QTableView {
     void refitColumnsToViewport();
     void rebuildAlbumRowGeometry();
     void refreshAlbumRowGeometry(int first_row, int last_row);
+    void applyCollapsedGroups();
+    [[nodiscard]] int collapsedHeight() const;
 
     std::function<void(const QVariantList&, int)> reorder_callback_;
     std::function<bool(QAbstractItemView*, const QVariantList&, int, Qt::DropAction)>
@@ -131,6 +148,8 @@ class QueueTableView final : public QTableView {
     bool refitting_columns_{false};
     QString empty_title_;
     QString empty_hint_;
+    QSet<QString> collapsed_groups_;
+    std::function<void()> collapse_callback_;
 };
 
 } // namespace trackknife::ui

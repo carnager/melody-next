@@ -317,6 +317,23 @@ void rowsHaveMoreLines() {
                                 &lists::ViewProblem::where));
 }
 
+// An editor says what one expression gives for a row -- a group header's
+// with the group's tracks and length -- or why it cannot.
+void oneExpressionSaysWhatItGives() {
+    using trackknife::titleformat::FormatContextKind;
+    const auto document = tags({{"ARTIST", {"Air"}}, {"GENRE", {"Downtempo"}}});
+    lists::ViewRow row;
+    row.raw_path = "/music/Talisman.flac";
+    row.metadata = &document;
+    const auto genre =
+        lists::evaluate_view_expression("%genre% · %artist%", FormatContextKind::list_item, row);
+    CHECK(genre && *genre == "Downtempo · Air");
+    const auto group = lists::evaluate_view_expression(
+        "%group_tracks% tracks", FormatContextKind::list_item, row, 7U, 420'000);
+    CHECK(group && *group == "7 tracks");
+    CHECK(!lists::evaluate_view_expression("$if(", FormatContextKind::list_item, row));
+}
+
 // ADR-0284: the shipped two-line view says, beneath each line, what its
 // columns would have needed columns for.
 void twoLineTracksSayWhatTheyShow() {
@@ -444,6 +461,7 @@ int main() {
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
     rowsHaveMoreLines();
+    oneExpressionSaysWhatItGives();
     twoLineTracksSayWhatTheyShow();
     stylesAreWordsExpressionsAnswer();
     rowsSayWhatTheyAre();

@@ -261,6 +261,13 @@ struct EvaluatedRow {
     friend bool operator==(const EvaluatedRow&, const EvaluatedRow&) = default;
 };
 
+// One expression of a view, on one row, as an editor shows what it gives:
+// a header's with group_tracks and group_length as `tracks` and
+// `length_ms` say. The error when it does not compile.
+[[nodiscard]] core::Result<std::string>
+evaluate_view_expression(std::string_view source, titleformat::FormatContextKind context,
+                         const ViewRow& row, std::size_t tracks = 1U, std::int64_t length_ms = 0);
+
 // Evaluates rows; an expression that fails leaves its cell empty -- a list
 // is not refused for one odd file.
 [[nodiscard]] core::Result<std::vector<EvaluatedRow>>

@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QRegularExpression>
 #include <QStyle>
 #include <QTableView>
@@ -169,6 +170,43 @@ TrackLinesDelegate::TrackLinesDelegate(QObject* parent) : QStyledItemDelegate(pa
 
 void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                                const QModelIndex& index) const {
+    // A list not grouped, each row its own cover where the cover column is.
+    if (const auto* view = qobject_cast<const QTableView*>(parent());
+        view != nullptr && view->property(track_row_covers_property).toBool() &&
+        index.column() ==
+            configuredColumn(this, track_artwork_column_property, track_artwork_column)) {
+        auto item = option;
+        initStyleOption(&item, index);
+        const auto* widget = item.widget;
+        auto* style = widget != nullptr ? widget->style() : QApplication::style();
+        item.text.clear();
+        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &item, painter, widget);
+        const auto extent = std::max(0, option.rect.height() - 4);
+        const QRect target{option.rect.left() + (option.rect.width() - extent) / 2,
+                           option.rect.top() + 2, extent, extent};
+        const auto cover = index.data(track_album_artwork_role).value<QImage>();
+        if (!cover.isNull()) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+            // The middle square of the cover, filling the tile.
+            const auto side = std::min(cover.width(), cover.height());
+            const QRect middle{(cover.width() - side) / 2, (cover.height() - side) / 2, side, side};
+            QPainterPath rounded;
+            rounded.addRoundedRect(target, 3, 3);
+            painter->setClipPath(rounded, Qt::IntersectClip);
+            painter->drawImage(target, cover, middle);
+            painter->restore();
+        } else {
+            const auto album = index
+                                   .siblingAtColumn(configuredColumn(
+                                       this, track_album_column_property, track_album_column))
+                                   .data()
+                                   .toString();
+            paintInitialsTile(painter, target, album, option.palette);
+        }
+        return;
+    }
     const auto lines = trackRowLines(parent());
     if (lines <= 1) {
         QStyledItemDelegate::paint(painter, option, index);

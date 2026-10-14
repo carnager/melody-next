@@ -36,6 +36,17 @@ other than Qt's table.
   played -- no column for what a second line carries.
 - A column may say how wide it starts. A tab keeps the widths it was given;
   choosing a view gives its columns the widths the view says.
+- **Covers follow the view, grouped or not.** Grouped, a group has one
+  cover beside its rows or in its header; not grouped, every row has its
+  own, a square as tall as the row, or the album's initials where it has
+  none. The cover column is the view's artwork setting, not a column the
+  Columns menu shows or hides.
+- **The editor says what it does.** Columns are a list, ticked where shown;
+  choosing one edits it -- for a built-in column only what it says beneath.
+  Rows and grouping are pages of their own. Beneath every expression, what
+  it gives for the list's first track, or its error in place; below, the
+  list's first rows drawn by the view as edited, by the code that draws the
+  list itself.
 
 ## Consequences
 

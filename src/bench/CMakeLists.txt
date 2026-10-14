@@ -46,6 +46,7 @@ qt_add_library(
     track_list_find_bar.cpp
     track_list_find_bar.hpp
     library_views_dialog.cpp
+    list_view_apply.hpp
     list_view_dialog.cpp
     list_view_dialog.hpp
     library_views_dialog.hpp

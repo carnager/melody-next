@@ -16005,9 +16005,10 @@ void BenchMainWindowTest::rowsHaveMoreLines() {
     QTRY_VERIFY(view->albumGroupingEnabled());
     QTRY_COMPARE(view->rowHeight(1), tall);
     QVERIFY(view->rowHeight(0) >= tall + ui::QueueItemDelegate::album_header_height);
-    // Covers beside the rows, but their column hidden: the headers are
-    // drawn in their strip rather than not at all.
-    QCOMPARE(view->albumArtworkColumn(), -1);
+    // Covers beside the rows: the cover column is the view's artwork, shown
+    // though this copy of plain columns had it hidden.
+    QCOMPARE(view->albumArtworkColumn(), local_artwork_column);
+    QVERIFY(!view->isColumnHidden(local_artwork_column));
     // And back to one line.
     window.chooseListView(QStringLiteral("plain-columns"));
     QTRY_COMPARE(view->rowHeight(1), ui::track_row_height);
@@ -16024,27 +16025,65 @@ void BenchMainWindowTest::listViewEditorChecksAndSavesACopy() {
     QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(static_cast<QTableView*>(tabs->currentWidget())->model());
+    LocalTrackRow first;
+    first.raw_path = "/music/one.flac";
+    first.title = "La Femme d'Argent";
+    first.artist = "Air";
+    first.album = "Moon Safari";
+    first.probed = true;
+    auto second = first;
+    second.raw_path = "/music/two.flac";
+    second.title = "Sexy Boy";
+    model->appendRows({first, second});
     window.chooseListView(QStringLiteral("plain-columns"));
     window.editListView(false);
     ListViewDialog* dialog = nullptr;
     QTRY_VERIFY((dialog = window.findChild<ListViewDialog*>()) != nullptr);
     auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("bench-list-view-name"));
     QCOMPARE(name->text(), QStringLiteral("Plain columns (copy)"));
-    auto* columns = dialog->findChild<QTableWidget*>(QStringLiteral("bench-list-view-columns"));
+    auto* columns = dialog->findChild<QListWidget*>(QStringLiteral("bench-list-view-columns"));
     auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-list-view-add-column"));
     auto* buttons = dialog->findChild<QDialogButtonBox*>();
     auto* save = buttons->button(QDialogButtonBox::Save);
     QVERIFY(save->isEnabled());
+    // The title is chosen first: a built-in column, only its second line the
+    // view's.
+    QCOMPARE(columns->currentItem()->text(), QStringLiteral("Title"));
+    const auto type = [](QLineEdit* field, const QString& value) {
+        field->setText(value);
+        emit field->textEdited(value);
+    };
+    const auto field = [dialog](const char* object) {
+        return dialog->findChild<QLineEdit*>(QString::fromLatin1(object));
+    };
+    const auto note = [dialog](const char* object) {
+        return dialog->findChild<QLabel*>(QString::fromLatin1(object) + QStringLiteral("-note"))
+            ->text();
+    };
     add->click();
-    const auto added = columns->rowCount() - 1;
-    columns->item(added, 2)->setText(QStringLiteral("$if(%genre%"));
+    QCOMPARE(columns->currentRow(), columns->count() - 1);
+    auto* display = field("bench-list-view-column-display");
+    QVERIFY(display->isVisible());
+    // Beneath an expression, what it gives for the list's first track.
+    type(display, QStringLiteral("%artist% · %title%"));
+    QCOMPARE(note("bench-list-view-column-display"), QStringLiteral("→ Air · La Femme d'Argent"));
+    type(display, QStringLiteral("$if(%genre%"));
     QVERIFY(!save->isEnabled());
-    QVERIFY(!columns->item(added, 2)->toolTip().isEmpty());
+    QVERIFY(!note("bench-list-view-column-display").startsWith(QStringLiteral("→")));
     auto* problems = dialog->findChild<QLabel*>(QStringLiteral("bench-list-view-problems"));
     QVERIFY(problems->isVisible());
-    columns->item(added, 1)->setText(QStringLiteral("Codec"));
-    columns->item(added, 2)->setText(QStringLiteral("$info(codec)"));
+    QVERIFY(problems->text().contains(QStringLiteral("shows")));
+    type(field("bench-list-view-column-title"), QStringLiteral("Codec"));
+    QCOMPARE(columns->currentItem()->text(), QStringLiteral("Codec"));
+    type(display, QStringLiteral("$info(codec)"));
     QVERIFY(save->isEnabled());
+    QVERIFY(problems->isHidden());
+    // The preview draws the view as edited.
+    auto* preview = dialog->findChild<QTableView*>(QStringLiteral("bench-list-view-preview"));
+    QTRY_COMPARE(preview->model()->columnCount(), local_column_count + 1);
+    QCOMPARE(preview->model()->headerData(local_column_count, Qt::Horizontal).toString(),
+             QStringLiteral("Codec"));
+    QCOMPARE(preview->model()->rowCount(), 2);
     save->click();
     QTRY_VERIFY(window.findChild<ListViewDialog*>() == nullptr);
     const auto bound = window.currentListTab()->view_layout.view;

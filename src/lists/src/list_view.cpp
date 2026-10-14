@@ -948,6 +948,20 @@ evaluate_list_groups(const CompiledListView& compiled, const std::span<const Vie
     return groups;
 }
 
+core::Result<std::string> evaluate_view_expression(const std::string_view source,
+                                                   const FormatContextKind context,
+                                                   const ViewRow& row, const std::size_t tracks,
+                                                   const std::int64_t length_ms) {
+    auto program = compiled_program(std::string{source}, context);
+    if (!program) {
+        return std::unexpected(std::move(program.error()));
+    }
+    const std::map<std::string, std::string> host{{"grouptracks", std::to_string(tracks)},
+                                                  {"grouplength", clock(length_ms)}};
+    const ViewRowContext evaluation{row, context, &host};
+    return format(*program, evaluation, {});
+}
+
 CellStyle parse_cell_style(const std::string_view words) {
     CellStyle style;
     std::size_t at = 0U;

@@ -493,6 +493,10 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     engine_requests_revision_.reset();
     engine_requests_known_ = false;
     view_->refreshTransport();
+    // The modes and ReplayGain are offered by the engine that plays: drawn
+    // for this one, not left as they were drawn for the last -- or for none,
+    // before any was connected, which left them greyed out.
+    view_->refreshLocalPlaybackControls();
 }
 
 void Workspace::rememberEngineState(EnginePlayback* playback) {

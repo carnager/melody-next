@@ -134,6 +134,22 @@ int trackRowLines(const QObject* view) {
     return lines.isValid() ? std::clamp(lines.toInt(), 1, 3) : 1;
 }
 
+QFont trackSecondLineFont(const QFont& font) {
+    auto smaller = font;
+    smaller.setWeight(QFont::Normal);
+    // A font sized in pixels has no point size to scale.
+    if (font.pointSizeF() > 0) {
+        smaller.setPointSizeF(font.pointSizeF() * 0.9);
+    } else if (font.pixelSize() > 0) {
+        smaller.setPixelSize(std::max(1, static_cast<int>(font.pixelSize() * 0.9)));
+    }
+    return smaller;
+}
+
+int trackSecondLineHeight(const QFont& font) {
+    return QFontMetrics{trackSecondLineFont(font)}.height() + 2;
+}
+
 void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, const QRect& area,
                      const QString& text, const int lines) {
     if (text.isEmpty() || area.height() <= 0) {
@@ -144,9 +160,7 @@ void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, 
     // Indented as the first line's text is.
     const auto text_rect = style->subElementRect(QStyle::SE_ItemViewItemText, &first_line, widget);
     const QRect target{text_rect.left() + 2, area.top(), text_rect.width() - 4, area.height() - 2};
-    auto font = first_line.font;
-    font.setWeight(QFont::Normal);
-    font.setPointSizeF(font.pointSizeF() * 0.9);
+    const auto font = trackSecondLineFont(first_line.font);
     painter->save();
     painter->setFont(font);
     const bool selected = first_line.state.testFlag(QStyle::State_Selected);

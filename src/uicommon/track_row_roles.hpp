@@ -63,12 +63,11 @@ enum TrackRowRole : int {
     // rows of more than one; empty where nothing.
     track_second_line_role,
 };
-// ADR-0284: int, the lines a row of the view has (1 when absent), and how
-// tall each line after the first is.
+// ADR-0284: int, the lines a row of the view has (1 when absent); each line
+// after the first as tall as trackSecondLineHeight() says for the list's font.
 inline constexpr auto track_row_lines_property = "trackknife-track-row-lines";
 // bool: a list not grouped draws each row's own cover in its artwork column.
 inline constexpr auto track_row_covers_property = "trackknife-track-row-covers";
-inline constexpr int track_second_line_height = 16;
 
 // Complete physical column layout used by both authority-bound queues:
 // artwork/status, artist, track number, title, album, date, duration, rating.

@@ -81,8 +81,10 @@ ui::TrackViewLayout drawListView(QTableView* view, const lists::ListView& defini
     if (previous_delegate != nullptr && previous_delegate->parent() == view) {
         previous_delegate->deleteLater();
     }
-    view->verticalHeader()->setDefaultSectionSize(ui::track_row_height +
-                                                  (lines - 1) * ui::track_second_line_height);
+    // Each further line as tall as the list's font needs.
+    const auto row_height =
+        ui::track_row_height + (lines - 1) * ui::trackSecondLineHeight(view->font());
+    view->verticalHeader()->setDefaultSectionSize(row_height);
     view->verticalHeader()->setMinimumSectionSize(18);
     queue_view->setAlbumGroupingEnabled(grouped);
     queue_view->refreshRowGeometry();
@@ -135,8 +137,7 @@ ui::TrackViewLayout drawListView(QTableView* view, const lists::ListView& defini
         // Covers beside the rows: the cover gutter and the numbers fixed
         // (ADR-0250).
         // A row's own cover: as wide as the row is tall.
-        const auto row_cover =
-            ui::track_row_height + (lines - 1) * ui::track_second_line_height + 6;
+        const auto row_cover = row_height + 6;
         const auto fixed = row_covers && logical == local_artwork_column ? row_cover
                            : !side_artwork                               ? 0
                            : logical == local_artwork_column             ? ui::side_cover_gutter

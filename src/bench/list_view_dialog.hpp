@@ -21,7 +21,6 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
-class QStackedWidget;
 
 namespace trackknife::ui {
 class QueueTableView;
@@ -99,12 +98,11 @@ class ListViewDialog final : public QDialog {
     // Columns.
     QListWidget* columns_{nullptr};
     QPushButton* remove_column_{nullptr};
-    QStackedWidget* column_page_{nullptr};
-    QLabel* builtin_note_{nullptr};
+    QLabel* column_note_{nullptr};
+    QPushButton* reset_column_{nullptr};
     QLineEdit* column_title_{nullptr};
     Field column_display_;
     Field column_second_;
-    Field builtin_second_;
     Field column_sort_;
     Field column_style_;
     QComboBox* column_align_{nullptr};

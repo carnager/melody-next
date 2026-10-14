@@ -29,6 +29,10 @@ void paintInitialsTile(QPainter* painter, const QRect& rect, const QString& name
 // ADR-0284: the lines a row of `view` has, and a cell's second line drawn
 // in `area` beneath its first -- smaller, quieter, as it is aligned.
 [[nodiscard]] int trackRowLines(const QObject* view);
+// ADR-0284: the smaller font a second line is drawn in, and how tall a line
+// of it is -- measured, so its descenders fit whatever the font's size.
+[[nodiscard]] QFont trackSecondLineFont(const QFont& font);
+[[nodiscard]] int trackSecondLineHeight(const QFont& font);
 void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, const QRect& area,
                      const QString& text, int lines);
 

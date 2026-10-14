@@ -33,16 +33,25 @@ inline constexpr std::array<std::string_view, 10> builtin_column_ids{
 
 [[nodiscard]] bool is_builtin_column(std::string_view id);
 
+// ADR-0285: what a built-in column shows, as an expression -- what its
+// "Shows" says until it is changed. Empty where no expression draws it as
+// Trackknife does (the cover, the rating's stars to click).
+[[nodiscard]] std::string_view builtin_column_expression(std::string_view id);
+
 struct ViewColumn {
     // A built-in id, or an expression column's own ("expression-1", ...).
     std::string id;
     bool visible{true};
-    // Expression columns only.
+    // Its header and what it shows. ADR-0285: a built-in column's too --
+    // empty, its usual name and as Trackknife draws it (its playing mark,
+    // its stars to click, its own way of sorting stay whatever it shows).
     std::string title;
     std::string display;
-    // Empty: sorted by what it shows.
+    // Empty: sorted by what it shows (a built-in, as it always sorted).
     std::string sort;
+    // A built-in column's, where it shows an expression of its own.
     ColumnAlignment alignment{ColumnAlignment::left};
+    // Expression columns only.
     bool expands{false};
     // ADR-0283: how its cell is drawn, as a style expression says (below);
     // empty, as its row is.
@@ -225,6 +234,14 @@ class CompiledListView final {
     [[nodiscard]] const std::vector<std::string>& second_line_columns() const noexcept {
         return second_line_ids_;
     }
+    // ADR-0285: the built-in columns with an expression of their own -- to
+    // show, or only a style -- in the view's order; EvaluatedRow::
+    // builtin_cells and builtin_styles hold theirs so.
+    [[nodiscard]] const std::vector<std::string>& builtin_expression_columns() const noexcept {
+        return builtin_ids_;
+    }
+    // Whether the built-in column shows an expression of its own.
+    [[nodiscard]] bool builtin_shows_expression(std::string_view id) const;
 
   private:
     friend struct ListViewEvaluator;
@@ -241,6 +258,10 @@ class CompiledListView final {
     std::vector<std::optional<titleformat::Program>> cell_styles_;
     std::vector<std::string> second_line_ids_;
     std::vector<titleformat::Program> second_lines_;
+    std::vector<std::string> builtin_ids_;
+    std::vector<std::optional<titleformat::Program>> builtin_displays_;
+    std::vector<std::optional<titleformat::Program>> builtin_sorts_;
+    std::vector<std::optional<titleformat::Program>> builtin_styles_;
     bool reads_history_{false};
 };
 
@@ -254,6 +275,10 @@ struct EvaluatedRow {
     std::vector<std::string> cell_styles;
     // ADR-0284: each column's second line, by second_line_columns() order.
     std::vector<std::string> second_lines;
+    // ADR-0285: the built-in columns' own, by builtin_expression_columns()
+    // order -- empty where one has only a style, or only a display.
+    std::vector<std::string> builtin_cells;
+    std::vector<std::string> builtin_styles;
     // An expression grouping's.
     std::string group_key;
     std::string subgroup_key;

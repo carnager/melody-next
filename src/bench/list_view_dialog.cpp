@@ -17,7 +17,6 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QSplitter>
-#include <QStackedWidget>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -54,7 +53,7 @@ constexpr std::size_t preview_rows = 40U;
 [[nodiscard]] QString text(const std::string& value) { return QString::fromStdString(value); }
 
 [[nodiscard]] QString column_name(const lists::ViewColumn& column) {
-    return column.builtin() ? builtin_title(column.id) : text(column.title);
+    return column.builtin() && column.title.empty() ? builtin_title(column.id) : text(column.title);
 }
 
 // A quiet line of help.
@@ -238,24 +237,14 @@ QWidget* ListViewDialog::columnsPage() {
     list_box->addWidget(columns_, 1);
     list_box->addLayout(list_buttons);
 
-    // A built-in column: Trackknife draws and sorts it; what it says beneath
-    // is the view's.
-    auto* builtin = new QWidget(page);
-    auto* builtin_form = new QFormLayout(builtin);
-    builtin_note_ = hint({}, builtin);
-    builtin_form->addRow(builtin_note_);
-    builtin_form->addRow(QStringLiteral("Second line"),
-                         expressionField(builtin_second_, "bench-list-view-builtin-second",
-                                         QStringLiteral("e.g. %artist% · %album%"),
-                                         FormatContextKind::list_item));
-    builtin_form->addRow(hint(QStringLiteral("Shown smaller beneath it, when rows have more "
-                                             "than one line (Rows page)."),
-                              builtin));
-
-    // A column of the view's own.
-    auto* own = new QWidget(page);
-    auto* own_form = new QFormLayout(own);
-    column_title_ = new QLineEdit(own);
+    // ADR-0285: every column, built in or not, as its expressions; a
+    // built-in one starts from what it always showed.
+    auto* form_box = new QWidget(page);
+    auto* own_form = new QFormLayout(form_box);
+    column_note_ = hint({}, form_box);
+    column_note_->setObjectName(QStringLiteral("bench-list-view-column-note"));
+    own_form->addRow(column_note_);
+    column_title_ = new QLineEdit(form_box);
     column_title_->setObjectName(QStringLiteral("bench-list-view-column-title"));
     connect(column_title_, &QLineEdit::textEdited, this, &ListViewDialog::edited);
     own_form->addRow(QStringLiteral("Header"), column_title_);
@@ -274,28 +263,44 @@ QWidget* ListViewDialog::columnsPage() {
                      expressionField(column_style_, "bench-list-view-column-style",
                                      QStringLiteral("empty: as its row"),
                                      FormatContextKind::list_item));
-    column_align_ = new QComboBox(own);
+    column_align_ = new QComboBox(form_box);
     column_align_->setObjectName(QStringLiteral("bench-list-view-column-align"));
     column_align_->addItems(
         {QStringLiteral("Left"), QStringLiteral("Right"), QStringLiteral("Centre")});
     connect(column_align_, &QComboBox::currentIndexChanged, this, &ListViewDialog::edited);
     own_form->addRow(QStringLiteral("Aligned"), column_align_);
-    column_expands_ = new QCheckBox(QStringLiteral("Takes up spare room"), own);
+    column_expands_ = new QCheckBox(QStringLiteral("Takes up spare room"), form_box);
     column_expands_->setObjectName(QStringLiteral("bench-list-view-column-expands"));
     connect(column_expands_, &QCheckBox::toggled, this, &ListViewDialog::edited);
     own_form->addRow(column_expands_);
+    reset_column_ = new QPushButton(QStringLiteral("Reset to default"), form_box);
+    reset_column_->setObjectName(QStringLiteral("bench-list-view-column-reset"));
+    connect(reset_column_, &QPushButton::clicked, this, [this] {
+        auto* column = currentColumn();
+        if (column == nullptr || !column->builtin()) {
+            return;
+        }
+        column->title.clear();
+        column->display.clear();
+        column->sort.clear();
+        column->style.clear();
+        column->alignment = lists::ColumnAlignment::left;
+        const auto row = shown_column_;
+        shown_column_ = -1;
+        filling_ = true;
+        showColumn(row);
+        filling_ = false;
+        edited();
+    });
+    own_form->addRow(reset_column_);
     own_form->addRow(hint(QStringLiteral("Expressions are tkfmt-1: %tag%, $if(…), "
                                          "$info(codec). Beneath each, what it gives for this "
                                          "list's first track."),
-                          own));
-
-    column_page_ = new QStackedWidget(page);
-    column_page_->addWidget(builtin);
-    column_page_->addWidget(own);
+                          form_box));
 
     auto* layout = new QHBoxLayout(page);
     layout->addLayout(list_box, 2);
-    layout->addWidget(column_page_, 3);
+    layout->addWidget(form_box, 3);
     return page;
 }
 
@@ -455,29 +460,41 @@ void ListViewDialog::showColumn(const int row) {
     const bool was = filling_;
     filling_ = true;
     const auto where = "column:" + column->id + ":";
-    if (column->builtin()) {
-        column_page_->setCurrentIndex(0);
-        builtin_note_->setText(QStringLiteral("%1 is a built-in column: Trackknife draws it and "
-                                              "sorts by it. What it shows beneath is the view's.")
-                                   .arg(builtin_title(column->id)));
-        builtin_second_.edit->setText(text(column->second_line));
-        builtin_second_.where = where + "second_line";
-    } else {
-        column_page_->setCurrentIndex(1);
-        column_title_->setText(text(column->title));
-        column_display_.edit->setText(text(column->display));
-        column_second_.edit->setText(text(column->second_line));
-        column_sort_.edit->setText(text(column->sort));
-        column_style_.edit->setText(text(column->style));
-        column_align_->setCurrentIndex(column->alignment == lists::ColumnAlignment::right    ? 1
-                                       : column->alignment == lists::ColumnAlignment::center ? 2
-                                                                                             : 0);
-        column_expands_->setChecked(column->expands);
-        column_display_.where = where + "display";
-        column_second_.where = where + "second_line";
-        column_sort_.where = where + "sort";
-        column_style_.where = where + "style";
+    const bool builtin = column->builtin();
+    // ADR-0285: a built-in column as what it shows, its own expression or
+    // the one it always showed.
+    const auto usual = text(std::string{lists::builtin_column_expression(column->id)});
+    column_note_->setVisible(builtin);
+    if (builtin) {
+        column_note_->setText(
+            column->id == "rating"
+                ? QStringLiteral("Built in: empty, it shows the stars to click. An expression "
+                                 "shows text instead; clicking still rates.")
+                : QStringLiteral("Built in: whatever it shows, it keeps what only Trackknife "
+                                 "does — the playing mark, its own sorting unless Sorts by "
+                                 "says otherwise."));
     }
+    column_title_->setText(builtin && column->title.empty() ? builtin_title(column->id)
+                                                            : text(column->title));
+    column_display_.edit->setText(builtin && column->display.empty() ? usual
+                                                                     : text(column->display));
+    column_display_.edit->setPlaceholderText(builtin ? QStringLiteral("as Trackknife draws it")
+                                                     : QStringLiteral("e.g. %genre%"));
+    column_second_.edit->setText(text(column->second_line));
+    column_sort_.edit->setText(text(column->sort));
+    column_sort_.edit->setPlaceholderText(builtin ? QStringLiteral("empty: as it always sorted")
+                                                  : QStringLiteral("empty: by what it shows"));
+    column_style_.edit->setText(text(column->style));
+    column_align_->setCurrentIndex(column->alignment == lists::ColumnAlignment::right    ? 1
+                                   : column->alignment == lists::ColumnAlignment::center ? 2
+                                                                                         : 0);
+    column_expands_->setVisible(!builtin);
+    column_expands_->setChecked(column->expands);
+    reset_column_->setVisible(builtin);
+    column_display_.where = where + "display";
+    column_second_.where = where + "second_line";
+    column_sort_.where = where + "sort";
+    column_style_.where = where + "style";
     filling_ = was;
     check();
 }
@@ -485,10 +502,6 @@ void ListViewDialog::showColumn(const int row) {
 void ListViewDialog::readColumn() {
     auto* column = currentColumn();
     if (column == nullptr) {
-        return;
-    }
-    if (column->builtin()) {
-        column->second_line = builtin_second_.edit->text().toStdString();
         return;
     }
     column->title = column_title_->text().trimmed().toStdString();
@@ -499,6 +512,17 @@ void ListViewDialog::readColumn() {
     column->alignment = column_align_->currentIndex() == 1   ? lists::ColumnAlignment::right
                         : column_align_->currentIndex() == 2 ? lists::ColumnAlignment::center
                                                              : lists::ColumnAlignment::left;
+    if (column->builtin()) {
+        // What it always was is no expression of the view's: drawn, and
+        // sorted, as Trackknife does.
+        if (column->title == builtin_title(column->id).toStdString()) {
+            column->title.clear();
+        }
+        if (column->display == lists::builtin_column_expression(column->id)) {
+            column->display.clear();
+        }
+        return;
+    }
     column->expands = column_expands_->isChecked();
 }
 
@@ -529,7 +553,7 @@ void ListViewDialog::edited() {
     }
     readEdits();
     // The list names a column as its header does.
-    if (const auto* column = currentColumn(); column != nullptr && !column->builtin()) {
+    if (const auto* column = currentColumn(); column != nullptr) {
         if (auto* item = columns_->item(shown_column_)) {
             const bool was = filling_;
             filling_ = true;
@@ -589,9 +613,9 @@ void ListViewDialog::check() {
     subgroup_key_.edit->setEnabled(subgroup_->isChecked());
     subgroup_label_.edit->setEnabled(subgroup_->isChecked());
     const auto problems = lists::validate_list_view(view_);
-    for (auto* field : {&builtin_second_, &column_display_, &column_second_, &column_sort_,
-                        &column_style_, &row_style_, &group_key_, &group_title_, &group_details_,
-                        &subgroup_key_, &subgroup_label_}) {
+    for (auto* field :
+         {&column_display_, &column_second_, &column_sort_, &column_style_, &row_style_,
+          &group_key_, &group_title_, &group_details_, &subgroup_key_, &subgroup_label_}) {
         note(*field, problems);
     }
     // Every problem, said where it is: the Save button waits on them.

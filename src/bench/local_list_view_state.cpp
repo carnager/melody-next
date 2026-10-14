@@ -237,6 +237,11 @@ void LocalListModel::forgetEvaluation(LocalTrackRow& row) {
     ++row.evaluation_ticket;
 }
 
+bool LocalListModel::showsOwnExpression(const int column) const {
+    return list_view_ != nullptr &&
+           list_view_->builtin_shows_expression(columnId(column).toStdString());
+}
+
 void LocalListModel::scheduleEvaluation() {
     if (!list_view_) {
         return;
@@ -324,8 +329,14 @@ void LocalListModel::mergeEvaluation(const std::uint64_t view,
     }
     // Built-in columns take their second lines and styles from the
     // evaluation too -- not their text, which the list's jobs read as an edit.
-    emit dataChanged(index(first, 0), index(last, local_column_count - 1),
-                     {ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole});
+    // Their text too where they show an expression of the view's (ADR-0285).
+    QList<int> builtin_roles{ui::track_second_line_role, Qt::ForegroundRole, Qt::FontRole};
+    if (std::ranges::any_of(list_view_->builtin_expression_columns(), [this](const auto& id) {
+            return list_view_->builtin_shows_expression(id);
+        })) {
+        builtin_roles.append(Qt::DisplayRole);
+    }
+    emit dataChanged(index(first, 0), index(last, local_column_count - 1), builtin_roles);
     if (expression_columns_ > 0) {
         emit dataChanged(
             index(first, local_column_count), index(last, columnCount() - 1),
@@ -446,6 +457,15 @@ QVariant LocalListModel::viewStyle(const QModelIndex& index, const int role) con
             style = lists::combined_style(
                 style, lists::parse_cell_style(row.evaluated->cell_styles[cell]));
         }
+    } else {
+        // ADR-0285: a built-in column's own style.
+        const auto& ids = list_view_->builtin_expression_columns();
+        const auto found = std::ranges::find(ids, columnId(index.column()).toStdString());
+        const auto cell = static_cast<std::size_t>(found - ids.begin());
+        if (found != ids.end() && cell < row.evaluated->builtin_styles.size()) {
+            style = lists::combined_style(
+                style, lists::parse_cell_style(row.evaluated->builtin_styles[cell]));
+        }
     }
     if (!style.any()) {
         return {};
@@ -490,6 +510,23 @@ QVariant LocalListModel::viewData(const QModelIndex& index, const int role) cons
         return found == ids.end() || line >= row.evaluated->second_lines.size()
                    ? QString{}
                    : QString::fromStdString(row.evaluated->second_lines[line]);
+    }
+    // ADR-0285: a built-in column's own expression.
+    if (index.column() < local_column_count &&
+        (role == Qt::DisplayRole || role == Qt::TextAlignmentRole)) {
+        const auto id = columnId(index.column()).toStdString();
+        if (role == Qt::TextAlignmentRole) {
+            const auto& columns = list_view_->view().columns;
+            const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
+            return found == columns.end() ? QVariant{}
+                                          : QVariant::fromValue(alignment_of(found->alignment));
+        }
+        const auto& ids = list_view_->builtin_expression_columns();
+        const auto found = std::ranges::find(ids, id);
+        const auto cell = static_cast<std::size_t>(found - ids.begin());
+        return evaluatedNow(row) && found != ids.end() && cell < row.evaluated->builtin_cells.size()
+                   ? QString::fromStdString(row.evaluated->builtin_cells[cell])
+                   : QString{};
     }
     if (index.column() >= local_column_count) {
         const auto expression = static_cast<std::size_t>(index.column() - local_column_count);

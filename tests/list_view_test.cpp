@@ -118,8 +118,8 @@ void viewsRoundTripAndRefuseWhatTheyCannotRead() {
     CHECK(!lists::deserialize_list_views("not json"));
     // A built-in column that came later joins a saved view, hidden.
     const auto without_rating = std::string{saved}.replace(
-        saved.find(R"({"id":"rating","visible":false},)"),
-        std::string_view{R"({"id":"rating","visible":false},)"}.size(), "");
+        saved.find(R"({"id":"rating","visible":true},)"),
+        std::string_view{R"({"id":"rating","visible":true},)"}.size(), "");
     const auto completed = lists::deserialize_list_views(without_rating);
     CHECK(completed && completed->size() == 1U &&
           std::ranges::contains(completed->front().columns, std::string{"rating"},
@@ -317,6 +317,67 @@ void rowsHaveMoreLines() {
                                 &lists::ViewProblem::where));
 }
 
+// ADR-0285: every column is an expression -- a built-in one shows its own
+// where it is given one, keeps its sorting unless given a sort, and is saved
+// with only what it was given.
+void builtinColumnsShowExpressions() {
+    const auto* plain = lists::shipped_list_view(lists::columns_view_id);
+    CHECK(plain != nullptr && lists::validate_list_view(*plain).empty());
+    const auto compiled = lists::CompiledListView::compile(*plain);
+    CHECK(compiled && (compiled->builtin_expression_columns() ==
+                       std::vector<std::string>{"track-number", "date", "length"}));
+    CHECK(compiled && compiled->builtin_shows_expression("date") &&
+          !compiled->builtin_shows_expression("artist"));
+    if (!compiled) {
+        return;
+    }
+    const auto document = tags({{"TRACKNUMBER", {"7"}}, {"DATE", {"1998-01-16"}}});
+    lists::ViewRow row;
+    row.metadata = &document;
+    row.duration_ms = 429'000;
+    const auto other_document = tags({{"TRACKNUMBER", {"12"}}, {"DATE", {"1971"}}});
+    auto other = row;
+    other.metadata = &other_document;
+    other.duration_ms = 61'000;
+    const std::vector rows{row, other};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated &&
+          (evaluated->front().builtin_cells == std::vector<std::string>{"07", "1998", "7:09"}));
+    // The length sorts by its milliseconds still, not the text it shows.
+    const auto by_length = lists::list_sort_keys(*compiled, "length", rows);
+    CHECK(by_length && (lists::list_sort_order(*by_length, false) == std::vector<int>{1, 0}));
+    auto sorted = *plain;
+    sorted.id = "view-sorted";
+    sorted.builtin = false;
+    std::ranges::find(sorted.columns, std::string{"length"}, &lists::ViewColumn::id)->sort =
+        "$sub(100000000,$info(lengthms))";
+    const auto resorted = lists::CompiledListView::compile(sorted);
+    if (!resorted) {
+        CHECK(resorted.has_value());
+        return;
+    }
+    const auto reversed = lists::list_sort_keys(*resorted, "length", rows);
+    CHECK(reversed && (lists::list_sort_order(*reversed, false) == std::vector<int>{0, 1}));
+
+    // Saved with what it was given, and only that.
+    auto mine = sorted;
+    auto& artist = *std::ranges::find(mine.columns, std::string{"artist"}, &lists::ViewColumn::id);
+    artist.title = "Who";
+    artist.display = "$upper(%artist%)";
+    artist.style = "accent";
+    const auto saved = lists::serialize_list_views({mine});
+    const auto restored = lists::deserialize_list_views(saved);
+    CHECK(restored && restored->size() == 1U && restored->front() == mine);
+    CHECK(saved.find(R"({"id":"album","visible":true})") != std::string::npos);
+    // An error is where it is.
+    auto bad = mine;
+    std::ranges::find(bad.columns, std::string{"album"}, &lists::ViewColumn::id)->display = "$if(";
+    CHECK(std::ranges::contains(lists::validate_list_view(bad), std::string{"column:album:display"},
+                                &lists::ViewProblem::where));
+    CHECK(lists::builtin_column_expression("artist") == "%artist%");
+    CHECK(lists::builtin_column_expression("rating").empty());
+}
+
 // An editor says what one expression gives for a row -- a group header's
 // with the group's tracks and length -- or why it cannot.
 void oneExpressionSaysWhatItGives() {
@@ -354,12 +415,22 @@ void twoLineTracksSayWhatTheyShow() {
     row.bits = 16;
     row.sample_rate = 44'100;
     row.history = std::array<std::int64_t, 6>{12, -1, -1, -1, -1, -1};
-    const std::vector rows{row};
-    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
-    CHECK(evaluated && evaluated->front().cells == std::vector<std::string>{"1998"});
+    row.title = "La Femme d'Argent";
+    row.duration_ms = 429'000;
+    auto bare = row;
+    const auto untagged = tags({{"ARTIST", {"Air"}}});
+    bare.metadata = &untagged;
+    bare.history = std::array<std::int64_t, 6>{1, -1, -1, -1, -1, -1};
+    const std::vector both{row, bare};
+    const auto evaluated = lists::evaluate_list_rows(*compiled, both);
+    CHECK(view->artwork == lists::ViewArtwork::beside);
+    CHECK(evaluated &&
+          evaluated->front().cells == std::vector<std::string>{"La Femme d'Argent [7:09]"});
     CHECK(evaluated && (evaluated->front().second_lines ==
-                        std::vector<std::string>{"Air · Moon Safari", "Electronic",
-                                                 "flac · 16/44.1", "12 plays"}));
+                        std::vector<std::string>{"Air • Moon Safari [1998-01-16]", "12 plays"}));
+    // No album, no date: no separators left hanging.
+    CHECK(evaluated &&
+          (evaluated->back().second_lines == std::vector<std::string>{"Air", "1 play"}));
 }
 
 void historyIsReadByExpressions() {
@@ -462,6 +533,7 @@ int main() {
     historyIsReadByExpressions();
     rowsHaveMoreLines();
     oneExpressionSaysWhatItGives();
+    builtinColumnsShowExpressions();
     twoLineTracksSayWhatTheyShow();
     stylesAreWordsExpressionsAnswer();
     rowsSayWhatTheyAre();

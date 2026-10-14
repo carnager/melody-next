@@ -46,7 +46,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
             .display = std::move(display),
             .sort = std::move(sort),
             .alignment = lists::ColumnAlignment::left,
-            .expands = false};
+            .expands = false,
+            .style = {}};
 }
 
 // A copy of a shipped view with expression columns and a grouping of its own.
@@ -65,13 +66,16 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
     view.group_title = "%label%";
     view.group_details = "%group_tracks% tracks · %group_length%";
     view.subgroup = lists::ViewSubgroup{.key = "%discnumber%", .label = "Disc %discnumber%"};
+    // ADR-0283: rows of one label quiet, and the label itself bold.
+    view.row_style = "$if($eq(%label%,Warp),quiet,)";
+    view.columns[view.columns.size() - 3].style = "bold";
     return view;
 }
 
 void shippedViewsAreValidAndAsTheyWere() {
     const auto& shipped = lists::shipped_list_views();
-    // The four presentations, then five starting points.
-    CHECK(shipped.size() == 9U);
+    // The four presentations, then twelve starting points.
+    CHECK(shipped.size() == 16U);
     for (const auto& view : shipped) {
         CHECK(view.builtin);
         CHECK(lists::validate_list_view(view).empty());
@@ -162,7 +166,9 @@ void rowsAreEvaluatedAndGrouped() {
                               .channels = 2,
                               .bit_rate = 0,
                               .rating = 0U,
-                              .history = std::nullopt};
+                              .history = std::nullopt,
+                              .added = 0,
+                              .album_added = 0};
     };
     const std::vector rows{
         make(first, "/music/a/One.flac", 61'000), make(second, "/music/a/Two.flac", 59'000),
@@ -208,6 +214,9 @@ void startingPointsShowWhatTheySay() {
     row.bits = 16;
     row.bit_rate = 1'009'000;
     row.duration_ms = 380'000;
+    // Came into the library 2023-11-14, its album's newest a day later.
+    row.added = 1'700'000'000;
+    row.album_added = 1'700'086'400;
     const std::vector rows{row};
     const auto run = [&rows](std::string_view id) {
         const auto compiled = lists::CompiledListView::compile(*lists::shipped_list_view(id));
@@ -228,6 +237,62 @@ void startingPointsShowWhatTheySay() {
     CHECK(by_genre.title == "No genre");
     CHECK(lists::CompiledListView::compile(*lists::shipped_list_view("listening-history"))
               ->reads_history());
+    // ADR-0283: when it came, and in which quality.
+    const auto [added, by_album] = run("recently-added");
+    CHECK(added.cells.front().starts_with("2023-11-1") && added.cells.front().size() == 10U);
+    CHECK(by_album.title == "Mezzanine" &&
+          by_album.details.starts_with("Massive Attack · added 2023-11-1"));
+    const auto [quality, by_quality] = run("grouped-by-quality");
+    CHECK(by_quality.title == "flac · 16-bit · 44.1 kHz");
+    const auto [year, by_year] = run("grouped-by-year");
+    CHECK(by_year.title == "1998" && year.subgroup_label == "Massive Attack · Mezzanine");
+    const auto [decade, by_decade] = run("grouped-by-decade");
+    CHECK(by_decade.title == "1990s");
+    const auto [folder, by_folder] = run("grouped-by-folder");
+    CHECK(by_folder.title == "/music/Mezzanine" && by_folder.details == "1 file");
+    const auto [check_row, none_grouped] = run("tag-check");
+    CHECK((check_row.cells == std::vector<std::string>{"missing", "missing", "missing"}));
+    // Days since added, as the query language has them.
+    auto days = *lists::shipped_list_view(lists::columns_view_id);
+    days.id = "days";
+    days.builtin = false;
+    days.columns.push_back(expression_column("since", "Since", "%dayssinceadded%"));
+    const auto [since, ungrouped] = [&] {
+        const auto compiled = lists::CompiledListView::compile(days);
+        return std::pair{lists::evaluate_list_rows(*compiled, rows)->front(), 0};
+    }();
+    CHECK(!since.cells.back().empty() && std::stoll(since.cells.back()) > 300);
+}
+
+// ADR-0283: style words as expressions answer them, a cell's over its row's.
+void stylesAreWordsExpressionsAnswer() {
+    const auto quiet_bold = lists::parse_cell_style("quiet, bold  sparkly");
+    CHECK(quiet_bold.quiet && quiet_bold.bold && !quiet_bold.italic && !quiet_bold.warning);
+    CHECK(!lists::parse_cell_style("").any());
+    const auto warned = lists::combined_style(quiet_bold, lists::parse_cell_style("warning"));
+    // One colour, the cell's; and the row's weight still.
+    CHECK(warned.warning && !warned.quiet && warned.bold);
+    const auto kept = lists::combined_style(quiet_bold, lists::parse_cell_style("italic"));
+    CHECK(kept.quiet && kept.bold && kept.italic);
+
+    const auto compiled = lists::CompiledListView::compile(user_view());
+    const auto warp = tags({{"LABEL", {"Warp"}}});
+    const auto other = tags({{"LABEL", {"Interscope"}}});
+    std::vector<lists::ViewRow> rows(2);
+    rows[0].metadata = &warp;
+    rows[1].metadata = &other;
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && evaluated->size() == 2U);
+    if (!evaluated) {
+        return;
+    }
+    CHECK((*evaluated)[0].row_style == "quiet" && (*evaluated)[1].row_style.empty());
+    CHECK(((*evaluated)[0].cell_styles == std::vector<std::string>{"bold", "", ""}));
+    // A bad style expression is said where it is.
+    auto bad = user_view();
+    bad.row_style = "$if(";
+    CHECK(std::ranges::contains(lists::validate_list_view(bad), std::string{"view:row_style"},
+                                &lists::ViewProblem::where));
 }
 
 void historyIsReadByExpressions() {
@@ -328,6 +393,7 @@ int main() {
     rowsAreEvaluatedAndGrouped();
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
+    stylesAreWordsExpressionsAnswer();
     startingPointsShowWhatTheySay();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

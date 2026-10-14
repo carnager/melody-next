@@ -184,6 +184,21 @@ class ViewRowContext final : public titleformat::EvaluationContext {
         if (canonical == "rating") {
             return row_.rating > 0U ? std::to_string(row_.rating) : std::string{};
         }
+        // ADR-0283: when it came into the library, as a date and in days.
+        const auto days_since = [](const std::int64_t seconds) {
+            const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+            return std::to_string(std::max<std::int64_t>(0, (now - seconds) / 86'400));
+        };
+        if (canonical == "added" || canonical == "albumadded") {
+            const auto seconds = canonical == "added" ? row_.added : row_.album_added;
+            return seconds > 0 ? local_time(seconds * 1000) : std::string{};
+        }
+        if (canonical == "dayssinceadded" || canonical == "albumdayssinceadded") {
+            const auto seconds = canonical == "dayssinceadded" ? row_.added : row_.album_added;
+            return seconds > 0 ? days_since(seconds) : std::string{};
+        }
         // Listening history, as the engine keeps it; absent where unknown.
         if (const auto found = std::ranges::find(history_field_names, canonical);
             found != history_field_names.end()) {
@@ -279,7 +294,8 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
                            .display = {},
                            .sort = {},
                            .alignment = ColumnAlignment::left,
-                           .expands = false});
+                           .expands = false,
+                           .style = {}});
     }
     return columns;
 }
@@ -294,7 +310,13 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
             .display = std::move(display),
             .sort = std::move(sort),
             .alignment = alignment,
-            .expands = false};
+            .expands = false,
+            .style = {}};
+}
+
+[[nodiscard]] ViewColumn styled(ViewColumn column, std::string style) {
+    column.style = std::move(style);
+    return column;
 }
 
 [[nodiscard]] std::vector<ViewColumn> with(std::vector<ViewColumn> columns,
@@ -321,6 +343,7 @@ const std::vector<ListView>& shipped_list_views() {
          .subgroup = std::nullopt,
          // The album's header says the artist, album and date; a track whose
          // artist differs says so after its title.
+         .row_style = {},
          .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
          .builtin = true},
         {.id = std::string{albums_header_view_id},
@@ -331,6 +354,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = {},
          .columns = builtin_columns(
              {"artwork", "artist", "track-number", "title", "album", "date", "length"}),
          .builtin = true},
@@ -342,6 +366,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = {},
          .columns = builtin_columns({"artist", "track-number", "title", "album", "date", "length"}),
          .builtin = true},
         {.id = std::string{compact_view_id},
@@ -352,6 +377,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = {},
          .columns = builtin_columns({"artist", "track-number", "title", "album", "length"}),
          .builtin = true},
         // ADR-0282: common starting points -- grouped by artist, genre or
@@ -365,6 +391,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
          .subgroup =
              ViewSubgroup{.key = "%album%|%date%", .label = "%album%$if(%date%, · %date%,)"},
+         .row_style = {},
          .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
          .builtin = true},
         {.id = "grouped-by-genre",
@@ -375,6 +402,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = "$if2(%genre%,No genre)",
          .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
          .subgroup = std::nullopt,
+         .row_style = {},
          .columns = builtin_columns({"artist", "title", "album", "date", "length"}),
          .builtin = true},
         {.id = "grouped-by-label",
@@ -385,6 +413,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = "$if2(%label%,No label)",
          .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
          .subgroup = ViewSubgroup{.key = "%album%", .label = "%album%"},
+         .row_style = {},
          .columns = with(builtin_columns({"artist", "title", "date", "length"}),
                          {expression("catalog", "Catalogue", "%catalognumber%")}),
          .builtin = true},
@@ -396,6 +425,7 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = {},
          .columns =
              with(builtin_columns({"artist", "title", "album", "length"}),
                   {expression("codec", "Codec", "$info(codec)"),
@@ -417,10 +447,109 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = "$if(%playcount%,,quiet)",
          .columns = with(builtin_columns({"artist", "title", "album", "length", "rating",
                                           "play-count", "last-played"}),
                          {expression("since", "Days since", "%dayssinceplayed%",
                                      "%dayssinceplayed%", ColumnAlignment::right)}),
+         .builtin = true},
+        // ADR-0283: more starting points.
+        {.id = "grouped-by-year",
+         .name = "Grouped by year",
+         .artwork = ViewArtwork::beside,
+         .grouping = ViewGrouping::expression,
+         .group_key = "$left(%date%,4)",
+         .group_title = "$if2($left(%date%,4),No year)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup =
+             ViewSubgroup{.key = "%albumartist%|%album%", .label = "%albumartist% · %album%"},
+         .row_style = {},
+         .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
+         .builtin = true},
+        {.id = "grouped-by-decade",
+         .name = "Grouped by decade",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "$left(%date%,3)",
+         .group_title = "$if($left(%date%,3),$left(%date%,3)0s,No year)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup = std::nullopt,
+         .row_style = {},
+         .columns = builtin_columns({"artist", "title", "album", "date", "length"}),
+         .builtin = true},
+        {.id = "grouped-by-folder",
+         .name = "Grouped by folder",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "$info(directory)",
+         .group_title = "$info(directory)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),file,files)",
+         .subgroup = std::nullopt,
+         .row_style = {},
+         .columns = with(builtin_columns({"artist", "title", "length"}),
+                         {expression("file", "File", "$info(filename_ext)")}),
+         .builtin = true},
+        {.id = "classical",
+         .name = "Classical",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "%composer%",
+         .group_title = "$if2(%composer%,No composer)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
+         .subgroup = ViewSubgroup{.key = "%work%", .label = "%work%"},
+         .row_style = {},
+         .columns = with(builtin_columns({"title", "artist", "length"}),
+                         {expression("conductor", "Conductor", "%conductor%")}),
+         .builtin = true},
+        {.id = "tag-check",
+         .name = "Tag check",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::none,
+         .group_key = {},
+         .group_title = {},
+         .group_details = {},
+         .subgroup = std::nullopt,
+         // What a tag may lack, said where it does: sorted by a column, the
+         // gaps come together.
+         .row_style = {},
+         .columns =
+             with(builtin_columns({"artist", "track-number", "title", "album", "date"}),
+                  {styled(expression("genre", "Genre", "$if2(%genre%,missing)"),
+                          "$if(%genre%,,warning)"),
+                   styled(expression("gain", "ReplayGain", "$if2(%replaygain_track_gain%,missing)"),
+                          "$if(%replaygain_track_gain%,,warning)"),
+                   styled(expression("musicbrainz", "MusicBrainz",
+                                     "$if(%musicbrainz_trackid%,yes,missing)"),
+                          "$if(%musicbrainz_trackid%,,warning)")}),
+         .builtin = true},
+        {.id = "grouped-by-quality",
+         .name = "Grouped by quality",
+         .artwork = ViewArtwork::none,
+         .grouping = ViewGrouping::expression,
+         .group_key = "$info(codec)|$info(bitspersample)|$info(samplerate)",
+         .group_title = "$if2($info(codec),Not known)"
+                        "$if($info(bitspersample), · $info(bitspersample)-bit,)"
+                        "$if($info(samplerate), · $decimal($info(samplerate),1000,1) kHz,)",
+         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks)",
+         .subgroup = std::nullopt,
+         .row_style = {},
+         .columns =
+             with(builtin_columns({"artist", "title", "album", "length"}),
+                  {expression("bitrate", "Bitrate", "$if($info(bitrate),$info(bitrate) kbps,)",
+                              "$info(bitrate)", ColumnAlignment::right)}),
+         .builtin = true},
+        {.id = "recently-added",
+         .name = "Recently added",
+         .artwork = ViewArtwork::header,
+         .grouping = ViewGrouping::expression,
+         .group_key = "%albumadded%|%albumartist%|%album%",
+         .group_title = "%album%",
+         .group_details = "%albumartist% · added $left(%albumadded%,10)",
+         .subgroup = std::nullopt,
+         // Sorted by Added, newest first, the albums come as they came.
+         .row_style = {},
+         .columns = with(builtin_columns({"artwork", "track-number", "title", "length"}),
+                         {expression("added", "Added", "$left(%added%,10)", "%added%")}),
          .builtin = true},
     };
     return views;
@@ -496,6 +625,8 @@ std::vector<ViewProblem> validate_list_view(const ListView& view) {
         expression("column:" + column.id + ":display", column.display, FormatContextKind::list_item,
                    true);
         expression("column:" + column.id + ":sort", column.sort, FormatContextKind::sort, false);
+        expression("column:" + column.id + ":style", column.style, FormatContextKind::list_item,
+                   false);
     }
     for (const auto id : builtin_column_ids) {
         if (!ids.contains(std::string{id})) {
@@ -506,6 +637,7 @@ std::vector<ViewProblem> validate_list_view(const ListView& view) {
     if (!shown) {
         add({}, "Show at least one column");
     }
+    expression("view:row_style", view.row_style, FormatContextKind::list_item, false);
     if (view.grouping == ViewGrouping::expression) {
         expression("group:key", view.group_key, FormatContextKind::grouping, true);
         expression("group:title", view.group_title, FormatContextKind::list_item, true);
@@ -533,6 +665,9 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
                 entry["sort"] = column.sort;
                 entry["align"] = alignment_name(column.alignment);
                 entry["expands"] = column.expands;
+                if (!column.style.empty()) {
+                    entry["style"] = column.style;
+                }
             }
             columns.push_back(std::move(entry));
         }
@@ -541,6 +676,9 @@ std::string serialize_list_views(const std::vector<ListView>& views) {
                    {"artwork", artwork_name(view.artwork)},
                    {"grouping", grouping_name(view.grouping)},
                    {"columns", std::move(columns)}};
+        if (!view.row_style.empty()) {
+            entry["row_style"] = view.row_style;
+        }
         if (view.grouping == ViewGrouping::expression) {
             entry["group"] = Json{{"key", view.group_key},
                                   {"title", view.group_title},
@@ -602,6 +740,7 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
             view.group_title = text_of(*group, "title");
             view.group_details = text_of(*group, "details");
         }
+        view.row_style = text_of(entry, "row_style");
         if (const auto subgroup = entry.find("subgroup");
             subgroup != entry.end() && subgroup->is_object()) {
             view.subgroup = ViewSubgroup{.key = text_of(*subgroup, "key"),
@@ -622,6 +761,7 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                              : align == "center" ? ColumnAlignment::center
                                                  : ColumnAlignment::left,
                 .expands = saved.value("expands", false),
+                .style = text_of(saved, "style"),
             });
         }
         // A built-in column added since it was saved goes last, hidden.
@@ -633,7 +773,8 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
                                         .display = {},
                                         .sort = {},
                                         .alignment = ColumnAlignment::left,
-                                        .expands = false});
+                                        .expands = false,
+                                        .style = {}});
             }
         }
         if (const auto problems = validate_list_view(view); !problems.empty()) {
@@ -675,6 +816,16 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
         compiled.reads_history_ = compiled.reads_history_ || reads(*display);
         compiled.expression_ids_.push_back(column.id);
         compiled.displays_.push_back(std::move(*display));
+        if (column.style.empty()) {
+            compiled.cell_styles_.emplace_back();
+        } else {
+            auto style = compiled_program(column.style, FormatContextKind::list_item);
+            if (!style) {
+                return std::unexpected(std::move(style.error()));
+            }
+            compiled.reads_history_ = compiled.reads_history_ || reads(*style);
+            compiled.cell_styles_.emplace_back(std::move(*style));
+        }
         if (column.sort.empty()) {
             compiled.sorts_.emplace_back();
         } else {
@@ -685,6 +836,14 @@ core::Result<CompiledListView> CompiledListView::compile(const ListView& view) {
             compiled.reads_history_ = compiled.reads_history_ || reads(*sort);
             compiled.sorts_.emplace_back(std::move(*sort));
         }
+    }
+    if (!view.row_style.empty()) {
+        auto style = compiled_program(view.row_style, FormatContextKind::list_item);
+        if (!style) {
+            return std::unexpected(std::move(style.error()));
+        }
+        compiled.reads_history_ = compiled.reads_history_ || reads(*style);
+        compiled.row_style_ = std::move(*style);
     }
     if (view.grouping == ViewGrouping::expression) {
         const auto program = [](const std::string& source, const FormatContextKind kind)
@@ -736,6 +895,17 @@ struct ListViewEvaluator {
             row.cells.reserve(compiled.displays_.size());
             for (const auto& display : compiled.displays_) {
                 row.cells.push_back(format(display, context, cancellation));
+            }
+            if (compiled.row_style_) {
+                row.row_style = format(*compiled.row_style_, context, cancellation);
+            }
+            if (std::ranges::any_of(compiled.cell_styles_,
+                                    [](const auto& style) { return style.has_value(); })) {
+                row.cell_styles.reserve(compiled.cell_styles_.size());
+                for (const auto& style : compiled.cell_styles_) {
+                    row.cell_styles.push_back(style ? format(*style, context, cancellation)
+                                                    : std::string{});
+                }
             }
             if (compiled.group_key_) {
                 const ViewRowContext grouping{source, FormatContextKind::grouping};
@@ -895,6 +1065,35 @@ evaluate_list_groups(const CompiledListView& compiled, const std::span<const Vie
         groups.push_back(std::move(group));
     }
     return groups;
+}
+
+CellStyle parse_cell_style(const std::string_view words) {
+    CellStyle style;
+    std::size_t at = 0U;
+    while (at < words.size()) {
+        const auto end = words.find_first_of(" ,", at);
+        const auto word = words.substr(at, end == std::string_view::npos ? end : end - at);
+        style.quiet = style.quiet || word == "quiet";
+        style.accent = style.accent || word == "accent";
+        style.warning = style.warning || word == "warning";
+        style.bold = style.bold || word == "bold";
+        style.italic = style.italic || word == "italic";
+        if (end == std::string_view::npos) {
+            break;
+        }
+        at = end + 1U;
+    }
+    return style;
+}
+
+CellStyle combined_style(const CellStyle& row, const CellStyle& cell) {
+    // One colour: the cell's, where it gives one.
+    const bool coloured = cell.quiet || cell.accent || cell.warning;
+    return {.quiet = coloured ? cell.quiet : row.quiet,
+            .accent = coloured ? cell.accent : row.accent,
+            .warning = coloured ? cell.warning : row.warning,
+            .bold = row.bold || cell.bold,
+            .italic = row.italic || cell.italic};
 }
 
 core::Result<std::vector<std::string>> list_sort_keys(const CompiledListView& compiled,

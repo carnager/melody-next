@@ -27,6 +27,7 @@ enum Column : int {
     title_column,
     display_column,
     sort_column,
+    style_column,
     align_column,
     expands_column,
     column_count
@@ -100,9 +101,15 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<lists::OwnedVie
     grouping_form->addRow(QStringLiteral("Subgroup by"), subgroup_key_);
     grouping_form->addRow(QStringLiteral("Subgroup label"), subgroup_label_);
 
+    // ADR-0283: style words a row is drawn by.
+    row_style_ =
+        expression_field("bench-list-view-row-style", QStringLiteral("$if(%playcount%,,quiet)"));
+    row_style_->setToolTip(
+        QStringLiteral("Answers style words: quiet, accent, warning, bold, italic"));
     auto* form = new QFormLayout;
     form->addRow(QStringLiteral("Name"), name_);
     form->addRow(QStringLiteral("Artwork"), artwork_);
+    form->addRow(QStringLiteral("Row style"), row_style_);
     form->addRow(QStringLiteral("Grouping"), grouping_);
     form->addRow(expression_grouping_);
 
@@ -110,12 +117,14 @@ ListViewDialog::ListViewDialog(lists::ListView view, std::vector<lists::OwnedVie
     columns_->setObjectName(QStringLiteral("bench-list-view-columns"));
     columns_->setHorizontalHeaderLabels({QStringLiteral("Shown"), QStringLiteral("Title"),
                                          QStringLiteral("Shows"), QStringLiteral("Sorts by"),
-                                         QStringLiteral("Align"), QStringLiteral("Expands")});
+                                         QStringLiteral("Style"), QStringLiteral("Align"),
+                                         QStringLiteral("Expands")});
     columns_->verticalHeader()->hide();
     columns_->setSelectionBehavior(QAbstractItemView::SelectRows);
     columns_->setSelectionMode(QAbstractItemView::SingleSelection);
     columns_->horizontalHeader()->setSectionResizeMode(display_column, QHeaderView::Stretch);
     columns_->horizontalHeader()->setSectionResizeMode(sort_column, QHeaderView::Stretch);
+    columns_->horizontalHeader()->setSectionResizeMode(style_column, QHeaderView::Stretch);
     connect(columns_, &QTableWidget::itemChanged, this, &ListViewDialog::edited);
     auto* add = new QPushButton(QStringLiteral("Add column"), this);
     add->setObjectName(QStringLiteral("bench-list-view-add-column"));
@@ -204,6 +213,7 @@ void ListViewDialog::fill() {
     grouping_->setCurrentIndex(view_.grouping == lists::ViewGrouping::none    ? 0
                                : view_.grouping == lists::ViewGrouping::album ? 1
                                                                               : 2);
+    row_style_->setText(text(view_.row_style));
     group_key_->setText(text(view_.group_key));
     group_title_->setText(text(view_.group_title));
     group_details_->setText(text(view_.group_details));
@@ -238,6 +248,10 @@ void ListViewDialog::fillColumns() {
         sort->setFlags(column.builtin() ? fixed : editable);
         sort->setToolTip(QStringLiteral("Empty: sorted by what it shows"));
         columns_->setItem(row, sort_column, sort);
+        auto* style = new QTableWidgetItem(column.builtin() ? QString{} : text(column.style));
+        style->setFlags(column.builtin() ? fixed : editable);
+        style->setToolTip(QStringLiteral("Empty: as its row"));
+        columns_->setItem(row, style_column, style);
         auto* align = new QComboBox(columns_);
         align->addItems(
             {QStringLiteral("Left"), QStringLiteral("Right"), QStringLiteral("Centre")});
@@ -267,6 +281,7 @@ void ListViewDialog::readEdits() {
     view_.grouping = grouping_->currentIndex() == 0   ? lists::ViewGrouping::none
                      : grouping_->currentIndex() == 1 ? lists::ViewGrouping::album
                                                       : lists::ViewGrouping::expression;
+    view_.row_style = row_style_->text().toStdString();
     view_.group_key = group_key_->text().toStdString();
     view_.group_title = group_title_->text().toStdString();
     view_.group_details = group_details_->text().toStdString();
@@ -284,6 +299,7 @@ void ListViewDialog::readEdits() {
         column.title = columns_->item(row, title_column)->text().toStdString();
         column.display = columns_->item(row, display_column)->text().toStdString();
         column.sort = columns_->item(row, sort_column)->text().toStdString();
+        column.style = columns_->item(row, style_column)->text().toStdString();
         const auto* align = qobject_cast<QComboBox*>(columns_->cellWidget(row, align_column));
         column.alignment = align == nullptr || align->currentIndex() == 0
                                ? lists::ColumnAlignment::left
@@ -315,6 +331,7 @@ void ListViewDialog::check() {
         field->setStyleSheet(found == problems.end() ? QString{}
                                                      : QStringLiteral("color: palette(link)"));
     };
+    mark(row_style_, "view:row_style");
     mark(group_key_, "group:key");
     mark(group_title_, "group:title");
     mark(group_details_, "group:details");
@@ -326,7 +343,7 @@ void ListViewDialog::check() {
         const auto& column = view_.columns[static_cast<std::size_t>(row)];
         for (const auto& [cell, part] :
              {std::pair{title_column, ":title"}, std::pair{display_column, ":display"},
-              std::pair{sort_column, ":sort"}}) {
+              std::pair{sort_column, ":sort"}, std::pair{style_column, ":style"}}) {
             const auto where = "column:" + column.id + part;
             const auto found = std::ranges::find(problems, where, &lists::ViewProblem::where);
             auto* item = columns_->item(row, cell);
@@ -428,7 +445,8 @@ void ListViewDialog::addColumn() {
                              .display = "%genre%",
                              .sort = {},
                              .alignment = lists::ColumnAlignment::left,
-                             .expands = false});
+                             .expands = false,
+                             .style = {}});
     fillColumns();
     columns_->setCurrentCell(columns_->rowCount() - 1, title_column);
     edited();

@@ -30,6 +30,9 @@ void TrackViewLayoutTest::roundTripsPresentationAndColumns() {
                     // ADR-0282: an expression column's id is its view's own.
                     {.id = QStringLiteral("expression-1"), .width = 140, .visible = true}},
         .view = QStringLiteral("view-1"),
+        // ADR-0283: folded groups by key, an album's with its separators.
+        .collapsed = {QStringLiteral("Artist") + QChar::Null + QStringLiteral("Album"),
+                      QStringLiteral("Label")},
     };
     QString error;
     const auto decoded =

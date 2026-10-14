@@ -469,6 +469,15 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
                 resized_tab->preserved_view_layout.clear();
                 schedulePersist();
             });
+    // ADR-0283: a group folded or unfolded is kept with the tab.
+    static_cast<ui::QueueTableView*>(view)->setCollapseCallback([this, id] {
+        if (auto* folded_tab = tabForDocument(id)) {
+            folded_tab->view_layout = captureTrackViewLayout(*folded_tab);
+            folded_tab->view_layout_persistence_protected = false;
+            folded_tab->preserved_view_layout.clear();
+            schedulePersist();
+        }
+    });
     // ADR-0282: a column's header sorts the list by it; an expression
     // grouping's groups, once known, are drawn.
     view->horizontalHeader()->setSectionsClickable(true);

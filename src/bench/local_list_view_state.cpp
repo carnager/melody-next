@@ -7,7 +7,11 @@
 
 #include "uicommon/track_row_roles.hpp"
 
+#include <QBrush>
+#include <QFont>
 #include <QFuture>
+#include <QGuiApplication>
+#include <QPalette>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -45,6 +49,8 @@ constexpr std::size_t evaluation_batch = 2'000U;
     }
     copy.rating = row.rating;
     copy.history = row.history;
+    copy.added = row.added;
+    copy.album_added = row.album_added;
     return copy;
 }
 
@@ -408,6 +414,48 @@ void LocalListModel::mergeHeaders(const std::uint64_t view, const std::vector<QS
     }
     // Groups that changed while these were evaluated.
     regroup();
+}
+
+QVariant LocalListModel::viewStyle(const QModelIndex& index, const int role) const {
+    const auto& row = rows_[static_cast<std::size_t>(index.row())];
+    if (!evaluatedNow(row)) {
+        return {};
+    }
+    auto style = lists::parse_cell_style(row.evaluated->row_style);
+    if (index.column() >= local_column_count) {
+        const auto cell = static_cast<std::size_t>(index.column() - local_column_count);
+        if (cell < row.evaluated->cell_styles.size()) {
+            style = lists::combined_style(
+                style, lists::parse_cell_style(row.evaluated->cell_styles[cell]));
+        }
+    }
+    if (!style.any()) {
+        return {};
+    }
+    if (role == Qt::FontRole) {
+        if (!style.bold && !style.italic) {
+            return {};
+        }
+        QFont font;
+        font.setWeight(style.bold ? QFont::DemiBold : QFont::Normal);
+        font.setItalic(style.italic);
+        return font;
+    }
+    // The playing row keeps its own colour, and the stars theirs.
+    if (index.row() == current_row_ || index.column() == local_rating_column) {
+        return {};
+    }
+    const auto palette = QGuiApplication::palette();
+    if (style.warning) {
+        return QBrush{QColor{0xd0, 0x85, 0x2a}};
+    }
+    if (style.accent) {
+        return QBrush{palette.color(QPalette::Highlight).lighter(115)};
+    }
+    if (style.quiet) {
+        return QBrush{palette.color(QPalette::PlaceholderText)};
+    }
+    return {};
 }
 
 QVariant LocalListModel::viewData(const QModelIndex& index, const int role) const {

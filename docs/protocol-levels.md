@@ -7,6 +7,13 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 12 (2026-10-14)
+
+- A track's description -- `list.describe`'s `library` -- says when it, and
+  its album's newest track, came into the library: `added`, `album_added`
+  (Unix seconds, 0 when not known), for a list to show and sort by
+  (ADR-0283). An older engine says neither, and they read as not known.
+
 ### Level 11 (2026-10-14)
 
 - The `catalogue.listened` event `{path}`: a listen was recorded for that

@@ -142,7 +142,7 @@ tags:
 | Host | Fields |
 | --- | --- |
 | Track/list | `list_index`, `list_total`, `selected` |
-| List view row (ADR-0282) | `length` (m:ss), `path`, `rating` (1-10); listening history `playcount`, `lastplayed` (local date and time), `dayssinceplayed`, `albumplaycount`, `albumlastplayed`, `albumdayssinceplayed`; technicals and the file by `$info` (`codec`, `samplerate`, `bitspersample`, `channels`, `bitrate`, `lengthms`, `filename`, `filename_ext`, `directory`, `extension`); a group header also `group_tracks`, `group_length` |
+| List view row (ADR-0282) | `length` (m:ss), `path`, `rating` (1-10); listening history `playcount`, `lastplayed` (local date and time), `dayssinceplayed`, `albumplaycount`, `albumlastplayed`, `albumdayssinceplayed`; when it came into the library `added`, `albumadded` (local date and time), `dayssinceadded`, `albumdayssinceadded`; technicals and the file by `$info` (`codec`, `samplerate`, `bitspersample`, `channels`, `bitrate`, `lengthms`, `filename`, `filename_ext`, `directory`, `extension`); a group header also `group_tracks`, `group_length` |
 | Queue | `queue_position`, `queue_total`, `queue_origin` |
 | Now playing | `playback_time`, `playback_remaining`, `playback_state`; with the engine's library row also `length`, `path`, `rating` (1-10) |
 | Conversion | `conversion_index`, `source_filename`, `source_extension` |

@@ -2,6 +2,7 @@
 
 #include "uicommon/queue_item_delegate.hpp"
 
+#include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QApplication>
@@ -185,6 +186,12 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 albumHeaderText(*index.model(), index.row(), album_column, date_column), false);
         }
         item.rect.setTop(item.rect.top() + QueueItemDelegate::album_header_height);
+        // ADR-0283: a folded group is its header alone.
+        if (const auto* queue_view = dynamic_cast<const QueueTableView*>(view);
+            queue_view != nullptr && queue_view->groupCollapsed(index.row())) {
+            painter->fillRect(item.rect, option.palette.base());
+            return;
+        }
     }
 
     if (beginsLooseRun(index)) {

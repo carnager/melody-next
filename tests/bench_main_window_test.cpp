@@ -433,6 +433,7 @@ class BenchMainWindowTest final : public QObject {
     void listViewsShowExpressionsGroupAndSort();
     void listViewEditorChecksAndSavesACopy();
     void listViewsReadListeningHistory();
+    void groupsFoldToTheirHeaders();
     void listLayoutsFromBeforeViewsMigrate();
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
@@ -15696,12 +15697,16 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
                                 .display = "%label%",
                                 .sort = {},
                                 .alignment = lists::ColumnAlignment::right,
-                                .expands = false});
+                                .expands = false,
+                                .style = {}});
     by_label.grouping = lists::ViewGrouping::expression;
     by_label.group_key = "%label%";
     by_label.group_title = "%label%";
     by_label.group_details = "%group_tracks% tracks";
     by_label.subgroup = lists::ViewSubgroup{.key = "%discnumber%", .label = "Disc %discnumber%"};
+    // ADR-0283: Interscope's rows quiet, the label itself bold.
+    by_label.row_style = "$if($eq(%label%,Interscope),quiet,)";
+    by_label.columns.back().style = "bold";
     QVERIFY(saveCustomListViews({by_label}).has_value());
 
     const auto row = [](const char* title, const char* label, const char* disc) {
@@ -15771,6 +15776,15 @@ void BenchMainWindowTest::listViewsShowExpressionsGroupAndSort() {
         QCOMPARE(model->index(2, 0).data(ui::track_disc_start_role).toString(), QString{});
         // One disc only: nothing to tell apart.
         QCOMPARE(model->index(3, 0).data(ui::track_disc_start_role).toString(), QString{});
+        // Drawn as its styles say: Interscope's row quiet, in every column;
+        // the label bold, in every row.
+        QCOMPARE(
+            model->index(3, local_title_column).data(Qt::ForegroundRole).value<QBrush>().color(),
+            QGuiApplication::palette().color(QPalette::PlaceholderText));
+        QVERIFY(!model->index(0, local_title_column).data(Qt::ForegroundRole).isValid());
+        QVERIFY(model->index(0, label).data(Qt::FontRole).value<QFont>().weight() >=
+                QFont::DemiBold);
+        QVERIFY(!model->index(0, local_title_column).data(Qt::FontRole).isValid());
         // Drawn as the view says: its header above the group, not the album's.
         QTRY_VERIFY(view->rowHeight(0) > view->rowHeight(2));
 
@@ -15840,7 +15854,8 @@ void BenchMainWindowTest::listViewsReadListeningHistory() {
                              .display = "$if(%playcount%,%playcount% plays,none)",
                              .sort = {},
                              .alignment = lists::ColumnAlignment::left,
-                             .expands = false});
+                             .expands = false,
+                             .style = {}});
     QVERIFY(saveCustomListViews({plays}).has_value());
     BenchMainWindow window;
     window.show();
@@ -15874,6 +15889,69 @@ void BenchMainWindowTest::listViewsReadListeningHistory() {
     window.workspace_.adoptListen(EngineKey::local(), played.raw_path);
     QTRY_COMPARE(model->index(0, column).data().toString(), QStringLiteral("none"));
     QVERIFY(window.close());
+}
+
+// ADR-0283: a click on the mark at a header's right end folds its group to
+// the header -- its rows stay in the list, not drawn -- and again unfolds
+// it; the folds are kept with the tab across a restart.
+void BenchMainWindowTest::groupsFoldToTheirHeaders() {
+    const auto row = [](const char* title, const char* album) {
+        LocalTrackRow made;
+        made.raw_path = std::string{"/music/"} + album + "/" + title + ".flac";
+        made.title = title;
+        made.artist = "Artist";
+        made.album = album;
+        made.duration_ms = 60'000;
+        made.probed = true;
+        return made;
+    };
+    {
+        BenchMainWindow window;
+        window.show();
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        model->appendRows({row("One", "First"), row("Two", "First"), row("Three", "Second"),
+                           row("Four", "Second")});
+        QTRY_VERIFY(view->rowHeight(0) > view->rowHeight(1));
+        const auto open_length = view->verticalHeader()->length();
+        // The mark at the header's right end.
+        const QPoint mark{view->viewport()->width() - ui::QueueTableView::collapse_mark_width / 2,
+                          view->rowViewportPosition(0) + 8};
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, {}, mark);
+        QVERIFY(view->groupCollapsed(0));
+        QVERIFY(view->isRowHidden(1));
+        QVERIFY(!view->isRowHidden(2) && !view->isRowHidden(3));
+        // Shorter by its folded rows; beside the rows the header keeps its
+        // cover's height.
+        QVERIFY(view->verticalHeader()->length() < open_length);
+        QVERIFY(view->rowHeight(0) >= ui::QueueItemDelegate::album_header_height);
+        // Still in the list.
+        QCOMPARE(model->rowCount(), 4);
+        // A click on the rest of the header still selects the group, folded
+        // rows and all.
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, {},
+                          QPoint{view->viewport()->width() / 2, view->rowViewportPosition(0) + 8});
+        QCOMPARE(view->selectionModel()->selectedRows().size(), 2);
+        QVERIFY(window.close());
+    }
+    {
+        BenchMainWindow restored;
+        restored.show();
+        auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
+        QTRY_COMPARE(view->model()->rowCount(), 4);
+        QTRY_VERIFY(view->isRowHidden(1));
+        QVERIFY(!view->isRowHidden(3));
+        // Every group, then none.
+        view->setAllGroupsCollapsed(true);
+        QVERIFY(view->isRowHidden(1) && view->isRowHidden(3));
+        view->setAllGroupsCollapsed(false);
+        QVERIFY(!view->isRowHidden(1) && !view->isRowHidden(3));
+        QVERIFY(restored.close());
+    }
 }
 
 // ADR-0282: the editor shows an expression's error and will not save the

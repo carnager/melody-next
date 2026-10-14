@@ -58,6 +58,7 @@ class ListViewDialog final : public QDialog {
     QLineEdit* name_{nullptr};
     QComboBox* artwork_{nullptr};
     QComboBox* grouping_{nullptr};
+    QLineEdit* row_style_{nullptr};
     QLineEdit* group_key_{nullptr};
     QLineEdit* group_title_{nullptr};
     QLineEdit* group_details_{nullptr};

@@ -272,6 +272,13 @@ target_link_libraries(
 )
 add_test(NAME list-view COMMAND trackknife_list_view_tests)
 
+add_executable(trackknife_track_description_tests track_description_test.cpp)
+target_link_libraries(
+    trackknife_track_description_tests
+    PRIVATE Trackknife::Engine trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME track-description COMMAND trackknife_track_description_tests)
+
 add_executable(trackknife_dynamic_selection_tests dynamic_selection_test.cpp)
 target_link_libraries(
     trackknife_dynamic_selection_tests

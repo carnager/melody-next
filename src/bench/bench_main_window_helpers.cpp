@@ -199,6 +199,8 @@ LocalTrackRow cached_library_row(persistence::LibraryTrackSnapshot snapshot) {
     if (snapshot.facts.rating >= 0) {
         row.rating = static_cast<unsigned>(snapshot.facts.rating);
     }
+    row.added = snapshot.facts.added;
+    row.album_added = snapshot.facts.album_added;
     if (snapshot.facts.album_rating >= 0) {
         row.album_rating = static_cast<unsigned>(snapshot.facts.album_rating);
     }

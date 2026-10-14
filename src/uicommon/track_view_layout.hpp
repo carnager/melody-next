@@ -46,6 +46,8 @@ struct TrackViewLayout {
     // ADR-0282: the list view's id; empty in a layout read from version 1
     // or 2, which the workspace migrates to one.
     QString view;
+    // ADR-0283: the groups folded to their headers, by their keys.
+    QStringList collapsed;
 
     friend bool operator==(const TrackViewLayout&, const TrackViewLayout&) = default;
 };

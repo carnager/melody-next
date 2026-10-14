@@ -26,6 +26,10 @@ Json describe_track(const persistence::LibraryTrackSnapshot& track) {
                    {"channels", track.facts.channels},
                    {"rating", track.facts.rating},
                    {"album_rating", track.facts.album_rating},
+                   // ADR-0283: when the track, and its album's newest track,
+                   // came into the library (Unix seconds; 0 not known).
+                   {"added", track.facts.added},
+                   {"album_added", track.facts.album_added},
                    {"revision", nullptr}};
     if (track.revision) {
         const auto& revision = *track.revision;
@@ -72,6 +76,8 @@ std::optional<persistence::LibraryTrackSnapshot> described_track(const Json& des
     track.facts.channels = number("channels", 0);
     track.facts.rating = number("rating", -1);
     track.facts.album_rating = number("album_rating", -1);
+    track.facts.added = number("added", 0);
+    track.facts.album_added = number("album_added", 0);
     if (const auto revision = description.find("revision");
         revision != description.end() && revision->is_object()) {
         const auto unsigned_of = [&revision](const char* key) {

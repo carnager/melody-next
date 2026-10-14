@@ -28,6 +28,7 @@
 #include <QPainterPath>
 #include <QPersistentModelIndex>
 #include <QPixmap>
+#include <QPolygonF>
 #include <QResizeEvent>
 #include <QScrollBar>
 #include <QStyle>
@@ -150,6 +151,44 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
         }
         paintRatingOverlay(painter, target, album_rating);
     }
+}
+
+// ADR-0283: each header's mark at its right end -- pointing down while its
+// group is open, right while it is folded.
+void paintCollapseMarks(QueueTableView* view, QPainter* painter) {
+    auto* model = view->model();
+    if (model == nullptr || !view->albumGroupingEnabled() || model->rowCount() == 0) {
+        return;
+    }
+    auto first = view->rowAt(0);
+    auto last = view->rowAt(view->viewport()->height() - 1);
+    first = first < 0 ? 0 : first;
+    last = last < 0 ? model->rowCount() - 1 : last;
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    auto colour = view->palette().color(QPalette::PlaceholderText);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(colour);
+    for (int row = first; row <= last; ++row) {
+        if (view->isRowHidden(row) || !beginsAlbum(view, row)) {
+            continue;
+        }
+        const auto top = view->rowViewportPosition(row);
+        const QPointF centre{
+            static_cast<double>(view->viewport()->width() -
+                                QueueTableView::collapse_mark_width / 2),
+            static_cast<double>(top + QueueItemDelegate::album_header_height / 2 + 2)};
+        const auto folded = view->groupCollapsed(row);
+        constexpr double half = 4.0;
+        const QPolygonF mark = folded ? QPolygonF{{centre.x() - half / 2, centre.y() - half},
+                                                  {centre.x() + half, centre.y()},
+                                                  {centre.x() - half / 2, centre.y() + half}}
+                                      : QPolygonF{{centre.x() - half, centre.y() - half / 2},
+                                                  {centre.x() + half, centre.y() - half / 2},
+                                                  {centre.x(), centre.y() + half}};
+        painter->drawPolygon(mark);
+    }
+    painter->restore();
 }
 
 // The keyboard's place: one thin outline around the current row while the
@@ -450,6 +489,7 @@ void QueueTableView::rebuildAlbumRowGeometry() {
     for (const auto row : album_group_start_rows_) {
         row_header->resizeSection(row, default_height + groupSpacing(this, row));
     }
+    applyCollapsedGroups();
     setUpdatesEnabled(true);
     // Section-size signals are deliberately batched above. QTableView therefore
     // needs one explicit scroll-range update after the final header heights.
@@ -489,10 +529,102 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
     for (int row = first; row <= last; ++row) {
         verticalHeader()->resizeSection(row, default_height + groupSpacing(this, row));
     }
+    if (!collapsed_groups_.isEmpty()) {
+        applyCollapsedGroups();
+    }
     // Section-size signals are deliberately batched above. QTableView therefore
     // needs one explicit scroll-range update after the final header heights.
     updateGeometries();
     viewport()->update();
+}
+
+int QueueTableView::collapsedHeight() const {
+    // Beside the rows, the cover has to fit beside its header.
+    return album_artwork_column_ >= 0 ? std::max(QueueItemDelegate::album_header_height,
+                                                 side_cover_top * 2 + side_cover_extent)
+                                      : QueueItemDelegate::album_header_height;
+}
+
+void QueueTableView::applyCollapsedGroups() {
+    if (model() == nullptr || verticalHeader() == nullptr) {
+        return;
+    }
+    const auto columns = groupColumns(this);
+    const auto rows = model()->rowCount();
+    const bool folding = album_grouping_enabled_ && !collapsed_groups_.isEmpty();
+    const QSignalBlocker blocker{verticalHeader()};
+    for (int row = 0; row < rows;) {
+        if (!folding || !beginsTrackGroup(*model(), row, columns)) {
+            if (isRowHidden(row)) {
+                setRowHidden(row, false);
+            }
+            ++row;
+            continue;
+        }
+        const auto [first, last] = trackGroupRange(*model(), row, columns);
+        const auto folded = collapsed_groups_.contains(trackGroupKey(*model(), first, columns));
+        for (int member = first + 1; member <= last; ++member) {
+            if (isRowHidden(member) != folded) {
+                setRowHidden(member, folded);
+            }
+        }
+        verticalHeader()->resizeSection(first, folded ? collapsedHeight()
+                                                      : verticalHeader()->defaultSectionSize() +
+                                                            groupSpacing(this, first));
+        row = std::max(last, first) + 1;
+    }
+}
+
+void QueueTableView::setCollapsedGroups(QSet<QString> keys) {
+    if (keys == collapsed_groups_) {
+        return;
+    }
+    collapsed_groups_ = std::move(keys);
+    applyCollapsedGroups();
+    updateGeometries();
+    viewport()->update();
+}
+
+bool QueueTableView::groupCollapsed(const int row) const {
+    return album_grouping_enabled_ && model() != nullptr && !collapsed_groups_.isEmpty() &&
+           collapsed_groups_.contains(trackGroupKey(*model(), row, groupColumns(this)));
+}
+
+void QueueTableView::setGroupCollapsed(const int row, const bool collapsed) {
+    if (model() == nullptr || row < 0 || row >= model()->rowCount()) {
+        return;
+    }
+    auto keys = collapsed_groups_;
+    const auto key = trackGroupKey(*model(), row, groupColumns(this));
+    if (collapsed) {
+        keys.insert(key);
+    } else {
+        keys.remove(key);
+    }
+    setCollapsedGroups(std::move(keys));
+    if (collapse_callback_) {
+        collapse_callback_();
+    }
+}
+
+void QueueTableView::setAllGroupsCollapsed(const bool collapsed) {
+    QSet<QString> keys;
+    if (collapsed && model() != nullptr) {
+        const auto columns = groupColumns(this);
+        for (int row = 0; row < model()->rowCount(); ++row) {
+            if (beginsTrackGroup(*model(), row, columns)) {
+                keys.insert(trackGroupKey(*model(), row, columns));
+            }
+        }
+    }
+    setCollapsedGroups(std::move(keys));
+    if (collapse_callback_) {
+        collapse_callback_();
+    }
+}
+
+void QueueTableView::setCollapseCallback(std::function<void()> changed) {
+    collapse_callback_ = std::move(changed);
 }
 
 void QueueTableView::setEmptyMessage(QString title, QString hint) {
@@ -659,6 +791,12 @@ void QueueTableView::mousePressEvent(QMouseEvent* event) {
         if (queue_delegate != nullptr &&
             queue_delegate->isAlbumHeaderHit(index,
                                              event->position().toPoint().y() - item_rect.top())) {
+            // ADR-0283: the mark at its right end folds or unfolds it.
+            if (event->position().toPoint().x() >= viewport()->width() - collapse_mark_width) {
+                setGroupCollapsed(index.row(), !groupCollapsed(index.row()));
+                event->accept();
+                return;
+            }
             const auto [first, last] = queue_delegate->albumRowRange(index);
             const QItemSelection album{model()->index(first, 0),
                                        model()->index(last, model()->columnCount() - 1)};
@@ -897,6 +1035,7 @@ void QueueTableView::paintEvent(QPaintEvent* event) {
     QPainter painter{viewport()};
     painter.setClipRegion(event->region());
     paintAlbumArtwork(this, &painter);
+    paintCollapseMarks(this, &painter);
     paintCurrentRow(this, &painter);
     if (model() != nullptr && model()->rowCount() == 0 && !empty_title_.isEmpty()) {
         // An empty list says so, and how to fill it, a little above the

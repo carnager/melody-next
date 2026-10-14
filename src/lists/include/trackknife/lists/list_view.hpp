@@ -44,6 +44,9 @@ struct ViewColumn {
     std::string sort;
     ColumnAlignment alignment{ColumnAlignment::left};
     bool expands{false};
+    // ADR-0283: how its cell is drawn, as a style expression says (below);
+    // empty, as its row is.
+    std::string style;
 
     [[nodiscard]] bool builtin() const { return is_builtin_column(id); }
     friend bool operator==(const ViewColumn&, const ViewColumn&) = default;
@@ -65,6 +68,9 @@ struct ListView {
     std::string group_title;
     std::string group_details;
     std::optional<ViewSubgroup> subgroup;
+    // ADR-0283: how each row is drawn -- an expression answering style words
+    // (`quiet`, `accent`, `warning`, `bold`, `italic`); empty, as always.
+    std::string row_style;
     // In their order; every built-in column is here, shown or not.
     std::vector<ViewColumn> columns;
     bool builtin{false};
@@ -125,6 +131,10 @@ struct ViewRow {
     // (UTC milliseconds), days since played, and the same for the album, -1
     // where unknown -- or none at all when it was not asked for.
     std::optional<std::array<std::int64_t, 6>> history;
+    // ADR-0283: when the track, and its album's newest track, came into the
+    // library -- Unix seconds, 0 not known.
+    std::int64_t added{0};
+    std::int64_t album_added{0};
 };
 
 // The history fields, in the order ViewRow::history holds them -- the names
@@ -152,6 +162,8 @@ struct OwnedViewRow {
     std::int64_t bit_rate{0};
     unsigned rating{0U};
     std::optional<std::array<std::int64_t, 6>> history;
+    std::int64_t added{0};
+    std::int64_t album_added{0};
 
     [[nodiscard]] ViewRow view() const {
         return {.raw_path = raw_path,
@@ -169,7 +181,9 @@ struct OwnedViewRow {
                 .channels = channels,
                 .bit_rate = bit_rate,
                 .rating = rating,
-                .history = history};
+                .history = history,
+                .added = added,
+                .album_added = album_added};
     }
 };
 
@@ -203,6 +217,8 @@ class CompiledListView final {
     std::optional<titleformat::Program> group_details_;
     std::optional<titleformat::Program> subgroup_key_;
     std::optional<titleformat::Program> subgroup_label_;
+    std::optional<titleformat::Program> row_style_;
+    std::vector<std::optional<titleformat::Program>> cell_styles_;
     bool reads_history_{false};
 };
 
@@ -210,6 +226,10 @@ class CompiledListView final {
 struct EvaluatedRow {
     // One per expression column, in the view's order.
     std::vector<std::string> cells;
+    // ADR-0283: the row's style words, and each expression column's own
+    // (empty where it has no style expression).
+    std::string row_style;
+    std::vector<std::string> cell_styles;
     // An expression grouping's.
     std::string group_key;
     std::string subgroup_key;
@@ -265,6 +285,22 @@ struct EvaluatedGroup {
 evaluate_list_groups(const CompiledListView& compiled, std::span<const ViewRow> rows,
                      std::span<const EvaluatedRow> evaluated,
                      const core::CancellationToken& cancellation = {});
+
+// ADR-0283: style words as an expression answers them -- separated by
+// spaces or commas, unknown ones ignored, so a newer word reads as nothing.
+struct CellStyle {
+    bool quiet{false};
+    bool accent{false};
+    bool warning{false};
+    bool bold{false};
+    bool italic{false};
+    [[nodiscard]] bool any() const noexcept { return quiet || accent || warning || bold || italic; }
+    friend bool operator==(const CellStyle&, const CellStyle&) = default;
+};
+[[nodiscard]] CellStyle parse_cell_style(std::string_view words);
+// A row's style with its cell's over it: a cell says what it says, and the
+// row the rest.
+[[nodiscard]] CellStyle combined_style(const CellStyle& row, const CellStyle& cell);
 
 // The keys a column sorts by, one per row: an expression column's sort
 // expression, else its display; a built-in column by what it shows.

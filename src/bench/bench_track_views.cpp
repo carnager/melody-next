@@ -143,7 +143,10 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
     }
     queue_view->setAutoFillColumns(std::move(expanding), std::move(preferred_widths),
                                    std::move(minimum_widths));
+    // ADR-0283: the groups it had folded.
+    queue_view->setCollapsedGroups({layout.collapsed.begin(), layout.collapsed.end()});
     state = applied;
+    state.collapsed = layout.collapsed;
     applying_track_view_layout_ = false;
     view->viewport()->update();
     refreshTrackViewActions();
@@ -159,6 +162,11 @@ BenchMainWindow::captureTrackViewLayout(const QTableView* view,
     auto layout = state;
     layout.schema_version = ui::track_view_layout_schema_version;
     layout.columns.clear();
+    if (const auto* queue_view = dynamic_cast<const ui::QueueTableView*>(view)) {
+        const auto& folded = queue_view->collapsedGroups();
+        layout.collapsed = QStringList{folded.begin(), folded.end()};
+        layout.collapsed.sort();
+    }
     const auto* model = qobject_cast<const LocalListModel*>(view->model());
     auto* header = view->horizontalHeader();
     layout.columns.reserve(static_cast<std::size_t>(header->count()));
@@ -446,15 +454,22 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
     QMenu menu(this);
     menu.addSection(QStringLiteral("View"));
     auto* views = new QActionGroup(&menu);
+    // The presentations and the user's own at hand; the starting points
+    // shipped to copy from, one menu down (ADR-0283).
+    auto* starting = new QMenu(QStringLiteral("Starting points"), &menu);
+    starting->setObjectName(QStringLiteral("menu-list-view-starting-points"));
     for (const auto& definition : listViews()) {
         const auto id = QString::fromStdString(definition.id);
-        auto* action = menu.addAction(QString::fromStdString(definition.name));
+        const auto presentation = ui::trackViewPresentationFromId(id).has_value();
+        auto* action = (definition.builtin && !presentation ? starting : &menu)
+                           ->addAction(QString::fromStdString(definition.name));
         action->setObjectName(QStringLiteral("action-list-view-%1").arg(id));
         action->setCheckable(true);
         action->setChecked(tab != nullptr && tab->view_layout.view == id);
         views->addAction(action);
         connect(action, &QAction::triggered, this, [this, id] { chooseListView(id); });
     }
+    menu.addMenu(starting);
     menu.addSeparator();
     auto* edit = menu.addAction(QStringLiteral("Edit view…"));
     edit->setObjectName(QStringLiteral("action-edit-list-view"));
@@ -483,6 +498,19 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
             connect(action, &QAction::toggled, this,
                     [this, id](const bool shown) { setTrackColumnVisible(id, shown); });
         }
+    }
+    // ADR-0283: every group folded, or none.
+    if (auto* queue_view = static_cast<ui::QueueTableView*>(view);
+        queue_view->albumGroupingEnabled()) {
+        menu.addSeparator();
+        auto* fold = menu.addAction(QStringLiteral("Collapse all groups"));
+        fold->setObjectName(QStringLiteral("action-collapse-groups"));
+        connect(fold, &QAction::triggered, queue_view,
+                [queue_view] { queue_view->setAllGroupsCollapsed(true); });
+        auto* unfold = menu.addAction(QStringLiteral("Expand all groups"));
+        unfold->setObjectName(QStringLiteral("action-expand-groups"));
+        connect(unfold, &QAction::triggered, queue_view,
+                [queue_view] { queue_view->setAllGroupsCollapsed(false); });
     }
     menu.addSeparator();
     menu.addAction(track_layout_reset_action_);

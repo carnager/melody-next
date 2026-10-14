@@ -59,6 +59,7 @@ QByteArray serializeTrackViewLayout(const TrackViewLayout& layout) {
             {QStringLiteral("schema"), layout.schema_version},
             {QStringLiteral("presentation"), trackViewPresentationId(layout.presentation)},
             {QStringLiteral("view"), layout.view},
+            {QStringLiteral("collapsed"), QJsonArray::fromStringList(layout.collapsed)},
             {QStringLiteral("columns"), columns},
         }}
         .toJson(QJsonDocument::Compact);
@@ -169,10 +170,19 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
             }
         }
     }
+    // ADR-0283: folded groups, bounded; one that is malformed is dropped,
+    // not the layout.
+    QStringList collapsed;
+    for (const auto& key : object.value(QStringLiteral("collapsed")).toArray()) {
+        if (key.isString() && key.toString().size() <= 1'024 && collapsed.size() < 4'096) {
+            collapsed << key.toString();
+        }
+    }
     return TrackViewLayout{.schema_version = track_view_layout_schema_version,
                            .presentation = *presentation,
                            .columns = std::move(columns),
-                           .view = view};
+                           .view = view,
+                           .collapsed = std::move(collapsed)};
 }
 
 } // namespace trackknife::ui

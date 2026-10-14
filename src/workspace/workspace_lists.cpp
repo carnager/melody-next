@@ -819,7 +819,8 @@ Workspace::trackViewLayoutFor(const lists::ListView& view,
     return ui::TrackViewLayout{.schema_version = ui::track_view_layout_schema_version,
                                .presentation = presentation,
                                .columns = std::move(columns),
-                               .view = QString::fromStdString(view.id)};
+                               .view = QString::fromStdString(view.id),
+                               .collapsed = {}};
 }
 
 ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
@@ -872,7 +873,9 @@ ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
             QStringLiteral("This list's view is gone; it is shown as albums instead"), 7'000);
         return layout;
     }
-    return trackViewLayoutFor(*view, decoded->columns);
+    auto restored = trackViewLayoutFor(*view, decoded->columns);
+    restored.collapsed = decoded->collapsed;
+    return restored;
 }
 
 void Workspace::removeRows(ListTab& tab, std::vector<int> rows) {

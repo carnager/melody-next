@@ -407,9 +407,8 @@ void BenchMainWindow::refreshTrackViewActions() {
     }
     auto* tab = currentListTab();
     const auto available = tab != nullptr;
-    for (auto* action :
-         {track_albums_side_action_, track_albums_header_action_, track_plain_columns_action_,
-          track_compact_queue_action_, track_layout_reset_action_, track_layout_copy_action_}) {
+    for (auto* action : {track_albums_side_action_, track_plain_columns_action_,
+                         track_layout_reset_action_, track_layout_copy_action_}) {
         action->setEnabled(available);
     }
     for (auto* action : track_column_actions_) {
@@ -424,16 +423,11 @@ void BenchMainWindow::refreshTrackViewActions() {
         return layout.view == ui::trackViewPresentationId(presentation);
     };
     const QSignalBlocker side_blocker{track_albums_side_action_};
-    const QSignalBlocker header_blocker{track_albums_header_action_};
     const QSignalBlocker plain_blocker{track_plain_columns_action_};
-    const QSignalBlocker compact_blocker{track_compact_queue_action_};
     // A view of the user's own is none of the shipped four.
     track_presentation_group_->setExclusive(false);
     track_albums_side_action_->setChecked(shipped(ui::TrackViewPresentation::albums_side_artwork));
-    track_albums_header_action_->setChecked(
-        shipped(ui::TrackViewPresentation::albums_header_artwork));
     track_plain_columns_action_->setChecked(shipped(ui::TrackViewPresentation::plain_columns));
-    track_compact_queue_action_->setChecked(shipped(ui::TrackViewPresentation::compact_queue));
     track_presentation_group_->setExclusive(true);
     for (const auto& column : layout.columns) {
         auto* action = track_column_actions_.value(column.id, nullptr);
@@ -454,22 +448,15 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
     QMenu menu(this);
     menu.addSection(QStringLiteral("View"));
     auto* views = new QActionGroup(&menu);
-    // The presentations and the user's own at hand; the starting points
-    // shipped to copy from, one menu down (ADR-0283).
-    auto* starting = new QMenu(QStringLiteral("Starting points"), &menu);
-    starting->setObjectName(QStringLiteral("menu-list-view-starting-points"));
     for (const auto& definition : listViews()) {
         const auto id = QString::fromStdString(definition.id);
-        const auto presentation = ui::trackViewPresentationFromId(id).has_value();
-        auto* action = (definition.builtin && !presentation ? starting : &menu)
-                           ->addAction(QString::fromStdString(definition.name));
+        auto* action = menu.addAction(QString::fromStdString(definition.name));
         action->setObjectName(QStringLiteral("action-list-view-%1").arg(id));
         action->setCheckable(true);
         action->setChecked(tab != nullptr && tab->view_layout.view == id);
         views->addAction(action);
         connect(action, &QAction::triggered, this, [this, id] { chooseListView(id); });
     }
-    menu.addMenu(starting);
     menu.addSeparator();
     auto* edit = menu.addAction(QStringLiteral("Edit view…"));
     edit->setObjectName(QStringLiteral("action-edit-list-view"));

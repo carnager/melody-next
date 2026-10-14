@@ -74,8 +74,8 @@ tags(std::initializer_list<std::pair<std::string, std::vector<std::string>>> fie
 
 void shippedViewsAreValidAndAsTheyWere() {
     const auto& shipped = lists::shipped_list_views();
-    // The four presentations, then twelve starting points.
-    CHECK(shipped.size() == 16U);
+    // Two: albums with side artwork, and plain columns.
+    CHECK(shipped.size() == 2U);
     for (const auto& view : shipped) {
         CHECK(view.builtin);
         CHECK(lists::validate_list_view(view).empty());
@@ -90,7 +90,14 @@ void shippedViewsAreValidAndAsTheyWere() {
     };
     CHECK(beside && shown(*beside, "title") && !shown(*beside, "artist") &&
           !shown(*beside, "album") && shown(*beside, "artwork"));
-    CHECK(!shown(*lists::shipped_list_view(lists::compact_view_id), "date"));
+    CHECK(shown(*lists::shipped_list_view(lists::columns_view_id), "date"));
+    // Views once shipped are drawn by the one in their place.
+    CHECK(lists::retired_list_view_replacement("albums-header-artwork") ==
+          lists::albums_beside_view_id);
+    CHECK(lists::retired_list_view_replacement("compact-queue") == lists::columns_view_id);
+    CHECK(lists::retired_list_view_replacement("recently-added") == lists::columns_view_id);
+    CHECK(!lists::retired_list_view_replacement("plain-columns"));
+    CHECK(!lists::retired_list_view_replacement("view-123"));
     // Shipped views are not saved: they are always there as they are.
     const auto saved = lists::serialize_list_views(shipped);
     const auto restored = lists::deserialize_list_views(saved);
@@ -199,69 +206,47 @@ void rowsAreEvaluatedAndGrouped() {
 // ADR-0282: listening history read by expressions, under tkq-1's names; a
 // view that reads it -- or shows a history column -- says so, so its list's
 // history is fetched first.
-// The starting points say what they should of an ordinary row.
-void startingPointsShowWhatTheySay() {
-    const auto document = tags({{"ALBUMARTIST", {"Massive Attack"}},
-                                {"ALBUM", {"Mezzanine"}},
-                                {"DATE", {"1998"}},
-                                {"LABEL", {"Virgin"}},
-                                {"CATALOGNUMBER", {"WBRCD4"}}});
+// What a row says of itself: its technicals, its file, and (ADR-0283) when
+// it came into the library.
+void rowsSayWhatTheyAre() {
+    const auto document = tags({{"ALBUM", {"Mezzanine"}}});
     lists::ViewRow row;
     row.raw_path = "/music/Mezzanine/01 Angel.flac";
     row.metadata = &document;
-    row.codec = "flac";
     row.sample_rate = 44'100;
     row.bits = 16;
     row.bit_rate = 1'009'000;
-    row.duration_ms = 380'000;
     // Came into the library 2023-11-14, its album's newest a day later.
     row.added = 1'700'000'000;
     row.album_added = 1'700'086'400;
+    auto view = *lists::shipped_list_view(lists::columns_view_id);
+    view.id = "facts";
+    view.builtin = false;
+    for (const auto& [id, display] :
+         {std::pair{"rate", "$decimal($info(samplerate),1000,1) kHz"},
+          std::pair{"bits", "$info(bitspersample)-bit"}, std::pair{"bitrate", "$info(bitrate)"},
+          std::pair{"folder", "$info(directory)"}, std::pair{"added", "$left(%added%,10)"},
+          std::pair{"album-added", "$left(%albumadded%,10)"},
+          std::pair{"since", "%dayssinceadded%"}}) {
+        view.columns.push_back(expression_column(id, id, display));
+    }
+    const auto compiled = lists::CompiledListView::compile(view);
+    CHECK(compiled.has_value());
+    if (!compiled) {
+        return;
+    }
     const std::vector rows{row};
-    const auto run = [&rows](std::string_view id) {
-        const auto compiled = lists::CompiledListView::compile(*lists::shipped_list_view(id));
-        auto evaluated = lists::evaluate_list_rows(*compiled, rows);
-        auto groups = lists::evaluate_list_groups(*compiled, rows, *evaluated);
-        return std::pair{std::move(evaluated->front()),
-                         groups->empty() ? lists::EvaluatedGroup{} : groups->front()};
-    };
-    const auto [audio, none] = run("audio-details");
-    CHECK((audio.cells ==
-           std::vector<std::string>{"flac", "44.1 kHz", "16-bit", "1009 kbps", "01 Angel.flac"}));
-    const auto [artist, by_artist] = run("grouped-by-artist");
-    CHECK(by_artist.title == "Massive Attack" && by_artist.details == "1 track · 6:20");
-    CHECK(artist.subgroup_label == "Mezzanine · 1998");
-    const auto [label, by_label] = run("grouped-by-label");
-    CHECK(by_label.title == "Virgin" && label.cells == std::vector<std::string>{"WBRCD4"});
-    const auto [genre, by_genre] = run("grouped-by-genre");
-    CHECK(by_genre.title == "No genre");
-    CHECK(lists::CompiledListView::compile(*lists::shipped_list_view("listening-history"))
-              ->reads_history());
-    // ADR-0283: when it came, and in which quality.
-    const auto [added, by_album] = run("recently-added");
-    CHECK(added.cells.front().starts_with("2023-11-1") && added.cells.front().size() == 10U);
-    CHECK(by_album.title == "Mezzanine" &&
-          by_album.details.starts_with("Massive Attack · added 2023-11-1"));
-    const auto [quality, by_quality] = run("grouped-by-quality");
-    CHECK(by_quality.title == "flac · 16-bit · 44.1 kHz");
-    const auto [year, by_year] = run("grouped-by-year");
-    CHECK(by_year.title == "1998" && year.subgroup_label == "Massive Attack · Mezzanine");
-    const auto [decade, by_decade] = run("grouped-by-decade");
-    CHECK(by_decade.title == "1990s");
-    const auto [folder, by_folder] = run("grouped-by-folder");
-    CHECK(by_folder.title == "/music/Mezzanine" && by_folder.details == "1 file");
-    const auto [check_row, none_grouped] = run("tag-check");
-    CHECK((check_row.cells == std::vector<std::string>{"missing", "missing", "missing"}));
-    // Days since added, as the query language has them.
-    auto days = *lists::shipped_list_view(lists::columns_view_id);
-    days.id = "days";
-    days.builtin = false;
-    days.columns.push_back(expression_column("since", "Since", "%dayssinceadded%"));
-    const auto [since, ungrouped] = [&] {
-        const auto compiled = lists::CompiledListView::compile(days);
-        return std::pair{lists::evaluate_list_rows(*compiled, rows)->front(), 0};
-    }();
-    CHECK(!since.cells.back().empty() && std::stoll(since.cells.back()) > 300);
+    const auto evaluated = lists::evaluate_list_rows(*compiled, rows);
+    CHECK(evaluated && evaluated->size() == 1U);
+    if (!evaluated) {
+        return;
+    }
+    const auto& cells = evaluated->front().cells;
+    CHECK(cells[0] == "44.1 kHz" && cells[1] == "16-bit" && cells[2] == "1009");
+    CHECK(cells[3] == "/music/Mezzanine");
+    CHECK(cells[4].starts_with("2023-11-1") && cells[4].size() == 10U);
+    CHECK(cells[5].starts_with("2023-11-1") && cells[5] >= cells[4]);
+    CHECK(!cells[6].empty() && std::stoll(cells[6]) > 300);
 }
 
 // ADR-0283: style words as expressions answer them, a cell's over its row's.
@@ -394,6 +379,6 @@ int main() {
     columnsSortNaturallyAndStably();
     historyIsReadByExpressions();
     stylesAreWordsExpressionsAnswer();
-    startingPointsShowWhatTheySay();
+    rowsSayWhatTheyAre();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

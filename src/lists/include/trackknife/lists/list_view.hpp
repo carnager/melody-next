@@ -78,13 +78,15 @@ struct ListView {
     friend bool operator==(const ListView&, const ListView&) = default;
 };
 
-// The shipped views: the four presentations ADR-0027 had, each as it was.
+// The shipped views: albums with side artwork, and plain columns.
 inline constexpr std::string_view albums_beside_view_id = "albums-side-artwork";
-inline constexpr std::string_view albums_header_view_id = "albums-header-artwork";
 inline constexpr std::string_view columns_view_id = "plain-columns";
-inline constexpr std::string_view compact_view_id = "compact-queue";
 [[nodiscard]] const std::vector<ListView>& shipped_list_views();
 [[nodiscard]] const ListView* shipped_list_view(std::string_view id);
+// A view once shipped and since retired -- header artwork, the compact
+// queue, the starting points -- and the shipped one a list using it is drawn
+// by now.
+[[nodiscard]] std::optional<std::string_view> retired_list_view_replacement(std::string_view id);
 
 // One problem with a view, and which of its expressions it is in:
 // "column:<id>:display", "column:<id>:sort", "group:key", "group:title",

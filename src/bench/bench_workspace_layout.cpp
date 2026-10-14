@@ -545,25 +545,12 @@ void BenchMainWindow::buildWorkspace() {
     track_presentation_group_->addAction(track_albums_side_action_);
     connect(track_albums_side_action_, &QAction::triggered, this,
             [this] { setTrackViewPresentation(ui::TrackViewPresentation::albums_side_artwork); });
-    track_albums_header_action_ =
-        track_layout_menu->addAction(QStringLiteral("Albums with header artwork"));
-    track_albums_header_action_->setObjectName(QStringLiteral("action-track-layout-albums-header"));
-    track_albums_header_action_->setCheckable(true);
-    track_presentation_group_->addAction(track_albums_header_action_);
-    connect(track_albums_header_action_, &QAction::triggered, this,
-            [this] { setTrackViewPresentation(ui::TrackViewPresentation::albums_header_artwork); });
     track_plain_columns_action_ = track_layout_menu->addAction(QStringLiteral("Plain columns"));
     track_plain_columns_action_->setObjectName(QStringLiteral("action-track-layout-plain"));
     track_plain_columns_action_->setCheckable(true);
     track_presentation_group_->addAction(track_plain_columns_action_);
     connect(track_plain_columns_action_, &QAction::triggered, this,
             [this] { setTrackViewPresentation(ui::TrackViewPresentation::plain_columns); });
-    track_compact_queue_action_ = track_layout_menu->addAction(QStringLiteral("Compact queue"));
-    track_compact_queue_action_->setObjectName(QStringLiteral("action-track-layout-compact"));
-    track_compact_queue_action_->setCheckable(true);
-    track_presentation_group_->addAction(track_compact_queue_action_);
-    connect(track_compact_queue_action_, &QAction::triggered, this,
-            [this] { setTrackViewPresentation(ui::TrackViewPresentation::compact_queue); });
     track_layout_menu->addSeparator();
     // ADR-0282: list views of the user's own.
     auto* edit_view = track_layout_menu->addAction(QStringLiteral("Edit list view…"));

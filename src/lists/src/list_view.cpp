@@ -300,31 +300,6 @@ builtin_columns(const std::initializer_list<std::string_view> shown) {
     return columns;
 }
 
-// A shipped view's own column.
-[[nodiscard]] ViewColumn expression(std::string id, std::string title, std::string display,
-                                    std::string sort = {},
-                                    const ColumnAlignment alignment = ColumnAlignment::left) {
-    return {.id = std::move(id),
-            .visible = true,
-            .title = std::move(title),
-            .display = std::move(display),
-            .sort = std::move(sort),
-            .alignment = alignment,
-            .expands = false,
-            .style = {}};
-}
-
-[[nodiscard]] ViewColumn styled(ViewColumn column, std::string style) {
-    column.style = std::move(style);
-    return column;
-}
-
-[[nodiscard]] std::vector<ViewColumn> with(std::vector<ViewColumn> columns,
-                                           std::initializer_list<ViewColumn> more) {
-    columns.insert(columns.end(), more.begin(), more.end());
-    return columns;
-}
-
 } // namespace
 
 bool is_builtin_column(const std::string_view id) {
@@ -332,6 +307,9 @@ bool is_builtin_column(const std::string_view id) {
 }
 
 const std::vector<ListView>& shipped_list_views() {
+    // Two, deliberately: albums with their covers beside them, and plain
+    // columns. Everything else is a view of the user's own, made in the
+    // editor -- the many shipped before were more menu than help.
     static const std::vector<ListView> views{
         {.id = std::string{albums_beside_view_id},
          .name = "Albums with side artwork",
@@ -341,22 +319,10 @@ const std::vector<ListView>& shipped_list_views() {
          .group_title = {},
          .group_details = {},
          .subgroup = std::nullopt,
+         .row_style = {},
          // The album's header says the artist, album and date; a track whose
          // artist differs says so after its title.
-         .row_style = {},
          .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
-         .builtin = true},
-        {.id = std::string{albums_header_view_id},
-         .name = "Albums with header artwork",
-         .artwork = ViewArtwork::header,
-         .grouping = ViewGrouping::album,
-         .group_key = {},
-         .group_title = {},
-         .group_details = {},
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns = builtin_columns(
-             {"artwork", "artist", "track-number", "title", "album", "date", "length"}),
          .builtin = true},
         {.id = std::string{columns_view_id},
          .name = "Plain columns",
@@ -369,190 +335,24 @@ const std::vector<ListView>& shipped_list_views() {
          .row_style = {},
          .columns = builtin_columns({"artist", "track-number", "title", "album", "date", "length"}),
          .builtin = true},
-        {.id = std::string{compact_view_id},
-         .name = "Compact queue",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::none,
-         .group_key = {},
-         .group_title = {},
-         .group_details = {},
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns = builtin_columns({"artist", "track-number", "title", "album", "length"}),
-         .builtin = true},
-        // ADR-0282: common starting points -- grouped by artist, genre or
-        // label, the files' audio, and their listening -- to use or copy.
-        {.id = "grouped-by-artist",
-         .name = "Grouped by artist",
-         .artwork = ViewArtwork::beside,
-         .grouping = ViewGrouping::expression,
-         .group_key = "%albumartist%",
-         .group_title = "%albumartist%",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup =
-             ViewSubgroup{.key = "%album%|%date%", .label = "%album%$if(%date%, · %date%,)"},
-         .row_style = {},
-         .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
-         .builtin = true},
-        {.id = "grouped-by-genre",
-         .name = "Grouped by genre",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "%genre%",
-         .group_title = "$if2(%genre%,No genre)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns = builtin_columns({"artist", "title", "album", "date", "length"}),
-         .builtin = true},
-        {.id = "grouped-by-label",
-         .name = "Grouped by label",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "%label%",
-         .group_title = "$if2(%label%,No label)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup = ViewSubgroup{.key = "%album%", .label = "%album%"},
-         .row_style = {},
-         .columns = with(builtin_columns({"artist", "title", "date", "length"}),
-                         {expression("catalog", "Catalogue", "%catalognumber%")}),
-         .builtin = true},
-        {.id = "audio-details",
-         .name = "Audio details",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::none,
-         .group_key = {},
-         .group_title = {},
-         .group_details = {},
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns =
-             with(builtin_columns({"artist", "title", "album", "length"}),
-                  {expression("codec", "Codec", "$info(codec)"),
-                   expression("rate", "Rate",
-                              "$if($info(samplerate),"
-                              "$decimal($info(samplerate),1000,1) kHz,)",
-                              "$info(samplerate)", ColumnAlignment::right),
-                   expression("bits", "Bits", "$if($info(bitspersample),$info(bitspersample)-bit,)",
-                              "$info(bitspersample)", ColumnAlignment::right),
-                   expression("bitrate", "Bitrate", "$if($info(bitrate),$info(bitrate) kbps,)",
-                              "$info(bitrate)", ColumnAlignment::right),
-                   expression("file", "File", "$info(filename_ext)")}),
-         .builtin = true},
-        {.id = "listening-history",
-         .name = "Listening history",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::none,
-         .group_key = {},
-         .group_title = {},
-         .group_details = {},
-         .subgroup = std::nullopt,
-         .row_style = "$if(%playcount%,,quiet)",
-         .columns = with(builtin_columns({"artist", "title", "album", "length", "rating",
-                                          "play-count", "last-played"}),
-                         {expression("since", "Days since", "%dayssinceplayed%",
-                                     "%dayssinceplayed%", ColumnAlignment::right)}),
-         .builtin = true},
-        // ADR-0283: more starting points.
-        {.id = "grouped-by-year",
-         .name = "Grouped by year",
-         .artwork = ViewArtwork::beside,
-         .grouping = ViewGrouping::expression,
-         .group_key = "$left(%date%,4)",
-         .group_title = "$if2($left(%date%,4),No year)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup =
-             ViewSubgroup{.key = "%albumartist%|%album%", .label = "%albumartist% · %album%"},
-         .row_style = {},
-         .columns = builtin_columns({"artwork", "track-number", "title", "length"}),
-         .builtin = true},
-        {.id = "grouped-by-decade",
-         .name = "Grouped by decade",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "$left(%date%,3)",
-         .group_title = "$if($left(%date%,3),$left(%date%,3)0s,No year)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns = builtin_columns({"artist", "title", "album", "date", "length"}),
-         .builtin = true},
-        {.id = "grouped-by-folder",
-         .name = "Grouped by folder",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "$info(directory)",
-         .group_title = "$info(directory)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),file,files)",
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns = with(builtin_columns({"artist", "title", "length"}),
-                         {expression("file", "File", "$info(filename_ext)")}),
-         .builtin = true},
-        {.id = "classical",
-         .name = "Classical",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "%composer%",
-         .group_title = "$if2(%composer%,No composer)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks) · %group_length%",
-         .subgroup = ViewSubgroup{.key = "%work%", .label = "%work%"},
-         .row_style = {},
-         .columns = with(builtin_columns({"title", "artist", "length"}),
-                         {expression("conductor", "Conductor", "%conductor%")}),
-         .builtin = true},
-        {.id = "tag-check",
-         .name = "Tag check",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::none,
-         .group_key = {},
-         .group_title = {},
-         .group_details = {},
-         .subgroup = std::nullopt,
-         // What a tag may lack, said where it does: sorted by a column, the
-         // gaps come together.
-         .row_style = {},
-         .columns =
-             with(builtin_columns({"artist", "track-number", "title", "album", "date"}),
-                  {styled(expression("genre", "Genre", "$if2(%genre%,missing)"),
-                          "$if(%genre%,,warning)"),
-                   styled(expression("gain", "ReplayGain", "$if2(%replaygain_track_gain%,missing)"),
-                          "$if(%replaygain_track_gain%,,warning)"),
-                   styled(expression("musicbrainz", "MusicBrainz",
-                                     "$if(%musicbrainz_trackid%,yes,missing)"),
-                          "$if(%musicbrainz_trackid%,,warning)")}),
-         .builtin = true},
-        {.id = "grouped-by-quality",
-         .name = "Grouped by quality",
-         .artwork = ViewArtwork::none,
-         .grouping = ViewGrouping::expression,
-         .group_key = "$info(codec)|$info(bitspersample)|$info(samplerate)",
-         .group_title = "$if2($info(codec),Not known)"
-                        "$if($info(bitspersample), · $info(bitspersample)-bit,)"
-                        "$if($info(samplerate), · $decimal($info(samplerate),1000,1) kHz,)",
-         .group_details = "%group_tracks% $if($eq(%group_tracks%,1),track,tracks)",
-         .subgroup = std::nullopt,
-         .row_style = {},
-         .columns =
-             with(builtin_columns({"artist", "title", "album", "length"}),
-                  {expression("bitrate", "Bitrate", "$if($info(bitrate),$info(bitrate) kbps,)",
-                              "$info(bitrate)", ColumnAlignment::right)}),
-         .builtin = true},
-        {.id = "recently-added",
-         .name = "Recently added",
-         .artwork = ViewArtwork::header,
-         .grouping = ViewGrouping::expression,
-         .group_key = "%albumadded%|%albumartist%|%album%",
-         .group_title = "%album%",
-         .group_details = "%albumartist% · added $left(%albumadded%,10)",
-         .subgroup = std::nullopt,
-         // Sorted by Added, newest first, the albums come as they came.
-         .row_style = {},
-         .columns = with(builtin_columns({"artwork", "track-number", "title", "length"}),
-                         {expression("added", "Added", "$left(%added%,10)", "%added%")}),
-         .builtin = true},
     };
     return views;
+}
+
+std::optional<std::string_view> retired_list_view_replacement(const std::string_view id) {
+    // Albums with their covers in the header strip are albums still.
+    if (id == "albums-header-artwork") {
+        return albums_beside_view_id;
+    }
+    static constexpr std::array retired{
+        "compact-queue",     "grouped-by-artist", "grouped-by-genre", "grouped-by-label",
+        "audio-details",     "listening-history", "grouped-by-year",  "grouped-by-decade",
+        "grouped-by-folder", "classical",         "tag-check",        "grouped-by-quality",
+        "recently-added"};
+    if (std::ranges::contains(retired, id)) {
+        return columns_view_id;
+    }
+    return std::nullopt;
 }
 
 const ListView* shipped_list_view(const std::string_view id) {

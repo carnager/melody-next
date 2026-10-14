@@ -21,7 +21,9 @@ quietly, a missing tag shown as a warning.
   older engine says neither; they read as not known. Expressions read them
   as `added` and `albumadded` (local date and time, which sorts as it reads)
   and, as `tkq-1` has them, `dayssinceadded` and `albumdayssinceadded`.
-- **More starting points ship**, read-only and copyable: Grouped by year
+- **More starting points ship** *(withdrawn 2026-10-14 with those of
+  ADR-0282: two views ship, and a list using a retired one is drawn by the
+  one in its place)*, read-only and copyable: Grouped by year
   (album subgroups), Grouped by decade, Grouped by folder, Classical
   (composer, work), Tag check (missing genre, ReplayGain and MusicBrainz id,
   as warnings), Grouped by quality (codec, bits, rate) and Recently added

@@ -779,8 +779,9 @@ void Workspace::closeList(ListTab& tab) {
 
 ui::TrackViewLayout
 Workspace::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) {
-    const auto* view =
-        lists::shipped_list_view(ui::trackViewPresentationId(presentation).toStdString());
+    const auto id = ui::trackViewPresentationId(presentation).toStdString();
+    const auto* view = lists::shipped_list_view(
+        lists::retired_list_view_replacement(id).value_or(std::string_view{id}));
     return trackViewLayoutFor(view != nullptr ? *view : lists::shipped_list_views().front());
 }
 
@@ -845,8 +846,15 @@ ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
         // ADR-0282: a layout from before list views is its presentation's
         // shipped view -- or, where its columns were arranged otherwise, a
         // copy arranged so, shared by every tab arranged the same.
-        const auto* shipped = lists::shipped_list_view(
-            ui::trackViewPresentationId(decoded->presentation).toStdString());
+        const auto presentation = ui::trackViewPresentationId(decoded->presentation).toStdString();
+        const auto* shipped = lists::shipped_list_view(presentation);
+        // A presentation no longer shipped: drawn by the one in its place,
+        // as it is -- its arrangement was that presentation's, not this one's.
+        if (shipped == nullptr) {
+            shipped = lists::shipped_list_view(lists::retired_list_view_replacement(presentation)
+                                                   .value_or(lists::albums_beside_view_id));
+            decoded->columns.clear();
+        }
         std::vector<lists::ViewColumn> arranged;
         for (const auto& column : decoded->columns) {
             const auto found = std::ranges::find(shipped->columns, column.id.toStdString(),
@@ -857,7 +865,7 @@ ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
                 arranged.push_back(std::move(placed));
             }
         }
-        if (arranged == shipped->columns) {
+        if (arranged.empty() || arranged == shipped->columns) {
             decoded->view = QString::fromStdString(shipped->id);
         } else if (auto copy = listViewCopy(*shipped, arranged,
                                             QString::fromStdString(shipped->name) +

@@ -75,6 +75,10 @@ std::optional<lists::ListView> findListView(const QString& id) {
     if (const auto* shipped = lists::shipped_list_view(text)) {
         return *shipped;
     }
+    // A view no longer shipped: the one that is now in its place.
+    if (const auto replacement = lists::retired_list_view_replacement(text)) {
+        return *lists::shipped_list_view(*replacement);
+    }
     if (auto custom = customListViews()) {
         if (const auto found = std::ranges::find(*custom, text, &lists::ListView::id);
             found != custom->end()) {

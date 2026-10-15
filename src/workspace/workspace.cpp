@@ -58,7 +58,7 @@ void Workspace::start() {
     persistence_timer_->setInterval(persist_debounce_ms);
     connect(persistence_timer_, &QTimer::timeout, this, [this] {
         persistNow(false);
-        refreshRatings();
+        refreshNewRatings();
     });
     tab_store_ = std::make_unique<TabStore>();
     // ADR-0259: once this window keeps its tabs itself, the lists it stored

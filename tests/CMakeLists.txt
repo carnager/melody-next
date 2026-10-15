@@ -921,6 +921,13 @@ if(TRACKKNIFE_BUILD_UI)
     target_compile_definitions(trackknife_library_panel_engine_tests PRIVATE
         TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME library-panel-engine COMMAND trackknife_library_panel_engine_tests)
+
+    qt_add_executable(trackknife_library_browser_merge_tests library_browser_merge_test.cpp)
+    target_link_libraries(trackknife_library_browser_merge_tests PRIVATE Trackknife::BenchUi
+        Qt6::Test trackknife_project_options trackknife_project_warnings)
+    add_test(NAME library-browser-merge COMMAND trackknife_library_browser_merge_tests)
+    set_tests_properties(library-browser-merge PROPERTIES TIMEOUT 120 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
     set_tests_properties(library-panel-engine PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 
@@ -959,6 +966,11 @@ if(TRACKKNIFE_BUILD_UI)
         trackknife_project_options trackknife_project_warnings)
     add_test(NAME local-list-edit COMMAND trackknife_local_list_edit_tests)
 
+    qt_add_executable(trackknife_local_list_model_tests local_list_model_test.cpp)
+    target_link_libraries(trackknife_local_list_model_tests PRIVATE Trackknife::BenchUi Qt6::Test
+        trackknife_project_options trackknife_project_warnings)
+    add_test(NAME local-list-model COMMAND trackknife_local_list_model_tests)
+
     qt_add_executable(trackknife_track_list_find_tests track_list_find_test.cpp)
     target_link_libraries(trackknife_track_list_find_tests PRIVATE Trackknife::BenchUi Qt6::Test
         trackknife_project_options trackknife_project_warnings)
@@ -967,7 +979,8 @@ if(TRACKKNIFE_BUILD_UI)
     target_link_libraries(trackknife_single_instance_tests PRIVATE Trackknife::BenchUi Qt6::Test
         Qt6::Concurrent trackknife_project_options trackknife_project_warnings)
     add_test(NAME single-instance COMMAND trackknife_single_instance_tests)
-    set_tests_properties(m3u8 local-list-edit track-list-find single-instance PROPERTIES TIMEOUT 30 ENVIRONMENT
+    set_tests_properties(m3u8 local-list-edit local-list-model track-list-find single-instance
+        PROPERTIES TIMEOUT 30 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 
     add_test(

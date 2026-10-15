@@ -183,59 +183,88 @@ void LocalListModel::setMissing(const std::vector<std::string>& checked,
 }
 
 void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
-    bool changed = false;
-    for (auto& row : rows_) {
-        const auto track_hash = QString::fromStdString(row.rating_hash);
-        if (!track_hash.isEmpty() && ratings.contains(track_hash)) {
-            const auto rating = ratings.value(track_hash);
-            if (row.rating != rating) {
-                row.rating = rating;
-                forgetEvaluation(row);
-                changed = true;
-            }
-        }
-        const auto album_hash = QString::fromStdString(row.album_rating_hash);
-        if (!album_hash.isEmpty() && ratings.contains(album_hash)) {
-            const auto rating = ratings.value(album_hash);
-            if (row.album_rating != rating) {
-                row.album_rating = rating;
-                changed = true;
-            }
-        }
+    RatingsByHash by_hash;
+    by_hash.reserve(static_cast<std::size_t>(ratings.size()));
+    for (auto rating = ratings.cbegin(); rating != ratings.cend(); ++rating) {
+        by_hash.emplace(rating.key().toStdString(), rating.value());
     }
-    if (changed) {
-        scheduleEvaluation();
-    }
-    if (changed && !rows_.empty()) {
-        // Album ratings paint over the artwork gutter, so both ends of the
-        // shared column contract refresh.
-        emit dataChanged(index(0, local_artwork_column),
-                         index(static_cast<int>(rows_.size()) - 1, local_artwork_column),
-                         {ui::track_album_rating_role});
-        emit dataChanged(index(0, local_rating_column),
-                         index(static_cast<int>(rows_.size()) - 1, local_rating_column),
-                         {Qt::DisplayRole, ui::track_rating_role});
-    }
+    adoptRatings(by_hash, nullptr);
 }
 
-QStringList LocalListModel::ratingHashes() const {
-    QStringList hashes;
-    QSet<QString> unique;
-    const auto append = [&](const std::string& value) {
-        if (value.empty()) {
-            return;
+void LocalListModel::applyRatings(const RatingsByHash& ratings) { adoptRatings(ratings, nullptr); }
+
+void LocalListModel::adoptKnownRatings(const RatingsByHash& known,
+                                       std::unordered_set<std::string>& unknown) {
+    adoptRatings(known, &unknown);
+}
+
+void LocalListModel::adoptRatings(const RatingsByHash& ratings,
+                                  std::unordered_set<std::string>* unknown) {
+    // By the rows' own bytes: a list of many thousands is looked up, not
+    // converted, row by row.
+    std::vector<int> tracks;
+    std::vector<int> albums;
+    for (std::size_t at = 0U; at < rows_.size(); ++at) {
+        auto& row = rows_[at];
+        if (!row.rating_hash.empty()) {
+            if (const auto found = ratings.find(row.rating_hash); found != ratings.end()) {
+                if (row.rating != found->second) {
+                    row.rating = found->second;
+                    forgetEvaluation(row);
+                    tracks.push_back(static_cast<int>(at));
+                }
+            } else if (unknown != nullptr) {
+                unknown->insert(row.rating_hash);
+            }
         }
-        const auto hash = QString::fromStdString(value);
-        if (!unique.contains(hash)) {
-            unique.insert(hash);
-            hashes.push_back(hash);
+        if (!row.album_rating_hash.empty()) {
+            if (const auto found = ratings.find(row.album_rating_hash); found != ratings.end()) {
+                if (row.album_rating != found->second) {
+                    row.album_rating = found->second;
+                    albums.push_back(static_cast<int>(at));
+                }
+            } else if (unknown != nullptr) {
+                unknown->insert(row.album_rating_hash);
+            }
         }
-    };
-    for (const auto& row : rows_) {
-        append(row.rating_hash);
-        append(row.album_rating_hash);
     }
-    return hashes;
+    if (tracks.empty() && albums.empty()) {
+        return;
+    }
+    scheduleEvaluation();
+    // Album ratings paint over the artwork gutter, so both ends of the
+    // shared column contract refresh -- the rows whose ratings changed.
+    std::vector<int> changed;
+    std::ranges::set_union(tracks, albums, std::back_inserter(changed));
+    emitRowRuns(changed, local_artwork_column, local_artwork_column, {ui::track_album_rating_role});
+    emitRowRuns(changed, local_rating_column, local_rating_column,
+                {Qt::DisplayRole, ui::track_rating_role});
+}
+
+void LocalListModel::emitRowRuns(const std::vector<int>& rows, const int first_column,
+                                 const int last_column, const QList<int>& roles) {
+    if (rows.empty()) {
+        return;
+    }
+    // Scattered over the list: once, from the first to the last, rather than
+    // a view hearing of each.
+    constexpr std::size_t most_runs = 32U;
+    std::size_t runs = 1U;
+    for (std::size_t at = 1U; at < rows.size() && runs <= most_runs; ++at) {
+        runs += rows[at] != rows[at - 1U] + 1 ? 1U : 0U;
+    }
+    if (runs > most_runs) {
+        emit dataChanged(index(rows.front(), first_column), index(rows.back(), last_column), roles);
+        return;
+    }
+    for (std::size_t at = 0U; at < rows.size();) {
+        auto end = at + 1U;
+        while (end < rows.size() && rows[end] == rows[end - 1U] + 1) {
+            ++end;
+        }
+        emit dataChanged(index(rows[at], first_column), index(rows[end - 1U], last_column), roles);
+        at = end;
+    }
 }
 
 void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row,
@@ -623,18 +652,37 @@ bool LocalListModel::describeRow(const int row, const core::StableId& entry,
     return true;
 }
 
+bool RawPathsAt::covers(const std::string_view raw_path) const {
+    if (paths_.empty()) {
+        return false;
+    }
+    if (paths_.contains(raw_path)) {
+        return true;
+    }
+    // Each folder above it: the path up to every '/' -- the empty one, the
+    // root's, included, as "under ''" always meant.
+    for (auto slash = raw_path.find('/'); slash != std::string_view::npos;
+         slash = raw_path.find('/', slash + 1U)) {
+        if (paths_.contains(raw_path.substr(0U, slash))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<core::StableId> LocalListModel::entriesAt(const std::vector<std::string>& raw_paths,
                                                       const bool everything) const {
     std::vector<core::StableId> entries;
+    static const std::vector<std::string> none;
+    const RawPathsAt at{everything ? none : raw_paths};
+    if (!everything && at.empty()) {
+        return entries;
+    }
     for (const auto& row : rows_) {
         if (row.segment) {
             continue;
         }
-        if (everything || std::ranges::any_of(raw_paths, [&row](const std::string& path) {
-                return row.raw_path == path ||
-                       (row.raw_path.size() > path.size() && row.raw_path.starts_with(path) &&
-                        row.raw_path[path.size()] == '/');
-            })) {
+        if (everything || at.covers(row.raw_path)) {
             entries.push_back(row.entry_id);
         }
     }

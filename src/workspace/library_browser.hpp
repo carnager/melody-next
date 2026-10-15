@@ -220,6 +220,7 @@ class LibraryBrowser final : public QObject {
     void libraryContentChanged();
 
   private:
+    friend class LibraryBrowserTest;
     struct Outcome {
         persistence::LibraryPage page;
         // A view's way to a file being located, its node at each level.
@@ -260,12 +261,17 @@ class LibraryBrowser final : public QObject {
     static void prepareEntry(persistence::LibraryEntry& entry,
                              const persistence::LibraryQuery& query);
     void describeItem(QStandardItem& item, const persistence::LibraryEntry& entry);
+    [[nodiscard]] const QIcon& kindIcon(persistence::LibraryEntryKind kind);
     // The tree's top level as reload() asks it; none for a search, whose
     // groups carry their own.
     [[nodiscard]] std::optional<persistence::LibraryQuery> topQuery() const;
     // Every loaded level asked again and merged into the rows there are.
     void refreshInPlace();
     void mergeChildren(const QPersistentModelIndex& parent, persistence::LibraryQuery query);
+    // A level's rows made what `page` says, in its order: an entry's row
+    // kept -- with what it holds, open or not -- moved where it is now.
+    void mergeLevel(QStandardItem& target, persistence::LibraryPage page,
+                    const persistence::LibraryQuery& query, bool root);
     void loadFilterChildren(const QPersistentModelIndex& parent,
                             std::shared_ptr<const query::CompiledTkq> compiled);
     void refreshSourceLabel();
@@ -281,6 +287,7 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] std::shared_ptr<engine::Catalogue> openCatalogue() const;
     EngineKey engine_;
     QStandardItemModel* model_{nullptr};
+    QHash<int, QIcon> kind_icons_;
     QThreadPool pool_;
     QFutureWatcher<Outcome> query_watcher_;
     QFutureWatcher<ScanOutcome> scan_watcher_;

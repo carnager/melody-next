@@ -654,7 +654,16 @@ const LocalTrackRow* Workspace::playingRow(const QString& entry) {
     };
     // The list it was played from, first: the header reads as the row does.
     if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-        if (const auto* row = in(tab->model->rows())) {
+        const auto& rows = tab->model->rows();
+        if (const auto& hint = playing_row_hint_;
+            hint && hint->entry == *identity && hint->document == tab->document.id &&
+            hint->row < rows.size() && rows[hint->row].entry_id == *identity) {
+            return &rows[hint->row];
+        }
+        if (const auto* row = in(rows)) {
+            playing_row_hint_ = PlayingRowHint{.entry = *identity,
+                                               .document = tab->document.id,
+                                               .row = static_cast<std::size_t>(row - rows.data())};
             return row;
         }
     }

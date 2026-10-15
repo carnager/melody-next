@@ -28,6 +28,8 @@ constexpr int more_role = library_more_role;
 // The line an empty top level shows, so its text can follow what is learned
 // later about the library's folders.
 constexpr int empty_state_role = Qt::UserRole + 20;
+// Its row was said by describeItem() -- not by a search's flat results.
+constexpr int described_role = Qt::UserRole + 21;
 
 QString text(const std::string& value) { return QString::fromUtf8(value); }
 std::string bytes(const QString& value) { return value.toUtf8().toStdString(); }
@@ -789,12 +791,9 @@ void LibraryBrowser::describeItem(QStandardItem& item, const persistence::Librar
     item.setEditable(false);
     item.setDragEnabled(entry.available > 0U);
     item.setDropEnabled(false);
-    item.setIcon(QIcon::fromTheme(
-        entry.kind == persistence::LibraryEntryKind::artist  ? QStringLiteral("avatar-default")
-        : entry.kind == persistence::LibraryEntryKind::album ? QStringLiteral("media-optical-audio")
-        : entry.kind == persistence::LibraryEntryKind::group ? QStringLiteral("folder-music")
-                                                             : QStringLiteral("audio-x-generic")));
+    item.setIcon(kindIcon(entry.kind));
     item.setData(QVariant::fromValue(entry), entry_role);
+    item.setData(true, described_role);
     // A track by its file, an album by whose it is, an artist by name alone.
     item.setToolTip(entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
                     : entry.kind == persistence::LibraryEntryKind::group
@@ -823,6 +822,21 @@ void LibraryBrowser::describeItem(QStandardItem& item, const persistence::Librar
         // cannot follow.
         item.setColumnCount(1);
     }
+}
+
+// Looked up in the theme once; a theme icon follows a change of theme.
+const QIcon& LibraryBrowser::kindIcon(const persistence::LibraryEntryKind kind) {
+    const auto at = static_cast<int>(kind);
+    if (const auto found = kind_icons_.constFind(at); found != kind_icons_.constEnd()) {
+        return *found;
+    }
+    return *kind_icons_.insert(at, QIcon::fromTheme(kind == persistence::LibraryEntryKind::artist
+                                                        ? QStringLiteral("avatar-default")
+                                                    : kind == persistence::LibraryEntryKind::album
+                                                        ? QStringLiteral("media-optical-audio")
+                                                    : kind == persistence::LibraryEntryKind::group
+                                                        ? QStringLiteral("folder-music")
+                                                        : QStringLiteral("audio-x-generic")));
 }
 
 std::optional<persistence::LibraryQuery> LibraryBrowser::topQuery() const {
@@ -924,70 +938,110 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
                  if (target == nullptr) {
                      return;
                  }
-                 // Rows that are no entry -- "Show more…", "No matches" -- go;
-                 // what stays is matched by its entry.
-                 for (int row = target->rowCount() - 1; row >= 0; --row) {
-                     if (!target->child(row)->data(entry_role).isValid()) {
-                         target->removeRow(row);
-                     }
-                 }
-                 int at = 0;
-                 for (auto entry : outcome.page.entries) {
-                     prepareEntry(entry, query);
-                     const auto key = entryKey(entry);
-                     int found = -1;
-                     for (int row = at; row < target->rowCount(); ++row) {
-                         if (entryKey(target->child(row)
-                                          ->data(entry_role)
-                                          .value<persistence::LibraryEntry>()) == key) {
-                             found = row;
-                             break;
-                         }
-                     }
-                     QStandardItem* item = nullptr;
-                     if (found == at) {
-                         item = target->child(at);
-                     } else if (found > at) {
-                         // Moved: taken with what it holds, and opened again.
-                         auto taken = target->takeRow(found);
-                         target->insertRow(at, taken);
-                         item = target->child(at);
-                         if (expanded_entries_.contains(key)) {
-                             emit expandRequested(item->index());
-                         }
-                     } else {
-                         item = new QStandardItem;
-                         target->insertRow(at, item);
-                     }
-                     // Said again as it is now: counts, ratings, what is
-                     // available -- its rows and whether they are open kept.
-                     describeItem(*item, entry);
-                     if (found < 0 && expanded_entries_.contains(key)) {
-                         emit expandRequested(item->index());
-                     }
-                     ++at;
-                 }
-                 if (target->rowCount() > at) {
-                     target->removeRows(at, target->rowCount() - at);
-                 }
-                 if (outcome.page.more) {
-                     auto next = query;
-                     next.offset = outcome.page.entries.size();
-                     auto* more = new QStandardItem(tr("Show more…"));
-                     more->setEditable(false);
-                     more->setDragEnabled(false);
-                     more->setData(true, more_role);
-                     more->setData(QVariant::fromValue(next), query_role);
-                     target->appendRow(more);
-                 } else if (target->rowCount() == 0) {
-                     const bool top = root && query.text.empty();
-                     auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
-                     empty->setEnabled(false);
-                     empty->setData(top, empty_state_role);
-                     target->appendRow(empty);
-                 }
+                 mergeLevel(*target, std::move(outcome.page), query, root);
              },
              true});
+}
+
+void LibraryBrowser::mergeLevel(QStandardItem& target, persistence::LibraryPage page,
+                                const persistence::LibraryQuery& query, const bool root) {
+    // Rows that are no entry -- "Show more…", "No matches" -- go;
+    // what stays is matched by its entry.
+    for (int row = target.rowCount() - 1; row >= 0; --row) {
+        if (!target.child(row)->data(entry_role).isValid()) {
+            target.removeRow(row);
+        }
+    }
+    // The rows there are, by their entries' keys, in their order: each
+    // entry finds its row by a lookup, not by reading every row after it.
+    struct Kept {
+        // Its first row's entry, as that row holds it -- shared, not copied.
+        QVariant entry;
+        std::vector<QStandardItem*> items;
+        std::size_t next{0U};
+    };
+    const auto entry_type = QMetaType::fromType<persistence::LibraryEntry>();
+    QHash<QByteArray, Kept> kept;
+    kept.reserve(target.rowCount());
+    for (int row = 0; row < target.rowCount(); ++row) {
+        auto* child = target.child(row);
+        auto held = child->data(entry_role);
+        if (held.metaType() != entry_type) {
+            continue;
+        }
+        auto& slot =
+            kept[entryKey(*static_cast<const persistence::LibraryEntry*>(held.constData()))];
+        if (slot.items.empty()) {
+            slot.entry = std::move(held);
+        }
+        slot.items.push_back(child);
+    }
+    int at = 0;
+    for (auto& entry : page.entries) {
+        prepareEntry(entry, query);
+        const auto key = entryKey(entry);
+        // The first row of that key not yet placed: rows before `at` are.
+        int found = -1;
+        const persistence::LibraryEntry* was = nullptr;
+        if (const auto slot = kept.find(key); slot != kept.end()) {
+            while (slot->next < slot->items.size() && found < 0) {
+                const auto row = slot->items[slot->next++]->row();
+                if (row >= at) {
+                    found = row;
+                    // Only the first of a key's rows is compared; another is
+                    // said again, as every row once was.
+                    was =
+                        slot->next == 1U
+                            ? static_cast<const persistence::LibraryEntry*>(slot->entry.constData())
+                            : nullptr;
+                }
+            }
+        }
+        QStandardItem* item = nullptr;
+        if (found == at) {
+            item = target.child(at);
+        } else if (found > at) {
+            // Moved: taken with what it holds, and opened again.
+            auto taken = target.takeRow(found);
+            target.insertRow(at, taken);
+            item = target.child(at);
+            if (expanded_entries_.contains(key)) {
+                emit expandRequested(item->index());
+            }
+        } else {
+            item = new QStandardItem;
+            target.insertRow(at, item);
+        }
+        // Said again as it is now: counts, ratings, what is available --
+        // its rows and whether they are open kept. A row saying it already
+        // is left as it is.
+        if (was == nullptr || !item->data(described_role).toBool() || !(*was == entry)) {
+            describeItem(*item, entry);
+        }
+        if (found < 0 && expanded_entries_.contains(key)) {
+            emit expandRequested(item->index());
+        }
+        ++at;
+    }
+    if (target.rowCount() > at) {
+        target.removeRows(at, target.rowCount() - at);
+    }
+    if (page.more) {
+        auto next = query;
+        next.offset = page.entries.size();
+        auto* more = new QStandardItem(tr("Show more…"));
+        more->setEditable(false);
+        more->setDragEnabled(false);
+        more->setData(true, more_role);
+        more->setData(QVariant::fromValue(next), query_role);
+        target.appendRow(more);
+    } else if (target.rowCount() == 0) {
+        const bool top = root && query.text.empty();
+        auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
+        empty->setEnabled(false);
+        empty->setData(top, empty_state_role);
+        target.appendRow(empty);
+    }
 }
 
 void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,

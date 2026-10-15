@@ -6,8 +6,10 @@
 #include "uicommon/track_row_roles.hpp"
 
 #include <QApplication>
+#include <QEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QStyle>
 #include <QTableView>
@@ -15,28 +17,82 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 
 namespace trackknife::ui {
+
+// What the view a delegate draws for says of its columns and rows, by the
+// properties set on it: each looked up by name once, and again only after
+// one of them is set -- not a dozen lookups for every cell drawn.
+class TrackViewSettings final : public QObject {
+  public:
+    explicit TrackViewSettings(QObject* delegate) : QObject(delegate) {}
+
+    // The view, as the delegate's parent; null when that is none. The
+    // properties are read from the parent, whatever it is.
+    [[nodiscard]] const QTableView* view() const {
+        return qobject_cast<const QTableView*>(parent()->parent());
+    }
+    [[nodiscard]] const QVariant& property(const char* name) const {
+        auto* current = parent()->parent();
+        if (current != watched_) {
+            if (watched_ != nullptr) {
+                watched_->removeEventFilter(const_cast<TrackViewSettings*>(this));
+            }
+            watched_ = current;
+            if (current != nullptr) {
+                current->installEventFilter(const_cast<TrackViewSettings*>(this));
+            }
+            known_.clear();
+        }
+        for (const auto& [known_name, value] : known_) {
+            if (known_name == name) {
+                return value;
+            }
+        }
+        known_.emplace_back(name, current != nullptr ? current->property(name) : QVariant{});
+        return known_.back().second;
+    }
+
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched == watched_ && event->type() == QEvent::DynamicPropertyChange) {
+            known_.clear();
+        }
+        return false;
+    }
+
+  private:
+    mutable QPointer<QObject> watched_;
+    // A deque: a value handed out stays where it is as others are added.
+    mutable std::deque<std::pair<const char*, QVariant>> known_;
+};
+
 namespace {
 
-[[nodiscard]] int configuredColumn(const QObject* owner, const char* property, const int fallback) {
-    const auto* view = qobject_cast<const QTableView*>(owner->parent());
-    if (view == nullptr || !view->property(property).isValid()) {
+[[nodiscard]] int configuredColumn(const TrackViewSettings& settings, const char* property,
+                                   const int fallback) {
+    if (settings.view() == nullptr) {
         return fallback;
     }
-    return view->property(property).toInt();
+    const auto& value = settings.property(property);
+    return value.isValid() ? value.toInt() : fallback;
 }
 
-[[nodiscard]] bool configuredFlag(const QObject* owner, const char* property) {
-    const auto* view = qobject_cast<const QTableView*>(owner->parent());
-    return view != nullptr && view->property(property).toBool();
+[[nodiscard]] bool configuredFlag(const TrackViewSettings& settings, const char* property) {
+    return settings.view() != nullptr && settings.property(property).toBool();
 }
 
 // A lone track is an album of its own (ADR-0250).
-[[nodiscard]] TrackGroupColumns groupColumns(const QObject* owner) {
-    return {.album = configuredColumn(owner, track_album_column_property, track_album_column),
-            .date = configuredColumn(owner, track_date_column_property, track_date_column),
+[[nodiscard]] TrackGroupColumns groupColumns(const TrackViewSettings& settings) {
+    return {.album = configuredColumn(settings, track_album_column_property, track_album_column),
+            .date = configuredColumn(settings, track_date_column_property, track_date_column),
             .lone_tracks_grouped = true};
+}
+
+[[nodiscard]] int rowLines(const TrackViewSettings& settings) {
+    const auto& lines = settings.property(track_row_lines_property);
+    return lines.isValid() ? std::clamp(lines.toInt(), 1, 3) : 1;
 }
 
 // A colour between two, `amount` of the way from `from` to `to`.
@@ -180,15 +236,15 @@ void paintSecondLine(QPainter* painter, const QStyleOptionViewItem& first_line, 
     painter->restore();
 }
 
-TrackLinesDelegate::TrackLinesDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
+TrackLinesDelegate::TrackLinesDelegate(QObject* parent)
+    : QStyledItemDelegate(parent), settings_(new TrackViewSettings(this)) {}
 
 void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                                const QModelIndex& index) const {
     // A list not grouped, each row its own cover where the cover column is.
-    if (const auto* view = qobject_cast<const QTableView*>(parent());
-        view != nullptr && view->property(track_row_covers_property).toBool() &&
+    if (settings_->view() != nullptr && configuredFlag(*settings_, track_row_covers_property) &&
         index.column() ==
-            configuredColumn(this, track_artwork_column_property, track_artwork_column)) {
+            configuredColumn(*settings_, track_artwork_column_property, track_artwork_column)) {
         auto item = option;
         initStyleOption(&item, index);
         const auto* widget = item.widget;
@@ -214,14 +270,14 @@ void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
         } else {
             const auto album = index
                                    .siblingAtColumn(configuredColumn(
-                                       this, track_album_column_property, track_album_column))
+                                       *settings_, track_album_column_property, track_album_column))
                                    .data()
                                    .toString();
             paintInitialsTile(painter, target, album, option.palette);
         }
         return;
     }
-    const auto lines = trackRowLines(parent());
+    const auto lines = rowLines(*settings_);
     if (lines <= 1) {
         QStyledItemDelegate::paint(painter, option, index);
         return;
@@ -244,21 +300,22 @@ void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
                     index.data(track_second_line_role).toString(), lines);
 }
 
-QueueItemDelegate::QueueItemDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
+QueueItemDelegate::QueueItemDelegate(QObject* parent)
+    : QStyledItemDelegate(parent), settings_(new TrackViewSettings(this)) {}
 
 void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                               const QModelIndex& index) const {
     auto item = option;
     initStyleOption(&item, index);
     item.state &= ~QStyle::State_MouseOver;
-    const auto* view = qobject_cast<const QTableView*>(parent());
+    const auto* view = settings_->view();
     const auto artwork_column =
-        configuredColumn(this, track_artwork_column_property, track_marker_column);
+        configuredColumn(*settings_, track_artwork_column_property, track_marker_column);
     const auto artist_column =
-        configuredColumn(this, track_artist_column_property, track_artist_column);
+        configuredColumn(*settings_, track_artist_column_property, track_artist_column);
     const auto title_column =
-        configuredColumn(this, track_title_column_property, track_title_column);
-    const auto side_artwork = configuredFlag(this, track_side_artwork_property);
+        configuredColumn(*settings_, track_title_column_property, track_title_column);
+    const auto side_artwork = configuredFlag(*settings_, track_side_artwork_property);
     const auto artwork_cell = index.column() == artwork_column;
     const auto selected = item.state.testFlag(QStyle::State_Selected);
     if (artwork_cell) {
@@ -267,13 +324,14 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         // first metadata column onward.
         item.state &= ~(QStyle::State_HasFocus | QStyle::State_Selected);
     }
-    if (view != nullptr && view->property("trackknife-hover-row").isValid() &&
-        view->property("trackknife-hover-row").toInt() == index.row()) {
+    if (view != nullptr && settings_->property("trackknife-hover-row").isValid() &&
+        settings_->property("trackknife-hover-row").toInt() == index.row()) {
         item.state |= QStyle::State_MouseOver;
     }
     const auto album_column =
-        configuredColumn(this, track_album_column_property, track_album_column);
-    const auto date_column = configuredColumn(this, track_date_column_property, track_date_column);
+        configuredColumn(*settings_, track_album_column_property, track_album_column);
+    const auto date_column =
+        configuredColumn(*settings_, track_date_column_property, track_date_column);
     const auto group_start = beginsAlbum(index);
     if (group_start) {
         const QRect header_rect{option.rect.x(), option.rect.y(), option.rect.width(),
@@ -341,17 +399,18 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         item.rect.setTop(item.rect.top() + disc_header_height);
     }
     TrackCellContext context{
-        .groups = groupColumns(this),
+        .groups = groupColumns(*settings_),
         .artwork = artwork_column,
         .artist = artist_column,
-        .number = configuredColumn(this, track_number_column_property, track_number_column),
+        .number = configuredColumn(*settings_, track_number_column_property, track_number_column),
         .title = title_column,
         .side_artwork = side_artwork,
-        .separate_number = configuredFlag(this, track_separate_number_property),
+        .separate_number = configuredFlag(*settings_, track_separate_number_property),
         .hidden =
             [view](const int column) { return view != nullptr && view->isColumnHidden(column); },
-        .album_rules = view == nullptr || !view->property(track_album_rules_property).isValid() ||
-                       view->property(track_album_rules_property).toBool(),
+        .album_rules = view == nullptr ||
+                       !settings_->property(track_album_rules_property).isValid() ||
+                       settings_->property(track_album_rules_property).toBool(),
     };
     const auto cell = trackCell(*index.model(), index.row(), index.column(), context);
     const auto current_track = cell.current;
@@ -398,7 +457,7 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     item.text = cell.text;
     // ADR-0284: rows of more than one line -- the cell's tint under every
     // line, its text on the first, its second line beneath.
-    const auto lines = trackRowLines(view);
+    const auto lines = view != nullptr ? rowLines(*settings_) : 1;
     QRect second_area;
     if (lines > 1 && !artwork_cell) {
         second_area = QRect{item.rect.left(), item.rect.top() + track_row_height, item.rect.width(),
@@ -489,15 +548,17 @@ std::pair<int, int> QueueItemDelegate::albumRowRange(const QModelIndex& index) c
     if (!index.isValid()) {
         return {-1, -1};
     }
-    return trackGroupRange(*index.model(), index.row(), groupColumns(this));
+    return trackGroupRange(*index.model(), index.row(), groupColumns(*settings_));
 }
 
 bool QueueItemDelegate::beginsLooseRun(const QModelIndex& index) const {
-    return index.isValid() && ui::beginsLooseRun(*index.model(), index.row(), groupColumns(this));
+    return index.isValid() &&
+           ui::beginsLooseRun(*index.model(), index.row(), groupColumns(*settings_));
 }
 
 bool QueueItemDelegate::beginsAlbum(const QModelIndex& index) const {
-    return index.isValid() && beginsTrackGroup(*index.model(), index.row(), groupColumns(this));
+    return index.isValid() &&
+           beginsTrackGroup(*index.model(), index.row(), groupColumns(*settings_));
 }
 
 QString discStart(const QModelIndex& index) {

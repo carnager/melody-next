@@ -3,6 +3,7 @@
 #include "workspace/workspace.hpp"
 
 #include "bench/engine_launcher.hpp"
+#include "bench/post_back.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/settings_keys.hpp"
 #include "workspace/color_scheme.hpp"
@@ -10,6 +11,7 @@
 
 #include <QCursor>
 #include <QGuiApplication>
+#include <QPointer>
 #include <QSettings>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -194,15 +196,24 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
                                     .toInt();
     for (const auto& engine : engines_) {
         if (engine->does_file_work && engine->file_work) {
-            static_cast<void>(
-                QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale,
-                                   rating_backup, keep_days, keep_writes, keep_gigabytes] {
+            static_cast<void>(QtConcurrent::run(
+                [workspace = QPointer{this}, work = engine->file_work, key, rating_tags,
+                 rating_scale, rating_backup, keep_days, keep_writes, keep_gigabytes] {
                     static_cast<void>(work->set_acoustid_key(key));
                     static_cast<void>(work->set_rating_tags(rating_tags));
                     static_cast<void>(work->set_rating_scale(rating_scale));
                     static_cast<void>(work->set_rating_backup_tag(rating_backup));
                     static_cast<void>(
                         work->set_backup_retention(keep_days, keep_writes, keep_gigabytes));
+                    // Another scale reads the files' ratings again, untold: they
+                    // are asked anew.
+                    postBack(workspace, [workspace, work] {
+                        for (const auto& candidate : workspace->engines_) {
+                            if (candidate->file_work == work) {
+                                candidate->ratings.clear();
+                            }
+                        }
+                    });
                 }));
         }
     }

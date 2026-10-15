@@ -140,9 +140,14 @@ jobs:
 
   # Built, not run: what Apple's clang and libc++ take -- a time zone
   # database they lack broke the Mac build before anything here saw it.
+  # macOS 26's default Xcode, current as the Macs it is built on are: the
+  # macOS 15 image defaults to Xcode 16.4, whose libc++ has no
+  # floating-point std::from_chars.
   macos:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
+      - name: Toolchain
+        run: c++ --version
       - name: Install build dependencies
         run: >-
           brew install cmake ninja pkgconf qt ffmpeg libopenmpt taglib libebur128

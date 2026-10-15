@@ -50,7 +50,6 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -59,6 +58,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 namespace {
 
@@ -992,7 +992,8 @@ int main(int argc, char** argv) {
     }
 
     if (!open_stop_pipe()) {
-        std::cerr << "melodyd: cannot wait for a stop: " << std::strerror(errno) << "\n";
+        std::cerr << "melodyd: cannot wait for a stop: " << std::generic_category().message(errno)
+                  << "\n";
         return EXIT_FAILURE;
     }
     std::signal(SIGINT, request_stop);

@@ -1912,6 +1912,7 @@ void BenchMainWindowTest::localPlaybackModesAdvance_data() {
 }
 
 void BenchMainWindowTest::localPlaybackModesAdvance() {
+    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
     QFETCH(bool, repeat);
     QFETCH(bool, random);
     QFETCH(int, single);
@@ -2082,6 +2083,7 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {
+    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const std::array names{QStringLiteral("a.wav"), QStringLiteral("b.wav"),

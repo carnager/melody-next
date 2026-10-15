@@ -174,6 +174,15 @@
 #include <utility>
 #include <vector>
 
+// A case that needs audio to play in real time -- a track to finish, a
+// listen to count. A shared CI runner's null sink stalls now and then, so CI
+// skips them (TRACKKNIFE_TEST_SKIP_REALTIME); where there is a sound server
+// they run.
+#define TRACKKNIFE_REQUIRE_REALTIME_AUDIO()                                                        \
+    if (qEnvironmentVariableIsSet("TRACKKNIFE_TEST_SKIP_REALTIME")) {                              \
+        QSKIP("needs audio to play in real time");                                                 \
+    }
+
 namespace trackknife::bench {
 
 namespace window_test {

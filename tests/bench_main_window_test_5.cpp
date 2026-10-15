@@ -5,6 +5,7 @@
 namespace trackknife::bench {
 
 void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
+    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir remote_state;
     QTemporaryDir media;
     QVERIFY(remote_state.isValid() && media.isValid());
@@ -1075,6 +1076,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {
     QTest::newRow("consume") << true;
 }
 void BenchMainWindowTest::upNextPreservesNormalPlayback() {
+    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
     QFETCH(bool, consume);
     QTemporaryDir media;
     QVERIFY(media.isValid());

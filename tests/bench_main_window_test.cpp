@@ -895,6 +895,7 @@ void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
 }
 
 void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
+    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto music = media.filePath(QStringLiteral("music"));

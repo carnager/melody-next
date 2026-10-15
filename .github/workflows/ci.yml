@@ -2,12 +2,24 @@
 
 name: CI
 
+# Every push: gcc and clang build and test, clang-tidy and formatting, and
+# the macOS build -- what the local gate (gcc, this machine) does not see.
+# Weekly, and when asked: the sanitizers and the fuzzers, which find slow
+# bugs and need not hold up a push.
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer push to the same branch makes an older run's answer moot.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # Built and tested on Debian trixie, as the release is (packaging/docker):
 # TagLib 2, FFmpeg 7, Qt 6.8. Ubuntu 24.04 has TagLib 1.13 only, which the
@@ -27,6 +39,10 @@ env:
   # Shared runners time too unevenly to judge the UI budgets; they are
   # reported, and held on real hardware.
   TRACKKNIFE_BENCHMARK_REPORT_ONLY: "1"
+  # The null sink of a shared runner stalls now and then, so what needs audio
+  # to play in real time is left to machines with a sound server: tests
+  # labelled realtime (-LE realtime) and window cases that skip themselves.
+  TRACKKNIFE_TEST_SKIP_REALTIME: "1"
 
 jobs:
   build-and-test:
@@ -52,9 +68,10 @@ jobs:
       - name: Build
         run: cmake --build --preset dev
       - name: Test
-        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure
+        run: .github/with-silent-audio.sh ctest --preset dev --output-on-failure -LE realtime
 
   sanitizers:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     container: debian:trixie
     env:
@@ -70,7 +87,7 @@ jobs:
       - name: Build
         run: cmake --build --preset asan
       - name: Test
-        run: .github/with-silent-audio.sh ctest --preset asan --output-on-failure
+        run: .github/with-silent-audio.sh ctest --preset asan --output-on-failure -LE realtime
 
   # What the people running it run: the current Arch packages, FFmpeg and
   # TagLib as they are now. Debian above is what the release is built on.
@@ -94,11 +111,12 @@ jobs:
       - name: Build
         run: cmake --build --preset tidy
       - name: Test
-        run: .github/with-silent-audio.sh ctest --preset tidy --output-on-failure
+        run: .github/with-silent-audio.sh ctest --preset tidy --output-on-failure -LE realtime
       - name: Check formatting
         run: cmake --build --preset tidy --target format-check
 
   fuzz-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     container: debian:trixie
     env:
@@ -119,3 +137,21 @@ jobs:
         run: >-
           ./build/fuzz/fuzz/trackknife_titleformat_evaluator_fuzz
           -dict=fuzz/titleformat.dict -runs=20000 -max_len=4096
+
+  # Built, not run: what Apple's clang and libc++ take -- a time zone
+  # database they lack broke the Mac build before anything here saw it.
+  macos:
+    runs-on: macos-15
+    steps:
+      - name: Install build dependencies
+        run: >-
+          brew install cmake ninja pkgconf qt ffmpeg libopenmpt taglib libebur128
+          sqlite curl openssl@3 utf8proc libupnp nlohmann-json
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          export CMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$(brew --prefix)/share/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix curl)/lib/pkgconfig"
+          cmake --preset macos -DPKG_CONFIG_EXECUTABLE="$(brew --prefix)/bin/pkg-config"
+      - name: Build
+        run: cmake --build --preset macos

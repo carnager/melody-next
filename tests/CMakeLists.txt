@@ -1084,3 +1084,17 @@ endif()
 get_property(trackknife_tests DIRECTORY PROPERTY TESTS)
 set_tests_properties(${trackknife_tests} PROPERTIES ENVIRONMENT_MODIFICATION
                      "${trackknife_test_environment}")
+
+# Tests that need audio to play in real time through a sound server. A shared
+# CI runner's null sink stalls now and then; CI leaves them out (-LE
+# realtime), and where there is a sound server they run with the rest.
+set_tests_properties(
+    engine-player
+    engine-playback
+    local-audition
+    output-agent
+    pipewire-output
+    speaker-plays-through
+    melody-cli
+    PROPERTIES LABELS realtime
+)

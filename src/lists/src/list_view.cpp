@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <map>
@@ -45,17 +46,18 @@ core::Error problem(std::string message, core::ErrorCode code = core::ErrorCode:
 }
 
 // A moment as the history fields show it: local date and time, which sorts
-// as it reads.
+// as it reads. The C library's local time, not std::chrono::zoned_time:
+// Apple's libc++ has no time zone database.
 [[nodiscard]] std::string local_time(const std::int64_t utc_milliseconds) {
-    const std::chrono::sys_time<std::chrono::seconds> moment{
-        std::chrono::seconds{utc_milliseconds / 1000}};
-    try {
+    const auto seconds = static_cast<std::time_t>(utc_milliseconds / 1000);
+    std::tm local{};
+    if (::localtime_r(&seconds, &local) == nullptr) {
+        // Not representable as local time: as UTC, still in order.
         return std::format("{:%Y-%m-%d %H:%M}",
-                           std::chrono::zoned_time{std::chrono::current_zone(), moment});
-    } catch (const std::exception&) {
-        // No time zone database: as UTC, still in order.
-        return std::format("{:%Y-%m-%d %H:%M}", moment);
+                           std::chrono::sys_seconds{std::chrono::seconds{seconds}});
     }
+    return std::format("{:04}-{:02}-{:02} {:02}:{:02}", local.tm_year + 1900, local.tm_mon + 1,
+                       local.tm_mday, local.tm_hour, local.tm_min);
 }
 
 // A row as a list's expressions read it (ADR-0282): its tags, the host

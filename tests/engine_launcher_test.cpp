@@ -250,17 +250,21 @@ void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
 void EngineLauncherTest::sharingSettingsReachTheEngine() {
     Scratch scratch;
     QVERIFY(scratch.directory.isValid());
-    const auto free_port = [] {
-        QTcpServer probe;
-        probe.listen(QHostAddress::LocalHost, 0);
-        return probe.serverPort();
-    };
-    const auto port = free_port();
+    // Both held while they are chosen: asked one after the other, the second
+    // could be the first again, and the engine then cannot start.
+    QTcpServer engine_probe;
+    QTcpServer stream_probe;
+    QVERIFY(engine_probe.listen(QHostAddress::LocalHost, 0));
+    QVERIFY(stream_probe.listen(QHostAddress::LocalHost, 0));
+    const auto port = engine_probe.serverPort();
+    const auto stream_port = stream_probe.serverPort();
+    engine_probe.close();
+    stream_probe.close();
     QSettings settings;
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
     settings.setValue(QLatin1String(SettingsDialog::engine_listen_key),
                       QStringLiteral("127.0.0.1:%1").arg(port));
-    settings.setValue(QLatin1String(SettingsDialog::engine_stream_port_key), free_port());
+    settings.setValue(QLatin1String(SettingsDialog::engine_stream_port_key), stream_port);
     settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
                       QStringLiteral("correct horse"));
     settings.sync();
@@ -270,7 +274,11 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     };
 
     auto started = connectLocalEngine(scratch.engine);
-    QVERIFY2(started.has_value(), started ? "" : started.error().message.c_str());
+    QVERIFY2(
+        started.has_value(),
+        started
+            ? ""
+            : (started.error().message + "\n" + engineLog(scratch.engine).toStdString()).c_str());
     // The password travels in a file only its owner can read, not in argv.
     const auto password_file = scratch.engine.state / "engine.password";
     QVERIFY(std::filesystem::exists(password_file));

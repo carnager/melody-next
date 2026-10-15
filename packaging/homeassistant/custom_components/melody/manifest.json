@@ -1,0 +1,12 @@
+{
+  "domain": "melody",
+  "name": "Melody",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/carnager/melody-next/tree/main/packaging/homeassistant",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0",
+  "zeroconf": ["_melody._tcp.local."]
+}

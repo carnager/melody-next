@@ -33,6 +33,15 @@ using protocol::Json;
     return facts;
 }
 
+// A tag's first value as written, or null.
+[[nodiscard]] Json first_tag(const persistence::TkqRowFacts& facts, const std::string& name) {
+    const auto found = facts.fields.find(name);
+    if (found == facts.fields.end() || found->second.empty()) {
+        return nullptr;
+    }
+    return protocol::displayable_text(found->second.front().first);
+}
+
 } // namespace
 
 void register_now_playing_methods(protocol::Dispatcher& dispatcher, const Catalogue& catalogue,
@@ -73,6 +82,40 @@ void register_now_playing_methods(protocol::Dispatcher& dispatcher, const Catalo
                       }
                       return Json{{"text", protocol::displayable_text(*text)}};
                   });
+
+    // What plays, as fields rather than a line of text -- for a client that
+    // lays it out itself (a home automation's media card, say). Asked when
+    // the playing entry changes, not with every state: the state goes out
+    // many times a second, and this reads the library.
+    dispatcher.on("playback.now_playing", [&catalogue, &player](const Json&) -> core::Result<Json> {
+        const auto state = player.state();
+        if (state.source.raw_path.empty()) {
+            return Json{{"track", nullptr}};
+        }
+        auto indexed = catalogue.cached_tracks({state.source.raw_path});
+        auto facts = indexed && !indexed->empty() ? std::move(indexed->front().facts)
+                                                  : from_queue(player, state);
+        name_by_file(facts, state.source.raw_path);
+        Json track = Json::object();
+        track["entry"] = state.entry.to_string();
+        track["instance"] = state.instance;
+        track["path"] = protocol::encode_raw_path(state.source.raw_path);
+        track["title"] = protocol::displayable_text(facts.title);
+        track["artist"] =
+            facts.artist.empty() ? Json(nullptr) : Json(protocol::displayable_text(facts.artist));
+        track["album"] =
+            facts.album.empty() ? Json(nullptr) : Json(protocol::displayable_text(facts.album));
+        track["album_artist"] = first_tag(facts, "albumartist");
+        track["date"] =
+            facts.date.empty() ? Json(nullptr) : Json(protocol::displayable_text(facts.date));
+        track["track_number"] = first_tag(facts, "tracknumber");
+        track["disc_number"] = first_tag(facts, "discnumber");
+        track["genre"] = first_tag(facts, "genre");
+        // What the player says of the length beats what the index last saw.
+        track["duration_ms"] = state.duration_ms >= 0 ? state.duration_ms : facts.duration_ms;
+        track["rating"] = facts.rating > 0 ? Json(facts.rating) : Json(nullptr);
+        return Json{{"track", std::move(track)}};
+    });
 }
 
 } // namespace trackknife::engine

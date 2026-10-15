@@ -1,0 +1,42 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "A melodyd engine listening on the network (melodyd --listen, with a password).",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The machine melodyd runs on.",
+          "port": "melodyd's protocol port; 6603 unless it was given another.",
+          "password": "The password in melodyd's --password-file."
+        }
+      },
+      "zeroconf_confirm": {
+        "description": "melodyd \"{name}\" was found at {host}. Its password:",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "description": "{name} no longer takes the password it was given. Its password now:",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "melodyd could not be reached there.",
+      "invalid_auth": "melodyd refused the password.",
+      "unknown": "Something unexpected went wrong; see the log."
+    },
+    "abort": {
+      "already_configured": "This engine is added already.",
+      "not_supported": "This engine speaks a protocol this integration does not.",
+      "reauth_successful": "The new password works."
+    }
+  }
+}

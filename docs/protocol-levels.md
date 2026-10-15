@@ -7,6 +7,17 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 13 (2026-10-15)
+
+- `playback.now_playing` answers what plays as fields, for a client that lays
+  it out itself (Home Assistant's media card): `{track: {entry, instance,
+  path, title, artist, album, album_artist, date, track_number, disc_number,
+  genre, duration_ms, rating}}`, a field not known being null, or `{track:
+  null}` when nothing plays. From the engine's library, or the queue entry for
+  a file it does not index -- as `playback.format` reads them. Asked when the
+  playing `entry` or `instance` changes; its cover is `catalogue.artwork
+  {path}`. An older engine does not know the method.
+
 ### Level 12 (2026-10-14)
 
 - A track's description -- `list.describe`'s `library` -- says when it, and

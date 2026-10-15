@@ -32,7 +32,21 @@ namespace {
 
 } // namespace
 
-DesktopNotifier::DesktopNotifier(QObject* parent) : QObject(parent) {}
+DesktopNotifier::DesktopNotifier(QObject* parent) : QObject(parent) {
+#ifndef __APPLE__
+    QDBusConnection::sessionBus().connect(QStringLiteral("org.freedesktop.Notifications"),
+                                          QStringLiteral("/org/freedesktop/Notifications"),
+                                          QStringLiteral("org.freedesktop.Notifications"),
+                                          QStringLiteral("NotificationClosed"), this,
+                                          SLOT(notificationClosed(uint, uint)));
+#endif
+}
+
+void DesktopNotifier::notificationClosed(const uint id, const uint) {
+    if (id == replace_id_) {
+        replace_id_ = 0U;
+    }
+}
 
 bool DesktopNotifier::publish(const MprisPlaybackState& state, const bool window_active) {
     const auto playing = state.status == QStringLiteral("Playing");
@@ -96,8 +110,11 @@ void DesktopNotifier::send(const QString& summary, const QString& body, const QS
         hints.insert(QStringLiteral("image-path"),
                      QUrl::fromLocalFile(image).toString(QUrl::FullyEncoded));
     }
-    call << QStringLiteral("Trackknife") << replace_id_ << QStringLiteral("audio-x-generic")
-         << summary << body << QStringList{} << hints << -1;
+    const auto replaces =
+        replacing(replace_id_, replace_sent_.isValid() ? replace_sent_.elapsed() : -1);
+    replace_sent_.start();
+    call << QStringLiteral("Trackknife") << replaces << QStringLiteral("audio-x-generic") << summary
+         << body << QStringList{} << hints << -1;
     auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(call), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
             [this](QDBusPendingCallWatcher* finished) {

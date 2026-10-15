@@ -35,6 +35,7 @@ class MprisServiceTest final : public QObject {
     void publishesDiffedStateWithoutABus();
     void exportsThePlayerOverTheSessionBus();
     void notificationDeliveryReportsAcceptanceAndFailure();
+    void aNotificationGoneIsNotReplaced();
 };
 
 void MprisServiceTest::notificationDeliveryReportsAcceptanceAndFailure() {
@@ -65,6 +66,18 @@ void MprisServiceTest::notificationDeliveryReportsAcceptanceAndFailure() {
 
 // The state machine must work identically whether or not a session bus
 // exists; without one the service is inert but fully observable.
+// The next track replaces the previous notification only while it can still
+// be on screen: DMS keeps one it no longer shows, says nothing of it closing,
+// and shows nothing for a notification replacing it.
+void MprisServiceTest::aNotificationGoneIsNotReplaced() {
+    QCOMPARE(DesktopNotifier::replacing(591U, 1'200), 591U);
+    QCOMPARE(DesktopNotifier::replacing(591U, DesktopNotifier::replace_window_ms), 0U);
+    QCOMPARE(DesktopNotifier::replacing(591U, 60'000), 0U);
+    QCOMPARE(DesktopNotifier::replacing(0U, 100), 0U);
+    // None sent yet.
+    QCOMPARE(DesktopNotifier::replacing(591U, -1), 0U);
+}
+
 void MprisServiceTest::publishesDiffedStateWithoutABus() {
     MprisService service;
     QCOMPARE(service.currentState().status, QStringLiteral("Stopped"));

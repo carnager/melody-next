@@ -4,6 +4,7 @@
 
 #include "bench/desktop_media_session.hpp"
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 
@@ -48,9 +49,24 @@ class DesktopNotifier final : public QObject {
     void setSendOverride(std::function<void(const QString& summary, const QString& body)> send) {
         send_override_ = std::move(send);
     }
+    // How long a notification is taken to be on screen: the next track's
+    // replaces it until then, so skipping through tracks leaves one popup.
+    static constexpr qint64 replace_window_ms = 4'000;
+    // Which notification the next one replaces: the previous, while it can
+    // still be showing; after that none, as a new one. A server may keep a
+    // notification it no longer shows -- DMS does, and says nothing of its
+    // closing -- and then shows nothing for one that replaces it.
+    [[nodiscard]] static quint32 replacing(quint32 previous, qint64 since_sent_ms) {
+        return previous != 0U && since_sent_ms >= 0 && since_sent_ms < replace_window_ms ? previous
+                                                                                         : 0U;
+    }
 
   signals:
     void deliveryFinished(const QString& error);
+
+  private slots:
+    // The server says a notification closed; a closed one is not replaced.
+    void notificationClosed(uint id, uint reason);
 
   private:
     void send(const QString& summary, const QString& body, const QString& image = {});
@@ -63,6 +79,7 @@ class DesktopNotifier final : public QObject {
     QString last_image_;
     quint64 sent_count_{0U};
     quint32 replace_id_{0U};
+    QElapsedTimer replace_sent_;
     std::function<void(const QString&, const QString&)> send_override_;
 };
 

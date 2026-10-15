@@ -19,6 +19,7 @@
 
 #include <signal.h>
 
+#include <filesystem>
 #include <thread>
 
 namespace trackknife::bench {
@@ -47,10 +48,45 @@ namespace {
     return holders.empty() ? 0 : holders.front();
 }
 
-// What the engine said, for a failure that needs it.
+// What the engine said, and what there is to see of engines, for a failure
+// that needs it: its log, its socket, and every melodyd with the lock files it
+// holds -- a CI container once found none holding this one's.
 [[nodiscard]] QByteArray engineLog(const LocalEngine& engine) {
+    QByteArray said;
     QFile log{QString::fromStdString((engine.state / "melodyd.log").string())};
-    return log.open(QIODevice::ReadOnly) ? log.readAll() : QByteArray{"(no log)"};
+    said += log.open(QIODevice::ReadOnly)
+                ? "log (" + QByteArray::number(log.size()) + " bytes): " + log.readAll()
+                : QByteArray{"no log"};
+    std::error_code error;
+    said += "\nsocket " + QByteArray::fromStdString(engine.socket.string()) +
+            (std::filesystem::exists(engine.socket, error) ? " exists" : " is missing");
+    said += "\nlock looked for: " +
+            QByteArray::fromStdString(
+                std::filesystem::weakly_canonical(engine.state / "engine.lock", error).string());
+    for (const auto& process : std::filesystem::directory_iterator{"/proc", error}) {
+        std::error_code unreadable;
+        const auto name = process.path().filename().string();
+        QFile comm{QString::fromStdString((process.path() / "comm").string())};
+        if (!comm.open(QIODevice::ReadOnly) || !comm.readAll().startsWith("melodyd")) {
+            continue;
+        }
+        QFile stat{QString::fromStdString((process.path() / "stat").string())};
+        said += "\nmelodyd " + QByteArray::fromStdString(name) + " stat " +
+                (stat.open(QIODevice::ReadOnly) ? stat.readLine().left(40).trimmed() : "?");
+        for (const auto& descriptor :
+             std::filesystem::directory_iterator{process.path() / "fd", unreadable}) {
+            std::error_code gone;
+            const auto target = std::filesystem::read_symlink(descriptor.path(), gone).string();
+            if (target.find(".lock") != std::string::npos ||
+                target.find(".sock") != std::string::npos) {
+                said += "\n  holds " + QByteArray::fromStdString(target);
+            }
+        }
+        if (unreadable) {
+            said += "\n  fds unreadable: " + QByteArray::fromStdString(unreadable.message());
+        }
+    }
+    return said;
 }
 
 void stop(const LocalEngine& engine) {

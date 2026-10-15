@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "trackknife/audio/pipewire_output.hpp"
+#include "device_output.hpp"
 
 #include <pipewire/extensions/metadata.h>
 #include <pipewire/keys.h>
@@ -85,7 +85,7 @@ void initialize_pipewire() {
 
 } // namespace
 
-struct PipeWireOutput::Impl {
+struct DeviceOutput::Impl {
     LocalPlayback* source;
     PipeWireOutputConfig config;
     std::size_t channels;
@@ -299,15 +299,15 @@ struct PipeWireOutput::Impl {
     }
 };
 
-PipeWireOutput::PipeWireOutput(std::unique_ptr<Impl> implementation)
+DeviceOutput::DeviceOutput(std::unique_ptr<Impl> implementation)
     : implementation_(std::move(implementation)) {}
 
-PipeWireOutput::PipeWireOutput(PipeWireOutput&&) noexcept = default;
-PipeWireOutput& PipeWireOutput::operator=(PipeWireOutput&&) noexcept = default;
-PipeWireOutput::~PipeWireOutput() = default;
+DeviceOutput::DeviceOutput(DeviceOutput&&) noexcept = default;
+DeviceOutput& DeviceOutput::operator=(DeviceOutput&&) noexcept = default;
+DeviceOutput::~DeviceOutput() = default;
 
-core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
-                                                     PipeWireOutputConfig config) {
+core::Result<DeviceOutput> DeviceOutput::connect(LocalPlayback& source,
+                                                 PipeWireOutputConfig config) {
     if (config.stream_name.empty()) {
         return std::unexpected(invalid_config("PipeWire stream name must not be empty"));
     }
@@ -400,10 +400,10 @@ core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
     if (!ready) {
         return std::unexpected(std::move(ready.error()));
     }
-    return PipeWireOutput{std::move(output)};
+    return DeviceOutput{std::move(output)};
 }
 
-PipeWireOutputSnapshot PipeWireOutput::snapshot() const {
+PipeWireOutputSnapshot DeviceOutput::snapshot() const {
     auto& output = *implementation_;
     pw_thread_loop_lock(output.loop);
     const auto node = pw_stream_get_node_id(output.stream);
@@ -422,7 +422,7 @@ PipeWireOutputSnapshot PipeWireOutput::snapshot() const {
     return result;
 }
 
-core::Result<void> PipeWireOutput::set_volume(const double volume) {
+core::Result<void> DeviceOutput::set_volume(const double volume) {
     auto& output = *implementation_;
     if (output.stream == nullptr) {
         return std::unexpected(invalid_config("PipeWire stream is not connected"));
@@ -965,7 +965,7 @@ list_pipewire_output_devices(const std::chrono::milliseconds timeout) {
     return devices;
 }
 
-core::Result<void> PipeWireOutput::activate() {
+core::Result<void> DeviceOutput::activate() {
     auto& output = *implementation_;
     pw_thread_loop_lock(output.loop);
     if (output.state.load(std::memory_order_acquire) == PipeWireOutputState::streaming) {
@@ -993,7 +993,7 @@ core::Result<void> PipeWireOutput::activate() {
     return streaming;
 }
 
-core::Result<void> PipeWireOutput::quiesce() {
+core::Result<void> DeviceOutput::quiesce() {
     auto& output = *implementation_;
     pw_thread_loop_lock(output.loop);
     if (output.state.load(std::memory_order_acquire) != PipeWireOutputState::paused) {
@@ -1030,7 +1030,7 @@ core::Result<void> PipeWireOutput::quiesce() {
     return {};
 }
 
-core::Result<void> PipeWireOutput::drain() {
+core::Result<void> DeviceOutput::drain() {
     auto& output = *implementation_;
     if (output.source->snapshot().state != LocalPlaybackState::ended) {
         return std::unexpected(core::Error{

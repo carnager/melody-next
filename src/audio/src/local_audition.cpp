@@ -1002,6 +1002,10 @@ struct LocalAuditionService::Impl {
     }
 
     void refresh_devices() {
+        // Offline there are no devices to watch, nor a server to watch them.
+        if (config.output.offline_speed > 0.0) {
+            return;
+        }
         auto monitored = PipeWireDeviceMonitor::connect(config.output.transition_timeout);
         if (!monitored) {
             device_monitor_error = std::move(monitored.error());

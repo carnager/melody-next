@@ -4,6 +4,8 @@
 #include "trackknife/core/error.hpp"
 #include "trackknife/core/stable_id.hpp"
 
+#include <unistd.h>
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -597,5 +599,31 @@ int main() {
     CHECK((*service)->clear().has_value());
 
     std::filesystem::remove(path);
+
+    // Offline: no device, rendered faster than it plays -- four seconds of
+    // audio at sixteen times, so it ends in a quarter of the time, needing no
+    // audio server.
+    {
+        const auto offline_path =
+            std::filesystem::temp_directory_path() /
+            ("trackknife-offline-audition-" + std::to_string(::getpid()) + ".wav");
+        write_silent_wave(offline_path, 4U * 48'000U);
+        trackknife::audio::LocalAuditionConfig offline_config;
+        offline_config.output.offline_speed = 16.0;
+        auto offline = trackknife::audio::LocalAuditionService::create(offline_config);
+        CHECK(offline.has_value());
+        if (offline) {
+            const auto started = std::chrono::steady_clock::now();
+            CHECK((*offline)->load_and_play(offline_path.native()).has_value());
+            const auto ended = wait_for(**offline, [](const auto& snapshot) {
+                return snapshot.state == LocalAuditionState::ended ||
+                       snapshot.state == LocalAuditionState::failed;
+            });
+            CHECK(ended.state == LocalAuditionState::ended);
+            CHECK(ended.position_sample == 4 * 48'000);
+            CHECK(std::chrono::steady_clock::now() - started < 2s);
+        }
+        std::filesystem::remove(offline_path);
+    }
     return failures == 0 ? 0 : 1;
 }

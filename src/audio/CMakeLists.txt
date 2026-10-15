@@ -5,6 +5,8 @@ add_library(
     src/album_grouping.cpp
     src/local_audition.cpp
     src/local_playback.cpp
+    src/offline_output.cpp
+    src/output.cpp
     src/playback_order.cpp
     src/playback_selection.cpp
 )

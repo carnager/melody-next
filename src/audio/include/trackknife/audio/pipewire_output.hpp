@@ -29,6 +29,10 @@ struct PipeWireOutputConfig {
     std::optional<std::string> target_object;
     std::chrono::milliseconds transition_timeout{2'000};
     bool exclusive{false};
+    // Above zero: no device, the source rendered this many times as fast as
+    // it plays (offline_output.hpp) -- for tests, which then need neither an
+    // audio server nor real time. Zero plays on the platform's device.
+    double offline_speed{0.0};
 
     friend bool operator==(const PipeWireOutputConfig&, const PipeWireOutputConfig&) = default;
 };

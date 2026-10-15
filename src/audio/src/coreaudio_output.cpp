@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "trackknife/audio/pipewire_output.hpp"
+#include "device_output.hpp"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
@@ -300,7 +300,7 @@ struct DeviceInventory {
 
 } // namespace
 
-struct PipeWireOutput::Impl {
+struct DeviceOutput::Impl {
     LocalPlayback* source;
     PipeWireOutputConfig config;
     // The source's channels; the unit always takes two, so mono is spread
@@ -394,15 +394,15 @@ struct PipeWireOutput::Impl {
     }
 };
 
-PipeWireOutput::PipeWireOutput(std::unique_ptr<Impl> implementation)
+DeviceOutput::DeviceOutput(std::unique_ptr<Impl> implementation)
     : implementation_(std::move(implementation)) {}
 
-PipeWireOutput::PipeWireOutput(PipeWireOutput&&) noexcept = default;
-PipeWireOutput& PipeWireOutput::operator=(PipeWireOutput&&) noexcept = default;
-PipeWireOutput::~PipeWireOutput() = default;
+DeviceOutput::DeviceOutput(DeviceOutput&&) noexcept = default;
+DeviceOutput& DeviceOutput::operator=(DeviceOutput&&) noexcept = default;
+DeviceOutput::~DeviceOutput() = default;
 
-core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
-                                                     PipeWireOutputConfig config) {
+core::Result<DeviceOutput> DeviceOutput::connect(LocalPlayback& source,
+                                                 PipeWireOutputConfig config) {
     if (config.stream_name.empty()) {
         return std::unexpected(invalid_config("CoreAudio stream name must not be empty"));
     }
@@ -495,10 +495,10 @@ core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
     output->initialized = true;
     output->output_drain_delay = drain_delay(output->unit, output->device, format.sample_rate);
     output->state.store(PipeWireOutputState::paused, std::memory_order_release);
-    return PipeWireOutput{std::move(output)};
+    return DeviceOutput{std::move(output)};
 }
 
-PipeWireOutputSnapshot PipeWireOutput::snapshot() const {
+PipeWireOutputSnapshot DeviceOutput::snapshot() const {
     const auto& output = *implementation_;
     return PipeWireOutputSnapshot{
         .state = output.state.load(std::memory_order_acquire),
@@ -515,12 +515,12 @@ PipeWireOutputSnapshot PipeWireOutput::snapshot() const {
     };
 }
 
-core::Result<void> PipeWireOutput::set_volume(const double volume) {
+core::Result<void> DeviceOutput::set_volume(const double volume) {
     implementation_->volume.store(std::clamp(volume, 0.0, 1.0), std::memory_order_release);
     return {};
 }
 
-core::Result<void> PipeWireOutput::activate() {
+core::Result<void> DeviceOutput::activate() {
     auto& output = *implementation_;
     if (output.started) {
         return {};
@@ -535,7 +535,7 @@ core::Result<void> PipeWireOutput::activate() {
     return {};
 }
 
-core::Result<void> PipeWireOutput::quiesce() {
+core::Result<void> DeviceOutput::quiesce() {
     auto& output = *implementation_;
     if (output.started) {
         const auto status = AudioOutputUnitStop(output.unit);
@@ -563,7 +563,7 @@ core::Result<void> PipeWireOutput::quiesce() {
     return {};
 }
 
-core::Result<void> PipeWireOutput::drain() {
+core::Result<void> DeviceOutput::drain() {
     auto& output = *implementation_;
     if (output.source->snapshot().state != LocalPlaybackState::ended) {
         return std::unexpected(core::Error{

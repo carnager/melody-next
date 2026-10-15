@@ -190,14 +190,28 @@ void require(const bool condition, const std::string_view message) {
 [[nodiscard]] std::unique_ptr<trackknife::agent::Agent>
 start_agent(const std::uint16_t port, const std::optional<std::filesystem::path>& root,
             const std::string& token = "agent-test-token", const std::string& name = "bedside",
-            trackknife::agent::StreamChoice stream = {}) {
-    auto agent = trackknife::agent::Agent::create(trackknife::agent::AgentConfig{
-        .server =
-            protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = token},
-        .name = name,
-        .music_root = root,
-        .stream_only = !root.has_value(),
-        .stream = stream});
+            trackknife::agent::StreamChoice stream = {}, const double offline_speed = 0.0) {
+    // Above zero, the agent plays on no device, that many times as fast as
+    // real time.
+    std::unique_ptr<audio::LocalAuditionService> audition;
+    if (offline_speed > 0.0) {
+        audio::LocalAuditionConfig config;
+        config.output.offline_speed = offline_speed;
+        auto created = audio::LocalAuditionService::create(config);
+        if (!created) {
+            return nullptr;
+        }
+        audition = std::move(*created);
+    }
+    auto agent = trackknife::agent::Agent::create(
+        trackknife::agent::AgentConfig{
+            .server =
+                protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = token},
+            .name = name,
+            .music_root = root,
+            .stream_only = !root.has_value(),
+            .stream = stream},
+        std::move(audition));
     if (!agent) {
         return nullptr;
     }
@@ -255,7 +269,11 @@ int main(int argc, char** argv) {
     });
     (*server)->start();
 
-    auto agent = start_agent(port, agent_root);
+    // Offline, eight times as fast: a listen needs half a 32-second track
+    // heard, which in real time took this test 16 seconds. The agent that
+    // comes back later plays in real time, for what turns on real timing.
+    constexpr double listening_speed = 8.0;
+    auto agent = start_agent(port, agent_root, "agent-test-token", "bedside", {}, listening_speed);
     if (!agent) {
         std::cerr << "output agent: no audio output here; skipping\n";
         (*server)->stop();
@@ -291,15 +309,20 @@ int main(int argc, char** argv) {
         player->replace_queue(heard);
         require(player->play_entry(heard[0].entry_id).has_value(), "a track plays");
         const auto started = std::chrono::steady_clock::now();
-        require(eventually(
-                    [&] {
-                        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             std::chrono::steady_clock::now() - started)
-                                             .count();
-                        return player->observe(now).listened_entry == heard[0].entry_id;
-                    },
-                    std::chrono::seconds{30}),
-                "and, half of it heard, is a listen");
+        // The test's clock runs as fast as the agent plays: a listen is
+        // credited no faster than the clock the engine is given moves.
+        require(
+            eventually(
+                [&] {
+                    const auto now = static_cast<std::int64_t>(
+                        listening_speed *
+                        static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::steady_clock::now() - started)
+                                                .count()));
+                    return player->observe(now).listened_entry == heard[0].entry_id;
+                },
+                std::chrono::seconds{30}),
+            "and, half of it heard, is a listen");
         require(player->stop().has_value(), "and stops");
     }
     const std::vector<engine::QueueEntry> entries{entry(engine_root / "one.wav"),

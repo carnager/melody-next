@@ -331,6 +331,23 @@ bool localEngineOutdated(const LocalEngine& engine) {
     return false;
 }
 
+#ifndef __APPLE__
+namespace {
+
+// The threads a process has now, its exited main thread among them.
+[[nodiscard]] std::size_t threadCount(const pid_t pid) {
+    std::error_code error;
+    std::size_t threads = 0U;
+    for ([[maybe_unused]] const auto& task :
+         std::filesystem::directory_iterator{"/proc/" + std::to_string(pid) + "/task", error}) {
+        ++threads;
+    }
+    return threads;
+}
+
+} // namespace
+#endif
+
 bool processRunning(const pid_t pid) {
     if (::kill(pid, 0) != 0 && errno != EPERM) {
         return false;
@@ -351,8 +368,13 @@ bool processRunning(const pid_t pid) {
         return true;
     }
     const auto name_end = line.rfind(')');
-    return name_end == std::string::npos || name_end + 2 >= line.size() ||
-           line[name_end + 2] != 'Z';
+    if (name_end == std::string::npos || name_end + 2 >= line.size() || line[name_end + 2] != 'Z') {
+        return true;
+    }
+    // A zombie main thread is not a process gone: its other threads may still
+    // be running and holding its files -- the engine's socket, still taking
+    // connections, and its lock. It is gone once the last of them is.
+    return threadCount(pid) > 1;
 #endif
 }
 
@@ -383,14 +405,32 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
             !std::ranges::all_of(name, [](const char c) { return c >= '0' && c <= '9'; })) {
             continue;
         }
-        std::error_code unreadable;
-        for (const auto& descriptor :
-             std::filesystem::directory_iterator{process.path() / "fd", unreadable}) {
-            std::error_code gone;
-            if (std::filesystem::read_symlink(descriptor.path(), gone) == target) {
-                holders.push_back(static_cast<pid_t>(std::stoi(name)));
-                break;
+        // A process whose main thread has exited shows no files of its own
+        // while its other threads still hold them: looked for there too.
+        const auto holds = [&target](const std::filesystem::path& descriptors) {
+            std::error_code unreadable;
+            for (const auto& descriptor :
+                 std::filesystem::directory_iterator{descriptors, unreadable}) {
+                std::error_code gone;
+                if (std::filesystem::read_symlink(descriptor.path(), gone) == target) {
+                    return true;
+                }
             }
+            return false;
+        };
+        bool held = holds(process.path() / "fd");
+        if (!held && threadCount(static_cast<pid_t>(std::stoi(name))) > 1) {
+            std::error_code unreadable;
+            for (const auto& task :
+                 std::filesystem::directory_iterator{process.path() / "task", unreadable}) {
+                if (holds(task.path() / "fd")) {
+                    held = true;
+                    break;
+                }
+            }
+        }
+        if (held) {
+            holders.push_back(static_cast<pid_t>(std::stoi(name)));
         }
     }
 #endif

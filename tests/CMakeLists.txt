@@ -610,11 +610,19 @@ if(TARGET trackknife_bench_ui)
         trackknife_engine_launcher_tests
         PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options trackknife_project_warnings
     )
+    # A process whose main thread has ended while another holds its files.
+    add_executable(trackknife_zombie_leader_helper zombie_leader_helper.cpp)
+    target_link_libraries(
+        trackknife_zombie_leader_helper
+        PRIVATE Threads::Threads trackknife_project_options trackknife_project_warnings
+    )
     target_compile_definitions(
         trackknife_engine_launcher_tests
         PRIVATE TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
+                TRACKKNIFE_ZOMBIE_LEADER_HELPER="$<TARGET_FILE:trackknife_zombie_leader_helper>"
     )
-    add_dependencies(trackknife_engine_launcher_tests trackknife_engine_daemon)
+    add_dependencies(trackknife_engine_launcher_tests trackknife_engine_daemon
+                     trackknife_zombie_leader_helper)
     add_test(NAME engine-launcher COMMAND trackknife_engine_launcher_tests)
     set_tests_properties(engine-launcher PROPERTIES TIMEOUT 60)
 endif()

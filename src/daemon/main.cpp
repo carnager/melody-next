@@ -270,6 +270,20 @@ void usage() {
 } // namespace
 
 int main(int argc, char** argv) {
+    // A stop is heard from the first moment: one that came while the engine
+    // was still starting -- a restart, systemctl -- killed it outright, before
+    // it could save anything, take its socket away or let its lock go. Now it
+    // starts, then stops as asked.
+    if (!open_stop_pipe()) {
+        std::cerr << "melodyd: cannot wait for a stop: " << std::generic_category().message(errno)
+                  << "\n";
+        return EXIT_FAILURE;
+    }
+    std::signal(SIGINT, request_stop);
+    std::signal(SIGTERM, request_stop);
+    // A client hanging up must not take the engine with it.
+    std::signal(SIGPIPE, SIG_IGN);
+
     auto socket_path = default_socket_path();
     auto state_directory = default_state_directory();
     std::string listen_address;
@@ -990,16 +1004,6 @@ int main(int argc, char** argv) {
                       << "\n";
         }
     }
-
-    if (!open_stop_pipe()) {
-        std::cerr << "melodyd: cannot wait for a stop: " << std::generic_category().message(errno)
-                  << "\n";
-        return EXIT_FAILURE;
-    }
-    std::signal(SIGINT, request_stop);
-    std::signal(SIGTERM, request_stop);
-    // A client hanging up must not take the engine with it.
-    std::signal(SIGPIPE, SIG_IGN);
 
     (*server)->start();
     if (tcp_server) {

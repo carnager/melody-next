@@ -31,6 +31,7 @@ class EngineLauncherTest final : public QObject {
     void initTestCase();
     void startsAnEngineAndFindsItAgain();
     void startsItAgainAfterItStops();
+    void aProcessIsRunningUntilItsLastThreadEnds();
     void twoClientsStartingAtOnceShareOneEngine();
     void aMissingProgramSaysSo();
     void nothingStartsOneUnlessAllowed();
@@ -153,6 +154,41 @@ void EngineLauncherTest::startsItAgainAfterItStops() {
     QVERIFY(again.has_value());
     QVERIFY2(enginePid(scratch.engine) > 0, engineLog(scratch.engine).constData());
     QVERIFY(enginePid(scratch.engine) != pid);
+}
+
+// The engine, stopped, can show as a zombie while its other threads are still
+// going and still hold its socket and its lock: in a CI container the test
+// took it for gone, found its socket still answering, and no engine holding
+// the lock. Running, then, and holding, until the last thread ends.
+void EngineLauncherTest::aProcessIsRunningUntilItsLastThreadEnds() {
+#ifdef __APPLE__
+    QSKIP("Linux's /proc semantics");
+#else
+    // A program of its own, not a fork of this one: a fork of a threaded Qt
+    // process can deadlock in its own exit.
+    QTemporaryDir directory;
+    const auto lock =
+        std::filesystem::path{directory.filePath(QStringLiteral("held.lock")).toStdString()};
+    QProcess helper;
+    helper.start(QStringLiteral(TRACKKNIFE_ZOMBIE_LEADER_HELPER),
+                 {QString::fromStdString(lock.string())});
+    QVERIFY(helper.waitForStarted());
+    const auto pid = static_cast<pid_t>(helper.processId());
+    const auto zombie = [pid] {
+        QFile stat{QStringLiteral("/proc/%1/stat").arg(pid)};
+        const auto line = stat.open(QIODevice::ReadOnly) ? stat.readAll() : QByteArray{};
+        const auto end = line.lastIndexOf(')');
+        return end >= 0 && end + 2 < line.size() && line[end + 2] == 'Z';
+    };
+    QTRY_VERIFY(zombie());
+    QVERIFY(processRunning(pid));
+    QCOMPARE(lockHolders(lock), std::vector<pid_t>{pid});
+
+    helper.write("x");
+    QVERIFY(helper.waitForFinished());
+    QVERIFY(!processRunning(pid));
+    QVERIFY(lockHolders(lock).empty());
+#endif
 }
 
 void EngineLauncherTest::twoClientsStartingAtOnceShareOneEngine() {

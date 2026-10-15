@@ -1087,8 +1087,10 @@ void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
     auto* tab = window.currentListTab();
     QVERIFY(tab != nullptr);
     QTRY_COMPARE(tab->model->rowCount(), 1);
+    // The row's album as its tags say, once they are read: taken before, it
+    // was the key of a row with no tags yet, which no cover ever comes for.
+    QTRY_VERIFY(tab->model->hasArtwork(tab->model->groupKey(0)));
     const auto group = tab->model->groupKey(0);
-    QTRY_VERIFY(tab->model->hasArtwork(group));
 
     // Nothing playing: a placeholder tile the size of a cover.
     window.refreshHeaderCover({});

@@ -858,7 +858,20 @@ if(TRACKKNIFE_BUILD_UI)
         Qt6::Test trackknife_project_options trackknife_project_warnings)
     add_test(NAME lastfm-service COMMAND trackknife_lastfm_service_tests)
     set_tests_properties(lastfm-service PROPERTIES TIMEOUT 30)
-    qt_add_executable(trackknife_bench_main_window_tests bench_main_window_test.cpp)
+    # In several files, compiled side by side: as one it was an 18,000-line
+    # file that every build waited half a minute for, last.
+    qt_add_executable(
+        trackknife_bench_main_window_tests
+        bench_main_window_test.hpp
+        bench_main_window_test.cpp
+        bench_main_window_test_2.cpp
+        bench_main_window_test_3.cpp
+        bench_main_window_test_4.cpp
+        bench_main_window_test_5.cpp
+        bench_main_window_test_6.cpp
+        bench_main_window_test_7.cpp
+        bench_main_window_test_8.cpp
+    )
     qt_add_executable(trackknife_mpris_service_tests mpris_service_test.cpp)
     target_link_libraries(trackknife_mpris_service_tests PRIVATE Trackknife::BenchUi Qt6::DBus
         Qt6::Test trackknife_project_options trackknife_project_warnings)

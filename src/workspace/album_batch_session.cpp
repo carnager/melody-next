@@ -76,6 +76,14 @@ AlbumBatchSession::AlbumBatchSession(TaggerSession& tagger, MusicBrainzLookupSer
     connect(&tagger, &TaggerSession::changed, this, [this] {
         noteDraft();
         stageNext();
+        // The tagger busy, or free again, changes whether a write can start:
+        // said, or the window's Write stays enabled for a click that is then
+        // ignored -- or disabled once it could write.
+        const std::pair writable{canWrite(), canUndoLastWrite()};
+        if (writable != told_writable_) {
+            told_writable_ = writable;
+            emit changed();
+        }
     });
     group();
 }

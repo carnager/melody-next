@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace trackknife::bench {
@@ -193,6 +194,8 @@ class AlbumBatchSession final : public QObject {
     void undone(std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome);
     // The albums already tagged so, as last told.
     std::vector<std::size_t> already_tagged_;
+    // canWrite() and canUndoLastWrite() as the window was last told them.
+    std::pair<bool, bool> told_writable_{false, false};
 };
 
 } // namespace trackknife::bench

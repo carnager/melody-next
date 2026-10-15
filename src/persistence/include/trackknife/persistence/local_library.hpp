@@ -79,6 +79,8 @@ struct LibraryQuery {
     // paths are everything below it.
     bool folders{false};
     std::optional<std::string> folder;
+
+    friend bool operator==(const LibraryQuery&, const LibraryQuery&) = default;
 };
 
 struct LibraryEntry {
@@ -115,6 +117,8 @@ struct LibraryEntry {
     // The query listing that node, filled in by the client that browses it:
     // what it opens to and what its files are, rather than its whole album.
     std::optional<LibraryQuery> view_node{};
+
+    friend bool operator==(const LibraryEntry&, const LibraryEntry&) = default;
 };
 
 struct LibraryPage {

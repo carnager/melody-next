@@ -259,6 +259,7 @@ class BenchMainWindowTest final : public QObject {
     void cleanup();
     void transportIsOneRowWithCoverAndPills();
     void theDesktopNamesWhatPlaysAfterARestart();
+    void thePlayingRowFollowsItsList();
     void headerShowsThePlayingAlbumsCover();
     void libraryDragsIntoUpNextWithCovers();
     void quickAlbumFindsByWordsAndPutsItAway();
@@ -1700,6 +1701,54 @@ void BenchMainWindowTest::theDesktopNamesWhatPlaysAfterARestart() {
     QCOMPARE(state.artist, QStringLiteral("Someone"));
     QCOMPARE(state.album, QStringLiteral("Album"));
     QCOMPARE(state.track_key, entry);
+}
+
+// The row of what plays is looked for where it was last found, several
+// times a refresh: wherever the list has moved it since, or edited it, it is
+// that entry's row -- and once it has left the list, none.
+void BenchMainWindowTest::thePlayingRowFollowsItsList() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    std::vector<LocalTrackRow> rows;
+    for (const auto* title : {"One", "Two", "Three"}) {
+        LocalTrackRow row;
+        row.raw_path = std::string{"/music/"} + title + ".flac";
+        row.title = title;
+        rows.push_back(std::move(row));
+    }
+    tab->model->appendRows(std::move(rows));
+    QCOMPARE(tab->model->rows().size(), 3U);
+    auto& workspace = window.workspace_;
+    workspace.playback_.anchors.document = tab->document.id;
+    const auto playing = tab->model->rows()[2].entry_id;
+    const auto entry = QString::fromStdString(playing.to_string());
+    const auto* found = workspace.playingRow(entry);
+    QVERIFY(found != nullptr);
+    QCOMPARE(found->title, std::string{"Three"});
+    QCOMPARE(workspace.playingRow(entry), found);
+
+    // Moved to the top: found there, not at the row it was.
+    QVERIFY(tab->model->applyPermutation({2, 0, 1}, QStringLiteral("Move")));
+    found = workspace.playingRow(entry);
+    QVERIFY(found != nullptr);
+    QCOMPARE(found->entry_id, playing);
+    QCOMPARE(found, &tab->model->rows()[0]);
+    QCOMPARE(workspace.playingRow(entry), found);
+
+    // Another entry now where it was found: not taken for it.
+    QVERIFY(tab->model->applyPermutation({1, 2, 0}, QStringLiteral("Move")));
+    found = workspace.playingRow(entry);
+    QVERIFY(found != nullptr);
+    QCOMPARE(found->entry_id, playing);
+    QCOMPARE(found->title, std::string{"Three"});
+
+    // Gone from every list: none.
+    const auto at = static_cast<int>(found - tab->model->rows().data());
+    tab->model->removeRowIndexes({at});
+    QCOMPARE(workspace.playingRow(entry), nullptr);
 }
 
 void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {

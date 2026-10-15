@@ -403,10 +403,14 @@ void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<st
     if (auto* found = link(engine); found != nullptr && found->browser) {
         found->browser->applyChanges(albums, everything);
     }
+    // A file read again may have brought a rating in its tags (ADR-0237),
+    // which its engine does not tell as one.
+    forgetRatings(engine, paths, everything);
     // ADR-0268: its lists' rows at those paths -- or under them, a folder --
     // looked at again: gone, or back; and what the files now hold, asked of
     // the engine, so a tag changed anywhere shows in every list, and the
     // tagger never takes a row's old file for the file there now.
+    const RawPathsAt at{paths};
     for (const auto& tab : list_tabs_) {
         if (EngineKey::of(tab->document) != engine) {
             continue;
@@ -421,11 +425,7 @@ void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<st
         }
         std::vector<std::string> touched;
         for (const auto& row : tab->model->rows()) {
-            if (std::ranges::any_of(paths, [&row](const std::string& path) {
-                    return row.raw_path == path ||
-                           (row.raw_path.size() > path.size() && row.raw_path.starts_with(path) &&
-                            row.raw_path[path.size()] == '/');
-                })) {
+            if (at.covers(row.raw_path)) {
                 touched.push_back(row.raw_path);
             }
         }
@@ -489,6 +489,9 @@ void Workspace::checkMissing(const QString& document_id, std::vector<std::string
 void Workspace::adoptEngineRating(const EngineKey& engine, const QString& hash,
                                   const unsigned rating) {
     const QHash<QString, unsigned> ratings{{hash, rating}};
+    if (auto* found = link(engine); found != nullptr) {
+        found->ratings.insert_or_assign(hash.toStdString(), rating);
+    }
     for (const auto& tab : list_tabs_) {
         if (EngineKey::of(tab->document) == engine) {
             tab->model->applyRatings(ratings);
@@ -629,6 +632,11 @@ void Workspace::watchFileWork(EngineLink& link) {
                          for (const auto& candidate : workspace->engines_) {
                              if (candidate->file_work == work) {
                                  candidate->does_file_work = does;
+                                 // A scale handed over may have read the
+                                 // files' ratings again, untold: asked anew.
+                                 if (does) {
+                                     candidate->ratings.clear();
+                                 }
                              }
                          }
                          if (does) {

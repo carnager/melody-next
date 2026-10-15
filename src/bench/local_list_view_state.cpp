@@ -76,6 +76,7 @@ void LocalListModel::setListView(std::shared_ptr<const lists::CompiledListView> 
         endRemoveColumns();
     }
     list_view_ = std::move(view);
+    planColumns();
     view_generation_ = ++view_generations;
     group_headers_.clear();
     group_starts_.clear();
@@ -92,6 +93,35 @@ void LocalListModel::setListView(std::shared_ptr<const lists::CompiledListView> 
         emit expressionGroupsChanged();
     }
     scheduleEvaluation();
+}
+
+void LocalListModel::planColumns() {
+    column_plans_.clear();
+    if (!list_view_) {
+        return;
+    }
+    const auto columns =
+        local_column_count + static_cast<int>(list_view_->expression_columns().size());
+    const auto position = [](const std::vector<std::string>& ids, const std::string& id) {
+        const auto found = std::ranges::find(ids, id);
+        return found == ids.end() ? -1 : static_cast<int>(found - ids.begin());
+    };
+    const auto& view_columns = list_view_->view().columns;
+    column_plans_.reserve(static_cast<std::size_t>(columns));
+    for (int column = 0; column < columns; ++column) {
+        const auto id = columnId(column).toStdString();
+        ColumnPlan plan;
+        if (column < local_column_count) {
+            plan.builtin = position(list_view_->builtin_expression_columns(), id);
+            plan.shows_expression = list_view_->builtin_shows_expression(id);
+        }
+        plan.second_line = position(list_view_->second_line_columns(), id);
+        if (const auto found = std::ranges::find(view_columns, id, &lists::ViewColumn::id);
+            found != view_columns.end()) {
+            plan.alignment = QVariant::fromValue(alignment_of(found->alignment));
+        }
+        column_plans_.push_back(std::move(plan));
+    }
 }
 
 bool LocalListModel::expressionGrouping() const noexcept {
@@ -238,8 +268,8 @@ void LocalListModel::forgetEvaluation(LocalTrackRow& row) {
 }
 
 bool LocalListModel::showsOwnExpression(const int column) const {
-    return list_view_ != nullptr &&
-           list_view_->builtin_shows_expression(columnId(column).toStdString());
+    const auto* plan = columnPlan(column);
+    return list_view_ != nullptr && plan != nullptr && plan->shows_expression;
 }
 
 void LocalListModel::scheduleEvaluation() {
@@ -369,6 +399,7 @@ void LocalListModel::regroup() {
     std::vector<QString> header_keys(rows_.size());
     std::vector<QString> labels(rows_.size());
     std::vector<QString> missing_keys;
+    QSet<QString> missing;
     std::vector<lists::OwnedViewRow> missing_rows;
     std::vector<std::pair<std::size_t, std::int64_t>> missing_sizes;
     for (const auto& run : lists::list_group_runs(evaluated, durations)) {
@@ -381,7 +412,8 @@ void LocalListModel::regroup() {
                          QString::number(run.length_ms) + QChar::Null +
                          QString::number(rows_[run.first].evaluation_ticket);
         header_keys[run.first] = key;
-        if (!group_headers_.contains(key) && !std::ranges::contains(missing_keys, key)) {
+        if (!group_headers_.contains(key) && !missing.contains(key)) {
+            missing.insert(key);
             missing_keys.push_back(key);
             missing_rows.push_back(owned(rows_[run.first]));
             missing_sizes.emplace_back(run.count, run.length_ms);
@@ -390,8 +422,33 @@ void LocalListModel::regroup() {
             labels[start] = QString::fromStdString(evaluated[start]->subgroup_label);
         }
     }
-    const bool changed =
-        starts != group_starts_ || header_keys != group_header_keys_ || labels != subgroup_labels_;
+    // The rows whose group roles say something else now: where a group or
+    // subgroup starts, and which group -- its header's key -- each row is in.
+    // Rows inserted or removed since, or groups not shown until now: every
+    // row.
+    std::vector<int> changed_rows;
+    const bool aligned = group_starts_.size() == rows_.size() &&
+                         group_header_keys_.size() == rows_.size() &&
+                         subgroup_labels_.size() == rows_.size();
+    if (aligned) {
+        const QString* was_in = nullptr;
+        const QString* is_in = nullptr;
+        for (std::size_t at = 0U; at < rows_.size(); ++at) {
+            if (group_starts_[at] != 0U) {
+                was_in = &group_header_keys_[at];
+            }
+            if (starts[at] != 0U) {
+                is_in = &header_keys[at];
+            }
+            if (starts[at] != group_starts_[at] || labels[at] != subgroup_labels_[at] ||
+                header_keys[at] != group_header_keys_[at] ||
+                (was_in == nullptr) != (is_in == nullptr) ||
+                (was_in != nullptr && *was_in != *is_in)) {
+                changed_rows.push_back(static_cast<int>(at));
+            }
+        }
+    }
+    const bool changed = !aligned || !changed_rows.empty();
     group_starts_ = std::move(starts);
     group_header_keys_ = std::move(header_keys);
     subgroup_labels_ = std::move(labels);
@@ -414,10 +471,15 @@ void LocalListModel::regroup() {
                 mergeHeaders(view, keys, std::move(headers));
             });
     }
+    const QList<int> group_roles{ui::track_album_group_start_role, ui::track_disc_start_role,
+                                 ui::track_group_key_role, ui::track_group_title_role};
     if (changed && !rows_.empty()) {
-        emit dataChanged(index(0, 0), index(static_cast<int>(rows_.size()) - 1, 0),
-                         {ui::track_album_group_start_role, ui::track_disc_start_role,
-                          ui::track_group_key_role, ui::track_group_title_role});
+        if (aligned && was_ready) {
+            emitRowRuns(changed_rows, 0, 0, group_roles);
+        } else {
+            emit dataChanged(index(0, 0), index(static_cast<int>(rows_.size()) - 1, 0),
+                             group_roles);
+        }
     }
     if (!was_ready) {
         emit expressionGroupsChanged();
@@ -429,15 +491,38 @@ void LocalListModel::mergeHeaders(const std::uint64_t view, const std::vector<QS
     if (view != view_generation_ || keys.size() != headers.size()) {
         return;
     }
-    // Headers of groups that are gone go too.
+    // Headers of groups that are gone go too -- not those still shown, or
+    // each new header would have every other one evaluated again.
     if (group_headers_.size() > 4 * std::max<qsizetype>(64, static_cast<qsizetype>(keys.size()))) {
-        group_headers_.clear();
+        QSet<QString> live;
+        for (const auto& key : group_header_keys_) {
+            if (!key.isEmpty()) {
+                live.insert(key);
+            }
+        }
+        if (group_headers_.size() > 2 * std::max<qsizetype>(64, live.size())) {
+            group_headers_.removeIf(
+                [&live](const QHash<QString, GroupHeaderCache>::iterator& header) {
+                    return !live.contains(header.key());
+                });
+        }
     }
+    QSet<QString> arrived;
     for (std::size_t at = 0U; at < keys.size(); ++at) {
         group_headers_.insert(keys[at], {.title = QString::fromStdString(headers[at].title),
                                          .details = QString::fromStdString(headers[at].details)});
+        arrived.insert(keys[at]);
     }
-    if (!rows_.empty()) {
+    // The group starts these headers are for; other rows have no header.
+    std::vector<int> starts;
+    if (group_header_keys_.size() == rows_.size() && group_starts_.size() == rows_.size()) {
+        for (std::size_t at = 0U; at < rows_.size(); ++at) {
+            if (group_starts_[at] != 0U && arrived.contains(group_header_keys_[at])) {
+                starts.push_back(static_cast<int>(at));
+            }
+        }
+        emitRowRuns(starts, 0, 0, {ui::track_group_title_role, ui::track_group_details_role});
+    } else if (!rows_.empty()) {
         emit dataChanged(index(0, 0), index(static_cast<int>(rows_.size()) - 1, 0),
                          {ui::track_group_title_role, ui::track_group_details_role});
     }
@@ -457,15 +542,13 @@ QVariant LocalListModel::viewStyle(const QModelIndex& index, const int role) con
             style = lists::combined_style(
                 style, lists::parse_cell_style(row.evaluated->cell_styles[cell]));
         }
-    } else {
+    } else if (const auto* plan = columnPlan(index.column());
+               plan != nullptr && plan->builtin >= 0 &&
+               static_cast<std::size_t>(plan->builtin) < row.evaluated->builtin_styles.size()) {
         // ADR-0285: a built-in column's own style.
-        const auto& ids = list_view_->builtin_expression_columns();
-        const auto found = std::ranges::find(ids, columnId(index.column()).toStdString());
-        const auto cell = static_cast<std::size_t>(found - ids.begin());
-        if (found != ids.end() && cell < row.evaluated->builtin_styles.size()) {
-            style = lists::combined_style(
-                style, lists::parse_cell_style(row.evaluated->builtin_styles[cell]));
-        }
+        style = lists::combined_style(
+            style, lists::parse_cell_style(
+                       row.evaluated->builtin_styles[static_cast<std::size_t>(plan->builtin)]));
     }
     if (!style.any()) {
         return {};
@@ -500,32 +583,27 @@ QVariant LocalListModel::viewData(const QModelIndex& index, const int role) cons
     const auto at = static_cast<std::size_t>(index.row());
     const auto& row = rows_[at];
     // ADR-0284: the cell's second line, where its column has one.
+    const auto* plan = columnPlan(index.column());
     if (role == ui::track_second_line_role) {
-        if (!evaluatedNow(row)) {
+        if (!evaluatedNow(row) || plan == nullptr || plan->second_line < 0) {
             return QString{};
         }
-        const auto& ids = list_view_->second_line_columns();
-        const auto found = std::ranges::find(ids, columnId(index.column()).toStdString());
-        const auto line = static_cast<std::size_t>(found - ids.begin());
-        return found == ids.end() || line >= row.evaluated->second_lines.size()
+        const auto line = static_cast<std::size_t>(plan->second_line);
+        return line >= row.evaluated->second_lines.size()
                    ? QString{}
                    : QString::fromStdString(row.evaluated->second_lines[line]);
     }
     // ADR-0285: a built-in column's own expression.
     if (index.column() < local_column_count &&
         (role == Qt::DisplayRole || role == Qt::TextAlignmentRole)) {
-        const auto id = columnId(index.column()).toStdString();
         if (role == Qt::TextAlignmentRole) {
-            const auto& columns = list_view_->view().columns;
-            const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
-            return found == columns.end() ? QVariant{}
-                                          : QVariant::fromValue(alignment_of(found->alignment));
+            return plan != nullptr ? plan->alignment : QVariant{};
         }
-        const auto& ids = list_view_->builtin_expression_columns();
-        const auto found = std::ranges::find(ids, id);
-        const auto cell = static_cast<std::size_t>(found - ids.begin());
-        return evaluatedNow(row) && found != ids.end() && cell < row.evaluated->builtin_cells.size()
-                   ? QString::fromStdString(row.evaluated->builtin_cells[cell])
+        const auto cell = plan != nullptr ? plan->builtin : -1;
+        return evaluatedNow(row) && cell >= 0 &&
+                       static_cast<std::size_t>(cell) < row.evaluated->builtin_cells.size()
+                   ? QString::fromStdString(
+                         row.evaluated->builtin_cells[static_cast<std::size_t>(cell)])
                    : QString{};
     }
     if (index.column() >= local_column_count) {
@@ -536,11 +614,7 @@ QVariant LocalListModel::viewData(const QModelIndex& index, const int role) cons
                        : QString{};
         }
         if (role == Qt::TextAlignmentRole) {
-            const auto id = columnId(index.column()).toStdString();
-            const auto& columns = list_view_->view().columns;
-            const auto found = std::ranges::find(columns, id, &lists::ViewColumn::id);
-            return found == columns.end() ? QVariant{}
-                                          : QVariant::fromValue(alignment_of(found->alignment));
+            return plan != nullptr ? plan->alignment : QVariant{};
         }
         return {};
     }

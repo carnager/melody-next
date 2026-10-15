@@ -12,8 +12,10 @@
 #include <QPointer>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,53 +23,96 @@ namespace trackknife::bench {
 
 void Workspace::refreshRatings() {
     for (const auto& engine_link : engines_) {
-        const auto engine = engine_link->key;
+        engine_link->ratings.clear();
+    }
+    refreshNewRatings();
+}
+
+void Workspace::refreshNewRatings() {
+    for (const auto& engine_link : engines_) {
         auto* catalogue = engine_link->catalogue.get();
         if (catalogue == nullptr) {
             continue;
         }
-        QStringList hashes;
-        QSet<QString> unique;
+        // What is known is shown at once; only what is not is asked for --
+        // a list's new rows, not every row of every list each time one
+        // changes. A rating stored since is told by its engine.
+        std::unordered_set<std::string> unknown;
         for (const auto& tab : list_tabs_) {
-            if (EngineKey::of(tab->document) != engine) {
-                continue;
+            if (EngineKey::of(tab->document) == engine_link->key) {
+                tab->model->adoptKnownRatings(engine_link->ratings, unknown);
             }
-            for (const auto& hash : tab->model->ratingHashes()) {
-                if (!unique.contains(hash)) {
-                    unique.insert(hash);
-                    hashes.push_back(hash);
-                }
-            }
-        }
-        if (hashes.isEmpty()) {
-            continue;
         }
         std::vector<std::string> keys;
-        keys.reserve(static_cast<std::size_t>(hashes.size()));
-        for (const auto& hash : hashes) {
-            keys.push_back(hash.toStdString());
+        for (const auto& hash : unknown) {
+            if (engine_link->ratings_asked.insert(hash).second) {
+                keys.push_back(hash);
+            }
+        }
+        if (keys.empty()) {
+            continue;
         }
         const QPointer workspace{this};
+        const auto* asking = engine_link.get();
         auto library = std::shared_ptr<engine::Catalogue>{catalogue->openDeferred()};
         static_cast<void>(QtConcurrent::run(
-            &catalogue_work_, [workspace, library, keys = std::move(keys), hashes, engine] {
+            &catalogue_work_, [workspace, library, keys = std::move(keys), asking]() mutable {
                 auto values = library->ratings(keys);
-                if (!values || values->size() != static_cast<std::size_t>(hashes.size())) {
-                    return;
-                }
-                postBack(workspace, [workspace, hashes, engine, values = std::move(*values)] {
-                    QHash<QString, unsigned> ratings;
-                    ratings.reserve(hashes.size());
-                    for (qsizetype index = 0; index < hashes.size(); ++index) {
-                        ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
-                    }
-                    for (const auto& tab : workspace->list_tabs_) {
-                        if (EngineKey::of(tab->document) == engine) {
-                            tab->model->applyRatings(ratings);
-                        }
-                    }
-                });
+                postBack(workspace,
+                         [workspace, keys = std::move(keys), asking, values = std::move(values)] {
+                             // Its engine still connected: it may be gone, or known by
+                             // another key now.
+                             const auto found = std::ranges::find_if(
+                                 workspace->engines_,
+                                 [asking](const auto& each) { return each.get() == asking; });
+                             if (found == workspace->engines_.end()) {
+                                 return;
+                             }
+                             auto& link = **found;
+                             for (const auto& hash : keys) {
+                                 link.ratings_asked.erase(hash);
+                             }
+                             // Not answered: asked again when next wanted.
+                             if (!values || values->size() != keys.size()) {
+                                 return;
+                             }
+                             LocalListModel::RatingsByHash answered;
+                             answered.reserve(keys.size());
+                             for (std::size_t index = 0; index < keys.size(); ++index) {
+                                 answered.emplace(keys[index], (*values)[index]);
+                                 link.ratings.insert_or_assign(keys[index], (*values)[index]);
+                             }
+                             for (const auto& tab : workspace->list_tabs_) {
+                                 if (EngineKey::of(tab->document) == link.key) {
+                                     tab->model->applyRatings(answered);
+                                 }
+                             }
+                         });
             }));
+    }
+}
+
+void Workspace::forgetRatings(const EngineKey& engine, const std::vector<std::string>& raw_paths,
+                              const bool everything) {
+    auto* found = link(engine);
+    if (found == nullptr || found->ratings.empty()) {
+        return;
+    }
+    if (everything) {
+        found->ratings.clear();
+        return;
+    }
+    const RawPathsAt at{raw_paths};
+    for (const auto& tab : list_tabs_) {
+        if (EngineKey::of(tab->document) != engine) {
+            continue;
+        }
+        for (const auto& row : tab->model->rows()) {
+            if (at.covers(row.raw_path)) {
+                found->ratings.erase(row.rating_hash);
+                found->ratings.erase(row.album_rating_hash);
+            }
+        }
     }
 }
 
@@ -84,6 +129,9 @@ void Workspace::rate(const EngineKey& engine, const QStringList& hashes, const b
         QHash<QString, unsigned> applied;
         for (const auto& hash : hashes) {
             applied.insert(hash, rating);
+            if (auto* found = link(engine); found != nullptr) {
+                found->ratings.insert_or_assign(hash.toStdString(), rating);
+            }
         }
         for (const auto& tab : list_tabs_) {
             if (EngineKey::of(tab->document) == engine) {
@@ -100,18 +148,24 @@ void Workspace::rate(const EngineKey& engine, const QStringList& hashes, const b
     const QPointer workspace{this};
     auto library = std::shared_ptr<engine::Catalogue>{catalogue->openDeferred()};
     static_cast<void>(QtConcurrent::run(
-        &catalogue_work_, [workspace, library, keys = std::move(keys), album, rating] {
+        &catalogue_work_, [workspace, library, keys = std::move(keys), album, rating, engine] {
             QString error;
             for (const auto& key : keys) {
                 if (auto stored = library->set_rating(key, album, rating); !stored) {
                     error = QString::fromStdString(stored.error().message);
                 }
             }
-            postBack(workspace, [workspace, error] {
+            postBack(workspace, [workspace, error, keys, engine] {
                 if (!error.isEmpty()) {
                     workspace->view_->showMessage(error, 5'000);
                 }
-                workspace->refreshRatings();
+                // As stored -- or not, when it could not be: asked again.
+                if (auto* found = workspace->link(engine); found != nullptr) {
+                    for (const auto& key : keys) {
+                        found->ratings.erase(key);
+                    }
+                }
+                workspace->refreshNewRatings();
             });
         }));
 }

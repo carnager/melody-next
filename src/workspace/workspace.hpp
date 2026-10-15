@@ -50,6 +50,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 // A window's widgets, known here only by name: the workspace holds which
@@ -212,6 +213,11 @@ class Workspace final : public QObject {
         // thread. Until it has said so, the tools do the work themselves.
         std::shared_ptr<engine::RemoteFileWork> file_work;
         bool does_file_work{false};
+        // ADR-0179: its ratings as last heard -- answered, or told of -- by
+        // hash, so a list's new rows are asked for and the rest are not
+        // asked again; and the hashes asked for and not yet answered.
+        LocalListModel::RatingsByHash ratings;
+        std::unordered_set<std::string> ratings_asked;
     };
     // ADR-0237: file work engines could neither finish nor roll back after a
     // crash, as each reports it -- shown with this window's own, once.
@@ -696,8 +702,15 @@ class Workspace final : public QObject {
     // ADR-0234: a remote's placeholder key replaced by the id it gave.
     void adoptEngineIdentity(EngineLink& engine);
     // Ratings (ADR-0179), read from and stored on the engine whose library
-    // holds the tracks, by their hashes; album ratings by the album's.
+    // holds the tracks, by their hashes; album ratings by the album's. All
+    // of them asked again, or those of rows not yet asked for: a rating
+    // stored since is told by its engine.
     void refreshRatings();
+    void refreshNewRatings();
+    // Ratings that may have changed without their engine telling: asked
+    // again when next wanted.
+    void forgetRatings(const EngineKey& engine, const std::vector<std::string>& raw_paths,
+                       bool everything);
     [[nodiscard]] bool canRate(const EngineKey& engine) const;
     void rate(const EngineKey& engine, const QStringList& hashes, bool album, unsigned rating);
     // A rating an engine stored, shown in its lists.
@@ -769,6 +782,15 @@ class Workspace final : public QObject {
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
     // The row for an entry the engine plays, wherever it is held.
     [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
+    // Where playingRow() last found its entry in the list played from:
+    // looked at first, as the transport asks several times each refresh. An
+    // entry is in a list once, so a row there that is still it is the row.
+    struct PlayingRowHint {
+        core::StableId entry;
+        core::StableId document;
+        std::size_t row{0U};
+    };
+    std::optional<PlayingRowHint> playing_row_hint_;
 
     // Up Next: asks, played before the list goes on. They are one engine's
     // files at a time (ADR-0227), each an occurrence of its own (ADR-0221).

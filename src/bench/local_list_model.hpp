@@ -29,7 +29,9 @@ class ListPersistenceService;
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -132,6 +134,24 @@ struct LocalTrackRow {
     }
 };
 
+// ADR-0268: the files and folders a library change names. A path is one of
+// them, or under one, when it or a folder above it is in the set: a lookup
+// per level of the path, not a comparison with every name -- a change of
+// thousands of files would make that rows times names. Paths are raw bytes,
+// split at '/' only. It holds views of `raw_paths`, which must outlive it.
+class RawPathsAt final {
+  public:
+    explicit RawPathsAt(const std::vector<std::string>& raw_paths)
+        : paths_(raw_paths.begin(), raw_paths.end()) {}
+    explicit RawPathsAt(std::vector<std::string>&&) = delete;
+
+    [[nodiscard]] bool empty() const noexcept { return paths_.empty(); }
+    [[nodiscard]] bool covers(std::string_view raw_path) const;
+
+  private:
+    std::unordered_set<std::string_view> paths_;
+};
+
 // ADR-0220 Phase 0: the type itself is audio::TrackSource, which is Qt-free so
 // that playback state holding one can leave the widget layer. The alias keeps
 // the established spelling at the several hundred call sites in src/bench.
@@ -174,6 +194,11 @@ class LocalListModel final : public QAbstractTableModel {
     // ADR-0179: applies stored ratings by content-identity hash to every row
     // whose track hash appears in the map.
     void applyRatings(const QHash<QString, unsigned>& ratings);
+    using RatingsByHash = std::unordered_map<std::string, unsigned>;
+    void applyRatings(const RatingsByHash& ratings);
+    // The same from what is known of the engine's ratings, the hashes it
+    // does not know added to `unknown` -- to be asked for.
+    void adoptKnownRatings(const RatingsByHash& known, std::unordered_set<std::string>& unknown);
     // ADR-0268: of the files `checked`, those in `missing` are not there and
     // their rows show greyed; the rest are there again.
     void setMissing(const std::vector<std::string>& checked,
@@ -181,8 +206,6 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] bool isMissing(const std::string& raw_path) const {
         return missing_.contains(raw_path);
     }
-    // Distinct track rating hashes across all rows, for a bulk store lookup.
-    [[nodiscard]] QStringList ratingHashes() const;
     void removeRowIndexes(std::vector<int> rows, bool remember = true, QString label = {});
     bool applyPermutation(const std::vector<int>& order, QString label);
     [[nodiscard]] bool canUndo() const noexcept { return history_cursor_ > 0; }
@@ -336,6 +359,12 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] bool showsOwnExpression(int column) const;
     // History came, or will not: its rows' history columns say so.
     void historyShown(int first, int last);
+    void adoptRatings(const RatingsByHash& ratings, std::unordered_set<std::string>* unknown);
+    // dataChanged for each run of consecutive rows among `rows` (ascending),
+    // not one from the first to the last: a view measures again what it is
+    // told changed.
+    void emitRowRuns(const std::vector<int>& rows, int first_column, int last_column,
+                     const QList<int>& roles);
     struct Edit {
         enum class Kind : std::uint8_t { reorder, removal, addition, replacement };
         Kind kind{Kind::reorder};
@@ -378,6 +407,25 @@ class LocalListModel final : public QAbstractTableModel {
     }
     [[nodiscard]] QVariant viewData(const QModelIndex& index, int role) const;
     [[nodiscard]] QVariant viewStyle(const QModelIndex& index, int role) const;
+    // What the view says of each column, looked up once when it is set
+    // rather than by id on every cell drawn: where its own expression, style
+    // and second line are in an evaluated row, and how it is aligned.
+    struct ColumnPlan {
+        // builtin_expression_columns() order; built-in columns only.
+        int builtin{-1};
+        bool shows_expression{false};
+        // second_line_columns() order.
+        int second_line{-1};
+        // The view's alignment of it; none where the view has no column.
+        QVariant alignment;
+    };
+    void planColumns();
+    [[nodiscard]] const ColumnPlan* columnPlan(int column) const noexcept {
+        return column >= 0 && static_cast<std::size_t>(column) < column_plans_.size()
+                   ? &column_plans_[static_cast<std::size_t>(column)]
+                   : nullptr;
+    }
+    std::vector<ColumnPlan> column_plans_;
     std::shared_ptr<const lists::CompiledListView> list_view_;
     std::uint64_t view_generation_{0U};
     int expression_columns_{0};

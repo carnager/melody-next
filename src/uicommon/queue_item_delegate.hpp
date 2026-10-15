@@ -12,6 +12,8 @@ class QAbstractItemModel;
 
 namespace trackknife::ui {
 
+class TrackViewSettings;
+
 // Draws a group header into `rect`: the album bold, the details muted, and a
 // hairline above it that separates it from the group before (`separated`).
 void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& palette,
@@ -45,6 +47,9 @@ class TrackLinesDelegate final : public QStyledItemDelegate {
     explicit TrackLinesDelegate(QObject* parent = nullptr);
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
                const QModelIndex& index) const override;
+
+  private:
+    TrackViewSettings* settings_;
 };
 
 class QueueItemDelegate final : public QStyledItemDelegate {
@@ -69,6 +74,7 @@ class QueueItemDelegate final : public QStyledItemDelegate {
   private:
     [[nodiscard]] bool beginsAlbum(const QModelIndex& index) const;
     [[nodiscard]] bool beginsLooseRun(const QModelIndex& index) const;
+    TrackViewSettings* settings_;
 };
 
 // "Disc 2" where a disc begins in an album of several, else empty.

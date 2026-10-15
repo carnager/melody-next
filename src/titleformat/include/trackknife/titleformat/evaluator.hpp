@@ -51,6 +51,12 @@ struct EvaluationOptions {
     std::size_t maximum_output_bytes{1024U * 1024U};
     std::size_t maximum_expanded_results{256U};
     core::CancellationToken cancellation;
+    // For text shown on screen only, never a file name or a key: a value set
+    // into the expression's own text -- a field, a function's result -- that
+    // holds right-to-left letters is wrapped in Unicode first-strong isolates
+    // (U+2068 ... U+2069), so a Hebrew or Arabic title does not reorder the
+    // text after it. Text with none is unchanged.
+    bool isolate_values{false};
 };
 
 [[nodiscard]] core::Result<EvalValue>

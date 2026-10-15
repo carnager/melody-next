@@ -343,8 +343,41 @@ void expandsTreeValuesExplicitlyAndBoundedly() {
 
 } // namespace
 
+// Shown text only: a value holding right-to-left letters is isolated from
+// the expression's own text, so "[4:37]" stays after a Hebrew title.
+void shownRightToLeftValuesAreIsolated() {
+    constexpr std::string_view open = "\u2068";
+    constexpr std::string_view close = "\u2069";
+    const std::string hebrew = "\u05d1\u05d2\u05d9\u05dc\u05d2\u05d5\u05dc";
+    TestContext context;
+    context.add("title", hebrew);
+    context.add("artist", "Midlake");
+    context.add("length", "4:37");
+    trackknife::titleformat::EvaluationOptions shown;
+    shown.isolate_values = true;
+
+    const auto line = evaluateScript("%title% [%length%]", context, shown);
+    CHECK(line && line->text == std::string{open} + hebrew + std::string{close} + " [4:37]");
+    // Left-to-right values are as they were: nothing is added.
+    const auto latin = evaluateScript("%artist% [%length%]", context, shown);
+    CHECK(latin && latin->text == "Midlake [4:37]");
+    // A function's arguments are untouched; its result, shown, is isolated.
+    const auto counted = evaluateScript("$len(%title%)", context, shown);
+    CHECK(counted && counted->text == "7");
+    const auto upper = evaluateScript("$upper(%title%)!", context, shown);
+    CHECK(upper && upper->text == std::string{open} + hebrew + std::string{close} + "!");
+    // A condition is not isolated; the branch shown is, part by part.
+    const auto branched = evaluateScript("$if(%title%,%title% · %artist%,none)", context, shown);
+    CHECK(branched &&
+          branched->text == std::string{open} + hebrew + std::string{close} + " · Midlake");
+    // Not shown -- a file name, a key: never.
+    const auto named = evaluateScript("%title% [%length%]", context);
+    CHECK(named && named->text == hebrew + " [4:37]");
+}
+
 int main() {
     fieldsUseSimplePredictableSemantics();
+    shownRightToLeftValuesAreIsolated();
     lazyFunctionsDoNotEvaluateUnselectedFields();
     integerFunctionsAreStrictBoundedAndDocumented();
     textFunctionsCountUnicodeScalars();

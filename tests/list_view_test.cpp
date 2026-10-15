@@ -433,6 +433,37 @@ void twoLineTracksSayWhatTheyShow() {
           (evaluated->back().second_lines == std::vector<std::string>{"Air", "1 play"}));
 }
 
+// A Hebrew row in the two-line view: its values isolated, so the length and
+// the date stay where the expression puts them rather than where the
+// bidi algorithm would carry them.
+void rightToLeftValuesKeepTheirPlace() {
+    const auto* view = lists::shipped_list_view(lists::two_line_view_id);
+    CHECK(view != nullptr);
+    if (view == nullptr) {
+        return;
+    }
+    const auto compiled = lists::CompiledListView::compile(*view);
+    CHECK(compiled.has_value());
+    if (!compiled) {
+        return;
+    }
+    const std::string title = "\u05d1\u05d2\u05d9\u05dc\u05d2\u05d5\u05dc";
+    const std::string artist = "\u05e9\u05dc\u05d5\u05dd";
+    const std::string album = "\u05d4\u05de\u05d9\u05d8\u05d1";
+    const auto document = tags({{"ARTIST", {artist}}, {"ALBUM", {album}}, {"DATE", {"2006"}}});
+    lists::ViewRow row;
+    row.metadata = &document;
+    row.title = title;
+    row.duration_ms = 277'000;
+    const auto isolated = [](const std::string& value) { return "\u2068" + value + "\u2069"; };
+    const auto evaluated = lists::evaluate_list_rows(*compiled, std::vector{row});
+    CHECK(evaluated &&
+          evaluated->front().cells == std::vector<std::string>{isolated(title) + " [4:37]"});
+    CHECK(evaluated && !evaluated->front().second_lines.empty() &&
+          evaluated->front().second_lines.front() ==
+              isolated(artist) + " • " + isolated(album) + " [2006]");
+}
+
 void historyIsReadByExpressions() {
     auto view = user_view();
     CHECK(lists::CompiledListView::compile(view).has_value() &&
@@ -527,6 +558,7 @@ void columnsSortNaturallyAndStably() {
 int main() {
     shippedViewsAreValidAndAsTheyWere();
     viewsRoundTripAndRefuseWhatTheyCannotRead();
+    rightToLeftValuesKeepTheirPlace();
     problemsSayWhereTheyAre();
     rowsAreEvaluatedAndGrouped();
     columnsSortNaturallyAndStably();

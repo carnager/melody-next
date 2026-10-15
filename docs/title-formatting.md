@@ -55,6 +55,18 @@ Programs are immutable after compilation and safe for concurrent evaluation.
 Evaluation state is local to one call. `tkfmt-1` has no assignment or variable
 functions.
 
+**Trackknife decision:** text a list shows -- its cells, second lines, group
+titles and details, subgroup labels -- is evaluated with right-to-left values
+isolated. A value set into the expression's own text (a field, or a function's
+result) that holds right-to-left letters (Unicode bidi classes R and AL: Hebrew,
+Arabic, ...) is wrapped in U+2068 FIRST STRONG ISOLATE and U+2069 POP
+DIRECTIONAL ISOLATE. Without them, `%title% [%length%]` for a Hebrew title shows
+as `[4:37] title`: the bidi algorithm carries the brackets and digits after it
+into its right-to-left run. Function arguments and conditions are never
+isolated, an empty value stays empty, and a value with no right-to-left letters
+is left exactly as it is. Keys, sort keys, styles, file names and every other
+host evaluate without isolation, so the language's result there is unchanged.
+
 ## Syntax
 
 ### Text

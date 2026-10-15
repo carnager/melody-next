@@ -59,10 +59,51 @@ class Evaluator final {
                                                "evaluation context does not match compiled host",
                                                {}});
         }
-        return evaluateNode(program_.syntax().root());
+        return evaluateOutput(program_.syntax().root());
     }
 
   private:
+    // EvaluationOptions::isolate_values: a part of what is shown that is not
+    // the expression's own text -- a field, a function's result -- and holds
+    // right-to-left letters is set in first-strong isolates, so it cannot
+    // carry the text around it along. Only where the result is shown: a
+    // function's arguments are its own business. Other values are left as
+    // they are, so text with no right-to-left letters is unchanged, and an
+    // empty value stays empty: whether anything is true is as it was.
+    [[nodiscard]] core::Result<EvalValue> evaluateOutput(const NodeId id) {
+        if (!options_.isolate_values || !output_) {
+            return evaluateNode(id);
+        }
+        const auto& node = program_.syntax().node(id);
+        if (std::holds_alternative<LiteralNode>(node.data) ||
+            std::holds_alternative<SequenceNode>(node.data)) {
+            return evaluateNode(id);
+        }
+        if (std::holds_alternative<CallNode>(node.data)) {
+            // Their branches are shown as they are: isolated part by part.
+            const auto function = program_.functionAt(id);
+            if (function == FunctionId::if_ || function == FunctionId::if2) {
+                return evaluateNode(id);
+            }
+        }
+        output_ = false;
+        auto value = evaluateNode(id);
+        output_ = true;
+        if (!value || !core::unicodeHasRightToLeft(value->text)) {
+            return value;
+        }
+        // U+2068 FIRST STRONG ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
+        return checked({"\u2068" + value->text + "\u2069"}, id);
+    }
+
+    // What a condition is: never isolated, whatever it is part of.
+    [[nodiscard]] core::Result<EvalValue> evaluateCondition(const NodeId id) {
+        const auto was = output_;
+        output_ = false;
+        auto value = evaluateNode(id);
+        output_ = was;
+        return value;
+    }
     [[nodiscard]] core::Error error(const core::ErrorCode code, std::string message,
                                     const NodeId id) const {
         return makeError(code, std::move(message), program_, id);
@@ -110,7 +151,7 @@ class Evaluator final {
                                                            const NodeId id) {
         std::string result;
         for (const auto child : sequence.children) {
-            auto value = evaluateNode(child);
+            auto value = evaluateOutput(child);
             if (!value) {
                 return std::unexpected(std::move(value.error()));
             }
@@ -247,22 +288,22 @@ class Evaluator final {
     }
 
     [[nodiscard]] core::Result<EvalValue> evaluateIf(const CallNode& call, const NodeId id) {
-        auto condition = evaluateNode(call.arguments.at(0));
+        auto condition = evaluateCondition(call.arguments.at(0));
         if (!condition) {
             return condition;
         }
         if (condition->truthy()) {
-            return evaluateNode(call.arguments.at(1));
+            return evaluateOutput(call.arguments.at(1));
         }
         if (call.arguments.size() == 3U) {
-            return evaluateNode(call.arguments.at(2));
+            return evaluateOutput(call.arguments.at(2));
         }
         return checked({""}, id);
     }
 
     [[nodiscard]] core::Result<EvalValue> evaluateIf2(const CallNode& call) {
         for (const auto argument : call.arguments) {
-            auto value = evaluateNode(argument);
+            auto value = evaluateOutput(argument);
             if (!value || value->truthy()) {
                 return value;
             }
@@ -931,6 +972,9 @@ class Evaluator final {
     EvaluationOptions options_;
     std::size_t steps_{0};
     const ExpansionBindings* expansion_bindings_{nullptr};
+    // Whether what is evaluated now is shown (isolate_values), not an
+    // argument.
+    bool output_{true};
 };
 
 core::Result<EvalValue> evaluate(const Program& program, const EvaluationContext& context,

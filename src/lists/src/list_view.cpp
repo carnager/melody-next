@@ -219,12 +219,18 @@ class ViewRowContext final : public titleformat::EvaluationContext {
     const std::map<std::string, std::string>* group_;
 };
 
-[[nodiscard]] titleformat::EvaluationOptions options(const core::CancellationToken& cancellation) {
+[[nodiscard]] titleformat::EvaluationOptions options(const core::CancellationToken& cancellation,
+                                                     const bool shown) {
     return {.maximum_steps = 100'000U,
             .maximum_output_bytes = 64U * 1024U,
             .maximum_expanded_results = 1U,
-            .cancellation = cancellation};
+            .cancellation = cancellation,
+            .isolate_values = shown};
 }
+
+// Text a row shows, as against a key, a sort key or a style: its values are
+// isolated, so a Hebrew title keeps "[4:37]" after it (isolate_values).
+constexpr bool as_shown_text = true;
 
 // Single-line, as every cell and header is (ADR-0027).
 [[nodiscard]] std::string one_line(std::string text) {
@@ -234,8 +240,9 @@ class ViewRowContext final : public titleformat::EvaluationContext {
 
 [[nodiscard]] std::string format(const titleformat::Program& program,
                                  const titleformat::EvaluationContext& context,
-                                 const core::CancellationToken& cancellation) {
-    auto value = titleformat::evaluate(program, context, options(cancellation));
+                                 const core::CancellationToken& cancellation,
+                                 const bool as_shown = false) {
+    auto value = titleformat::evaluate(program, context, options(cancellation, as_shown));
     return value ? one_line(std::move(value->text)) : std::string{};
 }
 
@@ -863,14 +870,14 @@ struct ListViewEvaluator {
             EvaluatedRow row;
             row.cells.reserve(compiled.displays_.size());
             for (const auto& display : compiled.displays_) {
-                row.cells.push_back(format(display, context, cancellation));
+                row.cells.push_back(format(display, context, cancellation, as_shown_text));
             }
             if (compiled.row_style_) {
                 row.row_style = format(*compiled.row_style_, context, cancellation);
             }
             row.second_lines.reserve(compiled.second_lines_.size());
             for (const auto& line : compiled.second_lines_) {
-                row.second_lines.push_back(format(line, context, cancellation));
+                row.second_lines.push_back(format(line, context, cancellation, as_shown_text));
             }
             if (!compiled.builtin_ids_.empty()) {
                 row.builtin_cells.reserve(compiled.builtin_ids_.size());
@@ -878,8 +885,9 @@ struct ListViewEvaluator {
                 for (std::size_t at = 0U; at < compiled.builtin_ids_.size(); ++at) {
                     const auto& display = compiled.builtin_displays_[at];
                     const auto& style = compiled.builtin_styles_[at];
-                    row.builtin_cells.push_back(display ? format(*display, context, cancellation)
-                                                        : std::string{});
+                    row.builtin_cells.push_back(
+                        display ? format(*display, context, cancellation, as_shown_text)
+                                : std::string{});
                     row.builtin_styles.push_back(style ? format(*style, context, cancellation)
                                                        : std::string{});
                 }
@@ -897,7 +905,8 @@ struct ListViewEvaluator {
                 row.group_key = format(*compiled.group_key_, grouping, cancellation);
                 if (compiled.subgroup_key_) {
                     row.subgroup_key = format(*compiled.subgroup_key_, grouping, cancellation);
-                    row.subgroup_label = format(*compiled.subgroup_label_, context, cancellation);
+                    row.subgroup_label =
+                        format(*compiled.subgroup_label_, context, cancellation, as_shown_text);
                 }
             }
             evaluated.push_back(std::move(row));
@@ -914,10 +923,10 @@ struct ListViewEvaluator {
         const std::map<std::string, std::string> host{{"grouptracks", std::to_string(tracks)},
                                                       {"grouplength", clock(length_ms)}};
         const ViewRowContext context{first, FormatContextKind::list_item, &host};
-        return {.title = format(*compiled.group_title_, context, cancellation),
-                .details = compiled.group_details_
-                               ? format(*compiled.group_details_, context, cancellation)
-                               : std::string{}};
+        return {.title = format(*compiled.group_title_, context, cancellation, as_shown_text),
+                .details = compiled.group_details_ ? format(*compiled.group_details_, context,
+                                                            cancellation, as_shown_text)
+                                                   : std::string{}};
     }
 
     static core::Result<std::vector<std::string>>

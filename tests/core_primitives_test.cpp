@@ -382,8 +382,19 @@ void rewrittenFilesAlwaysMoveForwardInTime() {
     std::filesystem::remove(path);
 }
 
+void rightToLeftLettersAreFound() {
+    using trackknife::core::unicodeHasRightToLeft;
+    CHECK(unicodeHasRightToLeft("\u05e9\u05dc\u05d5\u05dd"));              // Hebrew
+    CHECK(unicodeHasRightToLeft("Fairuz \u0641\u064a\u0631\u0648\u0632")); // Arabic
+    CHECK(!unicodeHasRightToLeft("Midlake [4:37]"));
+    CHECK(!unicodeHasRightToLeft("Bj\u00f6rk \u0540\u0561\u0575"));               // Latin, Armenian
+    CHECK(!unicodeHasRightToLeft(std::string_view{"\u05d0\u05d1"}.substr(0, 1))); // lead byte alone
+    CHECK(!unicodeHasRightToLeft({}));
+}
+
 int main() {
     stableIdsRoundTrip();
+    rightToLeftLettersAreFound();
     cancellationIsSharedAndMonotonic();
     progressClampsItsFraction();
     errorsRetainStructuredContext();

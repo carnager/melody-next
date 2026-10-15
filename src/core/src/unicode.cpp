@@ -113,6 +113,27 @@ Result<bool> unicodeSimpleCaseEqual(const std::string_view left, const std::stri
     return equal;
 }
 
+bool unicodeHasRightToLeft(const std::string_view text) {
+    std::size_t offset = 0;
+    while (offset < text.size()) {
+        // Below U+0590 nothing is right to left: ASCII and Latin pass quickly.
+        if (static_cast<unsigned char>(text[offset]) < 0xD6U) {
+            ++offset;
+            continue;
+        }
+        const auto code_point = decode(text, offset);
+        if (!code_point) {
+            return false;
+        }
+        const auto bidi = utf8proc_get_property(code_point->value)->bidi_class;
+        if (bidi == UTF8PROC_BIDI_CLASS_R || bidi == UTF8PROC_BIDI_CLASS_AL) {
+            return true;
+        }
+        offset += code_point->bytes;
+    }
+    return false;
+}
+
 Result<std::size_t> unicodeCodePointCount(const std::string_view text) {
     std::size_t offset = 0;
     std::size_t count = 0;

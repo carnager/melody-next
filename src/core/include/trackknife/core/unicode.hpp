@@ -29,4 +29,8 @@ namespace trackknife::core {
 [[nodiscard]] Result<std::string> unicodeSimpleUpper(std::string_view text);
 [[nodiscard]] Result<std::string> unicodeEncodeCodePoint(std::uint32_t code_point);
 
+// Whether any letter is written right to left -- Hebrew, Arabic, Syriac,
+// Thaana, and the rest of bidi classes R and AL. Invalid UTF-8 is not.
+[[nodiscard]] bool unicodeHasRightToLeft(std::string_view text);
+
 } // namespace trackknife::core

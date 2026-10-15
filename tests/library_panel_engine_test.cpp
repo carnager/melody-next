@@ -382,21 +382,21 @@ void LibraryPanelEngineTest::theTreeFollowsAChangeInPlace() {
     auto* model = browser.model();
     QTRY_VERIFY_WITH_TIMEOUT(
         model->rowCount() == 1 && model->index(0, 0).data(library_entry_role).isValid(), 5'000);
-    auto* artist = model->item(0);
-    browser.noteExpanded(artist->index(), true);
-    QTRY_COMPARE_WITH_TIMEOUT(artist->rowCount(), 2, 5'000);
+    auto* artist = model->root().child(0);
+    browser.noteExpanded(model->indexOf(*artist), true);
+    QTRY_COMPARE_WITH_TIMEOUT(artist->count(), 2, 5'000);
     auto* kept = artist->child(0);
-    const auto kept_label = kept->text();
-    browser.noteCurrent(kept->index());
+    const auto kept_label = kept->text;
+    browser.noteCurrent(model->indexOf(*kept));
 
     // The second album's folder deleted, and the engine re-reads it.
     QVERIFY(QDir{albums->second}.removeRecursively());
     QVERIFY(catalogue.refresh({albums->second.toStdString()}).has_value());
     browser.applyChanges({}, false);
-    QTRY_COMPARE_WITH_TIMEOUT(artist->rowCount(), 1, 5'000);
-    QCOMPARE(model->item(0), artist);
+    QTRY_COMPARE_WITH_TIMEOUT(artist->count(), 1, 5'000);
+    QCOMPARE(model->root().child(0), artist);
     QCOMPARE(artist->child(0), kept);
-    QCOMPARE(kept->text(), kept_label);
+    QCOMPARE(kept->text, kept_label);
     (*server)->stop();
 }
 

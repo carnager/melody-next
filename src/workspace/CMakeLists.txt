@@ -44,6 +44,8 @@ qt_add_library(
     folder_browser.cpp
     folder_browser.hpp
     library_browser.cpp
+    library_tree_model.cpp
+    library_tree_model.hpp
     library_view_definitions.cpp
     list_view_definitions.cpp
     list_view_definitions.hpp

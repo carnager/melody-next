@@ -51,29 +51,25 @@ QByteArray entryKey(const persistence::LibraryEntry& entry) {
 
 // The tree: children loaded when a row opens, an album's cover and its
 // quiet second line, and a drag that carries the entries.
-class LibraryModel final : public QStandardItemModel {
+class LibraryModel final : public LibraryTreeModel {
   public:
     LibraryModel(LibraryBrowser* browser, std::function<void(const QModelIndex&)> fetch)
-        : QStandardItemModel(browser), browser_(browser), fetch_(std::move(fetch)) {}
-    bool canFetchMore(const QModelIndex& parent) const override {
-        return parent.isValid() && parent.data(query_role).isValid() &&
-               !parent.data(loaded_role).toBool();
-    }
-    bool hasChildren(const QModelIndex& parent = {}) const override {
-        return canFetchMore(parent) || QStandardItemModel::hasChildren(parent);
-    }
+        : LibraryTreeModel(browser), browser_(browser), fetch_(std::move(fetch)) {}
     void fetchMore(const QModelIndex& parent) override {
         if (canFetchMore(parent))
             fetch_(parent);
     }
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
+        const auto* row = index.isValid() ? rowAt(index) : nullptr;
+        if (row == nullptr) {
+            return {};
+        }
         if (role == library_secondary_role) {
             // Text, empty where there is none: a view binding it as a
             // string must not be handed nothing.
-            const auto value = QStandardItemModel::data(index, entry_role);
-            if (!value.isValid())
+            if (!row->entry)
                 return QString{};
-            const auto entry = value.value<persistence::LibraryEntry>();
+            const auto& entry = *row->entry;
             // An artist's album count is the row's quiet count instead, and
             // so is a view's group's.
             if (entry.kind == persistence::LibraryEntryKind::artist ||
@@ -91,13 +87,12 @@ class LibraryModel final : public QStandardItemModel {
         }
         if (role == library_kind_role || role == library_count_role ||
             role == library_rating_role || role == library_available_role) {
-            const auto value = QStandardItemModel::data(index, entry_role);
-            if (!value.isValid()) {
+            if (!row->entry) {
                 return role == library_kind_role || role == library_count_role ? QVariant{QString{}}
                        : role == library_available_role                        ? QVariant{false}
                                                                                : QVariant{0U};
             }
-            const auto entry = value.value<persistence::LibraryEntry>();
+            const auto& entry = *row->entry;
             switch (role) {
             case library_kind_role:
                 return entry.kind == persistence::LibraryEntryKind::artist
@@ -119,9 +114,8 @@ class LibraryModel final : public QStandardItemModel {
             }
         }
         if (role == library_cover_key_role || role == Qt::DecorationRole) {
-            const auto value = QStandardItemModel::data(index, entry_role);
-            if (value.isValid()) {
-                const auto entry = value.value<persistence::LibraryEntry>();
+            if (row->entry) {
+                const auto& entry = *row->entry;
                 if (entry.kind == persistence::LibraryEntryKind::album) {
                     const auto key = text(entry.key);
                     if (role == library_cover_key_role) {
@@ -139,10 +133,32 @@ class LibraryModel final : public QStandardItemModel {
                 return QString{};
             }
         }
-        return QStandardItemModel::data(index, role);
+        switch (role) {
+        case Qt::DisplayRole:
+        case Qt::EditRole:
+            return row->text;
+        case Qt::DecorationRole:
+            return row->icon.isNull() ? QVariant{} : QVariant{row->icon};
+        case Qt::ToolTipRole:
+            return row->tooltip.isNull() ? QVariant{} : QVariant{row->tooltip};
+        case entry_role:
+            return row->entry ? QVariant::fromValue(*row->entry) : QVariant{};
+        case query_role:
+            return row->query ? QVariant::fromValue(*row->query) : QVariant{};
+        case loaded_role:
+            return row->loaded;
+        case more_role:
+            return row->more;
+        case described_role:
+            return row->described;
+        case empty_state_role:
+            return row->empty_state ? QVariant{*row->empty_state} : QVariant{};
+        default:
+            return {};
+        }
     }
     QHash<int, QByteArray> roleNames() const override {
-        auto names = QStandardItemModel::roleNames();
+        auto names = LibraryTreeModel::roleNames();
         names.insert(library_kind_role, "kind");
         names.insert(library_count_role, "count");
         names.insert(library_rating_role, "rating");
@@ -701,44 +717,38 @@ void LibraryBrowser::reload() {
             loadChildren({}, top);
             return;
         }
-        auto* group = new QStandardItem(tr("Tracks"));
-        group->setEditable(false);
-        group->setDragEnabled(false);
-        group->setData(true, loaded_role);
-        group->setColumnCount(1);
-        model_->appendRow(group);
-        loadFilterChildren(QPersistentModelIndex{group->index()},
+        auto group = std::make_unique<LibraryTreeModel::Row>();
+        group->text = tr("Tracks");
+        group->loaded = true;
+        const auto index = model_->indexOf(model_->append(model_->root(), std::move(group)));
+        loadFilterChildren(QPersistentModelIndex{index},
                            std::make_shared<query::CompiledTkq>(std::move(*compiled)));
-        emit expandRequested(group->index());
+        emit expandRequested(index);
         return;
     }
     for (const auto kind :
          {persistence::LibraryEntryKind::album, persistence::LibraryEntryKind::track}) {
-        auto* group = new QStandardItem(
-            kind == persistence::LibraryEntryKind::album ? tr("Albums") : tr("Tracks"));
-        group->setEditable(false);
-        group->setDragEnabled(false);
-        group->setData(true, loaded_role);
-        group->setColumnCount(1);
-        model_->appendRow(group);
+        auto group = std::make_unique<LibraryTreeModel::Row>();
+        group->text = kind == persistence::LibraryEntryKind::album ? tr("Albums") : tr("Tracks");
+        group->loaded = true;
         persistence::LibraryQuery query;
         query.kind = kind;
         query.text = query_text;
         // Loaded already, so not fetched again -- kept to be asked again.
-        group->setData(QVariant::fromValue(query), query_role);
-        loadChildren(QPersistentModelIndex{group->index()}, query);
-        emit expandRequested(group->index());
+        group->query = query;
+        const auto index = model_->indexOf(model_->append(model_->root(), std::move(group)));
+        loadChildren(QPersistentModelIndex{index}, query);
+        emit expandRequested(index);
     }
 }
 
 void LibraryBrowser::fetch(const QModelIndex& index) {
-    auto* item = model_->itemFromIndex(index);
-    if (item == nullptr || item->data(loaded_role).toBool() || !item->data(query_role).isValid()) {
+    auto* item = index.isValid() ? model_->rowAt(index) : nullptr;
+    if (item == nullptr || item->loaded || !item->query) {
         return;
     }
-    item->setData(true, loaded_role);
-    loadChildren(QPersistentModelIndex{index},
-                 item->data(query_role).value<persistence::LibraryQuery>());
+    item->loaded = true;
+    loadChildren(QPersistentModelIndex{index}, *item->query);
 }
 
 void LibraryBrowser::noteExpanded(const QModelIndex& index, const bool expanded) {
@@ -780,22 +790,21 @@ void LibraryBrowser::prepareEntry(persistence::LibraryEntry& entry,
 
 // An entry's row as it shows: its label, icon, tooltip, and what opening it
 // lists. Its children and whether they are loaded are left as they are.
-void LibraryBrowser::describeItem(QStandardItem& item, const persistence::LibraryEntry& entry) {
+void LibraryBrowser::describeItem(LibraryTreeModel::Row& item,
+                                  const persistence::LibraryEntry& entry) {
     auto label = entry.label.empty() && entry.view_node ? tr("Unknown") : text(entry.label);
     if (entry.available == 0U) {
         label += tr(" — unavailable");
     } else if (entry.available < entry.tracks) {
         label += tr(" — %1 unavailable").arg(entry.tracks - entry.available);
     }
-    item.setText(label);
-    item.setEditable(false);
-    item.setDragEnabled(entry.available > 0U);
-    item.setDropEnabled(false);
-    item.setIcon(kindIcon(entry.kind));
-    item.setData(QVariant::fromValue(entry), entry_role);
-    item.setData(true, described_role);
+    item.text = label;
+    item.draggable = entry.available > 0U;
+    item.icon = kindIcon(entry.kind);
+    item.entry = entry;
+    item.described = true;
     // A track by its file, an album by whose it is, an artist by name alone.
-    item.setToolTip(entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
+    item.tooltip = (entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
                     : entry.kind == persistence::LibraryEntryKind::group
                         ? tr("%1 album%2 · %3 track%4")
                               .arg(entry.albums)
@@ -805,8 +814,7 @@ void LibraryBrowser::describeItem(QStandardItem& item, const persistence::Librar
                     : entry.album.empty() ? text(entry.artist)
                                           : text(entry.artist + " — " + entry.album));
     if (entry.view_node) {
-        item.setData(QVariant::fromValue(*entry.view_node), query_role);
-        item.setColumnCount(1);
+        item.query = *entry.view_node;
     } else if (entry.kind != persistence::LibraryEntryKind::track) {
         persistence::LibraryQuery children;
         if (entry.kind == persistence::LibraryEntryKind::artist) {
@@ -816,11 +824,7 @@ void LibraryBrowser::describeItem(QStandardItem& item, const persistence::Librar
             children.kind = persistence::LibraryEntryKind::track;
             children.album_key = entry.key;
         }
-        item.setData(QVariant::fromValue(children), query_role);
-        // Its column before its rows: added with the first row, it is a
-        // column insertion under a nested row, which QML's tree adapter
-        // cannot follow.
-        item.setColumnCount(1);
+        item.query = std::move(children);
     }
 }
 
@@ -889,19 +893,14 @@ void LibraryBrowser::refreshInPlace() {
     if (const auto top = topQuery()) {
         levels.emplace_back(QPersistentModelIndex{}, *top);
     }
-    std::vector<QStandardItem*> pending{model_->invisibleRootItem()};
+    std::vector<const LibraryTreeModel::Row*> pending{&model_->root()};
     while (!pending.empty()) {
-        auto* item = pending.back();
+        const auto* item = pending.back();
         pending.pop_back();
-        for (int row = 0; row < item->rowCount(); ++row) {
-            auto* child = item->child(row);
-            if (child == nullptr) {
-                continue;
-            }
-            if (child->data(loaded_role).toBool() && child->data(query_role).isValid() &&
-                !child->data(more_role).toBool()) {
-                levels.emplace_back(QPersistentModelIndex{child->index()},
-                                    child->data(query_role).value<persistence::LibraryQuery>());
+        for (int row = 0; row < item->count(); ++row) {
+            const auto* child = item->child(row);
+            if (child->loaded && child->query && !child->more) {
+                levels.emplace_back(QPersistentModelIndex{model_->indexOf(*child)}, *child->query);
                 pending.push_back(child);
             }
         }
@@ -934,7 +933,7 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
                      !outcome.error.isEmpty()) {
                      return;
                  }
-                 auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
+                 auto* target = model_->rowAt(root ? QModelIndex{} : QModelIndex{parent});
                  if (target == nullptr) {
                      return;
                  }
@@ -943,104 +942,89 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
              true});
 }
 
-void LibraryBrowser::mergeLevel(QStandardItem& target, persistence::LibraryPage page,
+void LibraryBrowser::mergeLevel(LibraryTreeModel::Row& target, persistence::LibraryPage page,
                                 const persistence::LibraryQuery& query, const bool root) {
     // Rows that are no entry -- "Show more…", "No matches" -- go;
     // what stays is matched by its entry.
-    for (int row = target.rowCount() - 1; row >= 0; --row) {
-        if (!target.child(row)->data(entry_role).isValid()) {
-            target.removeRow(row);
+    for (int row = target.count() - 1; row >= 0; --row) {
+        if (!target.child(row)->entry) {
+            model_->remove(target, row, 1);
         }
     }
     // The rows there are, by their entries' keys, in their order: each
     // entry finds its row by a lookup, not by reading every row after it.
     struct Kept {
-        // Its first row's entry, as that row holds it -- shared, not copied.
-        QVariant entry;
-        std::vector<QStandardItem*> items;
+        std::vector<LibraryTreeModel::Row*> rows;
         std::size_t next{0U};
     };
-    const auto entry_type = QMetaType::fromType<persistence::LibraryEntry>();
     QHash<QByteArray, Kept> kept;
-    kept.reserve(target.rowCount());
-    for (int row = 0; row < target.rowCount(); ++row) {
+    kept.reserve(target.count());
+    for (int row = 0; row < target.count(); ++row) {
         auto* child = target.child(row);
-        auto held = child->data(entry_role);
-        if (held.metaType() != entry_type) {
-            continue;
-        }
-        auto& slot =
-            kept[entryKey(*static_cast<const persistence::LibraryEntry*>(held.constData()))];
-        if (slot.items.empty()) {
-            slot.entry = std::move(held);
-        }
-        slot.items.push_back(child);
+        kept[entryKey(*child->entry)].rows.push_back(child);
     }
     int at = 0;
     for (auto& entry : page.entries) {
         prepareEntry(entry, query);
         const auto key = entryKey(entry);
         // The first row of that key not yet placed: rows before `at` are.
-        int found = -1;
-        const persistence::LibraryEntry* was = nullptr;
+        LibraryTreeModel::Row* found = nullptr;
+        bool first_of_key = false;
         if (const auto slot = kept.find(key); slot != kept.end()) {
-            while (slot->next < slot->items.size() && found < 0) {
-                const auto row = slot->items[slot->next++]->row();
-                if (row >= at) {
-                    found = row;
+            while (slot->next < slot->rows.size() && found == nullptr) {
+                auto* candidate = slot->rows[slot->next++];
+                if (candidate->position() >= at) {
+                    found = candidate;
                     // Only the first of a key's rows is compared; another is
                     // said again, as every row once was.
-                    was =
-                        slot->next == 1U
-                            ? static_cast<const persistence::LibraryEntry*>(slot->entry.constData())
-                            : nullptr;
+                    first_of_key = slot->next == 1U;
                 }
             }
         }
-        QStandardItem* item = nullptr;
-        if (found == at) {
-            item = target.child(at);
-        } else if (found > at) {
+        LibraryTreeModel::Row* item = found;
+        if (found != nullptr && found->position() > at) {
             // Moved: taken with what it holds, and opened again.
-            auto taken = target.takeRow(found);
-            target.insertRow(at, taken);
-            item = target.child(at);
+            model_->move(target, found->position(), at);
             if (expanded_entries_.contains(key)) {
-                emit expandRequested(item->index());
+                emit expandRequested(model_->indexOf(*found));
             }
-        } else {
-            item = new QStandardItem;
-            target.insertRow(at, item);
+        } else if (found == nullptr) {
+            auto row = std::make_unique<LibraryTreeModel::Row>();
+            describeItem(*row, entry);
+            item = &model_->insert(target, at, std::move(row));
+            if (expanded_entries_.contains(key)) {
+                emit expandRequested(model_->indexOf(*item));
+            }
+            ++at;
+            continue;
         }
         // Said again as it is now: counts, ratings, what is available --
         // its rows and whether they are open kept. A row saying it already
         // is left as it is.
-        if (was == nullptr || !item->data(described_role).toBool() || !(*was == entry)) {
+        if (!first_of_key || !item->described || !(*item->entry == entry)) {
             describeItem(*item, entry);
-        }
-        if (found < 0 && expanded_entries_.contains(key)) {
-            emit expandRequested(item->index());
+            model_->changed(*item);
         }
         ++at;
     }
-    if (target.rowCount() > at) {
-        target.removeRows(at, target.rowCount() - at);
+    if (target.count() > at) {
+        model_->remove(target, at, target.count() - at);
     }
     if (page.more) {
         auto next = query;
         next.offset = page.entries.size();
-        auto* more = new QStandardItem(tr("Show more…"));
-        more->setEditable(false);
-        more->setDragEnabled(false);
-        more->setData(true, more_role);
-        more->setData(QVariant::fromValue(next), query_role);
-        target.appendRow(more);
-    } else if (target.rowCount() == 0) {
+        auto more = std::make_unique<LibraryTreeModel::Row>();
+        more->text = tr("Show more…");
+        more->more = true;
+        more->query = std::move(next);
+        model_->append(target, std::move(more));
+    } else if (target.count() == 0) {
         const bool top = root && query.text.empty();
-        auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
-        empty->setEnabled(false);
-        empty->setData(top, empty_state_role);
-        target.appendRow(empty);
+        auto empty = std::make_unique<LibraryTreeModel::Row>();
+        empty->text = top ? emptyLibraryText() : tr("No matches");
+        empty->enabled = false;
+        empty->empty_state = top;
+        model_->append(target, std::move(empty));
     }
 }
 
@@ -1067,17 +1051,18 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  if (generation != generation_ || (!root && !parent.isValid())) {
                      return;
                  }
-                 auto* target = root ? model_->invisibleRootItem() : model_->itemFromIndex(parent);
+                 auto* target = model_->rowAt(root ? QModelIndex{} : QModelIndex{parent});
                  if (target == nullptr) {
                      return;
                  }
                  if (!outcome.error.isEmpty()) {
                      setStatus(outcome.error);
-                     target->setData(false, loaded_role);
+                     target->loaded = false;
+                     model_->changed(*target);
                      return;
                  }
                  if (query.offset == 0U) {
-                     target->removeRows(0, target->rowCount());
+                     model_->remove(*target, 0, target->count());
                  }
                  if (!scanning_ && status_ == tr("Searching…")) {
                      setStatus(search_.trimmed().isEmpty() ? tr("Browse artists and albums.")
@@ -1088,52 +1073,62 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  for (QModelIndex above = parent; above.isValid(); above = above.parent()) {
                      ++depth;
                  }
-                 bool on_the_way = false;
-                 for (auto entry : outcome.page.entries) {
+                 // The level in at once -- one insertion however many rows --
+                 // and what opens, or is current, said of the rows once there.
+                 std::vector<std::unique_ptr<LibraryTreeModel::Row>> rows;
+                 rows.reserve(outcome.page.entries.size());
+                 for (auto& entry : outcome.page.entries) {
                      prepareEntry(entry, query);
-                     auto* item = new QStandardItem;
-                     describeItem(*item, entry);
-                     target->appendRow(item);
+                     auto row = std::make_unique<LibraryTreeModel::Row>();
+                     describeItem(*row, entry);
+                     rows.push_back(std::move(row));
+                 }
+                 auto* first = model_->append(*target, std::move(rows));
+                 bool on_the_way = false;
+                 for (std::size_t added = 0; added < outcome.page.entries.size(); ++added) {
+                     const auto& entry = outcome.page.entries[added];
+                     const auto index = model_->index(first->position() + static_cast<int>(added),
+                                                      0, model_->indexOf(*target));
                      if (locating_) {
                          const auto step = locating_(entry, depth);
                          if (step != Step::none) {
                              on_the_way = true;
-                             emit expandRequested(item->index());
+                             emit expandRequested(index);
                          }
                          if (step == Step::target) {
-                             emit currentRequested(item->index(), true);
+                             emit currentRequested(index, true);
                              locating_ = {};
                              setStatus(tr("Located in library."));
                          }
                      }
                      if (current_entry_ == entryKey(entry)) {
-                         emit currentRequested(item->index(), false);
+                         emit currentRequested(index, false);
                      }
                      if (expanded_entries_.contains(entryKey(entry))) {
-                         emit expandRequested(item->index());
+                         emit expandRequested(index);
                      }
                  }
                  if (outcome.page.more) {
                      query.offset += outcome.page.entries.size();
-                     auto* more = new QStandardItem(tr("Show more…"));
-                     more->setEditable(false);
-                     more->setDragEnabled(false);
-                     more->setData(true, more_role);
-                     more->setData(QVariant::fromValue(query), query_role);
-                     target->appendRow(more);
                      // Not among these: further on, then.
                      if (locating_ && !on_the_way) {
-                         target->removeRow(more->row());
                          loadChildren(parent, query);
+                     } else {
+                         auto more = std::make_unique<LibraryTreeModel::Row>();
+                         more->text = tr("Show more…");
+                         more->more = true;
+                         more->query = query;
+                         model_->append(*target, std::move(more));
                      }
-                 } else if (target->rowCount() == 0) {
+                 } else if (target->count() == 0) {
                      // Why it is empty, at the top: a search that found nothing
                      // is not a library with no folders.
                      const bool top = !parent.isValid() && query.text.empty();
-                     auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
-                     empty->setEnabled(false);
-                     empty->setData(top, empty_state_role);
-                     target->appendRow(empty);
+                     auto empty = std::make_unique<LibraryTreeModel::Row>();
+                     empty->text = top ? emptyLibraryText() : tr("No matches");
+                     empty->enabled = false;
+                     empty->empty_state = top;
+                     model_->append(*target, std::move(empty));
                  }
                  emit levelLoaded();
              },
@@ -1157,7 +1152,7 @@ void LibraryBrowser::loadFilterChildren(const QPersistentModelIndex& parent,
                  if (generation != generation_ || !parent.isValid()) {
                      return;
                  }
-                 auto* target = model_->itemFromIndex(parent);
+                 auto* target = model_->rowAt(parent);
                  if (target == nullptr) {
                      return;
                  }
@@ -1168,28 +1163,32 @@ void LibraryBrowser::loadFilterChildren(const QPersistentModelIndex& parent,
                  if (!scanning_ && status_ == tr("Searching…")) {
                      setStatus(tr("Query results"));
                  }
+                 std::vector<std::unique_ptr<LibraryTreeModel::Row>> rows;
+                 rows.reserve(outcome.page.entries.size());
+                 const auto icon = QIcon::fromTheme(QStringLiteral("audio-x-generic"));
                  for (const auto& entry : outcome.page.entries) {
-                     auto* item = new QStandardItem(text(entry.label));
-                     item->setEditable(false);
-                     item->setDragEnabled(true);
-                     item->setDropEnabled(false);
-                     item->setIcon(QIcon::fromTheme(QStringLiteral("audio-x-generic")));
-                     item->setData(QVariant::fromValue(entry), entry_role);
-                     item->setToolTip(pathLabel(entry.key));
-                     target->appendRow(item);
+                     auto row = std::make_unique<LibraryTreeModel::Row>();
+                     row->text = text(entry.label);
+                     row->draggable = true;
+                     row->icon = icon;
+                     row->entry = entry;
+                     row->tooltip = pathLabel(entry.key);
+                     rows.push_back(std::move(row));
                  }
+                 model_->append(*target, std::move(rows));
                  if (outcome.page.more) {
                      // The tree shows the first page; Enter keeps the complete
                      // bounded result set as a list.
-                     auto* more = new QStandardItem(
-                         tr("Showing the first %1 matches — press Enter to keep them all")
-                             .arg(outcome.page.entries.size()));
-                     more->setEnabled(false);
-                     target->appendRow(more);
-                 } else if (target->rowCount() == 0) {
-                     auto* empty = new QStandardItem(tr("No matches"));
-                     empty->setEnabled(false);
-                     target->appendRow(empty);
+                     auto more = std::make_unique<LibraryTreeModel::Row>();
+                     more->text = tr("Showing the first %1 matches — press Enter to keep them all")
+                                      .arg(outcome.page.entries.size());
+                     more->enabled = false;
+                     model_->append(*target, std::move(more));
+                 } else if (target->count() == 0) {
+                     auto empty = std::make_unique<LibraryTreeModel::Row>();
+                     empty->text = tr("No matches");
+                     empty->enabled = false;
+                     model_->append(*target, std::move(empty));
                  }
                  emit levelLoaded();
              },
@@ -1197,14 +1196,14 @@ void LibraryBrowser::loadFilterChildren(const QPersistentModelIndex& parent,
 }
 
 void LibraryBrowser::activate(const QModelIndex& index) {
-    auto* item = model_->itemFromIndex(index);
+    auto* item = index.isValid() ? model_->rowAt(index) : nullptr;
     if (item == nullptr) {
         return;
     }
-    if (item->data(more_role).toBool()) {
-        const auto query = item->data(query_role).value<persistence::LibraryQuery>();
+    if (item->more && item->query) {
+        const auto query = *item->query;
         const QPersistentModelIndex parent{index.parent()};
-        model_->removeRow(index.row(), index.parent());
+        model_->remove(*item->parent(), item->position(), 1);
         loadChildren(parent, query);
         return;
     }
@@ -1297,7 +1296,10 @@ void LibraryBrowser::rate(const QModelIndex& index, const int rating) {
     const auto value = static_cast<unsigned>(std::clamp(rating, 0, 10));
     storeRating(entry.rating_hash, entry.kind == persistence::LibraryEntryKind::album, value);
     entry.rating = value;
-    model_->setData(index, QVariant::fromValue(entry), entry_role);
+    if (auto* row = model_->rowAt(index); row != nullptr && row->entry) {
+        row->entry = std::move(entry);
+        model_->changed(*row);
+    }
 }
 
 void LibraryBrowser::resolveEntries(std::vector<persistence::LibraryEntry> entries,
@@ -1561,52 +1563,52 @@ void LibraryBrowser::removeRoot(std::string raw_path) {
 }
 
 void LibraryBrowser::loadRoots() {
-    enqueue({[](engine::Catalogue& library) {
-                 Outcome outcome;
-                 auto roots = library.roots();
-                 if (roots) {
-                     outcome.roots = std::move(*roots);
-                 } else {
-                     outcome.error = text(roots.error().message);
+    enqueue(
+        {[](engine::Catalogue& library) {
+             Outcome outcome;
+             auto roots = library.roots();
+             if (roots) {
+                 outcome.roots = std::move(*roots);
+             } else {
+                 outcome.error = text(roots.error().message);
+             }
+             return outcome;
+         },
+         [this](Outcome outcome) {
+             if (!outcome.error.isEmpty()) {
+                 setStatus(outcome.error);
+                 return;
+             }
+             has_roots_ = !outcome.roots.empty();
+             if (outcome.roots.empty()) {
+                 setStatus(tr("Choose Folders… to add your music collection."));
+             }
+             // The empty line may have been drawn before this was known.
+             for (int row = 0; row < model_->root().count(); ++row) {
+                 if (auto* item = model_->root().child(row); item->empty_state.value_or(false)) {
+                     item->text = emptyLibraryText();
+                     model_->changed(*item);
                  }
-                 return outcome;
-             },
-             [this](Outcome outcome) {
-                 if (!outcome.error.isEmpty()) {
-                     setStatus(outcome.error);
-                     return;
+             }
+             std::size_t offline = 0;
+             roots_.clear();
+             for (const auto& root : outcome.roots) {
+                 const auto unavailable = !root.available && !root.error.empty();
+                 if (unavailable) {
+                     ++offline;
                  }
-                 has_roots_ = !outcome.roots.empty();
-                 if (outcome.roots.empty()) {
-                     setStatus(tr("Choose Folders… to add your music collection."));
-                 }
-                 // The empty line may have been drawn before this was known.
-                 for (int row = 0; row < model_->rowCount(); ++row) {
-                     if (auto* item = model_->item(row);
-                         item && item->data(empty_state_role).toBool()) {
-                         item->setText(emptyLibraryText());
-                     }
-                 }
-                 std::size_t offline = 0;
-                 roots_.clear();
-                 for (const auto& root : outcome.roots) {
-                     const auto unavailable = !root.available && !root.error.empty();
-                     if (unavailable) {
-                         ++offline;
-                     }
-                     roots_.push_back(Root{.raw_path = root.raw_path,
-                                           .label = pathLabel(root.raw_path) +
-                                                    (root.available ? QString{}
-                                                     : unavailable  ? tr(" — unavailable")
-                                                                    : tr(" — not scanned")),
-                                           .tooltip = text(root.error)});
-                 }
-                 emit rootsChanged();
-                 if (offline > 0U && !scanning_) {
-                     setStatus(
-                         tr("%1 folders unavailable. Cached music is still shown.").arg(offline));
-                 }
-             }});
+                 roots_.push_back(Root{.raw_path = root.raw_path,
+                                       .label = pathLabel(root.raw_path) +
+                                                (root.available ? QString{}
+                                                 : unavailable  ? tr(" — unavailable")
+                                                                : tr(" — not scanned")),
+                                       .tooltip = text(root.error)});
+             }
+             emit rootsChanged();
+             if (offline > 0U && !scanning_) {
+                 setStatus(tr("%1 folders unavailable. Cached music is still shown.").arg(offline));
+             }
+         }});
 }
 
 void LibraryBrowser::refreshLibrary() {

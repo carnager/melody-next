@@ -9,6 +9,7 @@
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
+#include "workspace/library_tree_model.hpp"
 
 #include <QCache>
 #include <QFutureWatcher>
@@ -17,7 +18,6 @@
 #include <QPersistentModelIndex>
 #include <QPointer>
 #include <QSet>
-#include <QStandardItemModel>
 #include <QThreadPool>
 #include <QTimer>
 
@@ -90,7 +90,7 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] const EngineKey& engine() const noexcept { return engine_; }
     void setEngine(EngineKey engine) { engine_ = std::move(engine); }
     [[nodiscard]] const CatalogueSource* catalogues() const { return catalogues_; }
-    [[nodiscard]] QStandardItemModel* model() const { return model_; }
+    [[nodiscard]] LibraryTreeModel* model() const { return model_; }
 
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] QString queryError() const { return query_error_; }
@@ -260,7 +260,9 @@ class LibraryBrowser final : public QObject {
     void loadChildren(const QPersistentModelIndex& parent, persistence::LibraryQuery query);
     static void prepareEntry(persistence::LibraryEntry& entry,
                              const persistence::LibraryQuery& query);
-    void describeItem(QStandardItem& item, const persistence::LibraryEntry& entry);
+    // An entry's row as it shows; the caller says it changed, if it is in
+    // the tree already.
+    void describeItem(LibraryTreeModel::Row& item, const persistence::LibraryEntry& entry);
     [[nodiscard]] const QIcon& kindIcon(persistence::LibraryEntryKind kind);
     // The tree's top level as reload() asks it; none for a search, whose
     // groups carry their own.
@@ -270,7 +272,7 @@ class LibraryBrowser final : public QObject {
     void mergeChildren(const QPersistentModelIndex& parent, persistence::LibraryQuery query);
     // A level's rows made what `page` says, in its order: an entry's row
     // kept -- with what it holds, open or not -- moved where it is now.
-    void mergeLevel(QStandardItem& target, persistence::LibraryPage page,
+    void mergeLevel(LibraryTreeModel::Row& target, persistence::LibraryPage page,
                     const persistence::LibraryQuery& query, bool root);
     void loadFilterChildren(const QPersistentModelIndex& parent,
                             std::shared_ptr<const query::CompiledTkq> compiled);
@@ -286,7 +288,7 @@ class LibraryBrowser final : public QObject {
     // still running when the engine's source is torn down finishes safely.
     [[nodiscard]] std::shared_ptr<engine::Catalogue> openCatalogue() const;
     EngineKey engine_;
-    QStandardItemModel* model_{nullptr};
+    LibraryTreeModel* model_{nullptr};
     QHash<int, QIcon> kind_icons_;
     QThreadPool pool_;
     QFutureWatcher<Outcome> query_watcher_;

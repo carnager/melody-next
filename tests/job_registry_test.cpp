@@ -139,6 +139,14 @@ void a_long_job_does_not_starve_the_control_path() {
             return protocol::Json{{"done", true}};
         }));
 
+    // Running before the calls start: on a loaded machine the calls could
+    // otherwise all be answered before the job's thread was scheduled at all.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (reports.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    require(reports.load() > 0, "the job is running before the control calls");
+
     constexpr int calls = 500;
     const auto started = std::chrono::steady_clock::now();
     for (int call = 0; call < calls; ++call) {

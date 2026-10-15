@@ -4,6 +4,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 
 namespace trackknife::protocol {
 namespace {
@@ -18,8 +19,9 @@ namespace {
 }
 
 // An object payload or nothing; a scalar where an object belongs is a
-// malformed message rather than something to coerce.
-[[nodiscard]] core::Result<Json> object_member(const Json& parent, const char* key) {
+// malformed message rather than something to coerce. Moved out of the parsed
+// message, which is not used again: a large answer is not copied whole.
+[[nodiscard]] core::Result<Json> object_member(Json& parent, const char* key) {
     const auto found = parent.find(key);
     if (found == parent.end()) {
         return Json::object();
@@ -27,7 +29,7 @@ namespace {
     if (!found->is_object()) {
         return std::unexpected(malformed("protocol member must be an object", key));
     }
-    return *found;
+    return std::move(*found);
 }
 
 constexpr std::string_view base64_alphabet =
@@ -41,7 +43,7 @@ core::Result<Message> parse_message(const std::string_view line) {
     if (line.find('\n') != std::string_view::npos) {
         return std::unexpected(malformed("a framed message must not contain a newline"));
     }
-    const auto document = Json::parse(line, nullptr, false);
+    auto document = Json::parse(line, nullptr, false);
     if (document.is_discarded()) {
         return std::unexpected(malformed("message is not valid JSON"));
     }
@@ -78,10 +80,10 @@ core::Result<Message> parse_message(const std::string_view line) {
         }
         Response response{.id = document["id"].get<std::int64_t>(), .result = {}, .error = {}};
         if (has("result")) {
-            response.result = document["result"];
+            response.result = std::move(document["result"]);
             return Message{std::move(response)};
         }
-        const auto& failure = document["error"];
+        auto& failure = document["error"];
         if (!failure.is_object() || !failure.contains("code") || !failure["code"].is_string()) {
             return std::unexpected(malformed("an error must be an object with a string code"));
         }

@@ -750,7 +750,7 @@ void Server::serve(Connection& connection_ref) {
                 connection->write_line(protocol::encode_message(rejected));
                 continue;
             }
-            if (const auto* request = std::get_if<protocol::Request>(&*parsed)) {
+            if (auto* request = std::get_if<protocol::Request>(&*parsed)) {
                 if (!connection->authenticated.load()) {
                     if (!admit(*connection, *request)) {
                         break;
@@ -796,7 +796,7 @@ void Server::serve(Connection& connection_ref) {
                 }
                 {
                     const std::lock_guard lock{queue_mutex};
-                    requests.push_back(*request);
+                    requests.push_back(std::move(*request));
                 }
                 queued.notify_one();
             }

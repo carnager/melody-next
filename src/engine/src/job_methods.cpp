@@ -20,9 +20,10 @@
 #include "trackknife/persistence/operation_journal.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include <utility>
 
@@ -145,19 +146,30 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
             // sampled beside it. This is the same shape the workspace used
             // with a timer; the engine now owns the sampling because a remote
             // client has no timer to lend.
+            // It waits on the scan's end rather than sleeping, so a scan is
+            // not reported finished up to an interval late.
             persistence::LibraryScanProgress progress;
-            std::atomic_bool running{true};
+            std::mutex mutex;
+            std::condition_variable ended;
+            bool running = true;
             std::thread sampler{[&]() {
-                while (running.load()) {
+                std::unique_lock lock{mutex};
+                while (running) {
+                    lock.unlock();
                     report(Json{{"visited", progress.visited.load()},
                                 {"indexed", progress.indexed.load()},
                                 {"failed", progress.failed.load()}});
-                    std::this_thread::sleep_for(progress_interval);
+                    lock.lock();
+                    ended.wait_for(lock, progress_interval, [&running] { return !running; });
                 }
             }};
 
             auto outcome = catalogue.scan(token, progress);
-            running.store(false);
+            {
+                const std::lock_guard lock{mutex};
+                running = false;
+            }
+            ended.notify_one();
             sampler.join();
 
             Json result = Json::object();

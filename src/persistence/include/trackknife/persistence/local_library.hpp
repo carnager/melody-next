@@ -217,9 +217,9 @@ class LocalLibrary final {
                                   bool history,
                                   const core::CancellationToken& cancellation = {}) const;
     // ADR-0254: what a view grouped from each_track depends on, as one
-    // string: the tracks' revision, the ratings, and the listening history
-    // when `history`. Equal stamps, equal views.
-    core::Result<std::string> view_stamp(bool history) const;
+    // string: the tracks' revision, the ratings when `ratings`, and the
+    // listening history when `history`. Equal stamps, equal views.
+    core::Result<std::string> view_stamp(bool ratings, bool history) const;
     // Reads cached fields/technicals in input order, preserving raw paths and duplicates.
     // No filesystem access; missing index records fail rather than trigger discovery.
     core::Result<std::vector<LibraryTrackSnapshot>>

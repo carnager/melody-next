@@ -9,9 +9,11 @@
 #include "trackknife/titleformat/compiler.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -124,6 +126,24 @@ struct Level {
            });
 }
 
+// Whether a view's grouping can turn on a rating: ratings reach formats and
+// queries only as the fields rating and albumrating, so a view that never
+// names them is grouped the same whatever is rated. Read in the text, which
+// also finds $meta(rating) and the like; a false yes only costs a rebuild.
+[[nodiscard]] bool reads_ratings(const LibraryQuery& request) {
+    const auto names_rating = [](std::string_view source) {
+        std::string lowered{source};
+        std::ranges::transform(lowered, lowered.begin(), [](const unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        return lowered.find("rating") != std::string::npos;
+    };
+    return names_rating(request.view_filter) ||
+           std::ranges::any_of(request.view, [&](const LibraryViewLevel& level) {
+               return names_rating(level.format) || names_rating(level.sort);
+           });
+}
+
 // Children in their level's order, at every depth; empty labels last.
 void order(Node& node, const std::vector<Level>& levels, const std::size_t depth) {
     if (depth >= levels.size()) {
@@ -173,8 +193,11 @@ LibraryViews::tree(const persistence::LocalLibrary& library, const LibraryQuery&
             filter = std::move(*compiled);
         }
     }
+    // Ratings shown are read fresh for each page (query()), so a rating
+    // rebuilds only a view whose grouping reads ratings -- rebuilding is
+    // seconds on a large library.
     const bool history = filter && reads_history(*filter);
-    auto stamp = library.view_stamp(history);
+    auto stamp = library.view_stamp(reads_ratings(request), history);
     if (!stamp) {
         return std::unexpected(std::move(stamp.error()));
     }
@@ -392,9 +415,56 @@ namespace {
 
 } // namespace
 
+namespace {
+
+// The ratings a page shows, as stored now: a cached view keeps the ratings
+// of when it was grouped, and is not regrouped for a rating it does not read.
+[[nodiscard]] core::Result<LibraryPage>
+with_current_ratings(const persistence::LocalLibrary& library, LibraryPage page,
+                     const core::CancellationToken& cancellation) {
+    std::vector<std::string> hashes;
+    for (const auto& entry : page.entries) {
+        if (!entry.rating_hash.empty()) {
+            hashes.push_back(entry.rating_hash);
+        }
+        if (!entry.album_rating_hash.empty()) {
+            hashes.push_back(entry.album_rating_hash);
+        }
+    }
+    if (hashes.empty()) {
+        return page;
+    }
+    auto ratings = library.ratings(hashes, cancellation);
+    if (!ratings) {
+        return std::unexpected(std::move(ratings.error()));
+    }
+    std::size_t next = 0U;
+    for (auto& entry : page.entries) {
+        if (!entry.rating_hash.empty()) {
+            entry.rating = (*ratings)[next++];
+        }
+        if (!entry.album_rating_hash.empty()) {
+            entry.album_rating = (*ratings)[next++];
+        }
+    }
+    return page;
+}
+
+} // namespace
+
 core::Result<LibraryPage> LibraryViews::query(const persistence::LocalLibrary& library,
                                               const LibraryQuery& request,
                                               const core::CancellationToken& cancellation) const {
+    auto page = grouped_page(library, request, cancellation);
+    if (!page) {
+        return page;
+    }
+    return with_current_ratings(library, std::move(*page), cancellation);
+}
+
+core::Result<LibraryPage>
+LibraryViews::grouped_page(const persistence::LocalLibrary& library, const LibraryQuery& request,
+                           const core::CancellationToken& cancellation) const {
     if (request.view.empty()) {
         return std::unexpected(invalid("A view has at least one level"));
     }

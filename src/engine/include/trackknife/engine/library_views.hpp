@@ -42,6 +42,10 @@ class LibraryViews final {
     [[nodiscard]] core::Result<std::shared_ptr<const Tree>>
     tree(const persistence::LocalLibrary& library, const persistence::LibraryQuery& request,
          const core::CancellationToken& cancellation) const;
+    // query() before the page's ratings are read as they stand now.
+    [[nodiscard]] core::Result<persistence::LibraryPage>
+    grouped_page(const persistence::LocalLibrary& library, const persistence::LibraryQuery& request,
+                 const core::CancellationToken& cancellation) const;
 
     mutable std::mutex mutex_;
     mutable std::deque<std::shared_ptr<const Tree>> trees_;

@@ -247,15 +247,22 @@ void bridge_websocket(const int client, const int inner, std::string pending,
                 refuse(1000);
                 break;
             }
+            // Only what arrived is searched, and what was sent is dropped
+            // once: searching a multi-megabyte answer from its start at each
+            // read, and erasing its front line by line, made it quadratic.
+            const auto searched = from_inner.size();
             from_inner.append(buffer.data(), static_cast<std::size_t>(received));
-            for (auto end = from_inner.find('\n'); end != std::string::npos;
-                 end = from_inner.find('\n')) {
-                if (!send_all(client, frame(text, std::string_view{from_inner}.substr(0, end)))) {
+            std::size_t start = 0;
+            for (auto end = from_inner.find('\n', searched); end != std::string::npos;
+                 end = from_inner.find('\n', start)) {
+                if (!send_all(client, frame(text, std::string_view{from_inner}.substr(
+                                                      start, end - start)))) {
                     refuse(1001);
                     break;
                 }
-                from_inner.erase(0, end + 1U);
+                start = end + 1U;
             }
+            from_inner.erase(0, start);
         }
     }
     if (closing != 0U) {

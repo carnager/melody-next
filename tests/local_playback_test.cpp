@@ -332,8 +332,11 @@ void producerAndConsumerRunConcurrently(const std::filesystem::path& path) {
     }
     CHECK(playback->play().has_value());
     std::atomic_bool producer_failed{false};
-    std::jthread producer{[&playback, &producer_failed] {
-        while (true) {
+    // Stopped when the consumer gives up: playback only ends while it is
+    // rendered, so a producer waiting for the end would otherwise wait for
+    // good and the join below hang.
+    std::jthread producer{[&playback, &producer_failed](const std::stop_token& stop) {
+        while (!stop.stop_requested()) {
             const auto state = playback->snapshot().state;
             if (state == trackknife::audio::LocalPlaybackState::ended ||
                 state == trackknife::audio::LocalPlaybackState::failed) {
@@ -347,9 +350,12 @@ void producerAndConsumerRunConcurrently(const std::filesystem::path& path) {
         }
     }};
 
+    // Bounded by time, not by turns: on a loaded machine a hundred thousand
+    // turns passed before the producer had decoded the file.
     std::array<float, 43> output{};
     std::vector<float> rendered;
-    for (std::size_t iteration = 0U; iteration < 100'000U; ++iteration) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    while (std::chrono::steady_clock::now() < deadline) {
         const auto frames = playback->render(output);
         rendered.insert(rendered.end(), output.begin(),
                         output.begin() + static_cast<std::ptrdiff_t>(frames));
@@ -358,6 +364,7 @@ void producerAndConsumerRunConcurrently(const std::filesystem::path& path) {
         }
         std::this_thread::yield();
     }
+    producer.request_stop();
     producer.join();
     CHECK(!producer_failed.load(std::memory_order_acquire));
     CHECK(playback->snapshot().state == trackknife::audio::LocalPlaybackState::ended);

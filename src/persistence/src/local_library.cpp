@@ -1176,10 +1176,13 @@ namespace {
 // album whose tracks disagree about it stays in one piece. Joined once per
 // query rather than looked up per row, which on one huge album went
 // quadratic.
-[[nodiscard]] std::string with_album_years(const std::string& table) {
-    return " LEFT JOIN (SELECT album_key AS year_key, min(date) AS album_year"
-           " FROM local_library_tracks GROUP BY album_key) years ON years.year_key=" +
-           table + ".album_key";
+// An album's year, its earliest track date, looked up for the album at hand
+// (schema 55 indexes album_key,date). Joining every album's year instead had
+// every query aggregate the whole library first: 23 ms for one album's tracks
+// in 67,000.
+[[nodiscard]] std::string album_year_of(const std::string& table) {
+    return "(SELECT min(y.date) FROM local_library_tracks y WHERE y.album_key=" + table +
+           ".album_key)";
 }
 
 } // namespace
@@ -1235,11 +1238,12 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                       "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date,"
                       "added,duration_ms,album_rating_hash,"
                       "coalesce((SELECT rating FROM local_ratings WHERE hash=album_rating_hash),0)";
-            order = query.random ? " ORDER BY random()"
-                    : query.newest_first
-                        ? " ORDER BY added DESC,album_key,disc,track,raw_path"
-                        : " ORDER BY artist COLLATE NOCASE,years.album_year,album_key,disc,track,"
-                          "title COLLATE NOCASE,raw_path";
+            order = query.random         ? " ORDER BY random()"
+                    : query.newest_first ? " ORDER BY added DESC,album_key,disc,track,raw_path"
+                                         : " ORDER BY artist COLLATE NOCASE," +
+                                               album_year_of("local_library_tracks") +
+                                               ",album_key,disc,track,"
+                                               "title COLLATE NOCASE,raw_path";
             break;
         case LibraryEntryKind::group:
             fail("A view's levels are grouped by the engine", core::ErrorCode::invalid_argument);
@@ -1248,13 +1252,10 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         // lists a whole level, and the cap here was once 200 whatever was
         // asked, which put most of a real library behind "Show more…".
         const auto limit = std::clamp<std::size_t>(query.limit, 1U, filter_match_cap);
-        Statement statement{
-            db, "SELECT " + columns + " FROM local_library_tracks" +
-                    (query.kind == LibraryEntryKind::track && !query.newest_first && !query.random
-                         ? with_album_years("local_library_tracks")
-                         : std::string{}) +
-                    filter.sql + order + " LIMIT " + std::to_string(limit + 1U) + " OFFSET " +
-                    std::to_string(std::min<std::size_t>(query.offset, 1'000'000U))};
+        Statement statement{db,
+                            "SELECT " + columns + " FROM local_library_tracks" + filter.sql +
+                                order + " LIMIT " + std::to_string(limit + 1U) + " OFFSET " +
+                                std::to_string(std::min<std::size_t>(query.offset, 1'000'000U))};
         filter.bind(statement);
         LibraryPage page;
         while (statement.next()) {
@@ -1297,10 +1298,10 @@ LocalLibrary::paths(const LibraryQuery& query, const core::CancellationToken& ca
         const Filter filter{query};
         // An artist's albums in the order they came out, not the order of
         // their folders' names.
-        Statement statement{db, "SELECT raw_path FROM local_library_tracks" +
-                                    with_album_years("local_library_tracks") + filter.sql +
-                                    " AND available=1 ORDER BY artist COLLATE NOCASE,"
-                                    "years.album_year,album_key,disc,track,raw_path LIMIT 100001"};
+        Statement statement{db, "SELECT raw_path FROM local_library_tracks" + filter.sql +
+                                    " AND available=1 ORDER BY artist COLLATE NOCASE," +
+                                    album_year_of("local_library_tracks") +
+                                    ",album_key,disc,track,raw_path LIMIT 100001"};
         filter.bind(statement);
         std::vector<std::string> result;
         while (statement.next()) {
@@ -1323,9 +1324,10 @@ constexpr auto filter_columns =
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1),"
     "t.added,(SELECT max(a.added) FROM local_library_tracks a WHERE a.album_key=t.album_key),"
     "t.rating_hash,t.album_rating_hash";
-const auto filter_from = " FROM local_library_tracks t" + with_album_years("t");
-constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,years.album_year,t.album_key,"
-                              "t.disc,t.track,t.title COLLATE NOCASE,t.raw_path";
+const auto filter_from = std::string{" FROM local_library_tracks t"};
+const auto filter_order = " ORDER BY t.artist COLLATE NOCASE," + album_year_of("t") +
+                          ",t.album_key,"
+                          "t.disc,t.track,t.title COLLATE NOCASE,t.raw_path";
 
 struct FilterPlan {
     std::optional<FilterClause> pushed;
@@ -1547,6 +1549,129 @@ collect_history(sqlite3* db, const core::CancellationToken& cancellation,
             album.second > 0 ? std::max<std::int64_t>(0, now - album.second) / 86'400'000 : -1};
     }
     return history;
+}
+
+// The history of the asked sources alone, reckoned as collect_history does:
+// each source's counts by point lookup, and the album aggregates of only the
+// albums the sources name -- rather than every indexed file hashed and every
+// listen loaded to answer for one row (a 67k-file library took 600 ms).
+[[nodiscard]] std::vector<std::array<std::int64_t, 6>>
+collect_source_history(sqlite3* db, const core::CancellationToken& cancellation,
+                       const std::vector<LibraryHistorySource>& sources) {
+    if (sources.size() > 100'000U)
+        fail("History supports at most 100000 tab sources", core::ErrorCode::limit_exceeded);
+    Statement identity_of{db,
+                          "SELECT source_id FROM local_listening_sources WHERE observation_hash=?"};
+    Statement statistic_of{
+        db, "SELECT play_count,last_played_ms FROM local_listening_history WHERE track_hash=?"};
+    const auto identity = [&](const std::string& observation) -> std::optional<std::string> {
+        identity_of.reset();
+        identity_of.text(1, observation);
+        if (!identity_of.next())
+            return std::nullopt;
+        return identity_of.bytes(0);
+    };
+    const auto statistic = [&](const std::string& key) {
+        statistic_of.reset();
+        statistic_of.text(1, key);
+        std::pair<std::int64_t, std::int64_t> value{};
+        if (statistic_of.next())
+            value = {statistic_of.number(0), statistic_of.number(1)};
+        return value;
+    };
+
+    struct Entry {
+        std::string album;
+        std::int64_t count, last;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(sources.size());
+    std::vector<std::string> keys(sources.size());
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        if (cancellation.is_cancellation_requested())
+            fail("History query cancelled", core::ErrorCode::cancelled);
+        const auto& source = sources[i];
+        // The file as this engine sees it, where the asker could not say:
+        // a list's rows name a path, and the engine is what holds the file.
+        auto qualified = source.source;
+        if (!qualified.source_revision) {
+            if (auto seen = core::observe_local_source_revision(qualified.source_reference))
+                qualified.source_revision = *seen;
+        }
+        auto observation = local_listening_observation(qualified);
+        if (!observation) {
+            // Gone, or not a file: unknown for this row, not the whole list.
+            entries.push_back({"unknown:" + std::to_string(i), -1, -1});
+            continue;
+        }
+        auto key = *observation;
+        std::pair<std::int64_t, std::int64_t> value{};
+        if (const auto found = identity(*observation)) {
+            key = local_listening_track_hash(*found, qualified);
+            value = statistic(key);
+        }
+        auto album = source.album_hash.empty() ? "source:" + key : "album:" + source.album_hash;
+        keys[i] = std::move(key);
+        entries.push_back({std::move(album), value.first, value.second});
+    }
+
+    // An album's indexed files count whole, as in collect_history; a source
+    // adds to its album only what no indexed file of it already counted.
+    std::map<std::string, std::pair<std::int64_t, std::int64_t>> albums;
+    std::set<std::pair<std::string, std::string>> counted;
+    std::set<std::string> asked_albums;
+    for (const auto& source : sources)
+        if (!source.album_hash.empty())
+            asked_albums.insert(source.album_hash);
+    Statement album_files{db, "SELECT raw_path,revision FROM local_library_tracks "
+                              "WHERE album_rating_hash=? AND available=1 AND album<>''"};
+    for (const auto& album_hash : asked_albums) {
+        if (cancellation.is_cancellation_requested())
+            fail("History query cancelled", core::ErrorCode::cancelled);
+        const auto album = "album:" + album_hash;
+        auto& aggregate = albums[album];
+        album_files.reset();
+        album_files.text(1, album_hash);
+        while (album_files.next()) {
+            const auto path = album_files.bytes(0), revision = album_files.bytes(1);
+            if (!revision.starts_with("2:"))
+                fail("Refresh the local index before searching history", core::ErrorCode::conflict);
+            const auto observation = core::sha256_hex(std::to_string(path.size()) + ":" + path +
+                                                      ":" + revision.substr(2));
+            std::pair<std::int64_t, std::int64_t> value{};
+            std::string history_key = observation;
+            if (const auto found = identity(observation)) {
+                history_key =
+                    core::sha256_hex("local-listen-1:" + *found + ":default:default:whole");
+                value = statistic(history_key);
+            }
+            counted.emplace(album, history_key);
+            aggregate.first += value.first;
+            aggregate.second = std::max(aggregate.second, value.second);
+        }
+    }
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        if (entries[i].count < 0 || !counted.emplace(entries[i].album, keys[i]).second)
+            continue;
+        auto& aggregate = albums[entries[i].album];
+        aggregate.first += entries[i].count;
+        aggregate.second = std::max(aggregate.second, entries[i].last);
+    }
+
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    std::vector<std::array<std::int64_t, 6>> result;
+    result.reserve(entries.size());
+    for (const auto& entry : entries) {
+        const auto album = albums[entry.album];
+        result.push_back(
+            {entry.count, entry.last > 0 ? entry.last : -1,
+             entry.last > 0 ? std::max<std::int64_t>(0, now - entry.last) / 86'400'000 : -1,
+             album.first, album.second > 0 ? album.second : -1,
+             album.second > 0 ? std::max<std::int64_t>(0, now - album.second) / 86'400'000 : -1});
+    }
+    return result;
 }
 
 // Materializes the bounded match set in the default library order.
@@ -1786,11 +1911,7 @@ LocalLibrary::history_facts(const std::vector<LibraryHistorySource>& sources,
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
         Transaction snapshot{db, true};
-        const auto history = collect_history(db, cancellation, sources);
-        std::vector<std::array<std::int64_t, 6>> result;
-        result.reserve(sources.size());
-        for (std::size_t i = 0; i < sources.size(); ++i)
-            result.push_back(history.at(std::string(1, '\0') + std::to_string(i)));
+        auto result = collect_source_history(db, cancellation, sources);
         snapshot.commit();
         return result;
     });
@@ -1915,7 +2036,7 @@ core::Result<void> LocalLibrary::each_track(const std::function<void(LibraryView
         .transform([](bool) {});
 }
 
-core::Result<std::string> LocalLibrary::view_stamp(const bool history) const {
+core::Result<std::string> LocalLibrary::view_stamp(const bool ratings, const bool history) const {
     return checked([&] {
         auto* db = implementation_->db;
         Transaction snapshot{db, true};
@@ -1925,15 +2046,18 @@ core::Result<std::string> LocalLibrary::view_stamp(const bool history) const {
             fail("The library has no revision");
         }
         stamp = tracks.bytes(0) + ":" + std::to_string(tracks.number(1));
-        // A rating moved from one track to another keeps the count and the
-        // sum; weighting by the hash's leading digits tells them apart.
-        Statement ratings{db, "SELECT count(*),total(rating),"
-                              "total(rating*(instr('0123456789abcdef',substr(hash,1,1))+"
-                              "16*instr('0123456789abcdef',substr(hash,2,1)))),"
-                              "coalesce(max(updated_at),'') FROM local_ratings"};
-        if (ratings.next()) {
-            stamp += "/r" + std::to_string(ratings.number(0)) + ":" + ratings.bytes(1) + ":" +
-                     ratings.bytes(2) + ":" + ratings.bytes(3);
+        if (ratings) {
+            // A rating moved from one track to another keeps the count and
+            // the sum; weighting by the hash's leading digits tells them
+            // apart.
+            Statement rated{db, "SELECT count(*),total(rating),"
+                                "total(rating*(instr('0123456789abcdef',substr(hash,1,1))+"
+                                "16*instr('0123456789abcdef',substr(hash,2,1)))),"
+                                "coalesce(max(updated_at),'') FROM local_ratings"};
+            if (rated.next()) {
+                stamp += "/r" + std::to_string(rated.number(0)) + ":" + rated.bytes(1) + ":" +
+                         rated.bytes(2) + ":" + rated.bytes(3);
+            }
         }
         if (history) {
             Statement played{db, "SELECT count(*),total(play_count),coalesce(max(last_played_ms),0)"
@@ -2660,12 +2784,31 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 return !any.next();
             }();
             PreparationPipeline pipeline{scan_worker_count(), cancellation};
+            // Unchanged files are marked seen many to a transaction: one
+            // commit each was most of a rescan. Bounded, so a tag write
+            // waiting for the database is not held off for long.
+            Statement previous{db, "SELECT revision,field_index_complete,rating_hash FROM "
+                                   "local_library_tracks WHERE raw_path=?"};
+            Statement exists{db,
+                             "SELECT 1 FROM local_library_roots WHERE raw_path=? AND scan_token=?"};
+            Statement touch{db, "UPDATE local_library_tracks SET available=1,seen=? WHERE "
+                                "raw_path=? AND revision=?"};
+            std::optional<Transaction> seen_batch;
+            std::size_t seen_batched = 0;
+            auto seen_batch_started = std::chrono::steady_clock::now();
+            const auto commit_seen = [&] {
+                if (seen_batch) {
+                    seen_batch->commit();
+                    seen_batch.reset();
+                }
+            };
             // Commits one prepared file in its own transaction with the
             // unchanged guards: fresh revision, current root scan token.
             const auto commit_prepared = [&](PreparedFile prepared) {
                 if (root_lost) {
                     return;
                 }
+                commit_seen();
                 switch (commit_prepared_file(db, prepared, generation, first_scan)) {
                 case CommitOutcome::committed:
                     ++progress.indexed;
@@ -2716,35 +2859,43 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 {
                     // Rows still missing their migration-35 rating identity
                     // re-prepare even when the file itself is unchanged.
-                    Statement previous{db, "SELECT revision,field_index_complete,rating_hash FROM "
-                                           "local_library_tracks WHERE raw_path=?"};
+                    previous.reset();
                     previous.blob(1, raw);
                     unchanged = previous.next() && previous.bytes(0) == revision &&
                                 previous.number(1) == 1 && !previous.bytes(2).empty();
                 }
                 if (unchanged) {
-                    Transaction transaction{db};
                     const auto after = core::observe_local_source_revision(raw);
                     if (!after || *before != *after) {
                         ++progress.failed;
                         complete = false;
                         continue;
                     }
-                    Statement exists{
-                        db, "SELECT 1 FROM local_library_roots WHERE raw_path=? AND scan_token=?"};
-                    exists.blob(1, root.raw_path);
-                    exists.text(2, generation);
-                    if (!exists.next()) {
-                        complete = false;
-                        break;
+                    if (!seen_batch) {
+                        seen_batch.emplace(db);
+                        seen_batched = 0;
+                        seen_batch_started = std::chrono::steady_clock::now();
+                        // Within the transaction the token cannot change, so
+                        // once a batch is enough.
+                        exists.reset();
+                        exists.blob(1, root.raw_path);
+                        exists.text(2, generation);
+                        if (!exists.next()) {
+                            seen_batch.reset();
+                            complete = false;
+                            break;
+                        }
                     }
-                    Statement touch{db, "UPDATE local_library_tracks SET available=1,seen=? WHERE "
-                                        "raw_path=? AND revision=?"};
+                    touch.reset();
                     touch.text(1, generation);
                     touch.blob(2, raw);
                     touch.text(3, revision);
                     touch.next();
-                    transaction.commit();
+                    if (++seen_batched >= 512U ||
+                        std::chrono::steady_clock::now() - seen_batch_started >
+                            std::chrono::milliseconds{200}) {
+                        commit_seen();
+                    }
                 } else if (!pipeline.submit({raw, root.raw_path, revision, *before})) {
                     result.cancelled = true;
                     complete = false;
@@ -2758,6 +2909,10 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     break;
                 }
             }
+            if (root_lost) {
+                seen_batch.reset();
+            }
+            commit_seen();
             pipeline.finish_input();
             while (auto prepared = pipeline.next()) {
                 commit_prepared(std::move(*prepared));

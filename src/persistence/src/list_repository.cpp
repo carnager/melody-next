@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -28,7 +29,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 54U;
+constexpr unsigned current_schema_version = 55U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -309,7 +310,24 @@ read_optional_revision(sqlite3_stmt* statement, const int first,
     return {};
 }
 
+// The schema version as it stands, read without a lock, or nothing when there
+// is no schema yet.
+[[nodiscard]] std::optional<sqlite3_int64> current_version(sqlite3* database) {
+    auto query = prepare(database, "SELECT version FROM schema_version LIMIT 1");
+    if (!query || sqlite3_step(query->get()) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    return sqlite3_column_int64(query->get(), 0);
+}
+
 [[nodiscard]] core::Result<void> migrate(sqlite3* database) {
+    // The engine opens the database for every library request. A database
+    // already at this version needs no write lock to say so -- taking one
+    // made every read wait behind a scan or a tag write, and fail after the
+    // busy timeout.
+    if (current_version(database) == sqlite3_int64{current_schema_version}) {
+        return {};
+    }
     if (auto result = execute(database, "BEGIN IMMEDIATE"); !result) {
         return result;
     }
@@ -1571,6 +1589,18 @@ UPDATE schema_version SET version = 53;
 ALTER TABLE operation_journal ADD COLUMN in_place INTEGER NOT NULL DEFAULT 0
     CHECK(in_place IN (0, 1));
 UPDATE schema_version SET version = 54;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 54) {
+        // An album's year is its earliest track date, looked up per album
+        // when tracks are ordered by it; this answers it from the index.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE INDEX local_library_album_date ON local_library_tracks(album_key, date);
+UPDATE schema_version SET version = 55;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

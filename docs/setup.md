@@ -1,93 +1,71 @@
 # Setup
 
+Three ways to set it up, each a few steps. How it all fits together, and
+everything these leave out: [Engines, agents and the phone](melody.md).
+
 ## On one computer
 
-1. Start Trackknife. Its engine starts with it (a user service, on the first
-   connection); nothing to configure.
+1. Install Trackknife and `melodyd` ([Installation](install.md)) and start
+   Trackknife. The engine is a user service and starts on the first
+   connection; there is nothing to configure.
 2. In the library panel, click **Folders…** and add your music folder.
 3. Click **Refresh**.
 
-That's it. Close the window and the music keeps playing; open it again and
-it's where you left it.
+Close the window and the music keeps playing; open it again and it is where
+you left it.
 
-## Music on a server
+## The library on a server
 
-On the server, install `melodyd` ([Installation](install.md)) and give it a
-password and a name:
+**On the server**, install `melodyd` and give it a password -- one for all
+your engines:
 
 ```sh
 melody-cli config password 'the one all your engines share'
-melody-cli config name myserver
-```
-
-That writes `~/.config/melody/melodyd.conf`, only you can read it, and each
-setting is checked as the engine reads it; `melody-cli config --edit` opens
-the whole file, every setting explained in it. Without a password the engine
-doesn't listen on the network at all. Use the same password on every engine
-and agent you run.
-
-```sh
 systemctl --user enable --now melodyd
 loginctl enable-linger $USER    # keep it running when you're logged out
 ```
 
-Or use the Docker image instead.
+`melody-cli config --edit` opens the whole `~/.config/melody/melodyd.conf`,
+every setting explained in it. Without a password the engine stays on its
+machine. Or use the [Docker image](install.md#docker).
 
-On your desktop, in Trackknife:
+**In Trackknife**, under **Settings → Engines**:
 
-1. **Settings → Engines**: enter the password at the top -- the same one the
-   server has: one for all your engines -- and pick the server from
-   **On the network** (or **Add** it by address). Choose it as the one that
-   **holds the library**.
-2. Below the engines, add its music folder as the *server* sees it -- the
-   folder browser shows the server's disk -- then **Refresh** in the library
-   panel, where its library now has the tab.
+1. Enter the same password at the top.
+2. Pick the server from **On the network** (or **Add** it by address) and
+   choose it as the one that **holds the library**.
+3. Add its music folder as the server sees it -- the folder browser shows
+   the server's disk -- then click **Refresh** in the library panel.
 
-Tabs you fill from a server's library play on that server.
+The library's tabs play on the server. The tagger, ReplayGain and Convert
+work on its files there; nothing needs mounting.
+
+The sidebar's **This computer** shows this computer's own folders. Tabs of
+those files are marked with a computer and play here, on this computer's
+engine.
 
 If the music is on a NAS and the engine runs elsewhere, run `melody-watch` on
-the NAS so the engine hears about changes instead of scanning over the network
-([how](melody.md#a-nas-that-cant-run-the-engine)).
+the NAS so the engine hears about changes instead of scanning over the
+network ([how](melody.md#a-nas-that-cant-run-the-engine)).
 
-## Editing tags on server files
-
-The engine never writes to your files; Trackknife does. Mount the server's
-music on your desktop yourself (NFS, sshfs, …) -- Trackknife mounts
-nothing -- then under **Settings → Engines → Advanced**, with that server
-chosen in the list, set:
-
-- **Its music folder**: the path on the server, e.g. `/music`
-- **Also reachable here at**: where it is on your desktop, e.g.
-  `/mnt/nas/music`; empty when it is at the same path on both
-
-Now the tag editor, ReplayGain and Convert work on server tracks.
-
-## Other speakers
-
-- **A computer running Trackknife**: tick **Settings → Engines → Let other
-  engines play on this computer's speakers** (on by default).
-- **A headless machine** (a Pi by the stereo): run
-  `melody-agent --password-file FILE`, or `melodyd --agent` with the same
-  password if it should have its own library too.
-- **Your phone**: the app offers the phone as a speaker by default.
+## Speakers and the phone
 
 Pick where it plays from the output menu in Trackknife's header.
 
-## The phone
+- **Another computer with an engine** plays for the others by default, when
+  it has the same password. In Trackknife that is **Settings → Engines → Let
+  other engines play on this computer's speakers**.
+- **A headless machine** (a Pi by the stereo): `melody-agent --password-file
+  FILE`.
+- **A UPnP receiver**: `upnp = yes` in the server's `melodyd.conf`
+  ([more](melody.md#upnp-speakers)).
+- **The phone**: install the APK ([Installation](install.md#android)). It
+  finds engines on your network, or takes a host and port under **Or by
+  address**, and offers itself as a speaker. On mobile data it streams Opus
+  instead of the original files; the download button on an album keeps it
+  on the phone.
 
-Install the APK ([Installation](install.md#android)) and open it. It finds
-engines on your network; **Or by address** takes a host and port for when
-you're connected over a VPN.
-
-On mobile data it streams Opus (128 kbps by default) instead of the original
-files. The download button on an album keeps it on the phone (Opus 160, over
-Wi-Fi only, unless you change that), for when there's no engine in reach.
-
-## Away from home
-
-Use a VPN (WireGuard, Tailscale, …) and connect to the engine's VPN address.
-Don't forward its ports to the internet: the password travels unencrypted.
-If you want TLS anyway, put a proxy in front of it (see
-[melody.md](melody.md#headless-melodyd)).
-
-How all of this fits together: [Engines, agents and the phone](melody.md).
+**Away from home**, use a VPN (WireGuard, Tailscale, …) and connect to the
+engine's VPN address. Don't forward its ports to the internet: the password
+travels unencrypted. For TLS, put a proxy in front of it
+([how](melody.md#headless-melodyd)).

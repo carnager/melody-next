@@ -196,7 +196,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     color_scheme_ = new QComboBox(general);
     color_scheme_->setObjectName(QStringLiteral("bench-settings-color-scheme"));
     color_scheme_->setToolTip(
-        QStringLiteral("The system's colours, or Trackknife's own light or dark scheme -- the "
+        QStringLiteral("The system's colours, or Melody's own light or dark scheme -- the "
                        "same on every desktop. As the system uses the dark scheme where the "
                        "desktop is dark but gives Qt no dark colours."));
     bind(color_scheme_, SettingsSession::colorSchemes(), color_scheme_key);
@@ -205,9 +205,9 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* interface_scale = new QComboBox(general);
     interface_scale->setObjectName(QStringLiteral("bench-settings-interface-scale"));
     interface_scale->setToolTip(
-        QStringLiteral("How large Trackknife draws itself, on top of the scaling your desktop "
+        QStringLiteral("How large Melody draws itself, on top of the scaling your desktop "
                        "already applies (a Retina or 5K display's, a 125% Linux desktop's). "
-                       "Takes effect when Trackknife starts again."));
+                       "Takes effect when Melody starts again."));
     bind(interface_scale, SettingsSession::interfaceScales(), interface_scale_key);
     auto* interface_scale_row = new QWidget(general);
     auto* interface_scale_layout = new QHBoxLayout(interface_scale_row);
@@ -507,7 +507,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         QStringLiteral("optional; empty: the same path, or not reachable here"));
     remote_mount_->setToolTip(QStringLiteral(
         "Where that folder is on this computer, if you have mounted it (NFS, SMB, …). "
-        "Trackknife mounts nothing itself."));
+        "Melody mounts nothing itself."));
     engine_form->addRow(QStringLiteral("Also reachable here at:"), remote_mount_);
     remote_stream_ = new QComboBox(remote_box_);
     remote_stream_->setObjectName(QStringLiteral("bench-settings-remote-stream"));

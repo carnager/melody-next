@@ -71,7 +71,7 @@ const std::vector<ScriptSession::StepKind>& ScriptSession::stepKinds() {
          QStringLiteral("Build the value from an expression, for example %artist% — %title%")},
         {QStringLiteral("Number by selected-file order"), 13, {}},
         {QStringLiteral("Convert rating to FMPS_RATING"), 20,
-         QStringLiteral("Take a rating another player wrote into Trackknife's rating tag, "
+         QStringLiteral("Take a rating another player wrote into Melody's rating tag, "
                         "converted from its scale -- 4 of 5 stars becomes 0.8")},
         {QStringLiteral("Capture fields with tkcapture-1"), 16,
          QStringLiteral("Extract several fields at once from the filename, the full path, "

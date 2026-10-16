@@ -24,7 +24,7 @@ MetadataRuleScriptImportDialog::MetadataRuleScriptImportDialog(QWidget* parent) 
 
     auto* layout = new QVBoxLayout(this);
     auto* explanation = new QLabel(
-        QStringLiteral("Paste a Picard-style cleanup script. Trackknife translates the "
+        QStringLiteral("Paste a Picard-style cleanup script. Melody translates the "
                        "supported $unset/$delete, $set, $if, $and/$or, $eq/$ne, $not, and "
                        "$left subset into editable typed rules; it does not store or execute "
                        "the pasted script. Here, $unset generates an actual Remove field "

@@ -360,7 +360,7 @@ read_optional_revision(sqlite3_stmt* statement, const int first,
         rollback();
         return std::unexpected(core::Error{
             .code = core::ErrorCode::unsupported,
-            .message = "Trackknife state database was created by a newer application version",
+            .message = "Melody state database was created by a newer application version",
             .context = {{"schema_version", std::to_string(version)}},
         });
     }
@@ -2150,7 +2150,7 @@ core::Result<ListRepository> ListRepository::open(const std::filesystem::path& p
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
                         nullptr) != SQLITE_OK) {
         return std::unexpected(
-            database_error(implementation->database, "Could not open Trackknife state database"));
+            database_error(implementation->database, "Could not open Melody state database"));
     }
     sqlite3_busy_timeout(implementation->database, 2'000);
     if (auto result = execute(implementation->database, "PRAGMA journal_mode = WAL"); !result) {

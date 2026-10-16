@@ -322,7 +322,7 @@ core::Result<DeviceOutput> DeviceOutput::connect(LocalPlayback& source,
 
     initialize_pipewire();
     auto output = std::make_unique<Impl>(source, std::move(config));
-    output->loop = pw_thread_loop_new("trackknife-pipewire", nullptr);
+    output->loop = pw_thread_loop_new("melody-pipewire", nullptr);
     if (output->loop == nullptr) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::backend,
@@ -332,7 +332,7 @@ core::Result<DeviceOutput> DeviceOutput::connect(LocalPlayback& source,
     }
 
     auto* properties = pw_properties_new(
-        PW_KEY_APP_NAME, "Trackknife", PW_KEY_APP_ID, "io.trackknife.Trackknife", PW_KEY_MEDIA_TYPE,
+        PW_KEY_APP_NAME, "Melody", PW_KEY_APP_ID, "io.melody.Melody", PW_KEY_MEDIA_TYPE,
         "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Music", PW_KEY_MEDIA_NAME,
         output->config.stream_name.c_str(), nullptr);
     if (properties == nullptr) {
@@ -751,7 +751,7 @@ PipeWireDeviceMonitor::connect(const std::chrono::milliseconds timeout) {
     }
     initialize_pipewire();
     auto monitor = std::make_unique<Impl>();
-    monitor->loop = pw_thread_loop_new("trackknife-pw-monitor", nullptr);
+    monitor->loop = pw_thread_loop_new("melody-pw-monitor", nullptr);
     if (monitor->loop == nullptr) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::backend,
@@ -861,7 +861,7 @@ list_pipewire_output_devices(const std::chrono::milliseconds timeout) {
     }
     initialize_pipewire();
     DeviceEnumeration state;
-    state.loop = pw_thread_loop_new("trackknife-pw-devices", nullptr);
+    state.loop = pw_thread_loop_new("melody-pw-devices", nullptr);
     if (state.loop == nullptr) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::backend,

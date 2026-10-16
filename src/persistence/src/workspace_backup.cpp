@@ -63,7 +63,7 @@ using Database = std::unique_ptr<sqlite3, DatabaseCloser>;
     if (sqlite3_prepare_v2(database, "SELECT version FROM schema_version LIMIT 1", -1, &raw,
                            nullptr) != SQLITE_OK) {
         return std::unexpected(
-            error(core::ErrorCode::database, "Workspace backup has no Trackknife schema"));
+            error(core::ErrorCode::database, "Workspace backup has no Melody schema"));
     }
     statement.reset(raw);
     if (sqlite3_step(statement.get()) != SQLITE_ROW) {

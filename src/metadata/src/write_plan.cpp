@@ -90,7 +90,7 @@ void add_issue(MetadataWritePlanSource& source, const MetadataWritePlanIssueKind
     case FieldProvenance::segment:
         return quoted + "belongs to a chapter or part of the file, which cannot hold tags";
     case FieldProvenance::annotation:
-        return quoted + "is Trackknife's own note, not a tag in the file";
+        return quoted + "is Melody's own note, not a tag in the file";
     case FieldProvenance::embedded:
         break;
     }

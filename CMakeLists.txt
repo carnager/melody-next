@@ -161,7 +161,7 @@ if(MELODY_BUILD_WATCH)
 endif()
 
 if(MELODY_BUILD_UI)
-    find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Test Widgets)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Svg Test Widgets)
     qt_standard_project_setup()
 endif()
 # Always: the engine builds AcoustID requests with its Qt-free core

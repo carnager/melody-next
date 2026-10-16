@@ -627,7 +627,7 @@ core::Result<std::vector<ListView>> deserialize_list_views(const std::string_vie
     const auto schema = parsed.value("schema", 0);
     if (schema != list_view_schema_version) {
         return std::unexpected(problem(schema > list_view_schema_version
-                                           ? "Saved list views are from a newer Trackknife"
+                                           ? "Saved list views are from a newer Melody"
                                            : "Saved list views have no known schema",
                                        core::ErrorCode::unsupported));
     }

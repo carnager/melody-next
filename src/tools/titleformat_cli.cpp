@@ -145,7 +145,7 @@ class CommandLineContext final : public trackknife::titleformat::EvaluationConte
 };
 
 void printUsage(std::ostream& output) {
-    output << "Usage: trackknife-titleformat [options] SCRIPT\n"
+    output << "Usage: melody-titleformat [options] SCRIPT\n"
               "\n"
               "Options:\n"
               "  --field NAME=VALUE       Add an ordered metadata value; repeatable\n"

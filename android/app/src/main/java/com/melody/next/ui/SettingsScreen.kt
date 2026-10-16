@@ -68,7 +68,7 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
             Section("This phone as a speaker")
             ListItem(
                 headlineContent = { Text("Offer it to the engine") },
-                supportingContent = { Text("The engine, Trackknife and the other clients can then play on it") },
+                supportingContent = { Text("The engine, Melody and the other clients can then play on it") },
                 trailingContent = {
                     Switch(settings.speaker, onCheckedChange = {
                         settings.updateSpeaker(it)

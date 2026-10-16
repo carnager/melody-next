@@ -70,7 +70,7 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
         const auto peer = protocol::peer_version(*info);
         engine_level_.store(peer.level);
         auto said = protocol::compatibility_message(
-            peer, protocol::displayable_text(info->value("name", std::string{})), "Trackknife");
+            peer, protocol::displayable_text(info->value("name", std::string{})), "Melody");
         bool tell = false;
         {
             const std::lock_guard guard{mutex_};

@@ -910,7 +910,7 @@ class Workspace final : public QObject {
         QString title;
         QString context;
         QString tooltip;
-        QString window_title{QStringLiteral("Trackknife")};
+        QString window_title{QStringLiteral("Melody")};
         QString cover_entry;
         // What plays, to rate from the header: its rating and key on the
         // engine of the list it plays from -- where the row's Rate stores

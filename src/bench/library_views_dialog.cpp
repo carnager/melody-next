@@ -192,7 +192,7 @@ void LibraryViewsDialog::loadViews() {
     for (const auto& view : views_) {
         auto* item = new QListWidgetItem(view.name, list_);
         if (view.builtin) {
-            item->setToolTip(tr("Shipped with Trackknife: copy it to change it"));
+            item->setToolTip(tr("Shipped with Melody: copy it to change it"));
             item->setForeground(palette().color(QPalette::PlaceholderText));
         }
     }

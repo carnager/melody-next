@@ -295,7 +295,7 @@ bool SettingsSession::bufferCustom() const {
 // fields: the one thing the sharing part of the page is for, spelled out.
 QString SettingsSession::agentCommand() const {
     if (values_.value(QLatin1String(SettingsKeys::engine_password_key)).toString().isEmpty()) {
-        return QStringLiteral("Without a password only Trackknife on this computer controls this "
+        return QStringLiteral("Without a password only Melody on this computer controls this "
                               "engine. UPnP speakers can play when discovery is enabled.");
     }
     const auto listen =

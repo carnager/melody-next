@@ -54,7 +54,7 @@ void report(const QPointer<QObject>& context, std::function<void(const QString&)
         return nil;
     }
     const auto copy = QDir::temp().filePath(
-        QStringLiteral("trackknife-notification-%1.png")
+        QStringLiteral("melody-notification-%1.png")
             .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!QFile::copy(image, copy)) {
         return nil;
@@ -71,7 +71,7 @@ void postMacNotification(QObject* context, const QString& summary, const QString
     // and asking it for one ends the process.
     if (NSBundle.mainBundle.bundleIdentifier == nil) {
         report(guard, std::move(done),
-               QStringLiteral("macOS shows notifications only for Trackknife.app"));
+               QStringLiteral("macOS shows notifications only for Melody.app"));
         return;
     }
     static TrackknifeNotificationDelegate* delegate = [TrackknifeNotificationDelegate new];
@@ -92,7 +92,7 @@ void postMacNotification(QObject* context, const QString& summary, const QString
     }
     // One identifier: each track's notification replaces the last.
     UNNotificationRequest* request =
-        [UNNotificationRequest requestWithIdentifier:@"de.trackknife.now-playing"
+        [UNNotificationRequest requestWithIdentifier:@"org.melody.now-playing"
                                              content:content
                                              trigger:nil];
     auto shared = std::make_shared<std::function<void(const QString&)>>(std::move(done));
@@ -103,7 +103,7 @@ void postMacNotification(QObject* context, const QString& summary, const QString
                                        error != nil
                                            ? QString::fromNSString(error.localizedDescription)
                                            : QStringLiteral("Notifications are turned off for "
-                                                            "Trackknife in System Settings"));
+                                                            "Melody in System Settings"));
                                 return;
                             }
                             [center addNotificationRequest:request

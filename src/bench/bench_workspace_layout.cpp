@@ -321,7 +321,7 @@ void BenchMainWindow::buildWorkspace() {
     auto* quit = file_menu->addAction(QStringLiteral("Quit and stop playback"));
     quit->setObjectName(QStringLiteral("action-quit"));
     quit->setShortcut(QKeySequence::Quit);
-    quit->setStatusTip(QStringLiteral("Close Trackknife and stop this computer's engine"));
+    quit->setStatusTip(QStringLiteral("Close Melody and stop this computer's engine"));
     connect(quit, &QAction::triggered, this, &BenchMainWindow::quitAndStopEngine);
 
     auto* edit_menu = menuBar()->addMenu(QStringLiteral("&Edit"));

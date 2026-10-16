@@ -102,7 +102,7 @@ ConvertProfilesLoader Workspace::convertProfiles() {
                                   std::vector<persistence::SavedDestinationProfile>, QString)>
                    completion) {
         if (persistence_service == nullptr) {
-            completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
+            completion({}, {}, QStringLiteral("Melody persistence is unavailable"));
             return;
         }
         persistence_service->loadOutputProfiles(std::move(completion));
@@ -111,7 +111,7 @@ ConvertProfilesLoader Workspace::convertProfiles() {
 
 ConvertPresetStore Workspace::convertPresets() {
     auto* const persistence_service = persistence_;
-    const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
+    const auto unavailable = QStringLiteral("Melody persistence is unavailable");
     return ConvertPresetStore{
         .load =
             [persistence_service, unavailable](ConvertPresetStore::LoadCompletion completion) {
@@ -170,7 +170,7 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
     const auto work_engine = work_link != nullptr ? work_link->key : EngineKey::local();
     const auto mount = work_link != nullptr && elsewhere ? mountOf(*work_link) : RemoteMount{};
     auto mounted = std::make_shared<MountedMoves>();
-    const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
+    const auto unavailable = QStringLiteral("Melody persistence is unavailable");
     TaggerOpening opening{
         .services = TaggerServices{
             .plan_applier_factory = engineMetadataPlanApplierFactory(work),
@@ -686,7 +686,7 @@ void Workspace::applyEngineRelocation(const EngineKey& engine,
 
 OutputProfileStore Workspace::buildOutputProfileStore(const EngineKey& destinations_of) {
     auto* const persistence_service = persistence_;
-    const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
+    const auto unavailable = QStringLiteral("Melody persistence is unavailable");
     // This computer's destinations are in this workspace, which its engine
     // shares; an engine elsewhere is asked for its own.
     const auto place_of = [this, persistence_service,

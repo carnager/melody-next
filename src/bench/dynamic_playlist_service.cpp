@@ -332,7 +332,7 @@ void DynamicPlaylistService::refresh(DynamicPlaylistDefinition definition,
     request.setTransferTimeout(15000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
-    request.setRawHeader("User-Agent", "Trackknife/1.0");
+    request.setRawHeader("User-Agent", "Melody/1.0");
     auto* reply = network_->get(request);
     reply_ = reply;
     reply->setReadBufferSize(2 * 1024 * 1024 + 1);

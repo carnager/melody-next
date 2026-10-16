@@ -16,6 +16,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QIcon>
 #include <QMessageBox>
 #include <QPainter>
 #include <QSettings>
@@ -115,6 +116,10 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName(QStringLiteral("melody"));
     QApplication::setApplicationName(QStringLiteral("melody"));
     QApplication::setApplicationDisplayName(QStringLiteral("Melody"));
+    // ADR-0287: the vinyl bird, the icon theme's when it has one.
+    QApplication::setWindowIcon(
+        QIcon::fromTheme(QStringLiteral("melody"), QIcon{QStringLiteral(":/melody/melody.svg")}));
+    QApplication::setDesktopFileName(QStringLiteral("melody"));
 
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
     // background probing has had a moment, and exits -- in test mode, set

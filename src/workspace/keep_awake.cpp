@@ -41,7 +41,7 @@ class Inhibitor final {
         auto call = QDBusMessage::createMethodCall(
             QStringLiteral("org.freedesktop.login1"), QStringLiteral("/org/freedesktop/login1"),
             QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("Inhibit"));
-        call << QStringLiteral("idle") << QStringLiteral("Trackknife") << reason
+        call << QStringLiteral("idle") << QStringLiteral("Melody") << reason
              << QStringLiteral("block");
         auto* watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(call),
                                                     QCoreApplication::instance());

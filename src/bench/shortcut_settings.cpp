@@ -24,7 +24,7 @@ ShortcutSettings::ShortcutSettings(const QList<QAction*>& actions, QWidget* pare
     auto* layout = new QVBoxLayout(this);
     auto* note = new QLabel(
         tr("Click a shortcut and press the new keys. Clear it to disable it. Changes take effect "
-           "on Save. Shortcuts operate within Trackknife, not across the desktop."),
+           "on Save. Shortcuts operate within Melody, not across the desktop."),
         this);
     note->setWordWrap(true);
     note->setForegroundRole(QPalette::PlaceholderText);

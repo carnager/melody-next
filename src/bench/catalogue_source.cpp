@@ -353,7 +353,7 @@ std::shared_ptr<protocol::Client> CatalogueSource::Link::connectLocked() {
             const std::lock_guard guard{mutex};
             client.reset();
             failure = QString::fromStdString(
-                protocol::compatibility_message(peer, name.toStdString(), "Trackknife"));
+                protocol::compatibility_message(peer, name.toStdString(), "Melody"));
             refused = true;
             return nullptr;
         }

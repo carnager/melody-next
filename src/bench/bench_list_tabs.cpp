@@ -108,14 +108,14 @@ void BenchMainWindow::backupWorkspace() {
     if (persistence_ == nullptr) {
         return;
     }
-    auto* dialog = new QFileDialog(this, tr("Back up Trackknife workspace database"));
+    auto* dialog = new QFileDialog(this, tr("Back up Melody workspace database"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setAcceptMode(QFileDialog::AcceptSave);
     dialog->setFileMode(QFileDialog::AnyFile);
     dialog->setDefaultSuffix(QStringLiteral("sqlite"));
-    dialog->setNameFilter(tr("Trackknife workspace database (*.sqlite)"));
+    dialog->setNameFilter(tr("Melody workspace database (*.sqlite)"));
     dialog->setOption(QFileDialog::DontConfirmOverwrite);
-    dialog->selectFile(QStringLiteral("trackknife-workspace.sqlite"));
+    dialog->selectFile(QStringLiteral("melody-workspace.sqlite"));
     connect(dialog, &QFileDialog::fileSelected, this,
             [this](const QString& path) { workspace_.backupWorkspace(path); });
     dialog->open();
@@ -123,15 +123,15 @@ void BenchMainWindow::backupWorkspace() {
 
 void BenchMainWindow::scheduleWorkspaceRestore() {
     const auto path =
-        QFileDialog::getOpenFileName(this, tr("Restore Trackknife workspace database"), {},
-                                     tr("Trackknife workspace database (*.sqlite);;All files (*)"));
+        QFileDialog::getOpenFileName(this, tr("Restore Melody workspace database"), {},
+                                     tr("Melody workspace database (*.sqlite);;All files (*)"));
     if (path.isEmpty()) {
         return;
     }
     const auto answer = QMessageBox::warning(
         this, tr("Restore workspace database"),
-        tr("Trackknife will validate and restore this database at the next start. "
-           "The current database will be retained beside it for rollback. Close Trackknife now?"),
+        tr("Melody will validate and restore this database at the next start. "
+           "The current database will be retained beside it for rollback. Close Melody now?"),
         QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel);
     if (answer != QMessageBox::Close) {
         return;

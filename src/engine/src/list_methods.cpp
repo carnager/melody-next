@@ -250,7 +250,7 @@ using protocol::Json;
 // ADR-0286: a working list is a Trackknife tab now, not a list here.
 [[nodiscard]] core::Error working_refused() {
     return core::Error{.code = core::ErrorCode::unsupported,
-                       .message = "working lists are Trackknife's tabs now; only saved "
+                       .message = "working lists are Melody's tabs now; only saved "
                                   "playlists live on the engine (ADR-0286)",
                        .context = {}};
 }

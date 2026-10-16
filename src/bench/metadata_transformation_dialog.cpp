@@ -95,7 +95,7 @@ class MetadataTransformationDialog final : public QDialog {
         import_native_->setObjectName(
             QStringLiteral("bench-metadata-transformation-import-native"));
         import_native_->setToolTip(
-            QStringLiteral("Open a complete native Trackknife tagging script as an unsaved "
+            QStringLiteral("Open a complete native Melody tagging script as an unsaved "
                            "definition for review"));
         export_native_ = new QPushButton(QStringLiteral("Export…"), this);
         export_native_->setObjectName(
@@ -625,8 +625,8 @@ class MetadataTransformationDialog final : public QDialog {
             return;
         }
         session_->importNative(QFileDialog::getOpenFileName(
-            this, QStringLiteral("Import Trackknife tagging script"), {},
-            QStringLiteral("Trackknife tagging scripts (*.tbtags.json *.json);;All files (*)")));
+            this, QStringLiteral("Import Melody tagging script"), {},
+            QStringLiteral("Melody tagging scripts (*.tbtags.json *.json);;All files (*)")));
     }
 
     void exportNative() {
@@ -634,9 +634,9 @@ class MetadataTransformationDialog final : public QDialog {
             return;
         }
         session_->exportNative(QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export Trackknife tagging script"),
+            this, QStringLiteral("Export Melody tagging script"),
             session_->suggestedExportName(),
-            QStringLiteral("Trackknife tagging scripts (*.tbtags.json);;JSON files (*.json);;All "
+            QStringLiteral("Melody tagging scripts (*.tbtags.json);;JSON files (*.json);;All "
                            "files (*)")));
     }
 

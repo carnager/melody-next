@@ -470,7 +470,7 @@ void ListViewDialog::showColumn(const int row) {
             column->id == "rating"
                 ? QStringLiteral("Built in: empty, it shows the stars to click. An expression "
                                  "shows text instead; clicking still rates.")
-                : QStringLiteral("Built in: whatever it shows, it keeps what only Trackknife "
+                : QStringLiteral("Built in: whatever it shows, it keeps what only Melody "
                                  "does — the playing mark, its own sorting unless Sorts by "
                                  "says otherwise."));
     }
@@ -478,7 +478,7 @@ void ListViewDialog::showColumn(const int row) {
                                                             : text(column->title));
     column_display_.edit->setText(builtin && column->display.empty() ? usual
                                                                      : text(column->display));
-    column_display_.edit->setPlaceholderText(builtin ? QStringLiteral("as Trackknife draws it")
+    column_display_.edit->setPlaceholderText(builtin ? QStringLiteral("as Melody draws it")
                                                      : QStringLiteral("e.g. %genre%"));
     column_second_.edit->setText(text(column->second_line));
     column_sort_.edit->setText(text(column->sort));

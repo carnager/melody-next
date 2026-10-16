@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Melody
+GenericName=Music player
+Comment=Your music library: play, tag, convert and share it
+Exec=melody %F
+Icon=melody
+Categories=AudioVideo;Audio;Player;Qt;
+MimeType=audio/flac;audio/x-flac;audio/mpeg;audio/ogg;audio/x-wavpack;audio/x-musepack;audio/x-wav;
+Terminal=false

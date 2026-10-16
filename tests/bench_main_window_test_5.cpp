@@ -799,10 +799,10 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     // The title bar -- what a taskbar shows -- names it too, and lets go of
     // it when nothing plays.
     QVERIFY2(window.windowTitle().contains(QString::fromStdString(asked_title)) &&
-                 window.windowTitle().endsWith(QStringLiteral("Trackknife")),
+                 window.windowTitle().endsWith(QStringLiteral("Melody")),
              qPrintable(window.windowTitle()));
     window.remotePlayback()->stop();
-    QTRY_COMPARE(window.windowTitle(), QStringLiteral("Trackknife"));
+    QTRY_COMPARE(window.windowTitle(), QStringLiteral("Melody"));
 }
 
 void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {

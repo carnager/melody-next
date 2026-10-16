@@ -36,8 +36,8 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* layout = new QVBoxLayout(page);
     auto* note = new QLabel(
         QStringLiteral("Sign in here once. Hand the account to an engine below and it scrobbles "
-                       "what it plays itself, with Trackknife closed; until then, playback is "
-                       "scrobbled while Trackknife is open. Account actions take effect "
+                       "what it plays itself, with Melody closed; until then, playback is "
+                       "scrobbled while Melody is open. Account actions take effect "
                        "immediately."),
         page);
     note->setWordWrap(true);
@@ -49,7 +49,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     credentials_layout->setContentsMargins(0, 0, 0, 0);
     auto* instructions = new QLabel(
         QStringLiteral("1. Register a free Last.fm API application using the link below. "
-                       "Choose an application name such as Trackknife; "
+                       "Choose an application name such as Melody; "
                        "no callback URL is needed for desktop authorization.\n"
                        "2. Paste the API key and shared secret here once.\n"
                        "3. Connect to enable scrobbling, then approve access in your browser. "

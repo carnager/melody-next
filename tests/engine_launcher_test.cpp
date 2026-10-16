@@ -510,7 +510,7 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
 // start it, and says how to.
 void EngineLauncherTest::thisUsersEngineIsNotStartedHere() {
 #ifdef __APPLE__
-    QSKIP("on macOS Trackknife starts it");
+    QSKIP("on macOS Melody starts it");
 #else
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

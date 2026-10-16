@@ -461,7 +461,7 @@ Workspace::NowPlaying Workspace::nowPlaying(const EnginePlayback::State& state) 
     // shows.
     const auto artist = row != nullptr ? QString::fromStdString(row->artist) : QString{};
     shown.window_title = (artist.isEmpty() ? label : artist + QStringLiteral(" – ") + label) +
-                         QStringLiteral(" — Trackknife");
+                         QStringLiteral(" — Melody");
     shown.context = context;
     shown.tooltip = state.path;
     shown.cover_entry = state.entry;

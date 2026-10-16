@@ -1412,8 +1412,8 @@ void EnginePlaybackTest::anEngineOfAnotherProtocolIsNotUsedAndAnOlderOneIsSaidTo
         QSignalSpy said{playback, &EnginePlayback::versionNotice};
         if (protocol == 2) {
             QTRY_VERIFY(window.statusBar()->currentMessage().contains(
-                QStringLiteral("elsewhere speaks protocol 2; this Trackknife speaks protocol 1. "
-                               "Update Trackknife.")));
+                QStringLiteral("elsewhere speaks protocol 2; this Melody speaks protocol 1. "
+                               "Update Melody.")));
             QVERIFY(!playback->active());
             // Tried again as any lost connection is, and not said again.
             QTest::qWait(300);
@@ -1425,7 +1425,7 @@ void EnginePlaybackTest::anEngineOfAnotherProtocolIsNotUsedAndAnOlderOneIsSaidTo
         } else {
             QTRY_VERIFY(playback->active());
             QTRY_VERIFY(window.statusBar()->currentMessage().contains(
-                QStringLiteral("elsewhere's melodyd is older than this Trackknife")));
+                QStringLiteral("elsewhere's melodyd is older than this Melody")));
         }
         (*server)->stop();
     }

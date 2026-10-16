@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/about_dialog.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/desktop_media_session.hpp"
 #include "bench/desktop_notifier.hpp"
@@ -66,7 +67,7 @@ constexpr int transport_refresh_ms = 33;
 
 BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
     workspace_.setView(this);
-    setWindowTitle(QStringLiteral("Trackknife"));
+    setWindowTitle(QStringLiteral("Melody"));
     resize(1100, 720);
     setAcceptDrops(true);
 
@@ -108,6 +109,16 @@ void BenchMainWindow::buildHelpMenu() {
         LanguageReference::formatting);
     add(QStringLiteral("action-reference-scripts"), QStringLiteral("Tagging script reference"),
         LanguageReference::scripts);
+    help_menu->addSeparator();
+    // ADR-0287: on macOS Qt moves it to the application menu.
+    auto* about = help_menu->addAction(QStringLiteral("About Melody"));
+    about->setObjectName(QStringLiteral("action-about"));
+    about->setMenuRole(QAction::AboutRole);
+    connect(about, &QAction::triggered, this, [this] {
+        auto* dialog = new AboutDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
 }
 
 void BenchMainWindow::showMessage(const QString& text, const int timeout_ms) {
@@ -1036,7 +1047,7 @@ void BenchMainWindow::refreshTransport() {
     device_button_->setEnabled(false);
     device_button_->setToolTip(QStringLiteral("No engine is connected"));
     now_playing_->setText(QStringLiteral("No engine"));
-    setWindowTitle(QStringLiteral("Trackknife"));
+    setWindowTitle(QStringLiteral("Melody"));
     now_playing_context_->clear();
     setProperty("trackknife-engine-playback", QStringLiteral("unavailable"));
     publishMprisState();

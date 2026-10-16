@@ -40,19 +40,19 @@ int main() try {
     const protocol::PeerVersion same{.protocol = protocol::protocol_version,
                                      .level = protocol::protocol_level};
     require(protocol::compatibility(same) == Compatibility::full, "the same: everything works");
-    require(protocol::compatibility_message(same, "gemenon", "Trackknife").empty(),
+    require(protocol::compatibility_message(same, "gemenon", "Melody").empty(),
             "and nothing is said");
     const protocol::PeerVersion newer{.protocol = protocol::protocol_version,
                                       .level = protocol::protocol_level + 1};
     require(protocol::compatibility(newer) == Compatibility::full &&
-                protocol::compatibility_message(newer, "gemenon", "Trackknife").empty(),
+                protocol::compatibility_message(newer, "gemenon", "Melody").empty(),
             "a newer level serves an older client fully");
     const protocol::PeerVersion older{.protocol = protocol::protocol_version,
                                       .level = protocol::protocol_level - 1};
     require(protocol::compatibility(older) == Compatibility::older_engine,
             "an older level is used, without what it lacks");
-    require(protocol::compatibility_message(older, "gemenon", "Trackknife") ==
-                "gemenon's melodyd is older than this Trackknife; some things will not work "
+    require(protocol::compatibility_message(older, "gemenon", "Melody") ==
+                "gemenon's melodyd is older than this Melody; some things will not work "
                 "until it is updated.",
             "and said so");
     const protocol::PeerVersion next{.protocol = protocol::protocol_version + 1, .level = 0};
@@ -62,7 +62,7 @@ int main() try {
                 "gemenon speaks protocol 2; this melody-cli speaks protocol 1. Update melody-cli.",
             "naming the side to update: this one, for a newer engine");
     require(protocol::compatibility_message(protocol::PeerVersion{.protocol = 0, .level = 0},
-                                            "gemenon", "Trackknife")
+                                            "gemenon", "Melody")
                 .ends_with("Update gemenon's melodyd."),
             "the engine, for an older one");
     return EXIT_SUCCESS;

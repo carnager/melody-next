@@ -24,7 +24,7 @@ constexpr auto player_interface = "org.mpris.MediaPlayer2.Player";
     if (track_key.isEmpty()) {
         return QDBusObjectPath{QStringLiteral("/org/mpris/MediaPlayer2/TrackList/NoTrack")};
     }
-    return QDBusObjectPath{QStringLiteral("/de/trackknife/track/%1").arg(qHash(track_key), 0, 16)};
+    return QDBusObjectPath{QStringLiteral("/org/melody/track/%1").arg(qHash(track_key), 0, 16)};
 }
 } // namespace
 
@@ -47,8 +47,8 @@ class MprisRootAdaptor final : public QDBusAbstractAdaptor {
     [[nodiscard]] bool canQuit() const { return false; }
     [[nodiscard]] bool canRaise() const { return true; }
     [[nodiscard]] bool hasTrackList() const { return false; }
-    [[nodiscard]] QString identity() const { return QStringLiteral("Trackknife"); }
-    [[nodiscard]] QString desktopEntry() const { return QStringLiteral("trackknife"); }
+    [[nodiscard]] QString identity() const { return QStringLiteral("Melody"); }
+    [[nodiscard]] QString desktopEntry() const { return QStringLiteral("melody"); }
     [[nodiscard]] QStringList supportedUriSchemes() const { return {}; }
     [[nodiscard]] QStringList supportedMimeTypes() const { return {}; }
 
@@ -157,9 +157,9 @@ MprisService::MprisService(QObject* parent) : DesktopMediaSession(parent) {
     }
     // The plain well-known name first; a second running instance (or the test
     // suite beside the app) falls back to the pid-qualified variant.
-    service_name_ = QStringLiteral("org.mpris.MediaPlayer2.trackknife");
+    service_name_ = QStringLiteral("org.mpris.MediaPlayer2.melody");
     if (!bus.registerService(service_name_)) {
-        service_name_ = QStringLiteral("org.mpris.MediaPlayer2.trackknife.instance%1")
+        service_name_ = QStringLiteral("org.mpris.MediaPlayer2.melody.instance%1")
                             .arg(QCoreApplication::applicationPid());
         if (!bus.registerService(service_name_)) {
             bus.unregisterObject(QLatin1String(mpris_object_path));

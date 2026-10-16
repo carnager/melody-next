@@ -19,10 +19,9 @@ void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
-    const auto kept =
-        (*engine)->call("list.save", protocol::Json{{"name", "Kept"},
-                                                    {"kind", "saved"},
-                                                    {"items", protocol::Json::array()}});
+    const auto kept = (*engine)->call(
+        "list.save",
+        protocol::Json{{"name", "Kept"}, {"kind", "saved"}, {"items", protocol::Json::array()}});
     QVERIFY(kept.has_value());
     const auto kept_id = kept->value("id", std::string{});
     const auto gone_id = core::StableId::random().to_string();
@@ -1395,7 +1394,7 @@ void BenchMainWindowTest::longJobsKeepTheComputerAwake() {
             listed.beginStructure();
             listed >> what >> who >> why >> mode >> uid >> pid;
             listed.endStructure();
-            if (who == QStringLiteral("Trackknife") &&
+            if (who == QStringLiteral("Melody") &&
                 pid == static_cast<uint>(QCoreApplication::applicationPid())) {
                 ++count;
             }
@@ -2308,13 +2307,19 @@ void BenchMainWindowTest::listsLeftOnTheEngineAreOfferedOnce() {
         QCOMPARE(sqlite3_open((folder / "lists.sqlite").c_str(), &database), SQLITE_OK);
         const auto sql =
             "INSERT INTO retired_engine_lists(id, name, kind, revision, created_ms, modified_ms, "
-            "draft_of, draft_base) VALUES('" + list + "', CAST('Left over' AS BLOB), 0, 3, 1, 1, "
+            "draft_of, draft_base) VALUES('" +
+            list +
+            "', CAST('Left over' AS BLOB), 0, 3, 1, 1, "
             "NULL, 0);"
             "INSERT INTO retired_engine_list_items(list_id, position, entry_id, raw_path, "
             "duration_ms, title, artist, album) VALUES"
-            "('" + list + "', 0, '" + first + "', CAST('/music/left/one.flac' AS BLOB), 1000, "
+            "('" +
+            list + "', 0, '" + first +
+            "', CAST('/music/left/one.flac' AS BLOB), 1000, "
             "'One', 'Someone', 'Album'),"
-            "('" + list + "', 1, '" + second + "', CAST('/music/left/two.flac' AS BLOB), 1000, "
+            "('" +
+            list + "', 1, '" + second +
+            "', CAST('/music/left/two.flac' AS BLOB), 1000, "
             "'Two', 'Someone', 'Album');";
         char* error = nullptr;
         const auto done = sqlite3_exec(database, sql.c_str(), nullptr, nullptr, &error);
@@ -2409,10 +2414,10 @@ void BenchMainWindowTest::aPlayingTabsEditsReachTheQueueAsEdits() {
     QTRY_VERIFY(window.engine_queue_.has_value() && window.engine_queue_->size() == 5U);
 
     // Let go of on the engine -- as consume does -- before the window hears.
-    QVERIFY((*other)->call("playback.edit_queue",
-                           protocol::Json{{"list", tab->document.id.to_string()},
-                                          {"edits", protocol::Json::array({protocol::Json{
-                                                        {"remove", {ids[4]}}}})}}));
+    QVERIFY((*other)->call(
+        "playback.edit_queue",
+        protocol::Json{{"list", tab->document.id.to_string()},
+                       {"edits", protocol::Json::array({protocol::Json{{"remove", {ids[4]}}}})}}));
     // And now a row taken out here.
     tab->model->removeRowIndexes({0});
     window.markTabDirty(*tab);
@@ -2461,6 +2466,35 @@ void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() 
     QVERIFY(tabs->tabIcon(tabs->indexOf(local.view)).isNull());
     QVERIFY(!tabs->tabToolTip(tabs->indexOf(local.view)).contains(QStringLiteral("files on ")));
     saveRemoteEngines({});
+}
+
+// ADR-0287: Help › About Melody shows the mascot, the release and the
+// licence.
+void BenchMainWindowTest::aboutShowsTheMascotAndTheRelease() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QCOMPARE(window.windowTitle(), QStringLiteral("Melody"));
+    auto* about = window.findChild<QAction*>(QStringLiteral("action-about"));
+    QVERIFY(about != nullptr);
+    QCOMPARE(about->text(), QStringLiteral("About Melody"));
+    about->trigger();
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-about"))) != nullptr);
+    const auto* mascot = dialog->findChild<QLabel*>(QStringLiteral("bench-about-mascot"));
+    QVERIFY(mascot != nullptr && !mascot->pixmap().isNull());
+    // Drawn, not an empty square: the SVG reached the label.
+    const auto image = mascot->pixmap().toImage();
+    int drawn = 0;
+    for (int y = 0; y < image.height(); y += 4) {
+        for (int x = 0; x < image.width(); x += 4) {
+            drawn += qAlpha(image.pixel(x, y)) > 0 ? 1 : 0;
+        }
+    }
+    QVERIFY2(drawn > 100, qPrintable(QString::number(drawn)));
+    const auto* version = dialog->findChild<QLabel*>(QStringLiteral("bench-about-version"));
+    QVERIFY(version != nullptr && version->text().startsWith(QStringLiteral("Version ")));
+    dialog->close();
 }
 
 } // namespace trackknife::bench

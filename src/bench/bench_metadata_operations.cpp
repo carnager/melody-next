@@ -408,7 +408,7 @@ void BenchMainWindow::presentInterruptedOperations() {
     }
     auto* dialog = createPreparationFeedbackDialog(
         QStringLiteral("Interrupted file work"),
-        QStringLiteral("Trackknife could not finish or safely undo %1 earlier %2. The listed "
+        QStringLiteral("Melody could not finish or safely undo %1 earlier %2. The listed "
                        "files were left as they are — check them before editing further.")
             .arg(rows.size())
             .arg(rows.size() == 1U ? QStringLiteral("operation") : QStringLiteral("operations")),

@@ -115,12 +115,12 @@ void MprisServiceTest::exportsThePlayerOverTheSessionBus() {
     }
     MprisService service;
     QVERIFY(service.registered());
-    QVERIFY(service.serviceName().startsWith(QStringLiteral("org.mpris.MediaPlayer2.trackknife")));
+    QVERIFY(service.serviceName().startsWith(QStringLiteral("org.mpris.MediaPlayer2.melody")));
 
     QDBusInterface root{service.serviceName(), QStringLiteral("/org/mpris/MediaPlayer2"),
                         QStringLiteral("org.mpris.MediaPlayer2"), bus};
     QVERIFY(root.isValid());
-    QCOMPARE(root.property("Identity").toString(), QStringLiteral("Trackknife"));
+    QCOMPARE(root.property("Identity").toString(), QStringLiteral("Melody"));
     QCOMPARE(root.property("CanQuit").toBool(), false);
     QCOMPARE(root.property("CanRaise").toBool(), true);
 

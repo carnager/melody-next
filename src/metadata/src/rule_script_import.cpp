@@ -318,7 +318,7 @@ class Translator final {
         if (ascii_lower(value) == "comment:") {
             if (!warned_default_comment_) {
                 warning(offset,
-                        "Translated Picard's default comment target 'comment:' to Trackknife's "
+                        "Translated Picard's default comment target 'comment:' to Melody's "
                         "COMMENT field");
                 warned_default_comment_ = true;
             }
@@ -587,7 +587,7 @@ class Translator final {
         }
         if (node.text == "unset" && !warned_unset_) {
             warning(node.offset,
-                    "Trackknife translates $unset as an actual exact-native Remove field rule; "
+                    "Melody translates $unset as an actual exact-native Remove field rule; "
                     "it does not reproduce Picard's separate unset-versus-delete save behavior");
             warned_unset_ = true;
         }

@@ -28,7 +28,7 @@ env:
   DEPENDENCIES: >-
     build-essential cmake ninja-build pkg-config git ca-certificates
     clang clang-format clang-tidy libclang-rt-dev llvm
-    qt6-base-dev libutf8proc-dev nlohmann-json3-dev
+    qt6-base-dev qt6-svg-dev libutf8proc-dev nlohmann-json3-dev
     libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
     libebur128-dev libmpdclient-dev libopenmpt-dev libpipewire-0.3-dev
     libsqlite3-dev libtag-dev libupnp-dev libcurl4-openssl-dev libssl-dev
@@ -101,7 +101,7 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          base-devel cmake ninja pkgconf git clang qt6-base libutf8proc nlohmann-json
+          base-devel cmake ninja pkgconf git clang qt6-base qt6-svg libutf8proc nlohmann-json
           ffmpeg libebur128 libmpdclient libopenmpt taglib sqlite libupnp curl openssl
           pipewire wireplumber dbus openbsd-netcat
       - uses: actions/checkout@v4

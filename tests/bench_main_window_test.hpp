@@ -317,6 +317,7 @@ class BenchMainWindowTest final : public QObject {
     void listsLeftOnTheEngineAreOfferedOnce();
     void theTabStoreKeepsWhatItCannotRead();
     void aPlayingTabsEditsReachTheQueueAsEdits();
+    void thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

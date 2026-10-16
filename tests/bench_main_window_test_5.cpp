@@ -49,9 +49,12 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));
     }
-    // Named by what the engine calls itself -- here its machine's name, as
-    // it was started without one -- rather than by its socket or address.
-    QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());
+    // "Library", the engine named in its tooltip by what it calls itself --
+    // here its machine's name, as it was started without one -- rather than
+    // by its socket or address.
+    QCOMPARE(sources->tabText(sources->count() - 1), QStringLiteral("Library"));
+    QTRY_VERIFY(sources->tabToolTip(sources->count() - 1)
+                    .startsWith(QStringLiteral("The library on %1").arg(QSysInfo::machineHostName())));
     // And the library says so too, not the address.
     QTRY_COMPARE(window.remoteCatalogue()->describe(),
                  QStringLiteral("Library: %1").arg(QSysInfo::machineHostName()));

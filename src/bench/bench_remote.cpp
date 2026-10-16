@@ -94,17 +94,20 @@ void BenchMainWindow::engineRemoved() {
     refreshActiveContext();
 }
 
-// Connected, the remote says what it is called: the library tab shows that
-// rather than its address, and its lists' empty messages name it.
+// Connected, the remote says what it is called: the library tab's tooltip
+// names it rather than its address, and so do its lists.
 void BenchMainWindow::engineAttached(EngineLink& engine) {
     for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
          ++index) {
         if (local_source_tabs_->tabData(index).toString() == engine.key.text()) {
-            local_source_tabs_->setTabText(index, engine.catalogue->name());
+            local_source_tabs_->setTabToolTip(
+                index, QStringLiteral("The library on %1 · %2")
+                           .arg(engine.catalogue->name(), engine.catalogue->describe()));
         }
     }
     for (auto& tab : list_tabs_) {
         if (EngineKey::of(tab->document) == engine.key) {
+            refreshTabChrome(*tab);
             refreshEmptyMessage(*tab);
         }
     }
@@ -125,10 +128,14 @@ void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
     source_stack_->addWidget(link->library);
     workspace_.attachLibrary(&link->library->browser());
     refreshLocalRatings();
-    const auto index = local_source_tabs_->addTab(link->catalogue->name());
+    // ADR-0286: the library -- the only one with a tab -- named short, so
+    // the sidebar shows it whole; the engine holding it, said on it.
+    const auto index = local_source_tabs_->addTab(QStringLiteral("Library"));
     // The engine's key, which the tab is found and followed by (ADR-0234).
     local_source_tabs_->setTabData(index, link->key.text());
-    local_source_tabs_->setTabToolTip(index, link->catalogue->describe());
+    local_source_tabs_->setTabToolTip(
+        index, QStringLiteral("The library on %1 · %2")
+                   .arg(link->catalogue->name(), link->catalogue->describe()));
     // Now that there is a remote to show instead, or it was the one chosen.
     applyLocalLibraryVisibility();
     selectPreferredSource();

@@ -7,13 +7,37 @@
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/remote_engines.hpp"
+#include "bench/settings_keys.hpp"
+#include "workspace/sources.hpp"
 
 #include <QStringList>
+#include <QSysInfo>
 
 #include <array>
 #include <utility>
 
 namespace trackknife::bench {
+
+bool Workspace::holdsLibrary(const EngineKey& engine) const {
+    const auto library = libraryEngine();
+    if (engine.isLocal()) {
+        return library == QLatin1String(SettingsKeys::library_engine_local);
+    }
+    if (const auto* found = link(engine)) {
+        return found->setting.address == library;
+    }
+    // ADR-0234's placeholders, for an engine not reached yet: its address,
+    // or "remote", the first engine elsewhere.
+    if (engine.text().startsWith(QStringLiteral("address:"))) {
+        return engine.text().mid(8) == library;
+    }
+    if (engine == EngineKey::remote()) {
+        const auto engines = loadRemoteEngines();
+        return !engines.empty() && engines.front().address == library;
+    }
+    return false;
+}
 
 QString Workspace::emptyListTitle(const EngineKey& engine) const {
     return !engine.isLocal() ? tr("Nothing from %1 here yet").arg(engineName(engine))
@@ -21,6 +45,12 @@ QString Workspace::emptyListTitle(const EngineKey& engine) const {
 }
 
 QString Workspace::emptyListHint(const EngineKey& engine) const {
+    // ADR-0286: a tab of this computer's files, where the library is
+    // elsewhere, is filled from this computer.
+    if (engine.isLocal() && !holdsLibrary(engine)) {
+        return tr("Drop files or folders from this computer here, or open them from This "
+                  "computer on the left.");
+    }
     return !engine.isLocal()
                ? tr("Add albums from %1's library on the left, or drag them here.")
                      .arg(engineName(engine))
@@ -32,13 +62,24 @@ Workspace::TabChrome Workspace::tabChrome(const ListTab& tab) const {
     const auto name = displayText(tab.document.name);
     chrome.playing = QString::fromStdString(tab.document.id.to_string()) == active_local_list_id_;
     chrome.text = name + (tab.document.dirty ? QStringLiteral(" *") : QString{});
-    // The playing dot is the tab bar's own; the icon says where it plays.
-    chrome.remote = !EngineKey::of(tab.document).isLocal();
-    const auto kind = tab.document.kind == persistence::ListKind::scratch
-                          ? QStringLiteral("Persistent scratch list")
-                          : QStringLiteral("Named Trackknife working list");
-    chrome.tooltip = QStringLiteral("%1%2%3").arg(
-        kind, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
+    // The playing dot is the tab bar's own. ADR-0286: the icon marks a tab
+    // whose files are not the library's -- this computer's, or another
+    // engine's -- and says so.
+    const auto engine = EngineKey::of(tab.document);
+    const bool library = holdsLibrary(engine);
+    chrome.mark = library            ? TabChrome::Mark::none
+                  : engine.isLocal() ? TabChrome::Mark::this_computer
+                                     : TabChrome::Mark::elsewhere;
+    const auto kind = tab.document.kind == persistence::ListKind::saved
+                          ? tr("Saved playlist on %1").arg(engineName(engine))
+                          : tr("Tab");
+    const auto where = chrome.mark == TabChrome::Mark::this_computer
+                           ? tr(" · files on %1, played here").arg(QSysInfo::machineHostName())
+                       : chrome.mark == TabChrome::Mark::elsewhere
+                           ? tr(" · files on %1, played there").arg(engineName(engine))
+                           : QString{};
+    chrome.tooltip = QStringLiteral("%1%2%3%4").arg(
+        kind, where, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
         tab.document.dirty ? QStringLiteral(" · modified") : QString{});
     if (chrome.playing) {
         chrome.tooltip += tr(" · Active playback queue");

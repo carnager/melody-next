@@ -833,12 +833,17 @@ class Workspace final : public QObject {
         QString accessible_name;
         // The list playback was last started from: a dot on its tab.
         bool playing{false};
-        // Its files are an engine elsewhere's: an icon says so.
-        bool remote{false};
+        // ADR-0286: where its files are, when that is not the library: this
+        // computer's (a computer icon) or another engine's (a server icon).
+        // A tab of the library's engine is the usual one and has no mark.
+        enum class Mark : std::uint8_t { none, this_computer, elsewhere };
+        Mark mark{Mark::none};
         // ADR-0253: the rule it continues with; empty, none.
         QString continues;
     };
     [[nodiscard]] TabChrome tabChrome(const ListTab& tab) const;
+    // ADR-0286: whether `engine` holds the library (Settings › Engines).
+    [[nodiscard]] bool holdsLibrary(const EngineKey& engine) const;
     struct Summary {
         QString text;
         QString tooltip;

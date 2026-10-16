@@ -2422,4 +2422,45 @@ void BenchMainWindowTest::aPlayingTabsEditsReachTheQueueAsEdits() {
     (*other)->close();
 }
 
+// ADR-0286: the library's tabs are the usual ones; this computer's are
+// marked -- a computer icon, a tooltip saying where its files are -- and kept
+// after them. The sidebar calls this computer's folders by their name.
+void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() {
+    // The library on an engine elsewhere, reached or not.
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {},
+                        .stream_kbps = -1,
+                        .name = QStringLiteral("gemenon")}});
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
+                         QStringLiteral("192.0.2.10:6603"));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY(!window.list_tabs_.empty());
+    auto& local = *window.list_tabs_.front();
+    QVERIFY(EngineKey::of(local.document).isLocal());
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    const auto index = tabs->indexOf(local.view);
+    QVERIFY(!tabs->tabIcon(index).isNull());
+    QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("files on ")));
+    QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("played here")));
+    auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+    QVERIFY(sources != nullptr);
+    QCOMPARE(sources->tabText(0), QStringLiteral("This computer"));
+    // This computer's library is no library: its tab is not shown.
+    QVERIFY(!sources->isTabVisible(1));
+
+    // The library here again: nothing to mark.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
+                         QLatin1String(SettingsDialog::library_engine_local));
+    window.refreshTabChrome(local);
+    QVERIFY(tabs->tabIcon(tabs->indexOf(local.view)).isNull());
+    QVERIFY(!tabs->tabToolTip(tabs->indexOf(local.view)).contains(QStringLiteral("files on ")));
+    saveRemoteEngines({});
+}
+
 } // namespace trackknife::bench

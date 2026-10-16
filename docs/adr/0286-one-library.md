@@ -157,8 +157,13 @@ are chosen in Trackknife, which finds it on the network.
 
 ## Left for later
 
-- How tabs of this computer's files and tabs of the library differ, and what
-  a drop between them does.
+- What a drop of this computer's files on a library tab does ("Add to
+  library…"). How the two kinds of tab differ is settled (2026-10-16): when
+  the library is on another engine, this computer's tabs carry a computer
+  mark and say in their tooltip that their files are here and play here; the
+  library's tabs are unmarked and come first; the sidebar's folder view is
+  called "This computer" and the library's tab "Library", its engine named
+  in the tooltip.
 - Moving the library to another engine, with its playlists, ratings and
   history.
 

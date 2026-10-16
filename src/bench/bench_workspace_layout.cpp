@@ -54,6 +54,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QSysInfo>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -151,8 +152,14 @@ void BenchMainWindow::buildWorkspace() {
     };
     local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),
                                           QStringLiteral("Local music source"));
-    local_source_tabs_->addTab(QStringLiteral("Folders"));
+    // ADR-0286: "This computer" -- its folders, not an engine's -- and the
+    // library, named by the engine holding it.
+    local_source_tabs_->addTab(QIcon::fromTheme(QStringLiteral("computer")),
+                               QStringLiteral("This computer"));
+    local_source_tabs_->setTabToolTip(
+        0, QStringLiteral("Folders on this computer, %1").arg(QSysInfo::machineHostName()));
     local_source_tabs_->addTab(QStringLiteral("Library"));
+    local_source_tabs_->setTabToolTip(1, QStringLiteral("The library on this computer"));
     heading_row->addWidget(local_source_tabs_, 1);
     // Remembered only when chosen: tabs appearing, hiding or being switched
     // by the window itself do not change what the user asked for.
@@ -1033,6 +1040,13 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
         workspace_.settingsSaved(sharing);
         applyLocalLibraryVisibility();
+        // ADR-0286: which engine holds the library decides how tabs are
+        // marked and ordered.
+        for (const auto& tab : list_tabs_) {
+            refreshTabChrome(*tab);
+            refreshEmptyMessage(*tab);
+        }
+        keepTabGroupsTogether();
         applyListsDisplay();
         if (notifications_action_)
             notifications_action_->setChecked(

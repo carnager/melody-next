@@ -141,13 +141,18 @@ void BenchMainWindow::scheduleWorkspaceRestore() {
 }
 
 int BenchMainWindow::engineRank(const QWidget* view) const {
+    // ADR-0286: the library's tabs first -- the usual ones -- then the
+    // others' in the order the engines are, this computer's among them.
     const auto engine = engineOfView(view);
+    if (workspace_.holdsLibrary(engine)) {
+        return 0;
+    }
     for (std::size_t index = 0; index < engines_.size(); ++index) {
         if (engines_[index]->key == engine) {
-            return static_cast<int>(index);
+            return static_cast<int>(index) + 1;
         }
     }
-    return static_cast<int>(engines_.size());
+    return static_cast<int>(engines_.size()) + 1;
 }
 
 void BenchMainWindow::keepTabGroupsTogether() {
@@ -155,11 +160,11 @@ void BenchMainWindow::keepTabGroupsTogether() {
         return;
     }
     regrouping_tabs_ = true;
-    // ADR-0234: each engine's tabs together, in the order the engines are
-    // -- this computer's first -- and within each group as they were left.
+    // ADR-0234: each engine's tabs together -- ADR-0286: the library's
+    // first -- and within each group as they were left.
     // A tab dragged into another group goes back to its own.
     int next = 0;
-    for (int rank = 0; rank <= static_cast<int>(engines_.size()); ++rank) {
+    for (int rank = 0; rank <= static_cast<int>(engines_.size()) + 1; ++rank) {
         for (int index = next; index < tabs_->count(); ++index) {
             if (engineRank(tabs_->widget(index)) == rank) {
                 if (index != next) {
@@ -787,8 +792,11 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, chrome.playing);
     tabs_->setTabText(index, chrome.text);
-    tabs_->setTabIcon(index,
-                      chrome.remote ? QIcon::fromTheme(QStringLiteral("network-server")) : QIcon{});
+    tabs_->setTabIcon(index, chrome.mark == Workspace::TabChrome::Mark::this_computer
+                                 ? QIcon::fromTheme(QStringLiteral("computer"))
+                             : chrome.mark == Workspace::TabChrome::Mark::elsewhere
+                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                 : QIcon{});
     tabs_->setTabToolTip(index, chrome.tooltip);
     tab.view->setAccessibleName(chrome.accessible_name);
     if (auto* close = tabs_->tabBar()->tabButton(index, QTabBar::RightSide)) {

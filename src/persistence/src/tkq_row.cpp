@@ -39,6 +39,10 @@ std::string tkq_canonical_field(const std::string& field) {
     return metadata::canonicalize_field_name(field);
 }
 
+std::string tkq_spelled_field(const std::string& field) {
+    return metadata::resolve_text_property_identity(field).canonical_name;
+}
+
 } // namespace internal
 
 namespace {
@@ -54,6 +58,15 @@ std::string lower(const std::string& value) {
     return result ? *result : value;
 }
 
+// A row's values of a field, under its folded name or as it is spelled.
+template <typename Fields>
+[[nodiscard]] auto find_field(const Fields& fields, const std::string_view name) {
+    const auto found = fields.find(metadata::canonicalize_field_name(name));
+    return found != fields.end()
+               ? found
+               : fields.find(metadata::resolve_text_property_identity(name).canonical_name);
+}
+
 class RowFactsContext final : public titleformat::EvaluationContext {
   public:
     RowFactsContext(const TkqRowFacts& row, const titleformat::FormatContextKind kind)
@@ -61,7 +74,7 @@ class RowFactsContext final : public titleformat::EvaluationContext {
     titleformat::FormatContextKind kind() const noexcept override { return kind_; }
     std::optional<std::string> resolveField(std::string_view name) const override {
         const auto canonical = metadata::canonicalize_field_name(name);
-        const auto found = row_.fields.find(canonical);
+        const auto found = find_field(row_.fields, name);
         if (found != row_.fields.end() && !found->second.empty()) {
             return found->second.front().first;
         }
@@ -78,8 +91,7 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         return std::nullopt;
     }
     std::optional<MetadataValues> resolveMetadata(std::string_view name) const override {
-        const auto canonical = metadata::canonicalize_field_name(name);
-        const auto found = row_.fields.find(canonical);
+        const auto found = find_field(row_.fields, name);
         if (found == row_.fields.end()) {
             // The display fallbacks above, which are what %title% and the
             // rest read through: the evaluator asks here, not resolveField.
@@ -277,7 +289,7 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         const auto year = leading_integer(row.date);
         return year && compare_number(*year, predicate.comparison, predicate.number);
     }
-    const auto found = row.fields.find(canonical);
+    const auto found = find_field(row.fields, predicate.field);
     switch (predicate.comparison) {
     case TkqComparison::present:
         return found != row.fields.end();

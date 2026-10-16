@@ -83,6 +83,11 @@ Field names are index-canonical (lowercased, separators stripped), so
 `replaygain_track_gain`, `REPLAYGAIN_TRACK_GAIN`, and
 `ReplayGain Track Gain` name the same field.
 
+A field is named as a known field folds -- `album artist`, `albumartist`
+and `ALBUM_ARTIST` are one -- or, for a tag the library does not know, as
+it is spelled, case aside: `trackknife_rating` finds `TRACKKNIFE_RATING`,
+and `"media jukebox-score"` a tag of that name.
+
 For multi-value fields:
 
 - `IS`: some single value equals the string (casefolded).

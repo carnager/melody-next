@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . /source
 RUN cmake -S /source -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
-        -DTRACKKNIFE_BUILD_UI=OFF -DBUILD_TESTING=OFF -DTRACKKNIFE_BUILD_BENCHMARKS=OFF \
-        -DTRACKKNIFE_WARNINGS_AS_ERRORS=OFF \
+        -DMELODY_BUILD_UI=OFF -DBUILD_TESTING=OFF -DMELODY_BUILD_BENCHMARKS=OFF \
+        -DMELODY_WARNINGS_AS_ERRORS=OFF \
     && cmake --build /build --target trackknife_engine_daemon melody_agent melody_cli \
     && for part in engine agent cli; do DESTDIR=/out cmake --install /build --component $part; done
 # The runtime needs the packages these binaries link, and no more: found

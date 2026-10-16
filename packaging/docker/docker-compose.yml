@@ -2,9 +2,9 @@
 #
 #   docker compose up -d
 #
-# Then in Trackknife: Settings → Engine → Remote engine → On the network
-# picks it by name. Add the music folder as the engine sees it -- /music --
-# with Folders… in its library, and Refresh.
+# Then in Melody: Settings → Engines → On the network picks it by name;
+# choose it as the one that holds the library, add the music folder as the
+# engine sees it -- /music -- and Refresh.
 services:
   melodyd:
     build:
@@ -30,8 +30,8 @@ services:
     volumes:
       # The library, database and saved queue: keep this.
       - ./state:/state
-      # The music, read-only: tags are edited in Trackknife over the
-      # network share, not by the engine.
+      # The music. Read-only here, so tags cannot be edited: the engine does
+      # that (ADR-0237); drop :ro to let it.
       - /mnt/music:/music:ro
       # Speakers on this machine, optional: its PipeWire, handed in. Without
       # it the engine plays on agents only.

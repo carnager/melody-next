@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . /source
 RUN cmake -S /source -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
-        -DTRACKKNIFE_CLI_ONLY=ON -DBUILD_TESTING=OFF -DTRACKKNIFE_WARNINGS_AS_ERRORS=OFF \
+        -DMELODY_CLI_ONLY=ON -DBUILD_TESTING=OFF -DMELODY_WARNINGS_AS_ERRORS=OFF \
     && cmake --build /build --target melody_watch \
     && DESTDIR=/out cmake --install /build --component watch
 

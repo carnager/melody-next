@@ -4,8 +4,8 @@ Each directory here is one AUR package, as published:
 
 | Package | What |
 | --- | --- |
-| `trackknife-git` | the desktop app |
-| `melody-git` | the engine (`melodyd-git`) and speakers (`melody-agent-git`), plus a metapackage |
+| `melody-git` | the desktop app, Melody (ADR-0287: Trackknife's `trackknife-git` before) |
+| `melodyd-git` | the engine (`melodyd-git`) and speakers (`melody-agent-git`) |
 | `melody-cli-git` | `melody-cli`, built without the engine |
 | `melody-watch-git` | `melody-watch`, for a NAS that cannot run the engine (ADR-0232) |
 
@@ -22,7 +22,7 @@ held `melody-cli.debug`.
 To build one from this repository, as the AUR would:
 
 ```sh
-cd packaging/arch/melody-git
+cd packaging/arch/melodyd-git
 makepkg -si
 ```
 

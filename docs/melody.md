@@ -106,7 +106,7 @@ Each folder is `WHERE_IT_IS_HERE=WHERE_THE_ENGINE_SEES_IT` (one path if they
 are the same), and the engine's library must include the second. At start it
 compares the folder with the engine's library, so changes made while it wasn't
 running are found without a scan. It needs only `libutf8proc`: build it on the
-NAS with `cmake -DTRACKKNIFE_CLI_ONLY=ON`, which also builds `melody-cli`.
+NAS with `cmake -DMELODY_CLI_ONLY=ON`, which also builds `melody-cli`.
 There's a user unit, `melody-watch.service`, reading its options from
 `~/.config/melody/watch.conf` (`MELODY_WATCH_OPTIONS=...`).
 

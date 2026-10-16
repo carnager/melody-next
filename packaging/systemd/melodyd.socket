@@ -1,6 +1,6 @@
 [Unit]
 # ADR-0286: the engine's socket, held by systemd, so the engine starts when a
-# client -- Trackknife, melody-cli -- first connects, and nobody has to start
+# client -- Melody, melody-cli -- first connects, and nobody has to start
 # it. Enabled for every user by the package.
 Description=melodyd's socket, the Melody music engine started on first use
 

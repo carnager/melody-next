@@ -1,8 +1,9 @@
 [Unit]
 # ADR-0220: the engine owns the library and playback, and outlives any
-# window: music keeps playing with Trackknife closed, and starts without it.
-# On a desktop Trackknife starts the engine itself; this unit is for a
-# machine that plays without anyone logged in -- a server, a Pi -- with
+# window: music keeps playing with Melody closed, and starts without it.
+# On a desktop melodyd.socket starts it on the first connection; this unit
+# enabled is for a machine that plays without anyone logged in -- a server,
+# a Pi -- with
 #   loginctl enable-linger $USER
 # so it runs from boot.
 Description=melodyd, the Melody music engine
@@ -23,7 +24,7 @@ ExecStart=/usr/bin/melodyd
 # but not after systemctl stop.
 Restart=always
 RestartSec=1
-# engine.stop -- Trackknife's Quit and stop engine -- is not restarted after;
+# engine.stop -- Melody's Quit and stop engine -- is not restarted after;
 # the next client on the socket starts it.
 RestartPreventExitStatus=64
 

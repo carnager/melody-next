@@ -17,7 +17,7 @@ A folder per plugin, with a `plugin.json`:
 
 Plugins under `$XDG_DATA_DIRS/melody/plugins` are found too; one of the same
 name in your own folder wins. A plugin found is **off** until you tick it
-under **Settings → General → Plugins**. A plugin runs with your rights, like
+under **Settings → Plugins**. A plugin runs with your rights, like
 any program you start: enable only those you trust.
 
 ## plugin.json

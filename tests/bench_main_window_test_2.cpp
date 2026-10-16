@@ -2597,6 +2597,27 @@ echo "shared:${relative:-$album}"
     from_library->trigger();
     QTRY_COMPARE_WITH_TIMEOUT(QGuiApplication::clipboard()->text(),
                               QStringLiteral("shared:Band/Record"), 10'000);
+
+    // Settings has a page of plugins, each enabled there; turned off and
+    // saved, its action is gone.
+    {
+        auto* dialog = window.showSettingsDialog(SettingsDialog::Page::plugins);
+        QVERIFY(dialog != nullptr);
+        auto* pages = dialog->findChild<QListWidget*>();
+        QVERIFY(pages != nullptr);
+        QCOMPARE(pages->currentItem()->text(), QStringLiteral("Plugins"));
+        auto* enabled = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-plugin-echo"));
+        QVERIFY(enabled != nullptr && enabled->isChecked());
+        QCOMPARE(enabled->text(), QStringLiteral("Echo"));
+        enabled->setChecked(false);
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    }
+    QVERIFY(!pluginEnabled(QStringLiteral("echo")));
+    QVERIFY(enabledPlugins().empty());
     QSettings{}.remove(QStringLiteral("plugins"));
     QDir{folder}.removeRecursively();
 }

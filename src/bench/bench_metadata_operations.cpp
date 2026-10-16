@@ -191,6 +191,7 @@ void BenchMainWindow::openForScreenshot(const QString& name) {
             std::pair{"replaygain", SettingsDialog::Page::replaygain},
             std::pair{"covers", SettingsDialog::Page::covers},
             std::pair{"metadata", SettingsDialog::Page::metadata_services},
+            std::pair{"plugins", SettingsDialog::Page::plugins},
             std::pair{"lastfm", SettingsDialog::Page::lastfm},
             std::pair{"shortcuts", SettingsDialog::Page::shortcuts},
         };

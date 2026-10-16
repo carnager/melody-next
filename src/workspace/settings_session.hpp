@@ -41,6 +41,7 @@ class SettingsSession final : public QObject {
         ratings,
         covers,
         metadata_services,
+        plugins,
         lastfm,
         shortcuts
     };

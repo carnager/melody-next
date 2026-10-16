@@ -15,7 +15,9 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
@@ -40,6 +42,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -224,43 +227,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     bind(lists_display_, SettingsSession::listsDisplays(), "appearance/lists-display");
     general_form->addRow(QStringLiteral("Show lists as:"), lists_display_);
 
-    // ADR-0288: the plugins found, each off until enabled here.
-    auto* plugins = new QWidget(general);
-    plugins->setObjectName(QStringLiteral("bench-settings-plugins"));
-    auto* plugin_list = new QVBoxLayout(plugins);
-    plugin_list->setContentsMargins(0, 0, 0, 0);
-    const auto found = discoverPlugins();
-    for (const auto& plugin : found) {
-        auto* box = new QCheckBox(plugin.plugin ? plugin.plugin->title : plugin.name, plugins);
-        box->setObjectName(QStringLiteral("bench-settings-plugin-%1").arg(plugin.name));
-        box->setChecked(plugin.plugin && pluginEnabled(plugin.name));
-        box->setEnabled(plugin.plugin.has_value());
-        box->setToolTip(
-            plugin.plugin ? QStringLiteral("%1\n%2").arg(plugin.plugin->description, plugin.folder)
-                          : QStringLiteral("%1: %2").arg(plugin.folder, plugin.problem));
-        const auto key = pluginEnabledKey(plugin.name);
-        connect(box, &QCheckBox::toggled, this,
-                [this, key](const bool on) { session_->setValue(key, on); });
-        plugin_list->addWidget(box);
-        if (!plugin.plugin) {
-            auto* problem = new QLabel(plugin.problem, plugins);
-            problem->setWordWrap(true);
-            problem->setForegroundRole(QPalette::PlaceholderText);
-            plugin_list->addWidget(problem);
-        }
-    }
-    auto* plugin_note = new QLabel(
-        found.empty()
-            ? QStringLiteral("None found. A plugin is a folder with a plugin.json in %1.")
-                  .arg(pluginFolders().value(0))
-            : QStringLiteral("A plugin runs a program of its own with your rights: enable only "
-                             "those you trust. They are found in %1.")
-                  .arg(pluginFolders().value(0)),
-        plugins);
-    plugin_note->setWordWrap(true);
-    plugin_note->setForegroundRole(QPalette::PlaceholderText);
-    plugin_list->addWidget(plugin_note);
-    general_form->addRow(QStringLiteral("Plugins:"), plugins);
     add_page(QStringLiteral("General"), general);
 
     auto* playback = new QWidget(this);
@@ -943,6 +909,74 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     metadata_layout->addWidget(lastfm_note);
     metadata_layout->addStretch(1);
     add_page(QStringLiteral("Metadata services"), metadata_services);
+
+    // ADR-0288: the plugins found, each off until enabled here.
+    auto* plugins_page = new QWidget(this);
+    plugins_page->setObjectName(QStringLiteral("bench-settings-plugins"));
+    auto* plugins_layout = new QVBoxLayout(plugins_page);
+    auto* plugin_intro = new QLabel(
+        QStringLiteral("A plugin adds entries to the context menus of track lists and the "
+                       "library. Each is a program of its own and runs with your rights: enable "
+                       "only those you trust."),
+        plugins_page);
+    plugin_intro->setWordWrap(true);
+    plugins_layout->addWidget(plugin_intro);
+    const auto found = discoverPlugins();
+    for (const auto& plugin : found) {
+        auto* box = new QGroupBox(plugins_page);
+        auto* box_layout = new QVBoxLayout(box);
+        auto* enabled = new QCheckBox(plugin.plugin ? plugin.plugin->title : plugin.name, box);
+        enabled->setObjectName(QStringLiteral("bench-settings-plugin-%1").arg(plugin.name));
+        enabled->setChecked(plugin.plugin && pluginEnabled(plugin.name));
+        enabled->setEnabled(plugin.plugin.has_value());
+        const auto key = pluginEnabledKey(plugin.name);
+        connect(enabled, &QCheckBox::toggled, this,
+                [this, key](const bool on) { session_->setValue(key, on); });
+        box_layout->addWidget(enabled);
+        QStringList lines;
+        if (plugin.plugin) {
+            if (!plugin.plugin->description.isEmpty()) {
+                lines << plugin.plugin->description.toHtmlEscaped();
+            }
+            QStringList labels;
+            for (const auto& action : plugin.plugin->actions) {
+                labels << action.label.toHtmlEscaped();
+            }
+            lines << QStringLiteral("Adds: %1").arg(labels.join(QStringLiteral(", ")));
+        } else {
+            lines << QStringLiteral("Cannot be used: %1").arg(plugin.problem.toHtmlEscaped());
+        }
+        lines << plugin.folder.toHtmlEscaped();
+        auto* about = new QLabel(lines.join(QStringLiteral("<br>")), box);
+        about->setWordWrap(true);
+        about->setForegroundRole(QPalette::PlaceholderText);
+        about->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        box_layout->addWidget(about);
+        plugins_layout->addWidget(box);
+    }
+    const auto plugin_home = pluginFolders().value(0);
+    auto* plugin_note = new QLabel(
+        found.empty()
+            ? QStringLiteral("No plugins yet. A plugin is a folder with a plugin.json in %1 "
+                             "(docs/plugins.md).")
+                  .arg(plugin_home)
+            : QStringLiteral("Plugins are found in %1.").arg(plugin_home),
+        plugins_page);
+    plugin_note->setWordWrap(true);
+    plugin_note->setForegroundRole(QPalette::PlaceholderText);
+    plugins_layout->addWidget(plugin_note);
+    auto* open_plugins = new QPushButton(QStringLiteral("Open plugin folder"), plugins_page);
+    open_plugins->setObjectName(QStringLiteral("bench-settings-open-plugins"));
+    connect(open_plugins, &QPushButton::clicked, this, [plugin_home] {
+        QDir{}.mkpath(plugin_home);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(plugin_home));
+    });
+    auto* open_row = new QHBoxLayout;
+    open_row->addWidget(open_plugins);
+    open_row->addStretch(1);
+    plugins_layout->addLayout(open_row);
+    plugins_layout->addStretch(1);
+    add_page(QStringLiteral("Plugins"), plugins_page);
     if (lastfm)
         add_page(QStringLiteral("Last.fm"), lastfm(this));
     if (!shortcuts.isEmpty()) {

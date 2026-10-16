@@ -159,11 +159,11 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
 SettingsSession::~SettingsSession() = default;
 
 QStringList SettingsSession::pageTitles() {
-    return {QStringLiteral("General"), QStringLiteral("Playback"),
-            QStringLiteral("Engines"), QStringLiteral("File operations"),
-            QStringLiteral("Ratings"), QStringLiteral("Covers"),
-            QStringLiteral("Metadata services"), QStringLiteral("Last.fm"),
-            QStringLiteral("Shortcuts")};
+    return {QStringLiteral("General"),           QStringLiteral("Playback"),
+            QStringLiteral("Engines"),           QStringLiteral("File operations"),
+            QStringLiteral("Ratings"),           QStringLiteral("Covers"),
+            QStringLiteral("Metadata services"), QStringLiteral("Plugins"),
+            QStringLiteral("Last.fm"),           QStringLiteral("Shortcuts")};
 }
 
 QString SettingsSession::saveNote(const Page page) {

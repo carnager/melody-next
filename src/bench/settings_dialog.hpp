@@ -68,6 +68,8 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
         ratings,
         covers,
         metadata_services,
+        // ADR-0288: the plugins found, each enabled here.
+        plugins,
         lastfm,
         shortcuts,
         // Not pages: File operations, opened at its tab -- naming layouts,

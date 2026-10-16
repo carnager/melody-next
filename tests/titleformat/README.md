@@ -1,6 +1,6 @@
 # `tkfmt-1` executable corpus
 
-`tkfmt-corpus/` contains repository-owned examples that define Trackknife's
+`tkfmt-corpus/` contains repository-owned examples that define Melody's
 formatting language together with `docs/title-formatting.md`. Every case records
 the host, context values, exact source and output, and a rationale.
 

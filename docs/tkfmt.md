@@ -1,6 +1,6 @@
-# tkfmt — the Trackknife formatting language
+# tkfmt — the Melody formatting language
 
-`tkfmt-1` is the expression language used everywhere Trackknife turns track
+`tkfmt-1` is the expression language used everywhere Melody turns track
 metadata into text: naming layouts for rename/move and conversion, library
 tree levels, ReplayGain album grouping, and metadata transformation scripts.
 If you have used foobar2000's title formatting or MusicBrainz Picard's

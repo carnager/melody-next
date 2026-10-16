@@ -9,7 +9,7 @@ engine's level with its own and says once when the engine is older.
 
 ### Level 15 (2026-10-16)
 
-ADR-0286: tabs are Trackknife's; only saved playlists live on the engine.
+ADR-0286: tabs are Melody's; only saved playlists live on the engine.
 
 - `list.save` makes saved lists (`kind` defaults to `saved`); `kind:
   "working"`, there and in `list.edit`, is refused as `unsupported`.

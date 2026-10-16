@@ -15,7 +15,7 @@ transport controller, row type, and available commands. The queues never mix
 (a persisted document is entirely local or entirely server rows; ADR-0181's
 server list tabs are the client-owned MPD-row kind),
 and local operations remain unavailable to MPD rows. The former standalone
-Trackknife executable was retired in ADR-0071; stored-playlist tabs were
+Melody executable was retired in ADR-0071; stored-playlist tabs were
 migrated in ADR-0129 and committed search tabs in ADR-0140.
 
 ## Resolved for M2–M3

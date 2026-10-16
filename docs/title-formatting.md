@@ -1,8 +1,8 @@
-# Trackknife formatting expressions
+# Melody formatting expressions
 
 ## Contract
 
-**Trackknife decision:** `tkfmt-1` is Trackknife's own versioned, deterministic
+**Melody decision:** `tkfmt-1` is Melody's own versioned, deterministic
 formatting-expression language. Its surface syntax is intentionally familiar to
 users of MusicBrainz Picard and foobar2000, but neither language is a behavioral
 compatibility target.
@@ -55,7 +55,7 @@ Programs are immutable after compilation and safe for concurrent evaluation.
 Evaluation state is local to one call. `tkfmt-1` has no assignment or variable
 functions.
 
-**Trackknife decision:** text a list shows -- its cells, second lines, group
+**Melody decision:** text a list shows -- its cells, second lines, group
 titles and details, subgroup labels -- is evaluated with right-to-left values
 isolated. A value set into the expression's own text (a field, or a function's
 result) that holds right-to-left letters (Unicode bidi classes R and AL: Hebrew,
@@ -131,7 +131,7 @@ compilation fails closed.
 ## Metadata and context fields
 
 Field names are normalized with ASCII case folding for lookup. Hosts backed
-by the library index -- Trackknife's library views and queries, and the
+by the library index -- Melody's library views and queries, and the
 engine's `playback.format` and `catalogue.find` -- go further: they look a
 field up by its canonical name, which also ignores spaces, underscores and
 hyphens, so `%replaygain_track_gain%` and `%Replay-Gain-Track-Gain%` name one
@@ -295,7 +295,7 @@ engine cannot invent those revisions.
 
 ## Testing
 
-The executable corpus is owned by Trackknife and records:
+The executable corpus is owned by Melody and records:
 
 - dialect and schema version;
 - expression host and input values;

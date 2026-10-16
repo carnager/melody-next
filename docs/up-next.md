@@ -42,7 +42,7 @@ Next explicitly skips a failed request.
 
 Each engine has its own Up Next: this computer's and a server's are separate,
 and the panel says whose it is showing. The engine plays through its requests
-with Trackknife closed, and the phone app and `melody-cli` see and edit the
+with Melody closed, and the phone app and `melody-cli` see and edit the
 same list.
 
 Pending local requests are stored on the workspace persistence worker, including

@@ -1,6 +1,6 @@
 # M10 hardening and release validation
 
-This record closes the engineering gate for the first public Trackknife
+This record closes the engineering gate for the first public Melody
 workspace release. Distribution maintainers must still complete the
 artifact-specific and hardware-specific items in the release checklist for
 each published build.
@@ -29,7 +29,7 @@ each published build.
   versioned settings companion without overwriting an existing file.
 - File > Restore workspace validates the snapshot, restores it before services
   start on the next launch, and retains the previous database as a timestamped
-  rollback. Corrupt and non-Trackknife databases are rejected.
+  rollback. Corrupt and non-Melody databases are rejected.
 - File > MPD capability diagnostics exposes the negotiated protocol version,
   advertised commands and tag types, queue state, and outputs without requiring
   a terminal probe.

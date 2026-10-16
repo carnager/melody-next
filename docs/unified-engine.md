@@ -16,10 +16,10 @@ it. In short:
 - **Phase 5, the MPD bridge, hasn't started**, and nothing waits for it.
 - **Phase 6 is done:** `grep -rn supportsCommand src` finds nothing. One
   catalogue, ratings and history in the engine; lists live in the engine
-  (ADR-0233) and Trackknife keeps none of its own (ADR-0259). File work --
+  (ADR-0233) and Melody keeps none of its own (ADR-0259). File work --
   tagging, ReplayGain, conversion, moves, undo -- is done by the engine whose
   files they are, on its machine (ADRs 0237, 0263, 0266).
-- **Several engines at once** (ADR-0234): Trackknife holds a connection per
+- **Several engines at once** (ADR-0234): Melody holds a connection per
   engine, lists name their engine by a stable id, and the speakers of this
   computer and of the phone are offered to every engine listed.
 - **Phase 7** has `melody-cli` and the Android client (ADR-0231), with Opus
@@ -55,7 +55,7 @@ ADRs 0210–0214; `listening.go` against ADRs 0204/0207/0208; `internal/lastfm`
 against `lastfm_service.cpp`. The gap runs the other way too: `src/convert`,
 `src/loudness`, `src/musicbrainz` and `src/titleformat` have no Melody
 counterpart at all, and Melody only *reads* ReplayGain tags
-(`scanner.go:802-805`) where Trackknife computes them.
+(`scanner.go:802-805`) where Melody computes them.
 
 What Melody holds that the C++ tree does not is narrow and specific:
 
@@ -79,7 +79,7 @@ The target end state:
 ```
   clients                    melodyd (C++)                 agents (Go)
   ─────────                  ─────────────                 ───────────
-  Trackknife  ──┐          ┌──────────────────┐         ┌── melody-agent (satellite)
+  Melody  ──┐          ┌──────────────────┐         ┌── melody-agent (satellite)
   melody-tui  ──┼── proto ─┤ catalogue        ├── proto ─┼── melody-agent (streaming)
   melody-cli  ──┤          │ mutation+journals│         └── loopback agent (own output)
   Android     ──┘          │ playback state   │
@@ -87,11 +87,12 @@ The target end state:
                            └──────────────────┘
 ```
 
-**Names.** Melody is the backend family, Trackknife is the app: `melodyd` (the
-engine), `melody-agent`, `melody-cli`, `melody-tui`, `melody-mpd` — and
-**Trackknife** as the official frontend. Trackbench is retired as a product
-name; remaining internal uses (`BenchMainWindow`, `bench-*` object names,
-`src/bench`) are renamed opportunistically, not as a phase of their own.
+**Names.** Melody is the product (ADR-0287): `melodyd` (the engine),
+`melody-agent`, `melody-cli`, `melody-tui`, `melody-mpd` — and the desktop
+application `melody` as the official frontend. Trackknife and Trackbench are
+retired as product names; remaining internal uses (`trackknife::`,
+`BenchMainWindow`, `bench-*` object names, `src/bench`) are renamed
+opportunistically, not as a phase of their own.
 
 ## Sequencing
 
@@ -167,7 +168,7 @@ remains is orchestration. Delivered so far:
 | `AlbumGrouper` | the album grouping rule and its size limits |
 
 All of it is exercised by `tests/playback-state`, which links
-`Trackknife::Audio` only; `ldd` confirms it pulls in no Qt. That is Phase 0's
+`Melody::Audio` only; `ldd` confirms it pulls in no Qt. That is Phase 0's
 "done when" holding for the policy half.
 
 **What Phase 0 does not cover, contrary to the list above.** Up-next, the
@@ -245,9 +246,9 @@ separate tab bars (`local_source_tabs_`, `mpd_source_tabs_`), built by separate
 code paths (`buildWorkspace` / `buildMpdWorkspace`), and served by 54 distinct
 `*Mpd*`-suffixed methods shadowing local equivalents.
 
-This is not a merge. `MpdQueueModel` exists only because Trackknife is
+This is not a merge. `MpdQueueModel` exists only because Melody is
 currently an *MPD client* when talking to the Go daemon; once remote means
-protocol v1 to a remote engine, Trackknife is never an MPD client again and
+protocol v1 to a remote engine, Melody is never an MPD client again and
 that half is **deleted**, not abstracted. Local versus remote stops being a
 branch in feature code and becomes which profile the connection points at.
 
@@ -665,11 +666,11 @@ it is not incidental.
 
 **Audio never lives in the UI.** The engine's own output is the loopback agent;
 a desktop that wants local audio runs a `melody-agent` process beside
-Trackknife, not inside it. Anything else means closing the window stops the
+Melody, not inside it. Anything else means closing the window stops the
 music, which is what Phase 2 exists to prevent. **Decided (ADR-0226):**
-Trackknife starts its own agent when it wants the music on its own speakers
+Melody starts its own agent when it wants the music on its own speakers
 from an engine elsewhere, the way it starts its own engine when none is
-configured. Trackknife is not a player.
+configured. Melody is not a player.
 
 Done when: the engine drives its own speakers and a remote agent through the
 same interface, and output selection switches between them.
@@ -777,7 +778,7 @@ the MPD bridge; what must disappear is feature code asking it what the
 authority can do.
 
 Not all of those hits need unification work. `bench_lastfm.cpp:352` gates on
-`melody_lastfm` only to decide whether to call Trackknife's own
+`melody_lastfm` only to decide whether to call Melody's own
 `LastFmService` or proxy to Melody's `melodyd/lastfm.go`. `LastFmService` is
 already authority-agnostic — a Last.fm client taking a state path and an
 endpoint, with no notion of where the track came from — so the engine uses it

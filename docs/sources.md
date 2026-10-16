@@ -10,7 +10,7 @@ branding. ADR-0008 superseded the original foobar2000 scripting-compatibility
 research; those links remain useful background rather than a language oracle.
 
 Since ADR-0025 this register serves two applications. The MPD, Melody, and
-Cantata references inform Trackknife, the pure MPD/Melody client; the
+Cantata references inform Melody, the pure MPD/Melody client; the
 foobar2000, metadata, ReplayGain, playback, and conversion references inform
 Trackbench, the separate local-file workstation. The register entries below
 predate the split and are kept as-is.
@@ -36,14 +36,14 @@ predate the split and are kept as-is.
 - [Official libmpdclient site](https://www.musicpd.org/libs/libmpdclient/)
 - [Official libmpdclient API](https://www.musicpd.org/doc/libmpdclient/)
   - Provides maintained synchronous command parsing plus low-level asynchronous
-    protocol I/O. Trackknife initially uses complete blocking operations only
+    protocol I/O. Melody initially uses complete blocking operations only
     on bounded background session workers.
 - Local Melody reference: `../melody/README.md`,
   `../melody/melodyd/mpd.go`, and `../melody/melodyd/mpd_commands.go`.
   - Melody uses the standard MPD command surface for library, live queue,
     transport, and outputs. Its advertised additions include `switchoutput` and
     output primary/online/stream-format/bitrate fields.
-  - A clean temporary Melody daemon on 2026-08-25 accepted Trackknife's probe,
+  - A clean temporary Melody daemon on 2026-08-25 accepted Melody's probe,
     advertised 92 commands and 7 tag types, and exposed `switchoutput`. The
     empty fixture intentionally had no queue items or registered output agent.
 
@@ -53,7 +53,7 @@ predate the split and are kept as-is.
   - Cantata 2.5.0 was its final release. Its documented grouped play queue and
     Qt Widgets implementation inform interaction structure, not copied source,
     branding, or a compatibility promise. Its cached artist/album/track library
-    hierarchy also informed ADR-0019's interaction target; Trackknife instead
+    hierarchy also informed ADR-0019's interaction target; Melody instead
     uses bounded lazy MPD branch queries to preserve its authority boundary.
 - [Cantata interface screenshot](https://audio-file.org/wp-content/uploads/2022/03/cantata.png)
   - Reference for the compact transport/artwork/metadata header, album-grouped
@@ -76,7 +76,7 @@ predate the split and are kept as-is.
 - [MusicBrainz Picard scripting documentation](https://picard-docs.musicbrainz.org/en/v2.13/extending/scripting.html)
 - [MusicBrainz Picard source](https://github.com/metabrainz/picard)
   - Picard's open `%field%` / `$function(...)` language informed the familiar
-    surface syntax selected by ADR-0008. Trackknife does not copy its parser or
+    surface syntax selected by ADR-0008. Melody does not copy its parser or
     promise Picard script compatibility.
 
 - [Title Formatting Reference](https://wiki.hydrogenaudio.org/index.php?title=Foobar2000:Title_Formatting_Reference)
@@ -148,7 +148,7 @@ recommendation's `-23 LUFS` target. Persist the algorithm and reference used.
 - [Official OpenMPT/libopenmpt repository](https://github.com/OpenMPT/openmpt)
   - Accessed 2026-08-29 for ADR-0032. The stable C API exposes bounded subsong
     count, selection, names, and duration, including hidden songs. The project
-    is BSD-3-Clause licensed, which is compatible with Trackknife's GPLv3
+    is BSD-3-Clause licensed, which is compatible with Melody's GPLv3
     distribution; its notices remain required.
 
 ## FPL and rich cached playlist items

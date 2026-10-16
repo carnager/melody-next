@@ -46,7 +46,7 @@ These are always in the list and can be continued with like any other:
 | Not heard in a year | 100 tracks not played for a year or never, shuffled |
 
 They cannot be changed or removed. Edit one and choose **Save as copy** to
-keep your own version. Definitions saved by Trackknife's earlier MPD backend
+keep your own version. Definitions saved by Melody's earlier MPD backend
 are moved into the one list on start.
 
 **Save definition** keeps the rule/source. Saved rules refresh when selected and remain current while the

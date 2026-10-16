@@ -41,7 +41,7 @@ keep their title without a numeric prefix. Album rows show embedded covers or
 fall back to sibling `cover`, `folder`, or `front` JPEG/PNG files. Covers load
 one at a time for visible albums and keep the record placeholder when absent.
 No network lookup or library scan is triggered. Press **Refresh** after changing
-folder images outside Trackknife; in-app operation notifications refresh cached
+folder images outside Melody; in-app operation notifications refresh cached
 covers automatically.
 
 Children and search results arrive in pages of 200; **Show more…** loads the

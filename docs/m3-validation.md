@@ -36,7 +36,7 @@ cmake --build --preset dev
 
 On both Melody and stock MPD:
 
-1. Connect from an untouched profile, restart Trackknife, and confirm automatic
+1. Connect from an untouched profile, restart Melody, and confirm automatic
    reconnect. Create a second profile and switch to it with one Server-menu
    action.
 2. Browse Folders, Albums, Artists, Genres, and Playlists. Open focused rows
@@ -47,8 +47,8 @@ On both Melody and stock MPD:
 4. Play, pause, seek, change volume and modes, and edit the live queue by mouse
    and keyboard: multi-select, add-next/end, reorder, priority, remove, crop,
    and clear.
-5. While Trackknife stays open, change playback and reorder/delete the queue in
-   another client. Trackknife must converge without replaying a rejected edit.
+5. While Melody stays open, change playback and reorder/delete the queue in
+   another client. Melody must converge without replaying a rejected edit.
 6. Create, load, edit, reorder, rename, clear, and delete a server playlist when
    the daemon advertises the corresponding commands.
 7. Create two scratch/named lists, copy and move duplicate tracks between them,

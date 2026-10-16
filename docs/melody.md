@@ -1,7 +1,7 @@
 # Engines, agents and the phone
 
 ```
-  Trackknife ──┐                         ┌──► its own speakers
+  Melody ──┐                         ┌──► its own speakers
   phone app  ──┼──►  melodyd (engine)  ──┼──► agent: another computer, a Pi
   melody-cli ──┘     library, queue,     ├──► agent: the phone
                      history, Last.fm    └──► UPnP network speaker
@@ -10,7 +10,7 @@
 - **The engine**, `melodyd`, owns the library and playback: the queue,
   Up Next, ratings, listening history and scrobbling. It runs whether or not
   anything is connected to it.
-- **Clients** control it: Trackknife, the Android app, `melody-cli`. They
+- **Clients** control it: Melody, the Android app, `melody-cli`. They
   hold nothing of their own; close them and the music goes on.
 - **Outputs** are where the sound comes out: the engine's own speakers, an
   *agent* on a machine or phone, or an optional UPnP network renderer. You
@@ -29,9 +29,9 @@ lending its speakers with `--agent`, uses its own unless told otherwise.
 ## Headless melodyd
 
 On a desktop the engine is a user service too, started the first time
-Trackknife connects: the package enables `melodyd.socket` for every user, and
-Trackknife hands it its settings (`melodyd.conf`). It goes on playing with
-the window closed. On macOS Trackknife starts it itself. On a server or a Pi,
+Melody connects: the package enables `melodyd.socket` for every user, and
+Melody hands it its settings (`melodyd.conf`). It goes on playing with
+the window closed. On macOS Melody starts it itself. On a server or a Pi,
 run it as a user service:
 
 ```sh
@@ -117,7 +117,7 @@ says so, and `sysctl fs.inotify.max_user_watches=524288` raises the limit.
 
 There are three kinds:
 
-- **Another engine** started with `--agent` (in Trackknife: **Settings →
+- **Another engine** started with `--agent` (in Melody: **Settings →
   Engine → Let other engines play on this computer's speakers**). Use this on
   a machine that runs an engine anyway.
 - **`melody-agent`** on a machine that only plays: a Pi next to the stereo.
@@ -138,7 +138,7 @@ gets Opus instead of the original files.
 ## UPnP speakers
 
 When UPnP support was included at build time, enable **Settings → Engines →
-Discover UPnP speakers**. Trackknife sets `upnp = yes` and a LAN-facing stream
+Discover UPnP speakers**. Melody sets `upnp = yes` and a LAN-facing stream
 listener in its engine's `melodyd.conf` and restarts it. A headless setup uses, for example:
 
 ```sh
@@ -185,13 +185,13 @@ melody-cli watch --all                # the same, for whichever engine plays
 
 `current` and `find` print tracks as the engine formats them, with a
 [tkfmt-1](title-formatting.md) expression given by `--format` -- the language
-Trackknife formats with. The engine has each track's whole library row, so
+Melody formats with. The engine has each track's whole library row, so
 every tag is a field (`%replaygain_track_gain%`, `%genre%`, `%composer%`, ...),
 the technicals come through `$info(codec)`, `$info(samplerate)`,
 `$info(bitspersample)`, `$info(channels)`, and `%path%`, `%length%` and
 `%rating%` (1-10; absent when unrated) are there too. `current`
 adds `%playback_state%`, `%playback_time%` and `%playback_remaining%`.
-`find` takes a [Trackknife query](query-language.md) -- plain words, or
+`find` takes a [Melody query](query-language.md) -- plain words, or
 `artist IS "Alice in Chains" SORT BY $num(%tracknumber%,2)` -- and prints a
 line for each track, in the query's order; `--keys` adds a tab and each
 track's key for `add --key`. There are no
@@ -244,8 +244,8 @@ and uploads nothing.
   on the LAN and that the renderer can reach the engine's HTTP stream port.
 - **Converted tracks** are kept in `transcodes/` in the engine's state
   directory. Deleting that folder is safe.
-- **"… speaks protocol 2; this Trackknife speaks protocol 1"**, or **"…'s
-  melodyd is older than this Trackknife"**: the engine and the client are
+- **"… speaks protocol 2; this Melody speaks protocol 1"**, or **"…'s
+  melodyd is older than this Melody"**: the engine and the client are
   of releases too far apart (ADR-0260). Update the side the message names.
   Within 1.x any client works with any engine, without what an older engine
   lacks.

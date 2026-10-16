@@ -2,7 +2,7 @@
 
 > **Still current in substance, older in wording.** The file work described
 > here -- tags, artwork, MusicBrainz, moves, recovery -- is still done by
-> Trackknife, on files it can reach: this computer's, or an engine's through a
+> Melody, on files it can reach: this computer's, or an engine's through a
 > mount. Where it says Local Queue authority or MPD Queue, read: any list, and
 > the MPD client that no longer exists ([ADR-0224](adr/0224-retire-the-mpd-backend.md)).
 > After a move, every engine holding the file is told (`list.relocate`,
@@ -29,7 +29,7 @@ See [ADR-0203](adr/0203-direct-mapped-tag-editor.md).
 
 ## Publication while playing or editing
 
-**Trackknife decision (ADR-0121):** Saving tags or artwork updates queue rows
+**Melody decision (ADR-0121):** Saving tags or artwork updates queue rows
 without losing the playing occurrence or automatic advancement. Embedding
 artwork within Properties advances the pending tag draft's revision through
 that verified commit, preserving MusicBrainz edits and undo/redo. Apply still
@@ -45,13 +45,13 @@ checkbox or press Space to toggle a file; filename clicks and Shift/Ctrl retain
 normal list selection. This controls new edits; Apply still saves all staged
 changes, including changes already staged on files subsequently unchecked.
 
-**Trackknife decision (ADR-0157):** Properties can filter field names and show
+**Melody decision (ADR-0157):** Properties can filter field names and show
 only fields changed in the selected files. **Show files** collapses the file
 selector while preserving its scope. Bold field names supplement draft colors;
 the review bar reports visible/changed counts. Filters only affect presentation:
 **Apply includes hidden edits**. Adding a field clears filters to reveal it.
 
-**Trackknife decision (ADR-0158):** Identify works with manually entered artist
+**Melody decision (ADR-0158):** Identify works with manually entered artist
 or album text even when files have no tags. Search no longer requires the
 selected file count to equal a release's track count. **Match this version…**
 opens two aligned panes: local filenames on the left and MusicBrainz tracks
@@ -68,7 +68,7 @@ files whose remaining slots start in file order. **Stage matches** confirms the
 shown mapping and creates an undoable draft; **Apply** writes it later.
 
 Throttled MusicBrainz requests retry twice at most, honoring server cooldowns.
-Trackknife keeps its own identifying User-Agent and normal request pacing.
+Melody keeps its own identifying User-Agent and normal request pacing.
 See ADR-0158 for limits, evidence, and the API policy.
 
 ## Metadata is a typed, multi-source model
@@ -137,7 +137,7 @@ Important tag families include:
 - APEv2 for APE/WavPack/Musepack and optional uses elsewhere;
 - MP4 atoms/freeform `----` metadata, including names with a colon of their
   own (Picard's AcousticBrainz `AB:GENRE`), which TagLib alone cannot write
-  and Trackknife renders itself so a rewrite keeps them;
+  and Melody renders itself so a rewrite keeps them;
 - ASF/WMA attributes;
 - Matroska tags, attachments, and chapters;
 - RIFF/BWF/INFO and AIFF chunks;
@@ -531,7 +531,7 @@ shows the original and final document plus optionally each intermediate step.
 Do not serialize executable host-language code; persist declarative action data
 and formatting source.
 
-**Trackknife decision (ADR-0178):** the structured script editor implements
+**Melody decision (ADR-0178):** the structured script editor implements
 field allowlists and blocklists as typed, reusable actions. Names are entered as
 a comma-separated list and matched through canonical logical field identity.
 Each name completes from the selection's present fields plus the standard

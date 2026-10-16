@@ -13,8 +13,8 @@ come before adding more features to it.
 ## Where things are
 
 The engine is in place (ADR-0220). `melodyd` owns the library, the lists and
-playback; Trackknife, the Android app and `melody-cli` are its clients; sound
-comes out of output agents. Trackknife holds a connection to every engine you
+playback; Melody, the Android app and `melody-cli` are its clients; sound
+comes out of output agents. Melody holds a connection to every engine you
 list, each with its own library and lists (ADR-0234), and keeps no lists of
 its own (ADR-0259). The MPD client is gone (ADR-0224). File work -- tagging,
 ReplayGain, conversion, moves -- is done by the engine whose files they are,
@@ -65,7 +65,7 @@ kept in tabs, saved, and run against any engine's library.
 - [ ] Autoplaylists that update when the library changes. Saved searches run
   when opened; a result tab keeps a snapshot.
 - [ ] CUE, chapter and subsong titles indexed as tracks of their own.
-- [ ] An album-cover grid in Trackknife (the phone has one).
+- [ ] An album-cover grid in Melody (the phone has one).
 - [ ] Export over an existing playlist file with a reviewed replacement, and
   playlist formats beyond M3U8.
 
@@ -135,7 +135,7 @@ MPRIS and media keys control the engine that plays; the playing album's
 cover reaches both MPRIS and notifications. On macOS, Now Playing does the
 same for the media keys, Bluetooth headsets and Control Center (ADR-0275).
 
-- [ ] Notifications on macOS need `Trackknife.app`: build or package the
+- [ ] Notifications on macOS need `Melody.app`: build or package the
   bundle.
 - [ ] A long Apply as one engine job the window can reattach to, so a
   closed lid or a dropped connection does not stop it (ADR-0277 holds off

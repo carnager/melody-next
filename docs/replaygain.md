@@ -1,8 +1,8 @@
 # ReplayGain and loudness
 
-> **Older in wording.** Analysis and writing are still done by Trackknife;
+> **Older in wording.** Analysis and writing are still done by Melody;
 > playback gain is applied by the engine that plays, on whichever output it
-> plays. The Trackbench/Trackknife split and MPD's ReplayGain mode described
+> plays. The Trackbench/Melody split and MPD's ReplayGain mode described
 > below are retired ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md),
 > [ADR-0224](adr/0224-retire-the-mpd-backend.md)).
 
@@ -10,7 +10,7 @@
 
 Per ADR-0025, ReplayGain analysis, tag/sidecar storage, and local playback
 gain application belong to Trackbench, the standalone local-file workstation
-(milestone M7). Trackknife, the MPD/Melody client, does none of this itself:
+(milestone M7). Melody, the MPD/Melody client, does none of this itself:
 it only exposes MPD's advertised `replay_gain_mode`/`replay_gain_status`
 control, and the server owns the actual gain application. Everything below
 describes Trackbench unless stated otherwise.
@@ -286,7 +286,7 @@ not supported by the adapter.
 ## Playback application
 
 This section covers Trackbench's local player only. For MPD playback the
-server applies gain itself; Trackknife merely reads and sets the advertised
+server applies gain itself; Melody merely reads and sets the advertised
 `replay_gain_mode` and never processes audio.
 
 Expose source modes equivalent to:
@@ -371,7 +371,7 @@ after undo. Real-file CUE, Matroska chapter, and tracker-subsong regressions
 verify track gain, sample peak, and album reduction against direct scans.
 Results remain visible drafts regardless of embedded write capability.
 
-**Trackknife decision:** Conventional ReplayGain and R128 gain fields on a
+**Melody decision:** Conventional ReplayGain and R128 gain fields on a
 logical source cannot pass the ordinary whole-file metadata write plan. CUE
 tracks route to `REM REPLAYGAIN_*` (ADR-0139); chapters, subsongs, and arbitrary
 segments route to the versioned loudness sidecar (ADR-0141). Both carriers are

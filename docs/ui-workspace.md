@@ -26,7 +26,7 @@ track-view layout schema, renderer, editor, and preset path.
 
 ## Product promise
 
-Trackknife opens as a complete, satisfying MPD client. Users do not need to
+Melody opens as a complete, satisfying MPD client. Users do not need to
 design an interface, import the server library, install essential panels, or
 learn title formatting before they can connect, browse, queue, and play music.
 
@@ -36,7 +36,7 @@ Power remains available in layers:
 2. choose another shipped presentation;
 3. adjust columns, grouping, sorting, and artwork;
 4. rearrange/tab/float panels;
-5. write Trackknife format expressions;
+5. write Melody format expressions;
 6. install plugins that provide additional panel types, data, or actions.
 
 “Customizable” must never become an excuse for weak defaults.
@@ -112,7 +112,7 @@ The initial workspace is intentionally conventional:
   and server-round-trip edits with `stored_playlist`
   idle refresh; multi-row reorder and restoring open playlist tabs across
   restart remain follow-ups.
-- **Trackknife decision** (ADR-0233): lists show as a tab bar grouped by
+- **Melody decision** (ADR-0233): lists show as a tab bar grouped by
   engine (default), or -- Settings → General → *Show lists as*, or Workspace →
   *Lists in a side panel* -- as a Lists pane beside the tracks. The pane hides
   the tab bar and lists every engine's lists under its name, saved ones first
@@ -166,7 +166,7 @@ The initial workspace is intentionally conventional:
 
 Sharing one tab container does not merge list semantics. The live MPD queue
 is server-authoritative. MPD stored playlists are server collections. Scratch
-and named Trackknife lists are working memory of server references — persisted
+and named Melody lists are working memory of server references — persisted
 lists drop or migrate local-only rows (ADR-0025) — and they never become a
 second playback queue. Each tab identifies its kind and dirty/offline state.
 
@@ -210,7 +210,7 @@ expansion clear affected history in this first slice.
 ## Panel and layout system
 
 Use `QMainWindow`, toolbars, tab containers, and model/view track tables. The
-Trackknife client retains native dock panels and versioned window/dock/toolbar
+Melody client retains native dock panels and versioned window/dock/toolbar
 state. Trackbench uses ADR-0026's versioned declarative composition tree below
 its player chrome: registered panel instances may be nested in
 horizontal/vertical splitters or tab stacks, with bounded validation before
@@ -280,7 +280,7 @@ silently destroying the layout.
 
 ## One reusable track-view engine
 
-MPD results, stored playlists, Trackknife working lists, Trackbench local
+MPD results, stored playlists, Melody working lists, Trackbench local
 selections, and the live queue use the same presentation engine but different
 data-source adapters:
 
@@ -575,7 +575,7 @@ Fast also means low interaction cost:
 
 ## Creating tabs from selected tracks
 
-**Trackknife decision (ADR-0167):** Local track menus offer **Copy to list →
+**Melody decision (ADR-0167):** Local track menus offer **Copy to list →
 New tab…** and **Move to list → New tab…**, with a name prompt. Dropping local
 tracks on empty tab-strip space creates and selects a persistent **Selection**
 tab immediately. Drop on an existing local tab to append there. Dragging moves

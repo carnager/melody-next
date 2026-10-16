@@ -4,7 +4,7 @@
 
 From the AUR:
 
-- `trackknife-git`: the desktop app
+- `melody-git`: the desktop app
 - `melodyd-git`: the engine, `melodyd`, with its systemd user unit. A server
   needs only this.
 - `melody-agent-git`: `melody-agent`, the speakers of a machine for engines
@@ -66,7 +66,7 @@ browser or file manager first.
 
 ## macOS
 
-The macOS build runs the Trackknife desktop client and its engine with native
+The macOS build runs the Melody desktop client and its engine with native
 CoreAudio outputs and optional UPnP speakers. Install the build tools and
 libraries with Homebrew:
 

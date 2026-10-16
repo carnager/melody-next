@@ -1,4 +1,4 @@
-# Trackknife release checklist
+# Melody release checklist
 
 This is the acceptance record for an M10/public build. A release is not ready
 when only compilation succeeds.
@@ -24,12 +24,12 @@ when only compilation succeeds.
 ## Packaged workflow acceptance
 
 - Install into a clean test account using the package artifacts, not the
-  build tree: `trackknife-git`, `melodyd-git`, `melody-agent-git`,
+  build tree: `melody-git`, `melodyd-git`, `melody-agent-git`,
   `melody-cli-git`, `melody-watch-git`. Confirm the desktop entry, file
   opening, and that a second start hands its files to the running window.
-- This computer's engine: `melodyd.socket` starts it on Trackknife's first
-  connection (on macOS Trackknife does); it keeps playing with the window
-  closed. An engine an older Trackknife started is handed to the socket once. Library folders, Refresh, browsing, search, kept searches,
+- This computer's engine: `melodyd.socket` starts it on Melody's first
+  connection (on macOS Melody does); it keeps playing with the window
+  closed. An engine an older Melody started is handed to the socket once. Library folders, Refresh, browsing, search, kept searches,
   lists, Up Next, transport, volume, ReplayGain, gapless preload and natural
   advance.
 - An engine elsewhere, over TCP with its password: the same flow, then the

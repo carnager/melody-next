@@ -21,17 +21,20 @@ decisions as an ADR under `docs/adr/`.
 
 ## Product identity
 
-**Trackknife** is the application; **Melody** is the backend family. The
-accepted direction (ADR-0220) makes the Trackknife core into `melodyd`: one
-engine process owning catalogue, mutation and playback, reachable over a
-protocol that works remotely, with audio produced by output agents. Trackknife
-becomes a client of that engine and may be closed without stopping playback.
+**Melody** is the product: the desktop application, its engine `melodyd` and
+the programs around it (ADR-0287). The accepted direction (ADR-0220) makes
+the core into `melodyd`: one engine process owning catalogue, mutation and
+playback, reachable over a protocol that works remotely, with audio produced
+by output agents. The desktop application is a client of that engine and
+may be closed without stopping playback.
 
-Trackbench is retired as a product name. Remaining internal uses
-(`BenchMainWindow`, `bench-*` object names, `src/bench`) are renamed
-opportunistically, not as a phase of their own.
+Trackknife (the application's name until ADR-0287) and Trackbench before it
+are retired as product names. Remaining internal uses (the `trackknife::`
+namespace and include paths, `trackknife_*` targets, `BenchMainWindow`,
+`bench-*` object names, `src/bench`) are renamed opportunistically, not as a
+phase of their own.
 
-Trackknife is a spiritual successor to foobar2000, not a visual clone and not
+Melody is a spiritual successor to foobar2000, not a visual clone and not
 an attempt to run foobar2000 components. Preserve the ideas that make
 foobar2000 valuable: powerful metadata operations, predictable automation,
 broad format support, gapless playback, ReplayGain, speed, and user ownership.
@@ -60,7 +63,7 @@ repeatedly.
   one exception and stays a separate window (ADR-0221 rationale in
   `docs/unified-engine.md`, Phase 1).
 - **`quick::MpdQueueModel` and its tab type are being deleted, not
-  generalised.** They exist only because Trackknife is currently an MPD client
+  generalised.** They exist only because Melody is currently an MPD client
   when talking to the Go daemon. Do not build new abstractions over them.
 - **The UI asks; the core answers.** The UI tells the core what to do and the
   core owns the database, looks things up, and returns what was asked for.
@@ -117,8 +120,8 @@ rule above governs *new* code and the direction of refactors.
   do not prove safe round trips.
 - Do not claim foobar2000 or Picard script compatibility. Their public
   documentation and open implementations may inform independent design, but
-  Trackknife behavior is defined by its own specification and tests.
-- Trackknife source is `GPL-3.0-only`. Add the matching SPDX identifier to new
+  Melody behavior is defined by its own specification and tests.
+- Melody source is `GPL-3.0-only`. Add the matching SPDX identifier to new
   original source files and do not add dependencies without checking GPLv3
   compatibility and preserving their notices.
 - Treat paths as raw OS paths internally; do not assume valid UTF-8. Presentation
@@ -131,8 +134,8 @@ rule above governs *new* code and the direction of refactors.
 
 Use these labels when behavior is not yet proven:
 
-- **Compatibility requirement**: Trackknife must match the reference.
-- **Trackknife decision**: desired behavior intentionally chosen for this app.
+- **Compatibility requirement**: Melody must match the reference.
+- **Melody decision**: desired behavior intentionally chosen for this app.
 - **Proposal**: likely direction, not committed.
 - **Unknown**: requires research or a product decision.
 

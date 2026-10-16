@@ -1,21 +1,21 @@
 # Compatibility and inspiration
 
-Updated on 2026-09-27. Trackknife is one application, a client of engines
+Updated on 2026-09-27. Melody is one application, a client of engines
 (`melodyd`, ADR-0220): each engine owns its library, lists and playback, and
-Trackknife, the phone and `melody-cli` talk to it over protocol v1. The
+Melody, the phone and `melody-cli` talk to it over protocol v1. The
 two-authority model -- an MPD side and a local side in one window, ADR-0058 --
 is retired, and with it the MPD client (ADR-0224).
 
 ## Protocols
 
-**Trackknife decision:** the engines' own protocol, v1 (ADR-0222, ADR-0223),
-is the only one Trackknife and its clients speak. It is JSON lines over a unix
+**Melody decision:** the engines' own protocol, v1 (ADR-0222, ADR-0223),
+is the only one Melody and its clients speak. It is JSON lines over a unix
 socket or TCP; a TCP peer must give a password. It is versioned by the
 `protocol` number in `engine.info`, and a field added to a document is ignored
 by a client that does not know it, so older clients keep working (ADR-0236's
 `sequence` is such a field).
 
-**MPD** is not a compatibility target of Trackknife any more: it does not
+**MPD** is not a compatibility target of Melody any more: it does not
 speak MPD, and a library that used to be an MPD server is now an engine on
 that machine. The opposite direction -- an engine answering MPD clients such
 as `mpc` or Cantata -- is Phase 5 of the engine plan, the MPD bridge. It has
@@ -26,7 +26,7 @@ other way round.
 
 ## Product relationship to foobar2000
 
-Trackknife is a spiritual successor to foobar2000, not a clone. It keeps what
+Melody is a spiritual successor to foobar2000, not a clone. It keeps what
 makes foobar2000 valuable: tabbed lists, fast interaction, gapless playback,
 ReplayGain, broad format support, powerful metadata work, configurable views,
 conversion, and predictable bulk operations. It does not reproduce
@@ -39,7 +39,7 @@ ADR-0008 replaces the former 1:1 foobar2000 title-formatting target. The
 `tkfmt-1` language uses the familiar `%field%` and `$function(arguments)`
 shape also used by MusicBrainz Picard, but the project's own specification
 ([title-formatting.md](title-formatting.md)) and its test corpus are
-normative. The same language serves Trackknife's views, the engine
+normative. The same language serves Melody's views, the engine
 (`playback.format`, `catalogue.find`), `melody-cli --format`, and conversion
 and file naming.
 
@@ -49,7 +49,7 @@ Consequences:
 - there is no separate foobar truth flag or optional-section behaviour;
 - Picard's metadata-changing functions such as `$set` are intentionally
   absent; ADR-0065's paste importer may translate a documented subset into
-  ordinary Trackknife rules without running Picard code;
+  ordinary Melody rules without running Picard code;
 - missing fields, escaping, integer conversion, multi-values and every
   built-in follow `title-formatting.md`;
 - an importer or compatibility dialect stays separate and must not change
@@ -58,7 +58,7 @@ Consequences:
 ## Search and query syntax
 
 Foobar-style query syntax is not a compatibility requirement. Queries are
-`tkq-1` (ADR-0150): Trackknife's own versioned dialect with a foobar-inspired
+`tkq-1` (ADR-0150): Melody's own versioned dialect with a foobar-inspired
 keyword surface, specified in [query-language.md](query-language.md). The
 engine evaluates them, for every client. Persisted queries follow the same
 contract as formatting expressions: exact source, dialect, dialect version and
@@ -67,7 +67,7 @@ compiler schema. A query may embed `tkfmt-1`, for sort keys
 
 ## Metadata and workflow parity
 
-Trackknife needs equivalent outcomes for mass editing, arbitrary and
+Melody needs equivalent outcomes for mass editing, arbitrary and
 multi-value tags, derived values, safe file operations, ReplayGain,
 conversion, library views, lists and integrity checks. Equivalent outcomes do
 not require matching dialog layouts, menu locations, preset file formats or
@@ -84,9 +84,9 @@ implementation details.
 - acting as an MPD client.
 
 The ADR-0065 paste importer helps migrate a small documented cleanup subset by
-translating it into Trackknife's versioned models. It does not make the
+translating it into Melody's versioned models. It does not make the
 external language or source text canonical. Per ADR-0066, imported deletion
-targets the exact native field name; Trackknife does not read a legacy or
+targets the exact native field name; Melody does not read a legacy or
 custom spelling as an alias of a conventional field.
 
 ## Identity: an entry is not a path
@@ -109,7 +109,7 @@ that holds the file (`list.relocate`, ADR-0233).
 Metadata precedence is:
 
 1. freshly read embedded or container data;
-2. explicit Trackknife sidecar overrides (`.tkmeta`);
+2. explicit Melody sidecar overrides (`.tkmeta`);
 3. the engine's current library record;
 4. what a list entry carries -- the tags whoever queued it gave -- only while
    the file is unavailable or unread.

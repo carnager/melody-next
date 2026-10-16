@@ -1,23 +1,23 @@
 # Last.fm accounts, scrobbling, and loved tracks
 
 Scrobbling is done by the engine that plays the music, so it happens with
-Trackknife closed too. You connect a Last.fm account once in Trackknife, then
+Melody closed too. You connect a Last.fm account once in Melody, then
 tell each engine to use it.
 
 1. Open **Settings → Last.fm** and follow the link to register a Last.fm API
    application. Any name will do; no callback URL is needed. Paste the API key
-   and shared secret. No credentials ship with Trackknife.
+   and shared secret. No credentials ship with Melody.
 2. Leave **Use this API key for dynamic playlists too** ticked unless you want
    to enter a different key under Metadata services.
-3. Choose **Connect to Last.fm…** and approve access in your browser. Trackknife
+3. Choose **Connect to Last.fm…** and approve access in your browser. Melody
    notices the approval by itself and shows the account. You never type your
-   Last.fm password into Trackknife.
+   Last.fm password into Melody.
 4. Under **Engines scrobble what they play**, press **Use this account** for
    **This computer**, and for any server with **Another engine…**. Each engine
    keeps its own copy of the session and its own queue of scrobbles waiting to
    be sent, in `lastfm.json` in its state directory.
 
-While Trackknife waits for your approval, **Cancel** stops asking. It doesn't
+While Melody waits for your approval, **Cancel** stops asking. It doesn't
 undo an approval Last.fm already has. Waiting gives up after five minutes.
 
 The credentials are saved privately on this computer. **Disconnect / clear

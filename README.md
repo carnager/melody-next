@@ -1,4 +1,4 @@
-# Trackknife
+# Melody
 
 A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 
@@ -7,7 +7,7 @@ A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 ## What's different
 
 - **Playback runs in its own engine.** `melodyd` plays the music and
-  Trackknife is one of its clients. Close the window and the music keeps
+  Melody is one of its clients. Close the window and the music keeps
   going. Run the engine on a server and every client shares its library,
   queue and history.
 - **Computers, phones, and UPnP speakers are outputs.** Another computer, a
@@ -50,7 +50,7 @@ A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 - [Everything else](docs/README.md)
 
 This is new software and still changing. For a bug report, run
-`trackknife --debug` in a terminal and include the output.
+`melody --debug` in a terminal and include the output.
 
 ## License
 

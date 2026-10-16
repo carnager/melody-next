@@ -50,11 +50,12 @@ Measured on 2026-10-16:
    binary is `melody`, the desktop file `melody.desktop`, MPRIS
    `org.mpris.MediaPlayer2.melody`, the PipeWire application id and the
    User-Agents Melody's. Its icon is the vinyl bird -- a blackbird whose
-   body is a record (`packaging/icons/melodies-vinyl-bird-v7.svg`) --
-   replacing the crate icons; the blackbird
-   (`packaging/icons/melodies-blackbird-v2.svg`) is its mascot, shown in a
-   new **Help → About Melody**: the version and commit, the licence
-   (GPL-3.0) and links to the project and its documentation.
+   body is a record (`packaging/icons/melody.svg`, cropped to fill its
+   square from the traced `melodies-vinyl-bird-v7.svg`) -- replacing the
+   crate icons; the blackbird (`packaging/icons/melody-mascot.svg`) is its
+   mascot, shown in a new **Help → About Melody**: the version and commit,
+   the licence (GPL-3.0) and links to the project and its documentation.
+   Qt Svg draws both.
 2. **One folder per kind, named melody.** Qt's organisation and application
    become `melody`: settings in `~/.config/melody/melody.conf`, beside
    `melodyd.conf`; the window's data in `~/.local/share/melody/melody`, its
@@ -72,7 +73,9 @@ Measured on 2026-10-16:
    everything where it was, and the engine says so and starts from the old
    folder.
 4. **Packages.** `melody-git` becomes the application, depending on
-   `melodyd-git`; it replaces `trackknife-git`. The metapackage it was goes.
+   `melodyd-git` and `qt6-svg`; it replaces `trackknife-git`. The engine and
+   the speakers build as `melodyd-git` (pkgbase), and the metapackage
+   `melody-git` was goes.
 5. **Variables are renamed, without the old names.** Every `TRACKKNIFE_*`
    CMake option and environment variable becomes `MELODY_*`
    (`MELODY_STATE_DIR`, …); nothing released reads the old ones.

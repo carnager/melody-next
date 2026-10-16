@@ -1,15 +1,15 @@
 # Product definition
 
-**Trackknife** is a Qt 6 application for Linux, built from `src/bench` and
-installed as `trackknife`. **Melody** is the family of programs around it: the
-engine `melodyd`, output agents, `melody-cli`, `melody-watch` and the Android
-app.
+**Melody** is a Qt 6 application for Linux and macOS, built from `src/bench`
+and installed as `melody`, and the family of programs around it: the engine
+`melodyd`, output agents, `melody-cli`, `melody-watch` and the Android app
+(ADR-0287; the application was called Trackknife before).
 
 An engine owns a library, its lists and playback, and keeps playing when every
-client is closed (ADR-0220). Trackknife is a client of engines -- this
+client is closed (ADR-0220). Melody is a client of engines -- this
 computer's, and any others you list, each with its own library and lists
 (ADR-0234). Sound comes out of output agents: an engine's own speakers,
-another computer, a phone. Trackknife also does the collection work --
+another computer, a phone. Melody also does the collection work --
 tagging, MusicBrainz lookup, ReplayGain, conversion and file operations -- on
 files it can reach, including an engine's files over a mount.
 
@@ -80,7 +80,7 @@ currently implemented, including restrictions, see the [feature matrix](feature-
 - The engine is authoritative for its library, lists, queue, playback and
   outputs. Every client is one of several and must follow changes made by the
   others. Features are built once, not once per location (ADR-0220).
-- The UI asks and the engine answers: Trackknife holds no library database of
+- The UI asks and the engine answers: Melody holds no library database of
   its own and does not decide what an engine plays.
 - Tabs keep lists accessible; a tab belongs to one engine, and a list mixing
   engines is not planned.
@@ -88,7 +88,7 @@ currently implemented, including restrictions, see the [feature matrix](feature-
 - MusicBrainz identifiers, artist credits, sort names, release/disc identity,
   and related metadata remain intact and influence useful default organization.
 - One versioned, pure `tkfmt-1` language serves display, sorting, grouping,
-  conversion and file naming, in Trackknife, the engine and `melody-cli`.
+  conversion and file naming, in Melody, the engine and `melody-cli`.
 - FFmpeg is the common decode/encode backbone; PipeWire is the primary audio
   output on Linux.
 - Long work is asynchronous, cancellable, progress-reporting, and bounded.

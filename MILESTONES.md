@@ -1,11 +1,11 @@
-# Trackknife milestones
+# Melody milestones
 
 Milestones are capability gates, not calendar promises.
 
 > **Current direction: M11, the unified engine.** ADR-0220 supersedes the
-> two-authority model below. The Trackknife core becomes `melodyd` — one engine
+> two-authority model below. The Melody core becomes `melodyd` — one engine
 > process owning catalogue, mutation and playback, reachable remotely, with
-> audio from output agents — and Trackknife becomes its client. See
+> audio from output agents — and Melody becomes its client. See
 > [`docs/unified-engine.md`](docs/unified-engine.md) for the phases and
 > [ADR-0221](docs/adr/0221-entry-and-track-identity.md) for the identity design
 > that Phase 0 rests on. M0–M10 remain accurate as history; their description of
@@ -33,7 +33,7 @@ executable was retired once Trackbench reached parity (ADR-0071).
 | M8 | Complete | Parallel converter, resampler, and organized output |
 | M9 | Complete | Melody output endpoint for the MPD client |
 | M10 | Complete | Hardening, native packaging, and release acceptance |
-| M11 | Complete | Unified engine: core becomes `melodyd`, Trackknife becomes its client (ADR-0220); the MPD bridge and a TUI are optional and come later |
+| M11 | Complete | Unified engine: core becomes `melodyd`, Melody becomes its client (ADR-0220); the MPD bridge and a TUI are optional and come later |
 
 ADR-0171 closes M5 after revalidating its exit criteria; M6's complete provider
 flow had already landed. ADR-0172 closes M7, ADR-0173 closes M8, ADR-0174
@@ -47,13 +47,13 @@ they must not be read as current workspace status.
 
 ## Toward 1.0
 
-**Trackknife decision (2026-10-03):** there are no pre-1.0 release tags.
+**Melody decision (2026-10-03):** there are no pre-1.0 release tags.
 `main` is kept working at all times -- it is what the packages build -- and
 features and fixes are made on branches and merged once the full test suite
 passes. 1.0 is the first tagged release, and it is cut when all of these
 hold:
 
-- **M11 is complete,** including step 3d: Trackknife no longer keeps its own
+- **M11 is complete,** including step 3d: Melody no longer keeps its own
   copy of the lists (ADR-0233), so a tab holds an engine's list rather than a
   second copy of it.
 - **Window and engine check each other's version.** The protocol handshake
@@ -160,7 +160,7 @@ boundaries.
   the initial UI budgets.
 - The skeleton contains no fake playback/tag features presented as complete.
 
-## M1 — Trackknife formatting expressions
+## M1 — Melody formatting expressions
 
 ### Objective
 
@@ -1315,7 +1315,7 @@ quickly and correctly.
 
 ### Current progress (2026-09-02)
 
-- Done: ADR-0097 lands the validated measurement core. Trackknife::Loudness
+- Done: ADR-0097 lands the validated measurement core. Melody::Loudness
   wraps libebur128 over the qualified decoder's interleaved float PCM:
   gated integrated loudness, sample peak, optional true peak, native-rate
   analysis for high-rate material, and ReplayGain 2.0 gains at the -18 LUFS

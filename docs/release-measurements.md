@@ -8,7 +8,7 @@ and the numbers kept with the release.
 
 The setup: gemenon, a NAS running the packaged `melodyd` (protocol 1, level
 1) over 66,841 tracks of FLAC on its own disks; caprica, the desktop running
-Trackknife built from the same `main`, reaching gemenon over the LAN.
+Melody built from the same `main`, reaching gemenon over the LAN.
 
 ### The engine
 

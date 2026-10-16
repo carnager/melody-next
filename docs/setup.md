@@ -5,8 +5,8 @@ everything these leave out: [Engines, agents and the phone](melody.md).
 
 ## On one computer
 
-1. Install Trackknife and `melodyd` ([Installation](install.md)) and start
-   Trackknife. The engine is a user service and starts on the first
+1. Install Melody and `melodyd` ([Installation](install.md)) and start
+   Melody. The engine is a user service and starts on the first
    connection; there is nothing to configure.
 2. In the library panel, click **Folders…** and add your music folder.
 3. Click **Refresh**.
@@ -29,7 +29,7 @@ loginctl enable-linger $USER    # keep it running when you're logged out
 every setting explained in it. Without a password the engine stays on its
 machine. Or use the [Docker image](install.md#docker).
 
-**In Trackknife**, under **Settings → Engines**:
+**In Melody**, under **Settings → Engines**:
 
 1. Enter the same password at the top.
 2. Pick the server from **On the network** (or **Add** it by address) and
@@ -50,10 +50,10 @@ network ([how](melody.md#a-nas-that-cant-run-the-engine)).
 
 ## Speakers and the phone
 
-Pick where it plays from the output menu in Trackknife's header.
+Pick where it plays from the output menu in Melody's header.
 
 - **Another computer with an engine** plays for the others by default, when
-  it has the same password. In Trackknife that is **Settings → Engines → Let
+  it has the same password. In Melody that is **Settings → Engines → Let
   other engines play on this computer's speakers**.
 - **A headless machine** (a Pi by the stereo): `melody-agent --password-file
   FILE`.

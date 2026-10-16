@@ -70,7 +70,7 @@ require fixtures and measurements.
 ## System shape
 
 One repository builds a unified Trackbench workspace over shared internal
-libraries. The former standalone Trackknife MPD shell was retired in ADR-0071.
+libraries. The former standalone Melody MPD shell was retired in ADR-0071.
 
 ```text
 Trackbench: MPD Queue context       Trackbench: Local Queue context
@@ -349,7 +349,7 @@ UI-captured workspace snapshot on this worker so a newly opened occurrence
 cannot race the ordinary save debounce.
 ADR-0175 adds a Qt-free online-backup boundary over that database: SQLite
 captures committed WAL state into an exclusive destination, which is reopened
-read-only for integrity and Trackknife-schema validation before success is
+read-only for integrity and Melody-schema validation before success is
 reported. Restore remains a restart boundary so no live repository connection
 can observe a database being replaced underneath it.
 
@@ -383,7 +383,7 @@ ProfileId       stable MPD connection identity
 RemoteTrackKey  ProfileId + exact MPD URI + optional segment identity
 QueueItemKey    ProfileId + MPD song ID + server queue generation
 LocalSourceId   stable internal UUID + observed filesystem identity
-ListId          stable Trackknife tab/list identity
+ListId          stable Melody tab/list identity
 JobId           stable job identity
 Revision        server/list/source revision appropriate to the authority
 ```
@@ -411,7 +411,7 @@ metadata_operation_backups(operation_id, state, undo_id?, timestamps, failure?)
 
 The live MPD queue is not persisted as a second authoritative list. Its latest
 snapshot may be cached for fast/offline display, clearly marked stale. Scratch
-and named Trackknife lists are authoritative application data.
+and named Melody lists are authoritative application data.
 
 ## Events and consistency
 
@@ -489,7 +489,7 @@ local, mapped-local, writable, and decodable sources before offering actions.
   Properties selection, immutable review, bounded progress/cancellation,
   fresh-retry behavior, and exact native block rewriting. Other format artwork
   writers still require real preservation tests.
-- **Loudness:** libebur128 behind Trackknife-owned ReplayGain policy.
+- **Loudness:** libebur128 behind Melody-owned ReplayGain policy.
 - **Preparation:** ADR-0054 composes tag persistence, qualified ReplayGain
   storage, and filesystem rename/move into one immutable per-source review and
   recoverable Apply boundary. Versioned relative output layouts remain separate

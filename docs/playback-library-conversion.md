@@ -4,7 +4,7 @@
 > now belong to the engine that plays ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md)),
 > and the MPD server library is gone ([ADR-0224](adr/0224-retire-the-mpd-backend.md)).
 > The working-list, conversion and verification sections still describe what
-> Trackknife does. Current state: [unified engine](unified-engine.md).
+> Melody does. Current state: [unified engine](unified-engine.md).
 
 Current local engine output uses PipeWire on Linux and CoreAudio on macOS. Both
 adapters consume the same bounded PCM ring and playback worker; see
@@ -18,7 +18,7 @@ Older descriptions of a permanent process split below are historical.
 ## Application scope
 
 Since ADR-0025 the repository builds two applications. Server playback and the
-server library belong to **Trackknife**, the MPD/Melody client: transport,
+server library belong to **Melody**, the MPD/Melody client: transport,
 outputs, browsing, search, live queue, and stored playlists. Local playback,
 lists over local files, and conversion belong to **Trackbench**, the local
 file workstation. Sections below name the owning application; shared engine
@@ -27,7 +27,7 @@ by Trackbench's player and converter.
 
 ## Separate MPD playback and local playback
 
-Trackknife controls MPD as shared server state; Trackbench plays local files
+Melody controls MPD as shared server state; Trackbench plays local files
 through FFmpeg and PipeWire. The two never merge into one queue, transport
 timeline, or backend-neutral progression coordinator. MPD may be controlled by
 multiple clients and Melody may expose multiple server-managed agents; a
@@ -36,7 +36,7 @@ boundary enforces the separation (ADR-0025), so inside Trackbench local
 playback is first-class — its own transport and real list progression — not an
 audition mode.
 
-MPD playback remains server-owned: Trackknife sends transport/queue/output
+MPD playback remains server-owned: Melody sends transport/queue/output
 commands and projects server status. Trackbench's local pipeline is:
 
 The local player consumes a logical source reference, resolves it to a physical
@@ -54,7 +54,7 @@ entire configured path and device, not a marketing toggle.
 
 ### Required behavior
 
-Trackknife's side is remote MPD transport and output control without local
+Melody's side is remote MPD transport and output control without local
 decoding, projecting the authoritative live queue behind a transport that
 controls MPD alone. Everything below belongs to Trackbench's local player:
 
@@ -182,7 +182,7 @@ Stream metadata changes over time and must not be treated as stable file tags.
 - load cover art/readpicture asynchronously and cache it by server identity;
 - keep remote-only items fully functional when no local root mapping exists.
 
-Trackknife's database stores profiles, workspace, lists, snapshots, and
+Melody's database stores profiles, workspace, lists, snapshots, and
 caches; Trackbench's stores its own lists, presets, jobs, and journals.
 Neither is a second canonical server-library index. MPD owns its library;
 embedded tags remain canonical for local file metadata.
@@ -193,7 +193,7 @@ Each connection profile may map relative MPD URIs below one raw local root. The
 mapping is containment-checked and revalidated before any use. Its eventual
 purpose is opening the explicit local counterpart in Trackbench for tagging,
 scanning, organization, or conversion—a cross-tool convenience deferred until
-both tools stand alone (ADR-0025). It never creates a Trackknife library tree,
+both tools stand alone (ADR-0025). It never creates a Melody library tree,
 and the client itself offers no local file operations. Remote URLs, traversal,
 non-lossless names, and unavailable paths simply remain remote-only.
 
@@ -208,14 +208,14 @@ browsing never enrolls a directory in that index automatically.
 ### Metadata cache and large fields
 
 Each application caches normalized values plus native/provenance data needed
-for its list display—Trackknife for remote items, Trackbench for local
+for its list display—Melody for remote items, Trackbench for local
 files—with large lyrics/artwork stored separately and loaded lazily.
 Never replace a large value with an ambiguous dot/placeholder in an editor; show
 an explicit unloaded state and fetch it before permitting a destructive write.
 
 ## Browsing and views
 
-Trackknife ships a coherent default layout rather than demanding UI
+Melody ships a coherent default layout rather than demanding UI
 construction:
 
 - connection-aware MPD navigation/sidebar and search;
@@ -295,7 +295,7 @@ distinguishable.
 
 ### Import/export
 
-**Trackknife decision — implemented M3U8 profile (ADR-0128):** File → Import
+**Melody decision — implemented M3U8 profile (ADR-0128):** File → Import
 M3U8 playlist creates a new local list from either authority. Relative paths use
 the playlist directory; order, duplicates, and unavailable files survive import
 and workspace restart. UTF-8/BOM, CRLF, plain file paths, local percent-escaped
@@ -332,7 +332,7 @@ once and retain stable MPD song IDs; users can add next/end, reorder, remove,
 clear, prioritize where supported, and save queue contents. Other MPD clients
 may modify it concurrently, so positions are never treated as stable identity.
 
-Trackknife's scratch and named lists hold remote references as working memory,
+Melody's scratch and named lists hold remote references as working memory,
 but they are not playback queues; only the live MPD queue drives server
 playback. Trackbench's tabbed lists hold local files and are its playback
 queues: its player owns real list progression behind its own transport, and
@@ -347,14 +347,14 @@ metadata or statistics invalidates affected membership incrementally.
 
 ## Playback statistics
 
-**Trackknife decision — Melody support (ADR-0209):** servers advertising
+**Melody decision — Melody support (ADR-0209):** servers advertising
 `melody_stats` also offer Columns → Play count / Last played on server queue/list
 tabs. Melody collects these independently of Last.fm and Trackbench. They update
 when the server reports a qualified listen. Server and local history are separate;
 stock MPD has no client-emulated counts. Melody's metadata-based identity survives
 moves/rescans with unchanged tags, but retagging identity fields detaches history.
 
-**Trackknife decision — implemented collection (ADR-0207):** local playback
+**Melody decision — implemented collection (ADR-0207):** local playback
 stores a play count and last-played time after advancing through half a track
 or four minutes, whichever is less, for tracks longer than 30 seconds. This
 works without Last.fm or tags. App-managed metadata edits and moves preserve
@@ -367,7 +367,7 @@ explicit `HISTORY(...)` library predicates in both authorities; see
 [query syntax](query-language.md#listening-history-adr-0215). See [ADR-0207](adr/0207-local-playback-listen-collection.md)
 for counting, identity, and failure semantics.
 
-**Trackknife decision — paused resume (ADR-0210):** Settings → Playback offers
+**Melody decision — paused resume (ADR-0210):** Settings → Playback offers
 opt-in restoration of the local list track and position on startup, paused and
 without opening an audio output until Play. Checkpoints are saved every five
 seconds and on orderly close. Missing, changed, or mismatched sources are not
@@ -376,7 +376,7 @@ authorities; closed-list normal playback remains unsupported. Melody owns its
 independent server restart resume; connecting
 Trackbench never seeks or pauses server playback. Stock MPD is left unchanged.
 
-**Trackknife decision — one-shot album shuffle (ADR-0212):** Edit → Shuffle albums
+**Melody decision — one-shot album shuffle (ADR-0212):** Edit → Shuffle albums
 reorders a whole local list, with Undo, or any Melody list (ADR-0213).
 It groups exact album artist (artist fallback), album, and date; unknown albums
 remain independent entries. Within each album, existing order and duplicates
@@ -480,7 +480,7 @@ publication. Trackbench generates and previews contained relative paths,
 checks conflicts and source revisions, stages data, verifies every output, and
 publishes it atomically. Requesting an explicit MPD database update afterwards,
 and adding the published items to a stored playlist or the live queue, is a
-job for any MPD client, including Trackknife. Move semantics delete originals
+job for any MPD client, including Melody. Move semantics delete originals
 only after verified publication and leave a truthful recovery record on
 partial failure.
 

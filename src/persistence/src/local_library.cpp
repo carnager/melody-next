@@ -759,8 +759,10 @@ translate_predicate(const query::TkqPredicate& predicate) {
                      std::string{comparator} + std::to_string(predicate.number) + ")";
         return clause;
     }
+    // Under its folded name or as it is spelled (tkq_spelled_field).
     constexpr auto exists_head = "EXISTS(SELECT 1 FROM local_library_fields f WHERE "
-                                 "f.raw_path=t.raw_path AND f.canonical_name=?";
+                                 "f.raw_path=t.raw_path AND f.canonical_name IN (?,?)";
+    const auto spelled = internal::tkq_spelled_field(predicate.field);
     switch (predicate.comparison) {
     case TkqComparison::is:
         // The value is looked up once, through the (name, value) index, and
@@ -769,8 +771,9 @@ translate_predicate(const query::TkqPredicate& predicate) {
         // per-track subquery and walked every match once per track: 1.3 s for
         // `artist IS "alice in chains"` on 66,000 tracks, against 2 ms this way.
         clause.sql = "(t.raw_path IN (SELECT f.raw_path FROM local_library_fields f WHERE "
-                     "f.canonical_name=? AND f.value_lower=?))";
+                     "f.canonical_name IN (?,?) AND f.value_lower=?))";
         clause.bindings.push_back({FilterBinding::Kind::text, canonical});
+        clause.bindings.push_back({FilterBinding::Kind::text, spelled});
         clause.bindings.push_back({FilterBinding::Kind::blob, predicate.normalized});
         break;
     case TkqComparison::has: {
@@ -781,6 +784,7 @@ translate_predicate(const query::TkqPredicate& predicate) {
             }
             sql += std::string{exists_head} + " AND instr(f.value_lower,?)>0)";
             clause.bindings.push_back({FilterBinding::Kind::text, canonical});
+            clause.bindings.push_back({FilterBinding::Kind::text, spelled});
             clause.bindings.push_back({FilterBinding::Kind::blob, word});
         }
         clause.sql = "(" + sql + ")";
@@ -795,15 +799,18 @@ translate_predicate(const query::TkqPredicate& predicate) {
         clause.sql = std::string{"("} + exists_head + " AND CAST(f.value_lower AS INTEGER)" +
                      comparator + std::to_string(predicate.number) + "))";
         clause.bindings.push_back({FilterBinding::Kind::text, canonical});
+        clause.bindings.push_back({FilterBinding::Kind::text, spelled});
         break;
     }
     case TkqComparison::present:
         clause.sql = std::string{"("} + exists_head + "))";
         clause.bindings.push_back({FilterBinding::Kind::text, canonical});
+        clause.bindings.push_back({FilterBinding::Kind::text, spelled});
         break;
     case TkqComparison::missing:
         clause.sql = std::string{"(NOT "} + exists_head + "))";
         clause.bindings.push_back({FilterBinding::Kind::text, canonical});
+        clause.bindings.push_back({FilterBinding::Kind::text, spelled});
         break;
     }
     return clause;

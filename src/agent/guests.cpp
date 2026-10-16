@@ -36,10 +36,18 @@ namespace {
     return std::string{text.data()} + endpoint.substr(colon);
 }
 
-[[nodiscard]] const ListedEngine* listed_named(const GuestsConfig& config,
-                                               const std::string& name) {
-    const auto found = std::ranges::find(config.listed, name, &ListedEngine::name);
-    return found == config.listed.end() ? nullptr : &*found;
+// The section of an engine found: by the name it is announced by, else by
+// the address it was heard at -- a section named after its host.
+[[nodiscard]] const ListedEngine* listed_for(const GuestsConfig& config, const std::string& name,
+                                             const std::string& where) {
+    if (const auto named = std::ranges::find(config.listed, name, &ListedEngine::name);
+        named != config.listed.end()) {
+        return &*named;
+    }
+    const auto at = std::ranges::find_if(config.listed, [&where](const ListedEngine& listed) {
+        return !listed.where.empty() && listed.where == where;
+    });
+    return at == config.listed.end() ? nullptr : &*at;
 }
 
 [[nodiscard]] AgentConfig agent_for(const GuestsConfig& config, const ListedEngine* listed,
@@ -73,7 +81,10 @@ std::vector<Wanted> plan_guests(const GuestsConfig& config,
             continue;
         }
         found_names.insert(engine.instance);
-        const auto* listed = listed_named(config, engine.instance);
+        const auto* listed = listed_for(config, engine.instance, where);
+        if (listed != nullptr) {
+            found_names.insert(listed->name);
+        }
         if (!(listed != nullptr ? listed->play : config.play_found)) {
             continue;
         }
@@ -126,6 +137,11 @@ Guests::Guests(Config config, SpeakerArbiter& arbiter)
     : config_(std::move(config)), arbiter_(&arbiter) {
     for (auto& endpoint : config_.already) {
         endpoint = numeric(endpoint);
+    }
+    for (auto& listed : config_.listed) {
+        if (listed.address && listed.where.empty()) {
+            listed.where = numeric(listed.address->describe());
+        }
     }
 }
 

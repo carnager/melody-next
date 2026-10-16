@@ -19,7 +19,8 @@ engine's level with its own and says once when the engine is older.
   `value` taking it out, all or none, checked as melodyd reads the file and
   written with the rest of it kept: `{path, restart, overridden}`.
   `engine.restart {}` answers, then stops the engine for its service manager
-  to start again with what the file says.
+  to start again with what the file says; `engine.stop {}` stops it for good,
+  exiting with 64, which melodyd.service does not restart after.
 
 ### Level 13 (2026-10-15)
 

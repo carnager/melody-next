@@ -141,4 +141,23 @@ while True:
 PY
 )"
 [ "${own}" = False ] || fail "an engine started by hand is not a service's"
+# engine.stop: for good, said by its exit status.
+stopped="$(python3 - "${work}/own.sock" <<'PY'
+import json, socket, sys
+connection = socket.socket(socket.AF_UNIX)
+connection.connect(sys.argv[1])
+stream = connection.makefile("rw")
+stream.write(json.dumps({"id": 1, "method": "engine.stop", "params": {}}) + "\n")
+stream.flush()
+while True:
+    message = json.loads(stream.readline())
+    if message.get("id") == 1:
+        print(message["result"]["stopping"])
+        break
+PY
+)"
+[ "${stopped}" = True ] || fail "engine.stop answers"
+status=0
+wait "${pids[1]}" || status=$?
+[ "${status}" = 64 ] || fail "and the engine exits with 64, not restarted after (got ${status})"
 echo "engine service: ok"

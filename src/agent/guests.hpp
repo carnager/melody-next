@@ -33,6 +33,9 @@ struct ListedEngine final {
     std::string password;
     // Whether it is played for at all.
     bool play{true};
+    // Its address as an engine found there is heard -- numeric host:port --
+    // so one found under another name is still this one. Filled by Guests.
+    std::string where{};
 };
 
 struct GuestsConfig final {

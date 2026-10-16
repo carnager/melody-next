@@ -20,7 +20,11 @@ namespace trackknife::daemon {
 //   written with the rest of the file kept; null takes a key out.
 // - engine.restart {}: answered, then the engine stops for its service
 //   manager to start it again with what the file says now.
+// - engine.stop {}: answered, then the engine stops for good -- until a
+//   client connects to its socket again.
+//
+// `stop(for_good)` ends the engine, as engine.stop (true) or engine.restart.
 void register_config_methods(protocol::Dispatcher& dispatcher, const Settings& settings,
-                             std::function<void()> restart);
+                             std::function<void(bool for_good)> stop);
 
 } // namespace trackknife::daemon

@@ -23,6 +23,9 @@ ExecStart=/usr/bin/melodyd
 # but not after systemctl stop.
 Restart=always
 RestartSec=1
+# engine.stop -- Trackknife's Quit and stop engine -- is not restarted after;
+# the next client on the socket starts it.
+RestartPreventExitStatus=64
 
 [Install]
 WantedBy=default.target

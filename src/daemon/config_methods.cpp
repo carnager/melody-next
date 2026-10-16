@@ -55,7 +55,7 @@ constexpr std::array secret_keys{std::string_view{"password"},
 } // namespace
 
 void register_config_methods(protocol::Dispatcher& dispatcher, const Settings& settings,
-                             std::function<void()> restart) {
+                             std::function<void(bool for_good)> stop) {
     const auto path = settings.config_path;
     const auto from_flags = settings.from_flags;
 
@@ -125,9 +125,13 @@ void register_config_methods(protocol::Dispatcher& dispatcher, const Settings& s
         return Json{{"path", path.string()}, {"restart", true}, {"overridden", overridden}};
     });
 
-    dispatcher.on("engine.restart", [restart = std::move(restart)](const Json&) {
-        restart();
+    dispatcher.on("engine.restart", [stop](const Json&) {
+        stop(false);
         return core::Result<Json>{Json{{"restarting", true}}};
+    });
+    dispatcher.on("engine.stop", [stop](const Json&) {
+        stop(true);
+        return core::Result<Json>{Json{{"stopping", true}}};
     });
 }
 

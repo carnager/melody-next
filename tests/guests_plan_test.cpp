@@ -155,6 +155,25 @@ void anAddressIsTheFallback() {
     CHECK(plan_guests(with, {}, true).size() == 1U);
 }
 
+void aSectionNamedAfterItsAddress() {
+    // Found under its own name at the address a section names: that
+    // section's, and not reached by address as well.
+    auto with = config();
+    auto host = listed("192.168.0.200");
+    host.address = trackknife::protocol::Endpoint{
+        .socket = {}, .host = "192.168.0.200", .port = 6603, .token = {}};
+    host.where = "192.168.0.200:6603";
+    host.music_root = std::filesystem::path{"/mnt/gemenon"};
+    with.listed = {host};
+    const auto plan =
+        plan_guests(with, {engine("gemenon", "gemenon-id", "192.168.0.200")}, true);
+    CHECK(plan.size() == 1U);
+    if (plan.size() == 1U) {
+        CHECK(plan[0].identity == "gemenon-id");
+        CHECK(plan[0].agent.music_root == std::filesystem::path{"/mnt/gemenon"});
+    }
+}
+
 void alreadyPlayedForIsNotTwice() {
     auto with = config();
     with.already = {"10.8.0.1:6603"};
@@ -167,6 +186,7 @@ int main() {
     playsForWhatIsFound();
     listedEnginesAreTheirOwn();
     anAddressIsTheFallback();
+    aSectionNamedAfterItsAddress();
     alreadyPlayedForIsNotTwice();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";

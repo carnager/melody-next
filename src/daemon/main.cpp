@@ -49,6 +49,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <thread>
@@ -105,6 +106,13 @@ void request_stop(int) {
     ::unsetenv("LISTEN_FDNAMES");
     return socket;
 }
+
+// ADR-0286: how the engine ended. A stop asked for with engine.stop exits
+// with stopped_on_request, which melodyd.service does not restart after
+// (RestartPreventExitStatus); every other end -- engine.restart among them --
+// is restarted.
+constexpr int stopped_on_request = 64;
+std::atomic_int exit_status{EXIT_SUCCESS};
 
 void wait_for_stop() {
     char byte = 0;
@@ -539,12 +547,15 @@ int main(int argc, char** argv) {
                   });
     // ADR-0286: its melodyd.conf over the protocol, and a restart to use it:
     // a stop, answered first, for the service manager to start it again.
-    trackknife::daemon::register_config_methods(dispatcher, settings, [] {
-        std::thread{[] {
-            std::this_thread::sleep_for(std::chrono::milliseconds{200});
-            request_stop(0);
-        }}.detach();
-    });
+    trackknife::daemon::register_config_methods(
+        dispatcher, settings,
+        [](const bool for_good) {
+            exit_status.store(for_good ? stopped_on_request : EXIT_SUCCESS);
+            std::thread{[] {
+                std::this_thread::sleep_for(std::chrono::milliseconds{200});
+                request_stop(0);
+            }}.detach();
+        });
 
     auto server = activated ? trackknife::engine::Server::adopt(*activated, dispatcher)
                             : trackknife::engine::Server::listen(socket_path, dispatcher);
@@ -1085,5 +1096,5 @@ int main(int argc, char** argv) {
         tcp_server->stop();
     }
     (*server)->stop();
-    return EXIT_SUCCESS;
+    return exit_status.load();
 }

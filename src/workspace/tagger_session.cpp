@@ -2283,7 +2283,7 @@ std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
         }
         case MoveTarget::library:
             choices.push_back(Choice{.id = QStringLiteral("library"),
-                                     .name = QStringLiteral("The library folder each is in")});
+                                     .name = QStringLiteral("Within its library folder")});
             break;
         case MoveTarget::library_folder: {
             // ADR-0286: adding them to the library, on the engine holding it.

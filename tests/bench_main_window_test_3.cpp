@@ -2119,7 +2119,7 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTRY_COMPARE(write->text(), QStringLiteral("Write 2 albums"));
     QTRY_VERIFY(tagger->layoutsAvailable());
     tagger->selectLayout(1);
-    QCOMPARE(tagger->destinations().back().name, QStringLiteral("The library folder each is in"));
+    QCOMPARE(tagger->destinations().back().name, QStringLiteral("Within its library folder"));
     tagger->selectDestination(static_cast<int>(tagger->destinations().size()) - 1);
     tagger->chooseRename(true);
     tagger->chooseMove(true);

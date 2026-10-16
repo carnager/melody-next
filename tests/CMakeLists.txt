@@ -43,6 +43,13 @@ target_link_libraries(
 )
 add_test(NAME core-primitives COMMAND trackknife_core_tests)
 
+add_executable(trackknife_config_file_tests config_file_test.cpp)
+target_link_libraries(
+    trackknife_config_file_tests
+    PRIVATE Trackknife::Core trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME config-file COMMAND trackknife_config_file_tests)
+
 add_executable(trackknife_metadata_reader_tests metadata_reader_test.cpp)
 target_link_libraries(
     trackknife_metadata_reader_tests

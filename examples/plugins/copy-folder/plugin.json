@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "name": "Copy album folder",
+  "description": "Copies the album's folder, within the library's music folder, to the clipboard",
+  "actions": [
+    {
+      "id": "copy-folder",
+      "label": "Copy album folder",
+      "for": "albums",
+      "run": ["./copy-folder"],
+      "result": "copy"
+    }
+  ]
+}

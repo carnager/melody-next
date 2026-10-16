@@ -26,6 +26,7 @@ class PluginsTest final : public QObject {
     void tracksAreToldAsAlbums();
     void anActionRunsAndSaysWhatItGot();
     void pluginsAreFoundAndStayOffUntilEnabled();
+    void theExamplePluginReads();
 };
 
 namespace {
@@ -254,6 +255,32 @@ void PluginsTest::pluginsAreFoundAndStayOffUntilEnabled() {
     QCOMPARE(enabled.size(), std::size_t{1U});
     QCOMPARE(enabled.front().name, QStringLiteral("albumshare"));
     QSettings{}.remove(QStringLiteral("plugins"));
+}
+
+// The example plugin docs/plugins.md starts from is one Melody reads.
+void PluginsTest::theExamplePluginReads() {
+    const QString folder = QStringLiteral(MELODY_SOURCE_DIR "/examples/plugins/copy-folder");
+    QFile manifest{folder + QStringLiteral("/plugin.json")};
+    QVERIFY(manifest.open(QIODevice::ReadOnly));
+    QString problem;
+    const auto plugin = parsePluginManifest(manifest.readAll(), folder, &problem);
+    QVERIFY2(plugin.has_value(), qPrintable(problem));
+    QCOMPARE(plugin->actions.size(), std::size_t{1U});
+    QVERIFY(plugin->actions.front().result == PluginAction::Result::copy);
+    // And it answers as the guide says.
+    const auto albums = pluginAlbums({PluginTrack{.path = "/srv/music/A/B/01.flac",
+                                                  .title = {},
+                                                  .artist = {},
+                                                  .album = "B",
+                                                  .album_artist = "A",
+                                                  .date = {},
+                                                  .track_number = {}}},
+                                     {"/srv/music"});
+    const auto answered =
+        run(*plugin, plugin->actions.front(),
+            pluginInput(plugin->actions.front(), PluginEngine{}, albums, {"/srv/music"}));
+    QVERIFY2(answered.succeeded, qPrintable(answered.text));
+    QCOMPARE(answered.text, QStringLiteral("A/B"));
 }
 
 } // namespace trackknife::bench

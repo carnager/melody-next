@@ -49,6 +49,16 @@ A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 - [Search queries](docs/query-language.md)
 - [Everything else](docs/README.md)
 
+## Plugins
+
+Melody can be extended with plugins: programs of your own, in any language,
+that add entries to the right-click menu -- "Share album" through your own
+server, say. Melody runs them and tells them in JSON what was chosen.
+[Writing a plugin](docs/plugins.md) has all of it, and
+[`examples/plugins`](examples/plugins) a plugin to start from. Plugins live in
+repositories of their own; the GitHub topic
+[`melody-plugin`](https://github.com/topics/melody-plugin) finds them.
+
 This is new software and still changing. For a bug report, run
 `melody --debug` in a terminal and include the output.
 

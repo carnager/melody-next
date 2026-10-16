@@ -108,15 +108,36 @@ It runs in its own folder and gets the choice on stdin, as one JSON object:
 
 ## Example
 
-A plugin that copies the album's folder within the music folder:
+[`examples/plugins/copy-folder`](../examples/plugins/copy-folder) is a whole
+plugin to start from: a `plugin.json` and a dozen lines of Python that answer
+with the album's folder, which Melody copies to the clipboard. Copy the folder
+into `~/.local/share/melody/plugins/`, enable it, and change it.
+
+To try a program by hand, give it what Melody would:
 
 ```sh
-#!/bin/sh
-# plugin.json: {"schema": 1, "name": "Folder", "actions": [{"id": "folder",
-#   "label": "Copy album folder", "run": ["./folder"], "result": "copy"}]}
-input=$(cat)
-printf '%s' "$input" | jq -r '.albums[0].relative_folder'
+echo '{"schema": 1, "action": "copy-folder", "engine": {},
+       "albums": [{"artist": "A", "album": "B", "date": "", "music_folder": "/srv/music",
+                   "folder": "/srv/music/A/B", "relative_folder": "A/B", "tracks": []}]}' |
+    ./copy-folder
 ```
+
+## Publishing a plugin
+
+A plugin is not part of Melody and does not need to be: give it a repository
+of its own, and it is installed by putting its folder in the plugin folder --
+
+```sh
+git clone https://github.com/you/melody-albumshare ~/.local/share/melody/plugins/albumshare
+```
+
+-- then enabling it under Settings → Plugins. Give the repository the GitHub
+topic **`melody-plugin`**, so it is found with the others. Say in its README
+what it sends where: whoever enables it runs it with their rights.
+
+`schema` 1 is what Melody promises: a plugin written for it keeps working, and
+anything that changes the manifest or the JSON comes as a new schema, with 1
+still read.
 
 ## Later
 

@@ -864,6 +864,8 @@ if(MELODY_BUILD_UI)
         PRIVATE Trackknife::Workspace Qt6::Test trackknife_project_options
                 trackknife_project_warnings
     )
+    target_compile_definitions(trackknife_plugins_tests
+                               PRIVATE MELODY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME plugins COMMAND trackknife_plugins_tests)
 
     qt_add_executable(trackknife_names_tests trackknife_names_test.cpp)

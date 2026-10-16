@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""An example Melody plugin (docs/plugins.md): the album chosen, told on
+stdin as JSON, answered on stdout with its folder within the music folder.
+Melody copies the answer to the clipboard, as plugin.json says."""
+import json
+import sys
+
+given = json.load(sys.stdin)
+album = given["albums"][0]
+folder = album["relative_folder"] or album["folder"]
+if not folder:
+    # A failure: a non-zero exit, and what to say on stderr.
+    print("the album has no folder", file=sys.stderr)
+    sys.exit(1)
+print(folder)

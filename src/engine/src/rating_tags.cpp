@@ -230,9 +230,16 @@ void RatingTags::run() {
             }
             if (auto written = write(database_, catalogue_, path, rating, token, backup);
                 !written) {
+                // With which fields, when the read-back named them: "differs"
+                // alone cannot be acted on.
                 std::cerr << "melodyd: could not write the rating into "
-                          << core::display_raw_path(path) << ": " << written.error().message
-                          << "\n";
+                          << core::display_raw_path(path) << ": " << written.error().message;
+                for (const auto& [key, value] : written.error().context) {
+                    if (key == "fields") {
+                        std::cerr << " (" << value << ")";
+                    }
+                }
+                std::cerr << "\n";
             }
         }
         {

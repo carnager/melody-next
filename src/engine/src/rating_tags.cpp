@@ -47,6 +47,9 @@ RatingTags::RatingTags(std::filesystem::path database, LocalCatalogue& catalogue
     if (auto stored = workspace_.load_engine_state(backup_key); stored && *stored) {
         backup_tag_ = **stored;
     }
+    // A visit cut short by a stop is finished: asking costs no file, only
+    // the library, and what already holds its rating is not opened.
+    visit_wanted_ = enabled_;
     // Ratings in files are imported as they are read. A library read before
     // that is caught up once, from what it read.
     if (auto done = workspace_.load_engine_state(imported_key); done && !*done) {

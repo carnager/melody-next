@@ -970,6 +970,22 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
                 in_file("FMPS_RATING") == std::vector<std::string>{"0.9"},
             "the rating given last is the one in the file");
     require(tags.pending() == 0U, "and nothing is left to write");
+
+    // A visit cut short by a stop is finished at the next start.
+    require(tags.set_enabled(false).has_value(), "off once more");
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+                .has_value(),
+            "taken out once more");
+    // Left on as a stop would leave it, without this one visiting.
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    require(workspace->save_engine_state("ratings.write-tags", "1", now + 1000).has_value(),
+            "kept on");
+    engine::RatingTags restarted{database, catalogue, *workspace};
+    restarted.wait_idle();
+    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"9"},
+            "a start writes what a visit left");
 }
 
 // A rating another player put in a file is taken into the library.

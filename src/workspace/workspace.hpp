@@ -23,6 +23,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
+#include "trackknife/persistence/list_edits.hpp"
 #include "workspace/convert_job.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -283,7 +284,10 @@ class Workspace final : public QObject {
     // The queue last pushed to the engine, and the engine revision that
     // produced. Together they answer "is what I am showing what the engine
     // holds, and if not, who changed it".
-    QString engine_queue_;
+    // ADR-0286: as entries and what each plays (EnginePlayback::queuePrint),
+    // so a change is sent as the edits it is; none, not known -- the queue
+    // is then sent whole.
+    std::optional<std::vector<persistence::ListEntryPrint>> engine_queue_;
     quint64 engine_queue_revision_{0};
     // ADR-0269: the engine's Up Next revision last taken; none, not yet --
     // the next state is taken whatever it says.

@@ -880,6 +880,110 @@ EnginePlayback::queueCalls(const std::vector<LocalTrackRow>& rows,
     return calls;
 }
 
+std::size_t EnginePlayback::queuePrint(const LocalTrackRow& row) {
+    std::string print = row.raw_path;
+    print += '\0';
+    if (row.segment) {
+        print += std::to_string(row.segment->start_sample) + ":" +
+                 (row.segment->end_sample ? std::to_string(*row.segment->end_sample) : "");
+    }
+    print += '\0';
+    print += std::to_string(row.selection.stream_index.value_or(-1)) + ":" +
+             std::to_string(row.selection.subsong_index.value_or(-1));
+    return std::hash<std::string>{}(print);
+}
+
+std::vector<std::pair<QString, protocol::Json>> EnginePlayback::editQueueCalls(
+    const std::vector<persistence::ListEntryPrint>& before, const std::vector<LocalTrackRow>& rows,
+    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+    const QString& list) const {
+    using persistence::ListEdit;
+    std::vector<persistence::ListEntryPrint> wanted;
+    wanted.reserve(rows.size());
+    for (const auto& row : rows) {
+        wanted.push_back({.entry = row.entry_id, .print = queuePrint(row)});
+    }
+    const auto plan = persistence::plan_list_edits(before, wanted);
+    std::vector<std::pair<QString, protocol::Json>> calls;
+    auto edits = protocol::Json::array();
+    std::size_t bytes = 0U;
+    const auto send = [&] {
+        if (edits.empty()) {
+            return;
+        }
+        protocol::Json params{{"edits", std::move(edits)}};
+        if (!list.isEmpty()) {
+            params["list"] = list.toStdString();
+        }
+        calls.emplace_back(QStringLiteral("playback.edit_queue"), std::move(params));
+        edits = protocol::Json::array();
+        bytes = 0U;
+    };
+    const auto kind_of = [](const ListEdit::Kind kind) {
+        switch (kind) {
+        case ListEdit::Kind::remove:
+            return "remove";
+        case ListEdit::Kind::insert:
+            return "insert";
+        case ListEdit::Kind::move:
+            return "move";
+        case ListEdit::Kind::update:
+            return "update";
+        }
+        return "remove";
+    };
+    for (const auto& planned : plan) {
+        const bool placed =
+            planned.kind == ListEdit::Kind::insert || planned.kind == ListEdit::Kind::move;
+        // A run cut in parts goes on after the last of the part before.
+        auto after = planned.after;
+        auto part = protocol::Json::array();
+        std::optional<core::StableId> last;
+        const auto close_part = [&] {
+            if (part.empty()) {
+                return;
+            }
+            protocol::Json op{{kind_of(planned.kind), std::move(part)}};
+            if (placed) {
+                op["after"] = after ? protocol::Json(after->to_string()) : protocol::Json(nullptr);
+            }
+            edits.push_back(std::move(op));
+            part = protocol::Json::array();
+            after = last;
+        };
+        const auto add = [&](protocol::Json value, const core::StableId& entry) {
+            const auto size = value.dump().size() + 1U;
+            if (bytes + size > queue_part_bytes && (bytes > 0U || !part.empty())) {
+                close_part();
+                send();
+            }
+            bytes += size;
+            part.push_back(std::move(value));
+            last = entry;
+        };
+        for (const auto& entry : planned.entries) {
+            add(entry.to_string(), entry);
+        }
+        for (const auto index : planned.rows) {
+            add(listItemOf(entryJson(rows[index], index < overrides.size() ? overrides[index]
+                                                                           : std::nullopt)),
+                rows[index].entry_id);
+        }
+        close_part();
+    }
+    send();
+    return calls;
+}
+
+void EnginePlayback::editQueue(const std::vector<persistence::ListEntryPrint>& before,
+                               const std::vector<LocalTrackRow>& rows,
+                               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                               const QString& list) {
+    if (auto calls = editQueueCalls(before, rows, overrides, list); !calls.empty()) {
+        send(std::move(calls));
+    }
+}
+
 void EnginePlayback::replaceQueue(
     const std::vector<LocalTrackRow>& rows,
     const std::vector<std::optional<formats::ReplayGainInfo>>& overrides, const QString& list) {

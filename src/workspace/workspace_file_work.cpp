@@ -624,8 +624,8 @@ void Workspace::applyEngineRelocation(const EngineKey& engine,
             playback_.anchors.source.raw_path = here->target_raw_path;
         }
     }
-    // Sent again with the new paths, as after a move here.
-    engine_queue_.clear();
+    // ADR-0286: the moved entries go to the engine as updates -- what each
+    // plays has changed under the same identity.
     engine_requests_.reset();
     syncEngineQueue();
     syncEngineRequests();
@@ -931,9 +931,8 @@ void Workspace::applyCommittedRelocation(const operations::FilePublicationCommit
         playback_.anchors.source.raw_path = result.target_raw_path;
     }
     // The engine's queue names files by path. Identities are unchanged by a
-    // move, so the ordinary sync would see nothing new: it is told to send
-    // the list again, carrying the new paths.
-    engine_queue_.clear();
+    // move, but what each plays is not: the sync sends the moved entries as
+    // updates (ADR-0286).
     engine_requests_.reset();
     syncEngineQueue();
     syncEngineRequests();

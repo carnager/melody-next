@@ -316,6 +316,7 @@ class BenchMainWindowTest final : public QObject {
     void aScratchTabNeverReachesItsEngine();
     void listsLeftOnTheEngineAreOfferedOnce();
     void theTabStoreKeepsWhatItCannotRead();
+    void aPlayingTabsEditsReachTheQueueAsEdits();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

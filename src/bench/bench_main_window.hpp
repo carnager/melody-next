@@ -148,7 +148,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     EngineKey& up_next_engine_{workspace_.up_next_engine_};
     QString& engine_entry_{workspace_.engine_entry_};
     QString& engine_consumed_{workspace_.engine_consumed_};
-    QString& engine_queue_{workspace_.engine_queue_};
+    std::optional<std::vector<persistence::ListEntryPrint>>& engine_queue_{workspace_.engine_queue_};
     quint64& engine_queue_revision_{workspace_.engine_queue_revision_};
     quint64& engine_queue_asked_{workspace_.engine_queue_asked_};
     quint64& engine_reattach_asked_{workspace_.engine_reattach_asked_};

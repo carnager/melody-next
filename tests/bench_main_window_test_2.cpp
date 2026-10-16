@@ -2363,4 +2363,63 @@ void BenchMainWindowTest::listsLeftOnTheEngineAreOfferedOnce() {
     own.stop();
 }
 
+// ADR-0286: what changes in the playing tab reaches the engine's queue as the
+// edits it is -- so an entry the engine let go of meanwhile (consumed, say)
+// is not brought back by sending the tab whole.
+void BenchMainWindowTest::aPlayingTabsEditsReachTheQueueAsEdits() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto queued = [&other] {
+        std::vector<std::string> entries;
+        auto queue = (*other)->call("playback.queue");
+        for (const auto& entry :
+             queue ? queue->value("entries", protocol::Json::array()) : protocol::Json::array()) {
+            entries.push_back(entry.value("entry", std::string{}));
+        }
+        return entries;
+    };
+    auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                            .kind = persistence::ListKind::scratch,
+                                                            .name = "Playing",
+                                                            .pinned = false,
+                                                            .dirty = false,
+                                                            .items = {}},
+                                  true);
+    std::vector<LocalTrackRow> made;
+    for (int index = 0; index < 5; ++index) {
+        LocalTrackRow row;
+        row.raw_path = "/music/playing/" + std::to_string(index) + ".flac";
+        row.title = "Track " + std::to_string(index);
+        row.duration_ms = 60'000;
+        made.push_back(std::move(row));
+    }
+    tab->model->appendRows(std::move(made));
+    std::vector<std::string> ids;
+    for (const auto& row : tab->model->rows()) {
+        ids.push_back(row.entry_id.to_string());
+    }
+    window.playRow(*tab, 1);
+    QTRY_VERIFY_WITH_TIMEOUT(queued() == ids, 10'000);
+    // The window knows the queue it handed over.
+    QTRY_VERIFY(window.engine_queue_.has_value() && window.engine_queue_->size() == 5U);
+
+    // Let go of on the engine -- as consume does -- before the window hears.
+    QVERIFY((*other)->call("playback.edit_queue",
+                           protocol::Json{{"list", tab->document.id.to_string()},
+                                          {"edits", protocol::Json::array({protocol::Json{
+                                                        {"remove", {ids[4]}}}})}}));
+    // And now a row taken out here.
+    tab->model->removeRowIndexes({0});
+    window.markTabDirty(*tab);
+    QTRY_VERIFY(queued() == (std::vector<std::string>{ids[1], ids[2], ids[3]}));
+    QTest::qWait(500);
+    QCOMPARE(queued(), (std::vector<std::string>{ids[1], ids[2], ids[3]}));
+    (*other)->close();
+}
+
 } // namespace trackknife::bench

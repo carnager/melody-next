@@ -10,6 +10,8 @@
 #include "trackknife/protocol/client.hpp"
 
 #include <QHash>
+#include "trackknife/persistence/list_edits.hpp"
+
 #include <QObject>
 #include <QString>
 #include <QThreadPool>
@@ -145,6 +147,22 @@ class EnginePlayback final : public QObject {
     queueCalls(const std::vector<LocalTrackRow>& rows,
                const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
                const QString& list) const;
+    // ADR-0286: what of an entry the engine plays by -- its file and the part
+    // of it -- for the queue it holds and a tab's rows to be compared alike.
+    [[nodiscard]] static std::size_t queuePrint(const LocalTrackRow& row);
+    // The calls that turn the queue the engine holds, `before`, into `rows`
+    // by edits (playback.edit_queue), within its line: what was removed,
+    // what is new or moved, and what changed under the same identity. None
+    // when nothing changed.
+    [[nodiscard]] std::vector<std::pair<QString, protocol::Json>>
+    editQueueCalls(const std::vector<persistence::ListEntryPrint>& before,
+                   const std::vector<LocalTrackRow>& rows,
+                   const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                   const QString& list) const;
+    void editQueue(const std::vector<persistence::ListEntryPrint>& before,
+                   const std::vector<LocalTrackRow>& rows,
+                   const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                   const QString& list);
     // ADR-0260: the protocol level the engine said it speaks (0 until it has).
     [[nodiscard]] int engineLevel() const { return engine_level_.load(); }
     void replaceQueue(const std::vector<LocalTrackRow>& rows,

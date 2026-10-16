@@ -209,7 +209,10 @@ are chosen in Trackknife, which finds it on the network.
 4. Tabs in Trackknife; working lists leave the engine. Done (2026-10-16):
    tabs are never sent; a tab plays as a queue sent in parts
    (`playback.edit_queue`, since one line holds a megabyte and a long tab is
-   more); rows are described by path (`catalogue.describe`) and follow moves
+   more), and the playing tab's changes after go as the edits they are --
+   planned from the queue the window knows the engine holds, so an entry the
+   engine let go of meanwhile (consumed) is not brought back, and a moved
+   file is an update of its entry; rows are described by path (`catalogue.describe`) and follow moves
    made while the window was closed through the engine's move journal
    (`catalogue.resolve_moves`, asked for rows whose files are gone); the tab
    store lives with the window's data and is backed up. Schema 56 sets the

@@ -241,6 +241,28 @@ void Workspace::syncEngineRequests() {
     transport_->setRequests(rows, gains);
 }
 
+namespace {
+
+// ADR-0286: a queue as the window knows the engine holds it.
+[[nodiscard]] std::vector<persistence::ListEntryPrint>
+queue_prints(const std::vector<LocalTrackRow>& rows) {
+    std::vector<persistence::ListEntryPrint> prints;
+    prints.reserve(rows.size());
+    for (const auto& row : rows) {
+        prints.push_back({.entry = row.entry_id, .print = EnginePlayback::queuePrint(row)});
+    }
+    return prints;
+}
+
+[[nodiscard]] bool same_queue(const std::optional<std::vector<persistence::ListEntryPrint>>& held,
+                              const std::vector<persistence::ListEntryPrint>& wanted) {
+    return held && std::ranges::equal(*held, wanted, [](const auto& a, const auto& b) {
+               return a.entry == b.entry && a.print == b.print;
+           });
+}
+
+} // namespace
+
 void Workspace::syncEngineQueue() {
     if (!playingOnEngine()) {
         return;
@@ -250,14 +272,12 @@ void Workspace::syncEngineQueue() {
         return;
     }
     const auto& rows = tab->model->rows();
-    QString stated;
-    for (const auto& row : rows) {
-        stated += QString::fromStdString(row.entry_id.to_string());
-    }
-    if (stated == engine_queue_) {
+    auto stated = queue_prints(rows);
+    if (same_queue(engine_queue_, stated)) {
         return;
     }
-    engine_queue_ = stated;
+    // What the engine held before this, for the edits from it to what shows.
+    auto before = std::exchange(engine_queue_, std::move(stated));
     // A queue asked for before this edit answers with what the edit changed:
     // taken up, it would bring a removed row back.
     ++engine_queue_asked_;
@@ -267,19 +287,26 @@ void Workspace::syncEngineQueue() {
     // -- or going.
     const auto id = tab->document.id;
     const QPointer<EnginePlayback> playback{transport_};
-    const auto replace = [this, id, playback](const bool on_engine) {
+    const auto replace = [this, id, playback, before = std::move(before)](const bool on_engine) {
         auto* playing = tabForDocument(id);
         if (on_engine || playing == nullptr || playback == nullptr || playback != transport_) {
             return;
         }
-        // Not on the engine as shown: its rows are the queue, as before.
+        // Not on the engine as shown: its rows are the queue. ADR-0286: sent
+        // as the edits from what the engine holds -- only what changed, and
+        // an entry it no longer holds (consumed meanwhile) not brought back;
+        // whole, in parts, when that is not known or the engine is older.
         const auto& shown = playing->model->rows();
         std::vector<std::optional<formats::ReplayGainInfo>> overrides;
         overrides.reserve(shown.size());
         for (const auto& row : shown) {
             overrides.push_back(local_replay_gain_override(row));
         }
-        playback->replaceQueue(shown, overrides, document_text(id));
+        if (before && playback->engineLevel() >= 15) {
+            playback->editQueue(*before, shown, overrides, document_text(id));
+        } else {
+            playback->replaceQueue(shown, overrides, document_text(id));
+        }
     };
     if (list_sync_ != nullptr) {
         list_sync_->sendNow(
@@ -331,14 +358,11 @@ void Workspace::adoptEngineQueue(std::vector<LocalTrackRow> held) {
         }
         merged.push_back(std::move(fresh));
     }
-    QString stated;
-    for (const auto& row : merged) {
-        stated += QString::fromStdString(row.entry_id.to_string());
-    }
-    if (stated == engine_queue_) {
+    auto stated = queue_prints(merged);
+    if (same_queue(engine_queue_, stated)) {
         return;
     }
-    engine_queue_ = stated;
+    engine_queue_ = std::move(stated);
     tab->model->replaceRows(std::move(merged), true);
     enqueueUnprobedRows(*tab);
     // What plays is the engine's to say. A list replaced elsewhere and
@@ -410,14 +434,13 @@ void Workspace::reattachToQueue(std::vector<LocalTrackRow> rows) {
         }
     }
     // Untitled: the filename, until the file is read.
-    QString stated;
     for (auto& row : rows) {
         if (row.title.empty()) {
             row.title =
                 core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
         }
-        stated += QString::fromStdString(row.entry_id.to_string());
     }
+    auto stated = queue_prints(rows);
     auto* playing_engine = linkOf(transport_);
     // An engine elsewhere's queue goes into its tab, which it always has.
     auto* tab = playing_engine != nullptr && !playing_engine->key.isLocal()
@@ -434,7 +457,7 @@ void Workspace::reattachToQueue(std::vector<LocalTrackRow> rows) {
     }
     tab->model->replaceRows(std::move(rows), true);
     // What the engine holds, as this window knows it: these rows.
-    engine_queue_ = stated;
+    engine_queue_ = std::move(stated);
     // Titles are filenames until the files have been read; the ordinary probe
     // queue fills them in rather than a second path for this case.
     enqueueUnprobedRows(*tab);
@@ -485,7 +508,7 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     playback_.anchors = {};
     playback_.row = -1;
     engine_entry_.clear();
-    engine_queue_.clear();
+    engine_queue_.reset();
     engine_requests_.reset();
     engine_replay_gain_.reset();
     engine_consumed_.clear();

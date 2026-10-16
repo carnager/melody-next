@@ -17,7 +17,7 @@
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
-#include "id3_involved_people_detail.hpp"
+#include "id3_changed_properties_detail.hpp"
 #include "mp4_item_factory_detail.hpp"
 
 #include <tfile.h>
@@ -512,10 +512,7 @@ template <typename File>
         if constexpr (std::is_same_v<File, TagLib::MP4::File>) {
             return mp4_detail::set_changed_properties(file, before, properties);
         } else if constexpr (std::is_same_v<File, TagLib::MPEG::File>) {
-            const auto kept = id3_detail::unexpressed_involved_people(file);
-            auto rejected = file.setProperties(properties);
-            id3_detail::restore_involved_people(file, kept);
-            return rejected;
+            return id3_detail::set_changed_properties(file, before, properties);
         } else {
             return file.setProperties(properties);
         }

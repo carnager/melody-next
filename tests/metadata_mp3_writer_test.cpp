@@ -15,6 +15,7 @@
 #include "trackknife/metadata/write_plan.hpp"
 
 #include <taglib/attachedpictureframe.h>
+#include <taglib/commentsframe.h>
 #include <taglib/id3v2tag.h>
 #include <taglib/mp4file.h>
 #include <taglib/mpegfile.h>
@@ -30,6 +31,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -586,6 +588,90 @@ void keepsInvolvedPeopleTagLibCannotExpress(const std::filesystem::path& fixture
            std::vector<std::string>{"arranger", "orchestration Someone", "producer Prod"}));
 }
 
+// A name spread over frames of its own -- two comments in two languages, as
+// Media Center leaves them -- is kept through a write of something else.
+// TagLib's setProperties merged them into one frame, the other lost, and the
+// reread refused every write to such a file, a rating's included. And one
+// role of an involved-people frame changed keeps the frame's other.
+void writesOnlyTheFramesThatChange(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto source =
+        materialize(fixture_directory, "tagged-tone-mp3.b64", directory.path() / "comments.mp3");
+    {
+        TagLib::MPEG::File file{source.c_str()};
+        auto* tag = file.ID3v2Tag(true);
+        for (const auto& [language, text] : {std::pair{TagLib::ByteVector(3, '\0'), "first"},
+                                             std::pair{TagLib::ByteVector{"eng"}, "second"}}) {
+            auto* comment = new TagLib::ID3v2::CommentsFrame(TagLib::String::UTF8);
+            comment->setLanguage(language);
+            comment->setText(text);
+            tag->addFrame(comment);
+        }
+        auto* credits = new TagLib::ID3v2::TextIdentificationFrame("TIPL", TagLib::String::UTF8);
+        credits->setText(TagLib::StringList{"arranger", "Old"}.append("producer").append("Prod"));
+        tag->addFrame(credits);
+        CHECK(file.save());
+    }
+    const auto write = [&](const char* field, const char* value, const char* name) {
+        const auto read = trackknife::metadata::read_local_metadata(source.native());
+        CHECK(read.has_value());
+        if (!read) {
+            return std::filesystem::path{};
+        }
+        auto selection = selection_for(*read);
+        if (!selection) {
+            return std::filesystem::path{};
+        }
+        auto index = selection->field_index(field);
+        if (!index) {
+            index = selection->exact_native_field_index(field);
+        }
+        CHECK(index.has_value());
+        if (!index) {
+            return std::filesystem::path{};
+        }
+        trackknife::metadata::StagedMetadataPatchSet patches;
+        CHECK(patches.replace_values(*selection, 0U, *index, {value}).has_value());
+        auto plan = make_plan(*selection, patches);
+        CHECK(plan && plan->ready());
+        if (!plan || !plan->ready()) {
+            return std::filesystem::path{};
+        }
+        const auto prepared = directory.path() / name;
+        const auto written = trackknife::metadata::prepare_mp3_metadata_write_copy(
+            plan->sources.front(), prepared.native());
+        if (!written) {
+            std::cerr << written.error().message << '\n';
+        }
+        CHECK(written.has_value());
+        return prepared;
+    };
+
+    if (const auto retitled = write("title", "Retitled", "retitled.mp3"); !retitled.empty()) {
+        TagLib::MPEG::File file{retitled.c_str()};
+        std::vector<std::string> comments;
+        for (const auto* frame : file.ID3v2Tag()->frameList("COMM")) {
+            const auto* comment = dynamic_cast<const TagLib::ID3v2::CommentsFrame*>(frame);
+            comments.push_back(std::string{comment->language().data(), comment->language().size()} +
+                               "|" + comment->text().to8Bit(true));
+        }
+        std::ranges::sort(comments);
+        CHECK((comments == std::vector<std::string>{std::string{"\0\0\0|first", 9}, "eng|second"}));
+    }
+
+    if (const auto arranged = write("ARRANGER", "New", "arranged.mp3"); !arranged.empty()) {
+        TagLib::MPEG::File file{arranged.c_str()};
+        std::vector<std::string> credits;
+        for (const auto* frame : file.ID3v2Tag()->frameList("TIPL")) {
+            credits.push_back(frame->toString().to8Bit(true));
+        }
+        std::ranges::sort(credits);
+        // Written again by TagLib, which names the roles as its properties do.
+        CHECK((credits == std::vector<std::string>{"ARRANGER New PRODUCER Prod"}));
+        CHECK(file.ID3v2Tag()->frameList("COMM").size() == 2U);
+    }
+}
+
 // ADR-0281: a write that fits is made in place -- the ranges it answers, laid
 // on the file, are byte for byte what the prepared copy would be -- and one
 // that outgrows its room is not.
@@ -889,6 +975,7 @@ int main(const int argc, char** argv) {
         dropsEmptyFieldsOfFilesWritten(fixture_directory);
         keepsMp4FreeFormSpellings(fixture_directory);
         keepsInvolvedPeopleTagLibCannotExpress(fixture_directory);
+        writesOnlyTheFramesThatChange(fixture_directory);
         writesInPlaceExactlyAsACopyWould(fixture_directory);
         roundTripsApicArtworkEdits(fixture_directory);
     }

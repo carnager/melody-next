@@ -273,11 +273,11 @@ class LocalCatalogue final : public Catalogue {
               std::size_t limit) const override;
 
     // ADR-0237 stage 2: the files carrying a track rating, and every rated
-    // track with its rating.
+    // track with its rating and its file's indexed values under `field`.
     [[nodiscard]] core::Result<std::vector<std::string>>
     rated_paths(const std::string& track_hash) const;
-    [[nodiscard]] core::Result<std::vector<std::pair<std::string, unsigned>>>
-    rated_tracks(const core::CancellationToken& cancellation = {}) const;
+    [[nodiscard]] core::Result<std::vector<persistence::LocalLibrary::RatedTrack>>
+    rated_tracks(std::string_view field, const core::CancellationToken& cancellation = {}) const;
     [[nodiscard]] core::Result<std::size_t> import_indexed_tag_ratings();
 
   private:

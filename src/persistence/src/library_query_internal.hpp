@@ -13,5 +13,9 @@ namespace trackknife::persistence::internal {
 
 // Index-level canonicalization of a query field name.
 [[nodiscard]] std::string tkq_canonical_field(const std::string& field);
+// The name as the library keeps a tag it does not know: as it is spelled,
+// in lower case, underscores and all -- `fmps_rating`, which the folded name
+// above (`fmpsrating`) never finds. A field is looked up under both.
+[[nodiscard]] std::string tkq_spelled_field(const std::string& field);
 
 } // namespace trackknife::persistence::internal

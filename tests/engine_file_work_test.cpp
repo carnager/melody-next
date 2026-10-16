@@ -929,16 +929,16 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
     require(catalogue.set_rating(hash, false, 6).has_value(), "rated");
 
     engine::RatingTags tags{database, catalogue, *workspace};
-    require(tags.set_backup_tag("TRACKKNIFE_RATING").has_value(), "a backup tag");
+    require(tags.set_backup_tag("MELODY_RATING").has_value(), "a backup tag");
     require(tags.set_enabled(true).has_value(), "turned on");
     tags.wait_idle();
     require(in_file("FMPS_RATING") == std::vector<std::string>{"0.6"} &&
-                in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"6"},
+                in_file("MELODY_RATING") == std::vector<std::string>{"6"},
             "the first visit writes the rating and its copy");
     // And the library holds it under the name a visit asks for, so the next
     // one knows the file without opening it.
     const auto known =
-        catalogue.rated_tracks(engine::RatingTags::marked_field("TRACKKNIFE_RATING"));
+        catalogue.rated_tracks(engine::RatingTags::marked_field("MELODY_RATING"));
     require(known && known->size() == 1U && known->front().indexed == std::vector<std::string>{"6"},
             "the library knows what the file holds");
     const auto without = catalogue.rated_tracks(engine::RatingTags::marked_field(""));
@@ -957,33 +957,33 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
 
     // Its tags taken away (the library reads it again): written again.
     require(tags.set_enabled(false).has_value(), "off");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
                     .has_value() &&
-                in_file("TRACKKNIFE_RATING").empty(),
+                in_file("MELODY_RATING").empty(),
             "the tags taken out of the file");
     require(tags.set_enabled(true).has_value(), "on");
     tags.wait_idle();
-    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"6"},
+    require(in_file("MELODY_RATING") == std::vector<std::string>{"6"},
             "a file without its rating is written");
 
     // Rated as a visit starts: the file ends with that rating, not the one
     // the visit found.
     require(tags.set_enabled(false).has_value(), "off again");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
                 .has_value(),
             "taken out again");
     require(tags.set_enabled(true).has_value(), "on again");
     require(catalogue.set_rating(hash, false, 9).has_value(), "rated anew");
     tags.rated(hash, false, 9);
     tags.wait_idle();
-    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"9"} &&
+    require(in_file("MELODY_RATING") == std::vector<std::string>{"9"} &&
                 in_file("FMPS_RATING") == std::vector<std::string>{"0.9"},
             "the rating given last is the one in the file");
     require(tags.pending() == 0U, "and nothing is left to write");
 
     // A visit cut short by a stop is finished at the next start.
     require(tags.set_enabled(false).has_value(), "off once more");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
                 .has_value(),
             "taken out once more");
     // Left on as a stop would leave it, without this one visiting.
@@ -994,7 +994,7 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
             "kept on");
     engine::RatingTags restarted{database, catalogue, *workspace};
     restarted.wait_idle();
-    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"9"},
+    require(in_file("MELODY_RATING") == std::vector<std::string>{"9"},
             "a start writes what a visit left");
 }
 
@@ -1123,17 +1123,17 @@ void ratings_are_copied_into_a_backup_tag(const std::filesystem::path& directory
     require(catalogue.prepare().has_value(), "a library");
 
     const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "copied.flac").string();
-    require(engine::RatingTags::write(database, catalogue, flac, 8, {}, "TRACKKNIFE_RATING")
+    require(engine::RatingTags::write(database, catalogue, flac, 8, {}, "MELODY_RATING")
                 .value_or(false),
             "a FLAC is rated, with a copy");
     const auto read = metadata::read_local_metadata(flac);
     require(read &&
                 read->document.first_effective_value("FMPS_RATING") ==
                     std::optional<std::string>{"0.8"} &&
-                read->document.first_effective_value("TRACKKNIFE_RATING") ==
+                read->document.first_effective_value("MELODY_RATING") ==
                     std::optional<std::string>{"8"},
             "the rating, and its copy as 0-10");
-    require(!engine::RatingTags::write(database, catalogue, flac, 8, {}, "TRACKKNIFE_RATING")
+    require(!engine::RatingTags::write(database, catalogue, flac, 8, {}, "MELODY_RATING")
                  .value_or(true),
             "nothing to write when both are there");
     // Named after the rating was already written: only the copy is added.
@@ -1165,10 +1165,10 @@ void ratings_are_copied_into_a_backup_tag(const std::filesystem::path& directory
     require(metadata::rating_backup_tag_problem("").has_value() &&
                 metadata::rating_backup_tag_problem("FMPS_RATING").has_value() &&
                 metadata::rating_backup_tag_problem("A=B").has_value() &&
-                !metadata::rating_backup_tag_problem("TRACKKNIFE_RATING").has_value(),
+                !metadata::rating_backup_tag_problem("MELODY_RATING").has_value(),
             "names are checked");
     require(metadata::official_tag_name("COMMENT") && metadata::official_tag_name("Title") &&
-                !metadata::official_tag_name("TRACKKNIFE_RATING"),
+                !metadata::official_tag_name("MELODY_RATING"),
             "official names are known");
 }
 

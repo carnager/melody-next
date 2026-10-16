@@ -42,7 +42,7 @@ enum class PlainRatingScale : std::uint8_t { off, five, ten, hundred };
 // ADR-0245: a second copy of a track's rating, as its plain 0-10 number, in
 // a tag the user names -- apart from FMPS_RATING and POPM, which other
 // players rewrite, so the rating survives them. Unrated removes it.
-inline constexpr std::string_view default_rating_backup_tag = "TRACKKNIFE_RATING";
+inline constexpr std::string_view default_rating_backup_tag = "MELODY_RATING";
 // Why `name` cannot hold the copy -- empty, FMPS_RATING itself, or not a
 // name every format can carry (plain ASCII, no '=') -- or nothing.
 [[nodiscard]] std::optional<std::string> rating_backup_tag_problem(std::string_view name);

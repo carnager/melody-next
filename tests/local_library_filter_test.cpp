@@ -117,7 +117,7 @@ int main(const int argc, char** argv) {
                                {"GENRE", "Jazz"},
                                {"DATE", "1959"},
                                {"REPLAYGAIN_TRACK_GAIN", "-6.02 dB"},
-                               {"TRACKKNIFE_RATING", "4"},
+                               {"MELODY_RATING", "4"},
                                {"MEDIA JUKEBOX-SCORE", "Fine"},
                                {"MUSICBRAINZ_TRACKID", "11111111-1111-1111-1111-111111111111"}});
     const auto rock = fixture(fixtures, root, "b.flac",
@@ -203,10 +203,10 @@ int main(const int argc, char** argv) {
     // A tag the library does not know is kept as it is spelled -- in lower
     // case, underscores, spaces and hyphens and all -- and found so: folded
     // as known names are, `trackkniferating` named nothing.
-    CHECK(paths_of("trackknife_rating PRESENT") == std::vector{jazz});
-    CHECK(paths_of("trackknife_rating MISSING").size() == 2U);
-    CHECK(paths_of("trackknife_rating IS 4") == std::vector{jazz});
-    CHECK(paths_of("trackknife_rating EQUAL 4") == std::vector{jazz});
+    CHECK(paths_of("melody_rating PRESENT") == std::vector{jazz});
+    CHECK(paths_of("melody_rating MISSING").size() == 2U);
+    CHECK(paths_of("melody_rating IS 4") == std::vector{jazz});
+    CHECK(paths_of("melody_rating EQUAL 4") == std::vector{jazz});
     CHECK(paths_of("\"media jukebox-score\" HAS fine") == std::vector{jazz});
     const auto no_mbid = paths_of("musicbrainz_trackid MISSING");
     CHECK(no_mbid.size() == 2U && contains(no_mbid, rock) && contains(no_mbid, bare));

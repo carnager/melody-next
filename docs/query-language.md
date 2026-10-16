@@ -85,7 +85,7 @@ Field names are index-canonical (lowercased, separators stripped), so
 
 A field is named as a known field folds -- `album artist`, `albumartist`
 and `ALBUM_ARTIST` are one -- or, for a tag the library does not know, as
-it is spelled, case aside: `trackknife_rating` finds `TRACKKNIFE_RATING`,
+it is spelled, case aside: `melody_rating` finds `MELODY_RATING`,
 and `"media jukebox-score"` a tag of that name.
 
 For multi-value fields:

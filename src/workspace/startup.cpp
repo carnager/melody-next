@@ -2,6 +2,7 @@
 
 #include "workspace/startup.hpp"
 
+#include "bench/settings_keys.hpp"
 #include "workspace/tab_store.hpp"
 
 #include "trackknife/core/engine_state.hpp"
@@ -29,8 +30,9 @@ namespace {
     for (auto index = parts.size() - 1; index >= 0 && index >= parts.size() - 2; --index) {
         if (parts[index] == name) {
             parts[index] = QStringLiteral("trackknife");
-        } else if (parts[index] == name + QStringLiteral(".conf")) {
-            parts[index] = QStringLiteral("trackknife.conf");
+        } else if (parts[index].startsWith(name + QLatin1Char('.'))) {
+            // The settings file, melody.conf or however its format names it.
+            parts[index] = QStringLiteral("trackknife") + parts[index].sliced(name.size());
         }
     }
     return parts.join(QLatin1Char('/'));
@@ -47,7 +49,16 @@ void adoptTrackknifeNames() {
                                                               !QFile::exists(new_settings) &&
                                                               QFile::exists(old_settings)) {
         QDir{}.mkpath(QFileInfo{new_settings}.absolutePath());
-        QFile::rename(old_settings, new_settings);
+        if (QFile::rename(old_settings, new_settings)) {
+            // The rating backup copy kept under the name it had by default
+            // then, so no file is written again for the new default.
+            QSettings settings;
+            if (settings.value(QLatin1String(SettingsKeys::rating_backup_key), false).toBool() &&
+                !settings.contains(QLatin1String(SettingsKeys::rating_backup_tag_key))) {
+                settings.setValue(QLatin1String(SettingsKeys::rating_backup_tag_key),
+                                  QStringLiteral("TRACKKNIFE_RATING"));
+            }
+        }
     }
     const auto new_data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (const QDir old_data{underOldName(new_data)};

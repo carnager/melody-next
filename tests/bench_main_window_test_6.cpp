@@ -868,7 +868,7 @@ void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
         writing->setChecked(true);
         QVERIFY(copy->isEnabled());
         copy->setChecked(true);
-        QCOMPARE(name->text(), QStringLiteral("TRACKKNIFE_RATING"));
+        QCOMPARE(name->text(), QStringLiteral("MELODY_RATING"));
         QVERIFY(note->isHidden());
         name->setText(QStringLiteral("COMMENT"));
         QVERIFY(!note->isHidden() && note->text().contains(QStringLiteral("official")));

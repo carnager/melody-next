@@ -37,8 +37,8 @@ Measured on 2026-10-16:
 - **Internal names**: about 7,000 -- the `trackknife::` namespace, include
   paths, CMake targets and aliases. 53 `TRACKKNIFE_*` names are CMake options,
   test and runtime environment variables.
-- **Written into files and exports**: the rating backup tag, by default
-  `TRACKKNIFE_RATING` (ADR-0245), the format names of tagging-script and
+- **Written into files and exports**: the rating backup tag, when turned on
+  by default `TRACKKNIFE_RATING` (ADR-0245), the format names of tagging-script and
   encoder-preset files, the embedded-artwork hash domain.
 - Nothing is released (no compatibility owed to old names), but three people
   use it: their settings and data move.
@@ -76,14 +76,14 @@ Measured on 2026-10-16:
 5. **Variables are renamed, without the old names.** Every `TRACKKNIFE_*`
    CMake option and environment variable becomes `MELODY_*`
    (`MELODY_STATE_DIR`, …); nothing released reads the old ones.
-6. **The rating backup tag has no default.** The copy of each rating in a
-   tag of the user's naming (ADR-0245) is off until a name is given; the
-   default `TRACKKNIFE_RATING` goes, and with it a product's name in users'
-   files. Someone who had the copy on under the old default keeps that name
-   as their own, once, so nothing is written anew. The format names of
-   exported tagging scripts and encoder presets and the artwork hash domain
-   stay: renaming them would make old exports unreadable or change every
-   hash.
+6. **The rating backup tag is `MELODY_RATING`.** The copy of each rating in
+   a tag of the user's naming (ADR-0245), when it is turned on, is named
+   `MELODY_RATING` unless named otherwise. `TRACKKNIFE_RATING` stays only for
+   compatibility: someone who had the copy on under that old default keeps
+   it as their own name, set once as their settings move, so no file is
+   written anew. The format names of exported tagging scripts and encoder
+   presets and the artwork hash domain stay: renaming them would make old
+   exports unreadable or change every hash.
 7. **Internal names stay**: the `trackknife::` namespace, include paths,
    targets and test names. They are renamed opportunistically, as Trackbench's
    are (AGENTS.md).
@@ -109,7 +109,7 @@ Measured on 2026-10-16:
 - The desktop entry, the window and the About box show the vinyl bird at
   16 px and up; About shows the blackbird, the version and the licence.
 - No user-visible string, desktop entry, MPRIS name or package says
-  Trackknife; `grep -r TRACKKNIFE_` finds nothing.
-- A fresh install writes no backup tag; one that had the copy on under the
+  Trackknife; `grep -r TRACKKNIFE_` finds only the compatibility name.
+- A backup copy turned on now is `MELODY_RATING`; one that was on under the
   old default still writes `TRACKKNIFE_RATING`, and no file is written for
-  the change.
+  the change (tested in `trackknife-names`).

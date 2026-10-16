@@ -110,6 +110,7 @@ class Statement {
                                  static_cast<std::size_t>(sqlite3_column_bytes(value_, column))};
     }
     sqlite3_int64 number(int column) const { return sqlite3_column_int64(value_, column); }
+    bool null(int column) const { return sqlite3_column_type(value_, column) == SQLITE_NULL; }
 
   private:
     void check(int result) {
@@ -2247,17 +2248,31 @@ core::Result<std::size_t> LocalLibrary::import_indexed_tag_ratings() {
     });
 }
 
-core::Result<std::vector<std::pair<std::string, unsigned>>>
-LocalLibrary::rated_tracks(const core::CancellationToken& cancellation) const {
+core::Result<std::vector<LocalLibrary::RatedTrack>>
+LocalLibrary::rated_tracks(const std::string_view field,
+                           const core::CancellationToken& cancellation) const {
     return checked([&] {
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
-        Statement select{db, "SELECT t.raw_path, r.rating FROM local_library_tracks t "
+        Statement select{db, "SELECT t.raw_path, t.rating_hash, r.rating, f.value "
+                             "FROM local_library_tracks t "
                              "JOIN local_ratings r ON r.hash=t.rating_hash "
-                             "WHERE t.rating_hash<>'' ORDER BY t.raw_path"};
-        std::vector<std::pair<std::string, unsigned>> rated;
+                             "LEFT JOIN local_library_fields f ON f.raw_path=t.raw_path "
+                             "AND f.canonical_name=? "
+                             "WHERE t.rating_hash<>'' ORDER BY t.raw_path, f.position"};
+        select.text(1, std::string{field});
+        std::vector<RatedTrack> rated;
         while (select.next()) {
-            rated.emplace_back(select.bytes(0), static_cast<unsigned>(select.number(1)));
+            auto raw_path = select.bytes(0);
+            if (rated.empty() || rated.back().raw_path != raw_path) {
+                rated.push_back(RatedTrack{.raw_path = std::move(raw_path),
+                                           .hash = select.bytes(1),
+                                           .rating = static_cast<unsigned>(select.number(2)),
+                                           .indexed = {}});
+            }
+            if (!select.null(3)) {
+                rated.back().indexed.push_back(select.bytes(3));
+            }
         }
         return rated;
     });

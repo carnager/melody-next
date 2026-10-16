@@ -37,6 +37,12 @@ class Workspace;
 // Writes go through the tagger's own plan and commit, journaled in the
 // engine's database and re-read into the library, one file at a time on a
 // thread of their own: rating is never held up by a file being written.
+//
+// Every rated track is visited when writing is turned on or the backup tag
+// named: the library knows what each file was read with, so only the files
+// whose tag does not hold their rating -- the backup tag, which only this
+// writes, or FMPS_RATING without one -- are opened at all, and a rating
+// given meanwhile is written first, between two of them.
 class RatingTags final {
   public:
     RatingTags(std::filesystem::path database, LocalCatalogue& catalogue, Workspace& workspace);
@@ -65,7 +71,8 @@ class RatingTags final {
     // A rating was stored: its files follow, when this is on.
     void rated(const std::string& hash, bool album, unsigned rating);
 
-    // Files still to write, and waiting until there are none (for tests).
+    // Files still to write -- a rating given, and each of a visit's -- and
+    // waiting until there are none (for tests).
     [[nodiscard]] std::size_t pending() const;
     void wait_idle();
 
@@ -80,18 +87,28 @@ class RatingTags final {
 
   private:
     struct Work {
-        // Nothing: every rated track.
-        std::optional<std::string> hash;
+        std::string hash;
         unsigned rating{0};
     };
+    struct Visit {
+        std::string raw_path;
+        std::string hash;
+    };
     void run();
+    // The files of every rated track whose tag does not hold its rating.
+    [[nodiscard]] std::deque<Visit> plan_visit(const std::string& backup,
+                                               const core::CancellationToken& token) const;
 
     std::filesystem::path database_;
     LocalCatalogue& catalogue_;
     Workspace& workspace_;
     mutable std::mutex mutex_;
     std::condition_variable changed_;
+    // Ratings given, before any visit's file.
     std::deque<Work> queue_;
+    // Every rated track to be looked at, and the files found to need it.
+    bool visit_wanted_{false};
+    std::deque<Visit> visit_;
     std::size_t in_flight_{0U};
     bool enabled_{false};
     std::string backup_tag_;

@@ -250,10 +250,18 @@ class LocalLibrary final {
     ratings(const std::vector<std::string>& hashes,
             const core::CancellationToken& cancellation = {}) const;
     // ADR-0237 stage 2: the files a track rating belongs to, and every rated
-    // track with its rating -- what writing ratings into tags visits.
+    // track with its rating -- what writing ratings into tags visits -- with
+    // the values its file was indexed with under `field` (a canonical name),
+    // so what already holds its rating is known without opening it.
     core::Result<std::vector<std::string>> rated_paths(const std::string& track_hash) const;
-    core::Result<std::vector<std::pair<std::string, unsigned>>>
-    rated_tracks(const core::CancellationToken& cancellation = {}) const;
+    struct RatedTrack {
+        std::string raw_path;
+        std::string hash;
+        unsigned rating{0};
+        std::vector<std::string> indexed;
+    };
+    core::Result<std::vector<RatedTrack>>
+    rated_tracks(std::string_view field, const core::CancellationToken& cancellation = {}) const;
     // For a library indexed before ratings were imported, and again when
     // the plain RATING scale changes: each unrated track takes the rating
     // its files' tags carry, from what was indexed. Returns how many were

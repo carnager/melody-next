@@ -155,13 +155,14 @@ core::Result<std::size_t> LocalCatalogue::import_indexed_tag_ratings() {
     return library->import_indexed_tag_ratings();
 }
 
-core::Result<std::vector<std::pair<std::string, unsigned>>>
-LocalCatalogue::rated_tracks(const core::CancellationToken& cancellation) const {
+core::Result<std::vector<persistence::LocalLibrary::RatedTrack>>
+LocalCatalogue::rated_tracks(const std::string_view field,
+                             const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    return library->rated_tracks(cancellation);
+    return library->rated_tracks(field, cancellation);
 }
 
 core::Result<std::vector<unsigned char>>

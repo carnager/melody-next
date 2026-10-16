@@ -4,6 +4,7 @@
 
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
@@ -201,13 +202,19 @@ void RatingTags::wait_idle() {
     });
 }
 
+std::string RatingTags::marked_field(const std::string_view backup) {
+    // As the library names what it read -- an unknown name in its own
+    // spelling, underscores and all -- not as a query folds it.
+    return metadata::resolve_text_property_identity(backup.empty() ? rating_field : backup)
+        .canonical_name;
+}
+
 std::deque<RatingTags::Visit> RatingTags::plan_visit(const std::string& backup,
                                                      const core::CancellationToken& token) const {
     std::deque<Visit> visit;
     // The backup tag is written by nothing else: holding the rating, the
     // file was written by this. Without one, FMPS_RATING says.
-    const auto field = metadata::canonicalize_field_name(backup.empty() ? rating_field : backup);
-    auto rated = catalogue_.rated_tracks(field, token);
+    auto rated = catalogue_.rated_tracks(marked_field(backup), token);
     if (!rated) {
         std::cerr << "melodyd: could not list the rated tracks: " << rated.error().message << "\n";
         return visit;

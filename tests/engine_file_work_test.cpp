@@ -935,6 +935,16 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
     require(in_file("FMPS_RATING") == std::vector<std::string>{"0.6"} &&
                 in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"6"},
             "the first visit writes the rating and its copy");
+    // And the library holds it under the name a visit asks for, so the next
+    // one knows the file without opening it.
+    const auto known =
+        catalogue.rated_tracks(engine::RatingTags::marked_field("TRACKKNIFE_RATING"));
+    require(known && known->size() == 1U && known->front().indexed == std::vector<std::string>{"6"},
+            "the library knows what the file holds");
+    const auto without = catalogue.rated_tracks(engine::RatingTags::marked_field(""));
+    require(without && without->size() == 1U &&
+                without->front().indexed == std::vector<std::string>{"0.6"},
+            "FMPS_RATING too");
 
     // Visited again: the file holds its rating, and is not opened to write.
     const auto written = bytes();

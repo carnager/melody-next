@@ -71,6 +71,10 @@ class RatingTags final {
     // A rating was stored: its files follow, when this is on.
     void rated(const std::string& hash, bool album, unsigned rating);
 
+    // The field a file's rating is known by in the library: the backup tag,
+    // which only this writes, else FMPS_RATING.
+    [[nodiscard]] static std::string marked_field(std::string_view backup);
+
     // Files still to write -- a rating given, and each of a visit's -- and
     // waiting until there are none (for tests).
     [[nodiscard]] std::size_t pending() const;

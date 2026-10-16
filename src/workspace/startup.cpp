@@ -2,6 +2,8 @@
 
 #include "workspace/startup.hpp"
 
+#include "workspace/tab_store.hpp"
+
 #include "trackknife/persistence/workspace_backup.hpp"
 
 #include <QDateTime>
@@ -63,6 +65,11 @@ QString applyPendingWorkspaceRestore() {
                         }
                     }
                 }
+            }
+            // ADR-0286: and the tabs kept beside it, the ones here set aside.
+            if (const auto tabs = pending + QStringLiteral(".tabs");
+                QDir{tabs}.exists() && !TabStore::restoreFrom(tabs)) {
+                settings_error += QStringLiteral("; the tabs could not be restored");
             }
             settings.remove(QStringLiteral("recovery/pending-workspace-restore"));
             settings.remove(QStringLiteral("recovery/pending-settings-restore"));

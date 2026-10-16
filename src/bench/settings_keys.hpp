@@ -65,6 +65,11 @@ struct SettingsKeys {
     // Whether this computer's library has a tab: someone whose music is all
     // on the remote engine may not want it.
     static constexpr auto library_show_local_key = "library/show-local";
+    // ADR-0286: the engine holding the library -- "local", or an engine
+    // elsewhere by its address. Unset, it is as library_show_local_key was:
+    // this computer's when shown, else the first engine elsewhere.
+    static constexpr auto library_engine_key = "library/engine";
+    static constexpr auto library_engine_local = "local";
     // ADR-0235: this computer's engine finds UPnP renderers and plays on them.
     static constexpr auto engine_upnp_key = "engine/upnp";
     static constexpr auto engine_share_key = "engine/share";
@@ -86,6 +91,9 @@ struct SettingsKeys {
     static constexpr int engine_stream_nearby_default = 0;
     static constexpr auto engine_stream_away_key = "engine/stream-away-kbps";
     static constexpr int engine_stream_away_default = 128;
+    // ADR-0286: the settings above are in this computer's engine's
+    // melodyd.conf, handed over once; after that each change is.
+    static constexpr auto engine_settings_in_config_key = "engine/settings-in-config";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";

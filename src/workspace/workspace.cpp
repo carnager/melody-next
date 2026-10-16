@@ -114,6 +114,17 @@ void Workspace::restoreFromTabStore() {
     connect(preparing, &QFutureWatcherBase::finished, this, [this, preparing] {
         preparing->deleteLater();
         restoreLists(preparing->future().takeResult());
+        // ADR-0286: a tab's rows that could not be read are kept aside, and
+        // said: for a tab that is no saved playlist they are its only copy.
+        if (const auto unreadable = tab_store_->takeUnreadable(); !unreadable.empty()) {
+            view_->showMessage(
+                QStringLiteral("%1 tab(s) could not be read and open empty; the files are kept "
+                               "as %2")
+                    .arg(unreadable.size())
+                    .arg(QStringList{unreadable.begin(), unreadable.end()}.join(
+                        QStringLiteral(", "))),
+                0);
+        }
         restoredWorkspace({});
     });
     preparing->setFuture(
@@ -122,9 +133,9 @@ void Workspace::restoreFromTabStore() {
             documents.reserve(tabs.size());
             for (const auto& tab : tabs) {
                 auto cached = store->readRows(tab.id);
-                // Its cache gone, a tab is empty until its engine answers -- and
-                // not edited: what was not saved went with the cache, and an
-                // empty list kept over the engine's would lose it all.
+                // Its rows gone, a tab is empty -- a saved playlist until its
+                // engine answers -- and not edited: an empty list kept over
+                // the engine's would lose it all.
                 auto document = cached.value_or(persistence::ListDocument{.id = tab.id,
                                                                           .kind = tab.kind,
                                                                           .name = tab.name,

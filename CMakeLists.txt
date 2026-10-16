@@ -128,6 +128,8 @@ add_subdirectory(src/core)
 if(TRACKKNIFE_CLI_ONLY)
     add_subdirectory(src/protocol)
     add_subdirectory(src/discovery)
+    # ADR-0286: melodyd.conf's settings, which melody-cli config checks by.
+    add_subdirectory(src/daemon)
     add_subdirectory(src/cli)
     if(TRACKKNIFE_BUILD_WATCH)
         add_subdirectory(src/watch)

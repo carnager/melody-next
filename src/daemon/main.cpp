@@ -11,6 +11,8 @@
 #include "agent/speaker_arbiter.hpp"
 #include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "config_methods.hpp"
+#include "settings.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #if TRACKKNIFE_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
@@ -43,11 +45,14 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <thread>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -81,6 +86,33 @@ void request_stop(int) {
     }
     return true;
 }
+
+// ADR-0286: the socket systemd listens on for this engine (melodyd.socket),
+// handed over as descriptor 3 -- sd_listen_fds(3), read without libsystemd.
+// The variables go, so nothing this engine starts takes them for its own.
+[[nodiscard]] std::optional<int> activated_socket() {
+    const auto* pid = trackknife::core::environment_variable("LISTEN_PID");
+    const auto* fds = trackknife::core::environment_variable("LISTEN_FDS");
+    std::optional<int> socket;
+    if (pid != nullptr && fds != nullptr && std::string_view{pid} == std::to_string(::getpid()) &&
+        std::string_view{fds} != "0") {
+        constexpr int first = 3;
+        if (struct stat info{}; ::fstat(first, &info) == 0 && S_ISSOCK(info.st_mode)) {
+            socket = first;
+        }
+    }
+    ::unsetenv("LISTEN_PID");
+    ::unsetenv("LISTEN_FDS");
+    ::unsetenv("LISTEN_FDNAMES");
+    return socket;
+}
+
+// ADR-0286: how the engine ended. A stop asked for with engine.stop exits
+// with stopped_on_request, which melodyd.service does not restart after
+// (RestartPreventExitStatus); every other end -- engine.restart among them --
+// is restarted.
+constexpr int stopped_on_request = 64;
+std::atomic_int exit_status{EXIT_SUCCESS};
 
 void wait_for_stop() {
     char byte = 0;
@@ -185,16 +217,24 @@ constexpr const char* default_http = "0.0.0.0:6604";
 
 void usage() {
     std::cerr
-        << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT | --local-only]\n"
+        << "usage: melodyd [--config FILE] [--socket PATH] [--state DIR]\n"
+        << "               [--listen HOST:PORT | --local-only]\n"
         << "               [--name NAME] [--password PASS | --password-file FILE]\n"
         << "               [--http HOST:PORT] [--music-root DIR]\n"
         << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
         << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
         << "                [--play-for-music-root DIR]\n"
         << "                [--play-for-bitrate-nearby KBPS] [--play-for-bitrate-away KBPS]]\n"
-        << "               [--agent [--agent-password PASS] [--agent-music-root DIR]\n"
-        << "                [--agent-bitrate-nearby KBPS] [--agent-bitrate-away KBPS]]\n"
+        << "               [--agent | --no-agent] [--agent-password PASS]\n"
+        << "               [--agent-music-root DIR]\n"
+        << "               [--agent-stream-home STREAM] [--agent-stream-away STREAM]\n"
         << "\n"
+        << "Every option but --config and --play-for can be set in melodyd.conf, as\n"
+        << "\"name = gemenon\" -- \"agent = yes\" for a switch -- and an engine played for\n"
+        << "as an [engine NAME] section with its address. An option given here wins.\n"
+        << "\n"
+        << "  --config FILE  the settings to read (default $MELODYD_CONFIG, else\n"
+        << "                 " << trackknife::daemon::default_config_path().string() << ")\n"
         << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
         << "  --state DIR    where the database lives (default\n"
         << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
@@ -245,16 +285,21 @@ void usage() {
         << "                 network, and when it is reached through a VPN or a router:\n"
         << "                 0 for the original files, else Opus at 16 to 512 kbps\n"
         << "                 (default: 0 nearby, 128 away; ADR-0239)\n"
-        << "  --agent        play for every other engine found on the network, on this\n"
+        << "  --agent, --no-agent\n"
+        << "                 play for every other engine found on the network, on this\n"
         << "                 machine's speakers: no melody-agent needed. Engines listening\n"
         << "                 on the network (--listen) announce themselves to be found.\n"
+        << "                 On by default when this engine has a password.\n"
         << "  --agent-password PASS, --agent-password-file FILE\n"
         << "                 for the engines it plays for (default: --play-for's, else\n"
         << "                 this engine's own)\n"
         << "  --agent-music-root DIR\n"
         << "                 where their music is mounted here; without one it streams\n"
-        << "  --agent-bitrate-nearby KBPS, --agent-bitrate-away KBPS\n"
-        << "                 as --play-for-bitrate-*, for the engines found\n"
+        << "  --agent-stream-home STREAM, --agent-stream-away STREAM\n"
+        << "                 what is asked streamed here on this machine's own network,\n"
+        << "                 and through a VPN or a router: original, or opus and a bit\n"
+        << "                 rate from 16 to 512 (default: original at home, opus 128\n"
+        << "                 away; ADR-0239)\n"
         << "\n"
         << "Speaks protocol v1: one JSON object per line. Try:\n"
         << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -284,135 +329,59 @@ int main(int argc, char** argv) {
     // A client hanging up must not take the engine with it.
     std::signal(SIGPIPE, SIG_IGN);
 
-    auto socket_path = default_socket_path();
-    auto state_directory = default_state_directory();
-    std::string listen_address;
-    std::string http_address;
-    std::uint64_t transcode_cache_mb = 2048;
-    bool local_only = false;
-#if TRACKKNIFE_ENABLE_UPNP
-    bool upnp_enabled = false;
-    std::string upnp_interface;
-#endif
-    std::string password;
-    std::string password_file;
-    std::string engine_name;
-    std::optional<std::filesystem::path> music_root;
-    // ADR-0234: engines this one plays for by address, each on these
-    // speakers; `--play-for-*` after one applies to it, before any to all.
-    struct PlayFor {
-        std::string address;
-        std::string name;
-        std::string password;
-        std::string password_file;
-        std::optional<std::filesystem::path> music_root;
-        // ADR-0239: kbps asked streamed nearby and away; 0 the original.
-        std::optional<int> nearby_kbps;
-        std::optional<int> away_kbps;
-    };
-    std::vector<PlayFor> play_fors;
-    PlayFor play_for_defaults;
-    const auto play_for_option = [&play_fors, &play_for_defaults]() -> PlayFor& {
-        return play_fors.empty() ? play_for_defaults : play_fors.back();
-    };
-    bool agent_for_all = false;
-    std::string agent_password;
-    std::string agent_password_file;
-    std::optional<std::filesystem::path> agent_music_root;
-    std::optional<int> agent_nearby_kbps;
-    std::optional<int> agent_away_kbps;
-
-    for (int index = 1; index < argc; ++index) {
-        const std::string_view argument{argv[index]};
-        const auto value = [&]() -> std::string {
-            return index + 1 < argc ? argv[++index] : std::string{};
-        };
-        if (argument == "--socket") {
-            socket_path = value();
-        } else if (argument == "--state") {
-            state_directory = value();
-        } else if (argument == "--listen") {
-            listen_address = value();
-        } else if (argument == "--local-only") {
-            local_only = true;
-        } else if (argument == "--name") {
-            engine_name = value();
-        } else if (argument == "--password") {
-            password = value();
-        } else if (argument == "--password-file") {
-            password_file = value();
-#if TRACKKNIFE_ENABLE_UPNP
-        } else if (argument == "--upnp") {
-            upnp_enabled = true;
-        } else if (argument == "--upnp-interface") {
-            upnp_interface = value();
-            upnp_enabled = true;
-#endif
-        } else if (argument == "--http") {
-            http_address = value();
-        } else if (argument == "--transcode-cache") {
-            const auto text = value();
-            try {
-                transcode_cache_mb = std::stoull(text);
-            } catch (const std::exception&) {
-                std::cerr << "melodyd: --transcode-cache wants megabytes, got " << text << "\n";
-                return EXIT_FAILURE;
-            }
-        } else if (argument == "--music-root") {
-            music_root = std::filesystem::path{value()};
-        } else if (argument == "--play-for") {
-            play_fors.push_back(PlayFor{.address = value(),
-                                        .name = {},
-                                        .password = {},
-                                        .password_file = {},
-                                        .music_root = {},
-                                        .nearby_kbps = {},
-                                        .away_kbps = {}});
-        } else if (argument == "--play-for-name") {
-            play_for_option().name = value();
-        } else if (argument == "--play-for-password") {
-            play_for_option().password = value();
-        } else if (argument == "--play-for-password-file") {
-            play_for_option().password_file = value();
-        } else if (argument == "--agent") {
-            agent_for_all = true;
-        } else if (argument == "--agent-password") {
-            agent_password = value();
-        } else if (argument == "--agent-password-file") {
-            agent_password_file = value();
-        } else if (argument == "--agent-music-root") {
-            agent_music_root = std::filesystem::path{value()};
-        } else if (argument == "--play-for-music-root") {
-            play_for_option().music_root = std::filesystem::path{value()};
-        } else if (argument == "--play-for-bitrate-nearby" ||
-                   argument == "--play-for-bitrate-away" || argument == "--agent-bitrate-nearby" ||
-                   argument == "--agent-bitrate-away") {
-            const auto text = value();
-            const auto kbps = trackknife::agent::parse_kbps(text);
-            if (!kbps) {
-                std::cerr << "melodyd: " << argument
-                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text
-                          << "\n";
-                return EXIT_FAILURE;
-            }
-            if (argument == "--play-for-bitrate-nearby") {
-                play_for_option().nearby_kbps = *kbps;
-            } else if (argument == "--play-for-bitrate-away") {
-                play_for_option().away_kbps = *kbps;
-            } else if (argument == "--agent-bitrate-nearby") {
-                agent_nearby_kbps = *kbps;
-            } else {
-                agent_away_kbps = *kbps;
-            }
-        } else if (argument == "--help" || argument == "-h") {
+    // ADR-0286: melodyd.conf, then the command line over it.
+    const std::vector<std::string_view> arguments(argv + 1, argv + argc);
+    trackknife::daemon::Settings defaults;
+    defaults.socket_path = default_socket_path();
+    defaults.state_directory = default_state_directory();
+    auto given = trackknife::daemon::read_settings(arguments, std::move(defaults));
+    if (!given) {
+        std::cerr << "melodyd: " << given.error().message << "\n";
+        if (given.error().message.starts_with("unrecognised argument")) {
+            std::cerr << "\n";
             usage();
-            return EXIT_SUCCESS;
-        } else {
-            std::cerr << "melodyd: unrecognised argument " << argument << "\n\n";
-            usage();
-            return EXIT_FAILURE;
         }
+        return EXIT_FAILURE;
     }
+    if (given->help) {
+        usage();
+        return EXIT_SUCCESS;
+    }
+    auto& settings = *given;
+    for (const auto& note : settings.notes) {
+        std::cerr << "melodyd: " << note << "\n";
+    }
+    if (settings.config_file) {
+        std::cerr << "melodyd: settings from " << settings.config_file->string() << "\n";
+    }
+    auto& socket_path = settings.socket_path;
+    auto& state_directory = settings.state_directory;
+    auto& listen_address = settings.listen_address;
+    auto& http_address = settings.http_address;
+    const auto transcode_cache_mb = settings.transcode_cache_mb;
+    auto& local_only = settings.local_only;
+#if TRACKKNIFE_ENABLE_UPNP
+    const bool upnp_enabled = settings.upnp_enabled;
+    const auto& upnp_interface = settings.upnp_interface;
+#else
+    if (settings.upnp_enabled) {
+        std::cerr << "melodyd: built without UPnP; upnp is left out\n";
+    }
+#endif
+    auto& password = settings.password;
+    auto& password_file = settings.password_file;
+    auto& engine_name = settings.engine_name;
+    auto& music_root = settings.music_root;
+    using trackknife::daemon::PlayFor;
+    auto& play_fors = settings.play_fors;
+    auto& play_for_defaults = settings.play_for_defaults;
+    auto& agent_password = settings.agent_password;
+    auto& agent_password_file = settings.agent_password_file;
+    auto& agent_music_root = settings.agent_music_root;
+    const auto agent_nearby_kbps = settings.agent_nearby_kbps;
+    const auto agent_away_kbps = settings.agent_away_kbps;
+    // ADR-0286: the [engine NAME] sections, each password file read below.
+    auto& listed_engines = settings.engines;
 
     std::vector<std::pair<std::string*, std::string*>> password_files{
         {&password_file, &password},
@@ -420,6 +389,9 @@ int main(int argc, char** argv) {
         {&agent_password_file, &agent_password}};
     for (auto& target : play_fors) {
         password_files.emplace_back(&target.password_file, &target.password);
+    }
+    for (auto& engine : listed_engines) {
+        password_files.emplace_back(&engine.password_file, &engine.password);
     }
     for (const auto& [file, password_read] : password_files) {
         if (file->empty()) {
@@ -439,6 +411,9 @@ int main(int argc, char** argv) {
                      "connection must give it (ADR-0223)\n";
         return EXIT_FAILURE;
     }
+    // ADR-0286: every engine plays for every other, given the password they
+    // share; without one no other engine would take it.
+    const bool agent_for_all = settings.agent.value_or(!password.empty());
     // One password set everywhere is the usual case, as for --agent-password.
     if (play_for_defaults.password.empty()) {
         play_for_defaults.password = password;
@@ -552,8 +527,13 @@ int main(int argc, char** argv) {
     // here and over the network knows it is one engine, and one that stores
     // the id finds it again after a restart (ADR-0234).
     const auto engine_id = stable_engine_id(state_directory);
+    // ADR-0286: started by a service manager -- systemd's socket or unit --
+    // so a client knows it is not one an older Trackknife started itself.
+    const auto activated = activated_socket();
+    const bool service =
+        activated.has_value() || trackknife::core::environment_variable("INVOCATION_ID") != nullptr;
     dispatcher.on("engine.info",
-                  [&engine_name, engine_id](const trackknife::protocol::Json&)
+                  [&engine_name, engine_id, service](const trackknife::protocol::Json&)
                       -> trackknife::core::Result<trackknife::protocol::Json> {
                       // ADR-0260: what it speaks, for a client to decide
                       // once whether and how it can work with it.
@@ -562,10 +542,23 @@ int main(int argc, char** argv) {
                           {"id", engine_id},
                           {"protocol", trackknife::protocol::protocol_version},
                           {"level", trackknife::protocol::protocol_level},
-                          {"release", TRACKKNIFE_RELEASE}};
+                          {"release", TRACKKNIFE_RELEASE},
+                          {"service", service}};
                   });
+    // ADR-0286: its melodyd.conf over the protocol, and a restart to use it:
+    // a stop, answered first, for the service manager to start it again.
+    trackknife::daemon::register_config_methods(
+        dispatcher, settings,
+        [](const bool for_good) {
+            exit_status.store(for_good ? stopped_on_request : EXIT_SUCCESS);
+            std::thread{[] {
+                std::this_thread::sleep_for(std::chrono::milliseconds{200});
+                request_stop(0);
+            }}.detach();
+        });
 
-    auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
+    auto server = activated ? trackknife::engine::Server::adopt(*activated, dispatcher)
+                            : trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
         std::cerr << "melodyd: could not listen on " << socket_path.string() << ": "
                   << server.error().message << "\n";
@@ -957,8 +950,38 @@ int main(int argc, char** argv) {
 
     // This run's identity among engines on the network: what an engine that
     // plays for others looks for, so it does not play for itself.
+    // ADR-0286: listed engines, played for -- by their address while the
+    // network does not find them -- or left out.
+    std::vector<trackknife::agent::ListedEngine> listed;
+    for (const auto& engine : listed_engines) {
+        std::optional<trackknife::protocol::Endpoint> address;
+        if (engine.address) {
+            address = trackknife::protocol::Endpoint::parse(*engine.address, engine.password);
+            if (!address || !address->tcp()) {
+                std::cerr << "melodyd: " << engine.where << ": [engine " << engine.name
+                          << "] wants its address as HOST:PORT, got " << *engine.address << "\n";
+                return EXIT_FAILURE;
+            }
+        }
+        std::optional<trackknife::agent::StreamChoice> stream;
+        if (engine.nearby_kbps || engine.away_kbps) {
+            stream = stream_choice(engine.nearby_kbps ? engine.nearby_kbps : agent_nearby_kbps,
+                                   engine.away_kbps ? engine.away_kbps : agent_away_kbps);
+        }
+        listed.push_back(trackknife::agent::ListedEngine{
+            .name = engine.name,
+            .address = std::move(address),
+            .music_root = engine.music_root,
+            .stream = std::move(stream),
+            .password = engine.password,
+            // An engine listed with its address is one to play for; one
+            // without is played for as every other is, unless it says.
+            .play = engine.agent.value_or(engine.address.has_value() || agent_for_all)});
+    }
+    const bool any_listed_played = std::ranges::any_of(
+        listed, [](const auto& engine) { return engine.play && engine.address; });
     std::unique_ptr<trackknife::agent::Guests> guests;
-    if (agent_for_all) {
+    if (agent_for_all || any_listed_played) {
         if (!arbiter) {
             arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(player.get());
         }
@@ -981,7 +1004,9 @@ int main(int argc, char** argv) {
                         }
                         return addresses;
                     }(),
-                .stream = stream_choice(agent_nearby_kbps, agent_away_kbps)},
+                .stream = stream_choice(agent_nearby_kbps, agent_away_kbps),
+                .listed = std::move(listed),
+                .play_found = agent_for_all},
             *arbiter);
     }
     // Listening on the network, it says so there: agents and clients find it
@@ -1071,5 +1096,5 @@ int main(int argc, char** argv) {
         tcp_server->stop();
     }
     (*server)->stop();
-    return EXIT_SUCCESS;
+    return exit_status.load();
 }

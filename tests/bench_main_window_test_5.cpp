@@ -49,9 +49,13 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));
     }
-    // Named by what the engine calls itself -- here its machine's name, as
-    // it was started without one -- rather than by its socket or address.
-    QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());
+    // "Library", the engine named in its tooltip by what it calls itself --
+    // here its machine's name, as it was started without one -- rather than
+    // by its socket or address.
+    QCOMPARE(sources->tabText(sources->count() - 1), QStringLiteral("Library"));
+    QTRY_VERIFY(
+        sources->tabToolTip(sources->count() - 1)
+            .startsWith(QStringLiteral("The library on %1").arg(QSysInfo::machineHostName())));
     // And the library says so too, not the address.
     QTRY_COMPARE(window.remoteCatalogue()->describe(),
                  QStringLiteral("Library: %1").arg(QSysInfo::machineHostName()));
@@ -497,6 +501,116 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.localCatalogue()->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+// ADR-0286: with the library on another engine, the tagger's Move offers
+// its folders for this computer's files: moved there through the mount --
+// here the same path -- and taken into that engine's library.
+void BenchMainWindowTest::thisComputersFilesMoveIntoTheLibrary() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    const auto here = media.filePath(QStringLiteral("here.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), here));
+    const auto raw = [](const QString& path) {
+        const auto encoded = QFile::encodeName(path);
+        return std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    };
+    // The remote holds the library.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QVERIFY(window.remoteCatalogue()->open()->add_root(raw(music)).has_value());
+    const auto* library = window.workspace_.libraryElsewhere();
+    QVERIFY(library != nullptr && library->browser);
+    library->browser->reload();
+    QTRY_VERIFY(!library->browser->rootPaths().empty());
+    bool layout_saved = false;
+    window.persistence_->saveOutputLayoutProfile(
+        persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::OutputLayoutProfile{
+                    .schema_version = 1U,
+                    .name = "Added",
+                    .dialect = {},
+                    .relative_directory_expression = "Added",
+                    .basename_expression = "moved",
+                    .sanitization_policy = {"linux", 1U},
+                },
+        },
+        [&layout_saved](const QString& error) { layout_saved = error.isEmpty(); });
+    QTRY_VERIFY(layout_saved);
+
+    window.openLocalPaths({raw(here)});
+    Workspace::ListTab* tab = nullptr;
+    QTRY_VERIFY((tab = [&window]() -> Workspace::ListTab* {
+                    for (auto& candidate : window.list_tabs_) {
+                        if (EngineKey::of(candidate->document).isLocal() &&
+                            candidate->model->rowCount() == 1) {
+                            return candidate.get();
+                        }
+                    }
+                    return nullptr;
+                }()) != nullptr);
+    window.tabs_->setCurrentWidget(tab->view);
+    QTRY_VERIFY_WITH_TIMEOUT(tab->model->rows().front().probed, 5'000);
+    tab->view->selectionModel()->select(
+        tab->model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    properties_action->trigger();
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    auto* tagger = properties->findChild<TaggerSession*>();
+    QVERIFY(tagger != nullptr);
+    QTRY_VERIFY(tagger->layoutsAvailable());
+    const auto layouts = tagger->layouts();
+    const auto layout =
+        std::ranges::find(layouts, QStringLiteral("Added"), &TaggerSession::Choice::name);
+    QVERIFY(layout != layouts.end());
+    tagger->selectLayout(static_cast<int>(std::distance(layouts.begin(), layout)));
+
+    // The library's folder is offered, by the engine holding it.
+    const auto choices = tagger->destinations();
+    const auto offered =
+        std::ranges::find_if(choices, [&music](const TaggerSession::Choice& choice) {
+            return choice.name.startsWith(QStringLiteral("Library on ")) &&
+                   choice.name.endsWith(music);
+        });
+    QVERIFY2(offered != choices.end(),
+             qPrintable(choices.empty() ? QString{} : choices.back().name));
+    tagger->selectDestination(static_cast<int>(std::distance(choices.begin(), offered)));
+    tagger->chooseRename(true);
+    tagger->chooseMove(true);
+    QVERIFY2(tagger->moveAvailable(), qPrintable(tagger->moveTooltip()));
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QTRY_VERIFY(apply->isEnabled());
+    QTest::mouseClick(apply, Qt::LeftButton);
+
+    // Moved into the library's folder, and the library has it.
+    const auto target = music + QStringLiteral("/Added/moved.flac");
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(target), 10'000);
+    QVERIFY(!QFile::exists(here));
+    const auto in_library = [&window, &raw, &target] {
+        persistence::LibraryQuery lookup;
+        lookup.kind = persistence::LibraryEntryKind::track;
+        lookup.raw_path = raw(target);
+        lookup.limit = 1;
+        const auto found = window.remoteCatalogue()->open()->query(lookup);
+        return found && found->entries.size() == 1U;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(in_library(), 10'000);
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
 void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {

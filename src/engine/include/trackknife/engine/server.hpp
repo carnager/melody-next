@@ -38,6 +38,12 @@ class Server final {
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen(std::filesystem::path socket_path, protocol::Dispatcher& dispatcher);
 
+    // ADR-0286: a socket already listening, handed over by the service
+    // manager (systemd socket activation). Its file is the manager's, so it
+    // is left in place when the server stops.
+    [[nodiscard]] static core::Result<std::unique_ptr<Server>>
+    adopt(int listener, protocol::Dispatcher& dispatcher);
+
     // ADR-0223: a TCP listener. A connection must give the password through
     // session.authenticate before anything else. An empty password is
     // refused: there is no open TCP listener. Port 0 asks for an ephemeral

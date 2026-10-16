@@ -54,6 +54,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QSysInfo>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -151,8 +152,14 @@ void BenchMainWindow::buildWorkspace() {
     };
     local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),
                                           QStringLiteral("Local music source"));
-    local_source_tabs_->addTab(QStringLiteral("Folders"));
+    // ADR-0286: "This computer" -- its folders, not an engine's -- and the
+    // library, named by the engine holding it.
+    local_source_tabs_->addTab(QIcon::fromTheme(QStringLiteral("computer")),
+                               QStringLiteral("This computer"));
+    local_source_tabs_->setTabToolTip(
+        0, QStringLiteral("Folders on this computer, %1").arg(QSysInfo::machineHostName()));
     local_source_tabs_->addTab(QStringLiteral("Library"));
+    local_source_tabs_->setTabToolTip(1, QStringLiteral("The library on this computer"));
     heading_row->addWidget(local_source_tabs_, 1);
     // Remembered only when chosen: tabs appearing, hiding or being switched
     // by the window itself do not change what the user asked for.
@@ -952,41 +959,30 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return existing;
         }
     }
-    // Every engine's music folders, one at a time: the same folders its
+    // ADR-0286: every engine's music folders, a page each, naming the engine
+    // it is of ("local", or its address) and what is known of it: the
+    // Engines page shows the one holding the library. The same folders its
     // library's Folders… opens.
     std::function<QWidget*(QWidget*)> library_folders;
     if (std::ranges::any_of(engines_,
                             [](const auto& engine) { return engine->library != nullptr; })) {
         library_folders = [this](QWidget* parent) -> QWidget* {
-            auto* widget = new QWidget(parent);
-            auto* layout = new QVBoxLayout(widget);
-            layout->setContentsMargins(0, 0, 0, 0);
-            auto* row = new QHBoxLayout;
-            auto* label = new QLabel(tr("Engine:"), widget);
-            auto* picker = new QComboBox(widget);
-            picker->setObjectName(QStringLiteral("bench-settings-library-engine"));
-            picker->setAccessibleName(tr("Engine whose music folders are shown"));
-            row->addWidget(label);
-            row->addWidget(picker);
-            row->addStretch(1);
-            layout->addLayout(row);
-            auto* folders = new QStackedWidget(widget);
+            auto* pages = new QWidget(parent);
             for (const auto& engine : engines_) {
                 if (engine->library == nullptr) {
                     continue;
                 }
-                picker->addItem(engine->key.isLocal() ? tr("This computer")
-                                                      : engineName(engine->key),
-                                engine->key.text());
-                folders->addWidget(engine->library->createFoldersWidget(folders));
+                auto* folders = engine->library->createFoldersWidget(pages);
+                folders->setProperty("engine-address",
+                                  engine->key.isLocal()
+                                      ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                      : engine->setting.address);
+                folders->setProperty("engine-state",
+                                  engine->catalogue != nullptr && engine->catalogue->reachable()
+                                      ? tr("connected")
+                                      : tr("not reached"));
             }
-            // One engine: nothing to choose.
-            label->setVisible(picker->count() > 1);
-            picker->setVisible(picker->count() > 1);
-            connect(picker, &QComboBox::currentIndexChanged, folders,
-                    &QStackedWidget::setCurrentIndex);
-            layout->addWidget(folders, 1);
-            return widget;
+            return pages;
         };
     }
     // ADR-0266: where each engine keeps its undo copies, asked of it.
@@ -1044,6 +1040,13 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
         workspace_.settingsSaved(sharing);
         applyLocalLibraryVisibility();
+        // ADR-0286: which engine holds the library decides how tabs are
+        // marked and ordered.
+        for (const auto& tab : list_tabs_) {
+            refreshTabChrome(*tab);
+            refreshEmptyMessage(*tab);
+        }
+        keepTabGroupsTogether();
         applyListsDisplay();
         if (notifications_action_)
             notifications_action_->setChecked(

@@ -2,36 +2,46 @@
 
 #include "bench_main_window_test.hpp"
 
+#include "workspace/sources.hpp"
+
+#include <QGroupBox>
+#include <QMessageBox>
+
+#include <sqlite3.h>
+
 namespace trackknife::bench {
 
 // ADR-0234: pending removals are kept by engine key now; one an older release
-// left as "l:<id>" is still carried out on connecting.
+// left as "l:<id>" is still carried out on connecting. ADR-0286: it named a
+// working list, which the engine has set aside since -- so it is let go of,
+// and touches no saved playlist.
 void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
-    const auto made =
-        (*engine)->call("list.save", protocol::Json{{"name", "Closed long ago"},
-                                                    {"kind", "working"},
+    const auto kept =
+        (*engine)->call("list.save", protocol::Json{{"name", "Kept"},
+                                                    {"kind", "saved"},
                                                     {"items", protocol::Json::array()}});
-    QVERIFY(made.has_value());
-    const auto id = made->value("id", std::string{});
+    QVERIFY(kept.has_value());
+    const auto kept_id = kept->value("id", std::string{});
+    const auto gone_id = core::StableId::random().to_string();
     QSettings{}.setValue(QStringLiteral("lists/pending-removals"),
-                         QStringList{QStringLiteral("l:") + QString::fromStdString(id)});
-    const auto listed = [&engine, &id] {
+                         QStringList{QStringLiteral("l:") + QString::fromStdString(gone_id)});
+    const auto listed = [&engine](const std::string& id) {
         auto all = (*engine)->call("list.all");
         return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
                                           [&id](const protocol::Json& list) {
                                               return list.value("id", std::string{}) == id;
                                           });
     };
-    QVERIFY(listed());
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(!listed());
     QTRY_VERIFY(
         QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    QVERIFY(listed(kept_id));
+    QVERIFY((*engine)->call("list.delete", protocol::Json{{"id", kept_id}}).has_value());
     (*engine)->close();
 }
 
@@ -252,31 +262,59 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-add"));
     auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-remove"));
     QVERIFY(list && address && folder && reachable && add && remove);
-    QCOMPARE(list->count(), 1);
+    // ADR-0286: this computer first, then the engines elsewhere, each with
+    // its "holds the library" choice.
+    const auto row = [list](const int index) {
+        auto* holder = qobject_cast<QRadioButton*>(list->itemWidget(list->item(index)));
+        return holder != nullptr ? holder->text() : QString{};
+    };
+    QCOMPARE(list->count(), 2);
+    QVERIFY(row(0).startsWith(QStringLiteral("This computer")));
+    QVERIFY(row(1).startsWith(QStringLiteral("192.0.2.10:6603")));
     QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
     QCOMPARE(folder->text(), QStringLiteral("/mnt/nas/Music"));
 
     // One more, filled in.
     add->click();
-    QCOMPARE(list->count(), 2);
+    QCOMPARE(list->count(), 3);
     QVERIFY(address->text().isEmpty());
     address->setText(QStringLiteral("192.0.2.20:6603"));
     folder->setText(QStringLiteral("/srv/music"));
     reachable->setText(QStringLiteral("/media/desktop"));
-    QCOMPARE(list->item(1)->text(), QStringLiteral("192.0.2.20:6603"));
+    QVERIFY(row(2).startsWith(QStringLiteral("192.0.2.20:6603")));
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-engines.png")));
     }
     // Back to the first: its fields, untouched.
-    list->setCurrentRow(0);
+    list->setCurrentRow(1);
     QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
     QVERIFY(reachable->text().isEmpty());
+    // This computer chosen: nothing of an engine elsewhere to edit or remove.
+    list->setCurrentRow(0);
+    QVERIFY(!remove->isEnabled());
+    QVERIFY(!address->isVisibleTo(dialog));
+    list->setCurrentRow(2);
+    QVERIFY(remove->isEnabled());
     // A third, left empty, and removed again.
     add->click();
-    QCOMPARE(list->count(), 3);
+    QCOMPARE(list->count(), 4);
     remove->click();
-    QCOMPARE(list->count(), 2);
+    QCOMPARE(list->count(), 3);
+    // The second engine elsewhere holds the library; its folders are shown.
+    auto* holder = qobject_cast<QRadioButton*>(list->itemWidget(list->item(2)));
+    QVERIFY(holder != nullptr);
+    holder->click();
+    const auto folders_title = [dialog] {
+        for (auto* box : dialog->findChildren<QGroupBox*>()) {
+            if (box->title().startsWith(QStringLiteral("Music folders of "))) {
+                return box->title();
+            }
+        }
+        return QString{};
+    };
+    QCOMPARE(folders_title(), QStringLiteral("Music folders of 192.0.2.20:6603"));
+    QVERIFY(row(2).endsWith(QStringLiteral("holds the library")));
 
     QPointer<SettingsDialog> lifetime = dialog;
     dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
@@ -291,6 +329,48 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     QCOMPARE(saved[1].music_folder, QStringLiteral("/srv/music"));
     QCOMPARE(saved[1].reachable_at, QStringLiteral("/media/desktop"));
     QVERIFY(saved[1].id.isEmpty());
+    QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::library_engine_key)).toString(),
+             QStringLiteral("192.0.2.20:6603"));
+    QCOMPARE(libraryEngine(), QStringLiteral("192.0.2.20:6603"));
+    QVERIFY(!localLibraryShown());
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_key));
+    saveRemoteEngines({});
+}
+
+// ADR-0286: one password for every engine. One of its own kept from before
+// still works, is said under Advanced, and can go.
+void BenchMainWindowTest::anEnginesOwnPasswordIsSaidAndCanGo() {
+    QSettings{}.setValue(QLatin1String(SettingsDialog::engine_password_key),
+                         QStringLiteral("shared"));
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = QStringLiteral("its own"),
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}}});
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    QVERIFY(dialog != nullptr);
+    auto* list = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-engines"));
+    auto* own = dialog->findChild<QWidget*>(QStringLiteral("bench-settings-engine-own-password"));
+    auto* drop =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-own-password-drop"));
+    QVERIFY(list && own && drop);
+    list->setCurrentRow(1);
+    QVERIFY(own->isVisibleTo(own->parentWidget()));
+    drop->click();
+    QVERIFY(!own->isVisibleTo(own->parentWidget()));
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    const auto saved = loadRemoteEngines();
+    QCOMPARE(saved.size(), std::size_t{1});
+    QVERIFY(saved[0].password.isEmpty());
+    QCOMPARE(saved[0].effectivePassword(), QStringLiteral("shared"));
+    QSettings{}.remove(QLatin1String(SettingsDialog::engine_password_key));
     saveRemoteEngines({});
 }
 
@@ -2206,6 +2286,181 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QCOMPARE(status.count(), 1);
     QVERIFY(
         status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
+}
+
+// ADR-0286: the working lists an engine set aside when tabs became the
+// window's are offered once; opened, they are tabs of this window -- never
+// sent back -- and gone from the engine.
+void BenchMainWindowTest::listsLeftOnTheEngineAreOfferedOnce() {
+    engine_.stop();
+    QTemporaryDir state;
+    QVERIFY(state.isValid());
+    const auto folder = std::filesystem::path{state.path().toStdString()};
+    testing::TestEngine own;
+    QVERIFY2(own.start(folder), own.log().constData());
+    own.stop();
+    // As schema 56 sets a working list aside, written where it keeps them.
+    const auto list = core::StableId::random().to_string();
+    const auto first = core::StableId::random().to_string();
+    const auto second = core::StableId::random().to_string();
+    {
+        sqlite3* database = nullptr;
+        QCOMPARE(sqlite3_open((folder / "lists.sqlite").c_str(), &database), SQLITE_OK);
+        const auto sql =
+            "INSERT INTO retired_engine_lists(id, name, kind, revision, created_ms, modified_ms, "
+            "draft_of, draft_base) VALUES('" + list + "', CAST('Left over' AS BLOB), 0, 3, 1, 1, "
+            "NULL, 0);"
+            "INSERT INTO retired_engine_list_items(list_id, position, entry_id, raw_path, "
+            "duration_ms, title, artist, album) VALUES"
+            "('" + list + "', 0, '" + first + "', CAST('/music/left/one.flac' AS BLOB), 1000, "
+            "'One', 'Someone', 'Album'),"
+            "('" + list + "', 1, '" + second + "', CAST('/music/left/two.flac' AS BLOB), 1000, "
+            "'Two', 'Someone', 'Album');";
+        char* error = nullptr;
+        const auto done = sqlite3_exec(database, sql.c_str(), nullptr, nullptr, &error);
+        QVERIFY2(done == SQLITE_OK, error);
+        sqlite3_close(database);
+    }
+    QVERIFY2(own.start(folder), own.log().constData());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = own.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    QCOMPARE((*engine)->call("list.retired")->at("lists").size(), std::size_t{1});
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QMessageBox* offer = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (offer = window.findChild<QMessageBox*>(QStringLiteral("bench-retired-lists"))) != nullptr,
+        10'000);
+    QVERIFY(offer->informativeText().contains(QStringLiteral("Left over")));
+    QAbstractButton* open = nullptr;
+    for (auto* button : offer->buttons()) {
+        if (button->text() == QStringLiteral("Open as tabs")) {
+            open = button;
+        }
+    }
+    QVERIFY(open != nullptr);
+    open->click();
+    BenchMainWindow::ListTab* tab = nullptr;
+    QTRY_VERIFY((tab = window.tabForDocument(QString::fromStdString(list))) != nullptr);
+    QCOMPARE(rowPaths(*tab->model),
+             (std::vector<std::string>{"/music/left/one.flac", "/music/left/two.flac"}));
+    QCOMPARE(tab->model->rows().front().entry_id.to_string(), first);
+    QCOMPARE(displayText(tab->document.name), QStringLiteral("Left over"));
+    QVERIFY(tab->document.kind != persistence::ListKind::saved);
+    QTRY_VERIFY((*engine)->call("list.retired")->at("lists").empty());
+    // A tab of this window's: not sent back to the engine.
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(std::ranges::none_of((*engine)->call("list.all")->at("lists"),
+                                 [&list](const protocol::Json& summary) {
+                                     return summary.value("id", std::string{}) == list;
+                                 }));
+    (*engine)->close();
+    own.stop();
+}
+
+// ADR-0286: what changes in the playing tab reaches the engine's queue as the
+// edits it is -- so an entry the engine let go of meanwhile (consumed, say)
+// is not brought back by sending the tab whole.
+void BenchMainWindowTest::aPlayingTabsEditsReachTheQueueAsEdits() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto queued = [&other] {
+        std::vector<std::string> entries;
+        auto queue = (*other)->call("playback.queue");
+        for (const auto& entry :
+             queue ? queue->value("entries", protocol::Json::array()) : protocol::Json::array()) {
+            entries.push_back(entry.value("entry", std::string{}));
+        }
+        return entries;
+    };
+    auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                            .kind = persistence::ListKind::scratch,
+                                                            .name = "Playing",
+                                                            .pinned = false,
+                                                            .dirty = false,
+                                                            .items = {}},
+                                  true);
+    std::vector<LocalTrackRow> made;
+    for (int index = 0; index < 5; ++index) {
+        LocalTrackRow row;
+        row.raw_path = "/music/playing/" + std::to_string(index) + ".flac";
+        row.title = "Track " + std::to_string(index);
+        row.duration_ms = 60'000;
+        made.push_back(std::move(row));
+    }
+    tab->model->appendRows(std::move(made));
+    std::vector<std::string> ids;
+    for (const auto& row : tab->model->rows()) {
+        ids.push_back(row.entry_id.to_string());
+    }
+    window.playRow(*tab, 1);
+    QTRY_VERIFY_WITH_TIMEOUT(queued() == ids, 10'000);
+    // The window knows the queue it handed over.
+    QTRY_VERIFY(window.engine_queue_.has_value() && window.engine_queue_->size() == 5U);
+
+    // Let go of on the engine -- as consume does -- before the window hears.
+    QVERIFY((*other)->call("playback.edit_queue",
+                           protocol::Json{{"list", tab->document.id.to_string()},
+                                          {"edits", protocol::Json::array({protocol::Json{
+                                                        {"remove", {ids[4]}}}})}}));
+    // And now a row taken out here.
+    tab->model->removeRowIndexes({0});
+    window.markTabDirty(*tab);
+    QTRY_VERIFY(queued() == (std::vector<std::string>{ids[1], ids[2], ids[3]}));
+    QTest::qWait(500);
+    QCOMPARE(queued(), (std::vector<std::string>{ids[1], ids[2], ids[3]}));
+    (*other)->close();
+}
+
+// ADR-0286: the library's tabs are the usual ones; this computer's are
+// marked -- a computer icon, a tooltip saying where its files are -- and kept
+// after them. The sidebar calls this computer's folders by their name.
+void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() {
+    // The library on an engine elsewhere, reached or not.
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {},
+                        .stream_kbps = -1,
+                        .name = QStringLiteral("gemenon")}});
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
+                         QStringLiteral("192.0.2.10:6603"));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY(!window.list_tabs_.empty());
+    auto& local = *window.list_tabs_.front();
+    QVERIFY(EngineKey::of(local.document).isLocal());
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    const auto index = tabs->indexOf(local.view);
+    QVERIFY(!tabs->tabIcon(index).isNull());
+    QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("files on ")));
+    QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("played here")));
+    auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+    QVERIFY(sources != nullptr);
+    QCOMPARE(sources->tabText(0), QStringLiteral("This computer"));
+    // This computer's library is no library: its tab is not shown.
+    QVERIFY(!sources->isTabVisible(1));
+
+    // The library here again: nothing to mark.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
+                         QLatin1String(SettingsDialog::library_engine_local));
+    window.refreshTabChrome(local);
+    QVERIFY(tabs->tabIcon(tabs->indexOf(local.view)).isNull());
+    QVERIFY(!tabs->tabToolTip(tabs->indexOf(local.view)).contains(QStringLiteral("files on ")));
+    saveRemoteEngines({});
 }
 
 } // namespace trackknife::bench

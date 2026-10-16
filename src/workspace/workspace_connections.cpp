@@ -90,6 +90,7 @@ void Workspace::connectLocalEngine() {
         list_sync_->reconnected(localPlayback());
         flushEngineRelocations();
         view_->engineListsChanged();
+        offerRetiredLists(EngineKey::local());
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
         rememberEngineState(localPlayback());
@@ -103,6 +104,7 @@ void Workspace::connectLocalEngine() {
     });
     if (localPlayback()->active()) {
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
+        QTimer::singleShot(0, this, [this] { offerRetiredLists(EngineKey::local()); });
         // An engine starts with its own defaults and has never heard of this
         // window's settings, so they are handed over the moment the connection
         // exists. This runs after the transport is built, which is why sending
@@ -121,6 +123,11 @@ void Workspace::adoptEngineIdentity(EngineLink& engine) {
     auto* remote = &engine;
     if (remote->catalogue == nullptr) {
         return;
+    }
+    // ADR-0286: shown by the name it goes by, in Settings among the rest.
+    if (const auto name = remote->catalogue->name(); name != remote->setting.address) {
+        remote->setting.name = name;
+        rememberEngineName(remote->setting.address, name);
     }
     const auto id = remote->catalogue->engineId();
     if (id.isEmpty() || id == remote->key.text()) {
@@ -265,6 +272,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
             list_sync_->reconnected(link->playback);
             flushEngineRelocations();
             view_->engineListsChanged();
+            offerRetiredLists(link->key);
         });
     }
     connect(link->playback, &EnginePlayback::changed, this, [this, link] {
@@ -472,15 +480,62 @@ void Workspace::checkMissing(const QString& document_id, std::vector<std::string
     if (!work || paths.empty()) {
         return;
     }
+    // ADR-0286: a tab is the window's own, and no engine moves its rows for
+    // it; a file gone since -- moved while the window was closed, or by
+    // another -- is looked for in the engine's move journal, by the revision
+    // the row was seen at, and the row follows it.
+    std::unordered_map<std::string, core::LocalSourceRevision> seen;
+    for (const auto& row : tab->model->rows()) {
+        if (row.source_revision) {
+            seen.emplace(row.raw_path, *row.source_revision);
+        }
+    }
+    const bool resolves = playbackOf(EngineKey::of(tab->document)) != nullptr &&
+                          playbackOf(EngineKey::of(tab->document))->engineLevel() >= 15;
     const QPointer self{this};
-    static_cast<void>(QtConcurrent::run([self, work, document_id, paths = std::move(paths)] {
+    static_cast<void>(QtConcurrent::run([self, work, document_id, paths = std::move(paths),
+                                         seen = std::move(seen), resolves] {
         auto missing = work->missing(paths);
-        postBack(self, [self, document_id, paths, missing = std::move(missing)] {
+        std::vector<std::pair<std::string, core::LocalSourceRevision>> asked;
+        std::vector<std::optional<engine::RemoteFileWork::Moved>> moved;
+        if (missing && resolves) {
+            for (const auto& gone : *missing) {
+                if (const auto at = seen.find(gone); at != seen.end()) {
+                    asked.emplace_back(gone, at->second);
+                }
+            }
+            if (!asked.empty()) {
+                if (auto resolved = work->resolve_moves(asked)) {
+                    moved = std::move(*resolved);
+                }
+            }
+        }
+        postBack(self, [self, document_id, paths, missing = std::move(missing),
+                        asked = std::move(asked), moved = std::move(moved)] {
             if (!missing) {
                 return;
             }
-            if (auto* found = self->tabForDocument(document_id)) {
-                found->model->setMissing(paths, *missing);
+            auto* found = self->tabForDocument(document_id);
+            if (found == nullptr) {
+                return;
+            }
+            std::vector<std::string> still_missing = *missing;
+            bool followed = false;
+            for (std::size_t index = 0; index < moved.size() && index < asked.size(); ++index) {
+                if (!moved[index]) {
+                    continue;
+                }
+                if (found->model->applyCommittedRelocation(asked[index].first,
+                                                           moved[index]->raw_path,
+                                                           asked[index].second,
+                                                           moved[index]->revision)) {
+                    std::erase(still_missing, asked[index].first);
+                    followed = true;
+                }
+            }
+            found->model->setMissing(paths, still_missing);
+            if (followed) {
+                self->schedulePersist();
             }
         });
     }));
@@ -823,6 +878,85 @@ void Workspace::flushEngineRelocations() {
                 flushEngineRelocations();
             });
     }
+}
+
+// ADR-0286: the working lists an engine set aside when tabs became this
+// window's -- tabs of earlier, of this window or another -- offered once a
+// run: opened as tabs, or discarded. Neither, they are offered again.
+void Workspace::offerRetiredLists(const EngineKey& key) {
+    auto* engine = playbackOf(key);
+    if (engine == nullptr || engine->engineLevel() < 15 || retired_offered_.contains(key.text())) {
+        return;
+    }
+    retired_offered_.insert(key.text());
+    engine->request(
+        QStringLiteral("list.retired"), protocol::Json::object(),
+        [this, key](const core::Result<protocol::Json>& answer) {
+            if (!answer) {
+                return;
+            }
+            QStringList names;
+            QStringList ids;
+            for (const auto& list : answer->value("lists", protocol::Json::array())) {
+                ids << QString::fromStdString(list.value("id", std::string{}));
+                names << QString::fromUtf8(list.value("name", std::string{}));
+            }
+            if (ids.isEmpty()) {
+                return;
+            }
+            view_->offerRetiredLists(
+                engineName(key), names, [this, key, ids](const RetiredChoice choice) {
+                    if (choice == RetiredChoice::open) {
+                        openRetiredLists(key, ids, 0);
+                    } else if (choice == RetiredChoice::discard) {
+                        dropRetiredLists(key, ids);
+                    }
+                });
+        });
+}
+
+void Workspace::openRetiredLists(const EngineKey& key, const QStringList& ids,
+                                 const qsizetype from) {
+    auto* engine = playbackOf(key);
+    if (engine == nullptr) {
+        return;
+    }
+    if (from >= ids.size()) {
+        dropRetiredLists(key, ids);
+        schedulePersist();
+        return;
+    }
+    engine->request(
+        QStringLiteral("list.retired_get"), protocol::Json{{"id", ids[from].toStdString()}},
+        [this, key, ids, from](const core::Result<protocol::Json>& answer) {
+            if (answer) {
+                if (auto document = EngineListSync::documentFromAnswer(*answer, key)) {
+                    // A tab of this window's from now on, never sent anywhere.
+                    document->kind = persistence::ListKind::scratch;
+                    document->dirty = false;
+                    if (tabForDocument(QString::fromStdString(document->id.to_string())) ==
+                        nullptr) {
+                        if (auto* added = addList(std::move(*document), from == 0)) {
+                            describeEngineRows(*added);
+                        }
+                    }
+                }
+            }
+            openRetiredLists(key, ids, from + 1);
+        });
+}
+
+void Workspace::dropRetiredLists(const EngineKey& key, const QStringList& ids) {
+    auto* engine = playbackOf(key);
+    if (engine == nullptr) {
+        return;
+    }
+    auto named = protocol::Json::array();
+    for (const auto& id : ids) {
+        named.push_back(id.toStdString());
+    }
+    engine->request(QStringLiteral("list.retired_drop"), protocol::Json{{"ids", std::move(named)}},
+                    [](const core::Result<protocol::Json>&) {});
 }
 
 } // namespace trackknife::bench

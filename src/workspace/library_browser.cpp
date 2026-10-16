@@ -361,8 +361,8 @@ void LibraryBrowser::refreshSourceLabel() {
     const auto tooltip =
         catalogues_->usingEngine()
             ? tr("Folders, scanning, search and covers come from that engine.")
-            : tr("Choose an engine in Settings → Library, or leave it empty to use this "
-                 "computer's. It is tried again on the next library action.");
+            : tr("Choose the engine holding the library in Settings → Engines. It is tried "
+                 "again on the next library action.");
     if (described != source_ || shown != source_shown_ || tooltip != source_tooltip_) {
         source_ = described;
         source_shown_ = shown;

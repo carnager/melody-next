@@ -4,6 +4,7 @@
 // library by words, outputs -- what a script, a key binding or a rofi menu
 // wants, over the same protocol Trackknife speaks.
 
+#include "config_command.hpp"
 #include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -97,7 +98,7 @@ void usage(std::ostream& out) {
            "  play list NAME...           play one of the engine's lists: by its name,\n"
            "                              or every word found in one name\n"
            "\n"
-           "  lists                       the engine's lists, saved and working\n"
+           "  lists                       the engine's saved playlists\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  find QUERY [--format EXPR]  tracks a query finds, one line each, formatted\n"
@@ -111,6 +112,16 @@ void usage(std::ostream& out) {
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
            "  engines                     the engines announcing themselves nearby\n"
+           "\n"
+           "  config [KEY [VALUE...]]     this machine's melodyd.conf: all of it, one\n"
+           "                              setting, or that setting changed -- checked as\n"
+           "                              melodyd reads it, comments kept. --engine NAME\n"
+           "                              for an [engine NAME] section, --unset KEY,\n"
+           "                              --config FILE (default $MELODYD_CONFIG, else\n"
+           "                              ~/.config/melody/melodyd.conf). A new file\n"
+           "                              starts from the commented skeleton\n"
+           "  config --edit               open it in $EDITOR, and take it only when\n"
+           "                              melodyd would\n"
            "\n"
            "  watch [--all]               print the state each time it changes; with\n"
            "                              --all, of whichever engine here or nearby plays\n"
@@ -779,6 +790,10 @@ int watch_all(const Options& options) {
 int run(const Options& options) {
     const auto& words = options.words;
     const auto command = words.front();
+    // ADR-0286: this machine's file; no engine is asked.
+    if (command == "config") {
+        return trackknife::cli::config_command({words.begin() + 1, words.end()});
+    }
     if (command == "engines") {
         const auto found = look_around();
         if (options.json) {

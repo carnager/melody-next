@@ -51,6 +51,10 @@ VOLUME /state
 # the music, 5353/udp to be found by name: with host networking, as the
 # compose file uses, they need no mapping.
 EXPOSE 6603 6604
+# ADR-0286: the settings, in the state folder; melody-cli config reads the
+# same (docker exec melodyd melody-cli config password ...).
+ENV MELODYD_CONFIG=/state/melodyd.conf
+# Options on top of the file, as flags.
 ENV MELODYD_OPTIONS=""
 HEALTHCHECK --interval=30s --timeout=5s \
     CMD melody-cli --server /state/melodyd.sock status > /dev/null || exit 1

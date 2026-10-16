@@ -120,8 +120,16 @@ struct TaggerServices {
     MetadataDialogLayoutStore layout_store;
     MusicBrainzLookupService musicbrainz;
     FileWorkTools tools;
-    // The library folders of the engine holding the files, as raw paths.
-    std::function<std::vector<std::string>()> library_roots;
+    // ADR-0286: the library's folders, when the library is on another engine
+    // and these files are this computer's -- where a move adds them to the
+    // library. Each says where it is here, through that engine's mount;
+    // nothing when it is not reachable from this computer.
+    struct LibraryFolder {
+        QString engine;
+        std::string root;
+        std::optional<std::string> here;
+    };
+    std::function<std::vector<LibraryFolder>()> library_elsewhere;
     // ADR-0263: writes undone by the engine holding the files, newest first
     // as given. Run on a worker.
     std::function<core::Result<std::vector<operations::UndoOutcome>>(
@@ -329,9 +337,6 @@ class TaggerSession final : public QObject {
     [[nodiscard]] std::string moveFolderStart() const;
     // The destination Move goes to; none for the library folder each is in.
     [[nodiscard]] std::optional<operations::DestinationProfile> moveDestination() const;
-    [[nodiscard]] bool movesIntoLibraryFolders() const {
-        return move_target_ == MoveTarget::library;
-    }
     [[nodiscard]] QString outputProfileStatus() const { return output_profile_status_; }
     [[nodiscard]] QString destinationsOn() const {
         return services_.output_profile_store.destinations_on;
@@ -667,8 +672,18 @@ class TaggerSession final : public QObject {
     bool output_profiles_loading_{false};
     std::optional<core::StableId> editing_output_layout_id_;
     std::optional<core::StableId> editing_destination_id_;
-    enum class MoveTarget : std::uint8_t { saved, library, folder };
+    enum class MoveTarget : std::uint8_t { saved, library_folder, folder };
     MoveTarget move_target_{MoveTarget::saved};
+    // ADR-0286: one of the library's folders on another engine, by its path
+    // there (services_.library_elsewhere).
+    std::optional<std::string> library_folder_;
+    // The destination list, row by row: what each is.
+    struct DestinationRow {
+        MoveTarget target;
+        std::size_t index{0U}; // into the saved ones, or the library's folders
+    };
+    [[nodiscard]] std::vector<DestinationRow> destinationRows() const;
+    [[nodiscard]] std::optional<TaggerServices::LibraryFolder> chosenLibraryFolder() const;
     std::optional<std::string> move_folder_;
     bool write_plan_running_{false};
     bool apply_running_{false};

@@ -329,6 +329,12 @@ core::Result<std::unique_ptr<Server>> Server::listen(std::filesystem::path socke
     return finish(listener, std::move(socket_path), dispatcher);
 }
 
+core::Result<std::unique_ptr<Server>> Server::adopt(const int listener,
+                                                    protocol::Dispatcher& dispatcher) {
+    static_cast<void>(::fcntl(listener, F_SETFD, FD_CLOEXEC));
+    return finish(listener, {}, dispatcher);
+}
+
 core::Result<std::unique_ptr<Server>> Server::finish(const int listener, std::filesystem::path path,
                                                      protocol::Dispatcher& dispatcher) {
     if (::listen(listener, 16) < 0) {

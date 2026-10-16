@@ -17,11 +17,14 @@
 #include <vector>
 
 class QAction;
+class QButtonGroup;
 class QCheckBox;
 class QComboBox;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPushButton;
 class QStackedWidget;
 class QTabWidget;
 class QSpinBox;
@@ -59,7 +62,7 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     enum class Page : std::uint8_t {
         general,
         playback,
-        library,
+        // ADR-0286: Engines -- the engines, the library's music folders.
         engine,
         file_operations,
         ratings,
@@ -91,7 +94,14 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
   private:
     void sync();
     void refreshEngines();
+    void refreshEngineRows();
     void refreshFound();
+    // ADR-0286: Advanced for the engine chosen in the list; the music
+    // folders of the one holding the library; what is known of an engine
+    // ("connected"), by "local" or its address.
+    void showChosenEngine();
+    void showLibraryFolders();
+    [[nodiscard]] QString engineState(const QString& address) const;
     // A field shown from, and written to, the draft.
     void bind(QCheckBox* box, const char* key);
     void bind(QLineEdit* field, const char* key);
@@ -120,17 +130,22 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QDoubleSpinBox* preamp_with_{nullptr};
     QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* engine_socket_{nullptr};
-    QLineEdit* engine_token_{nullptr};
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
     QComboBox* remote_stream_{nullptr};
     QListWidget* engines_view_{nullptr};
     QCheckBox* engine_upnp_{nullptr};
-    QCheckBox* engine_share_{nullptr};
+    QButtonGroup* library_holders_{nullptr};
+    QGroupBox* folders_box_{nullptr};
+    QStackedWidget* library_folders_{nullptr};
+    QLabel* folders_missing_{nullptr};
+    QGroupBox* remote_box_{nullptr};
+    QWidget* own_password_{nullptr};
+    QPushButton* remove_engine_{nullptr};
+    bool adding_{false};
     QCheckBox* play_for_remote_{nullptr};
     QComboBox* stream_nearby_{nullptr};
     QComboBox* stream_away_{nullptr};
-    QCheckBox* show_local_library_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};
     QLineEdit* engine_password_{nullptr};

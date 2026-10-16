@@ -2,6 +2,7 @@
 #include "workspace/tab_store.hpp"
 
 #include <QDataStream>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -181,12 +182,90 @@ void writeItem(QDataStream& out, const persistence::ListItem& item) {
 
 } // namespace
 
-TabStore::TabStore(QString cache_directory)
-    : directory_(cache_directory.isEmpty()
-                     ? QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
-                           QStringLiteral("/tabs")
-                     : std::move(cache_directory)),
-      writer_([this] { work(); }) {}
+QString TabStore::defaultDirectory() {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+           QStringLiteral("/tabs");
+}
+
+TabStore::TabStore(QString directory)
+    : directory_(directory.isEmpty() ? defaultDirectory() : std::move(directory)),
+      writer_([this] { work(); }) {
+    // ADR-0286: kept in the cache before, where a cleanup takes them: moved
+    // to the window's data once, the first time it has none there.
+    if (directory_ == defaultDirectory()) {
+        const QDir old{QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+                       QStringLiteral("/tabs")};
+        const QDir now{directory_};
+        const auto kept = old.entryList({QStringLiteral("*.tabcache")}, QDir::Files);
+        if (!kept.isEmpty() &&
+            now.entryList({QStringLiteral("*.tabcache")}, QDir::Files).isEmpty()) {
+            QDir{}.mkpath(directory_);
+            for (const auto& name : kept) {
+                if (QFile::rename(old.filePath(name), now.filePath(name)) ||
+                    (QFile::copy(old.filePath(name), now.filePath(name)) &&
+                     QFile::remove(old.filePath(name)))) {
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+std::vector<QString> TabStore::takeUnreadable() {
+    const std::lock_guard guard{unreadable_mutex_};
+    return std::exchange(unreadable_, {});
+}
+
+void TabStore::setAside(const QString& path) const {
+    const auto aside = path + QStringLiteral(".unreadable-%1").arg(
+                                  QDateTime::currentDateTime().toString(
+                                      QStringLiteral("yyyyMMdd-hhmmss")));
+    if (QFile::rename(path, aside)) {
+        const std::lock_guard guard{unreadable_mutex_};
+        unreadable_.push_back(aside);
+    }
+}
+
+bool TabStore::copyTo(const QString& destination) {
+    flush();
+    if (!QDir{}.mkpath(destination)) {
+        return false;
+    }
+    const QDir from{directory_};
+    for (const auto& name : from.entryList({QStringLiteral("*.tabcache")}, QDir::Files)) {
+        const auto target = QDir{destination}.filePath(name);
+        QFile::remove(target);
+        if (!QFile::copy(from.filePath(name), target)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TabStore::restoreFrom(const QString& source) {
+    const QDir from{source};
+    if (!from.exists()) {
+        return false;
+    }
+    const auto live = defaultDirectory();
+    if (QDir{live}.exists()) {
+        const auto before = live + QStringLiteral("-before-restore-%1").arg(
+                                       QDateTime::currentDateTime().toString(
+                                           QStringLiteral("yyyyMMdd-hhmmss")));
+        if (!QDir{}.rename(live, before)) {
+            return false;
+        }
+    }
+    if (!QDir{}.mkpath(live)) {
+        return false;
+    }
+    for (const auto& name : from.entryList({QStringLiteral("*.tabcache")}, QDir::Files)) {
+        if (!QFile::copy(from.filePath(name), QDir{live}.filePath(name))) {
+            return false;
+        }
+    }
+    return true;
+}
 
 TabStore::~TabStore() {
     {
@@ -310,7 +389,13 @@ void TabStore::work() {
 }
 
 std::optional<persistence::ListDocument> TabStore::readRows(const core::StableId& id) const {
-    QFile file{pathOf(id)};
+    const auto path = pathOf(id);
+    if (!QFile::exists(path)) {
+        return std::nullopt;
+    }
+    // Read, or set aside and said -- never taken for an empty tab.
+    auto read_rows = [&]() -> std::optional<persistence::ListDocument> {
+    QFile file{path};
     if (!file.open(QIODevice::ReadOnly)) {
         return std::nullopt;
     }
@@ -344,6 +429,12 @@ std::optional<persistence::ListDocument> TabStore::readRows(const core::StableId
     }
     if (in.status() != QDataStream::Ok) {
         return std::nullopt;
+    }
+    return document;
+    };
+    auto document = read_rows();
+    if (!document) {
+        setAside(path);
     }
     return document;
 }

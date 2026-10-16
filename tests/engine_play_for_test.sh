@@ -90,4 +90,55 @@ PY
 [ "$(listed "${port_a}")" = "yes" ] || fail "alpha lists gamma's speakers"
 [ "$(listed "${port_b}")" = "yes" ] || fail "and so does beta"
 [ "$(grep -c "playing for" "${work}/gamma.log")" -eq 2 ] || fail "gamma plays for both"
+
+# ADR-0286: an [engine NAME] of melodyd.conf with an address is played for
+# there while the network does not find it -- none here goes by "faraway".
+cat >"${work}/delta.conf" <<CONF
+# delta: plays for no engine found, only the one listed.
+name = delta
+password = ${password}
+local-only = yes
+agent = no
+
+[engine faraway]
+address = 127.0.0.1:${port_a}
+CONF
+chmod 600 "${work}/delta.conf"
+"${melodyd}" --config "${work}/delta.conf" --socket "${work}/delta.sock" --state "${work}/delta" \
+    2>"${work}/delta.log" &
+pids+=($!)
+for _ in $(seq 1 120); do
+    grep -q "playing for faraway at 127.0.0.1:${port_a}" "${work}/delta.log" 2>/dev/null && break
+    sleep 0.1
+done
+grep -q "playing for faraway at 127.0.0.1:${port_a}" "${work}/delta.log" ||
+    fail "delta reaches the listed engine by its address"
+listed_as() { # port output
+    python3 - "$1" "${password}" "$2" <<'PY'
+import json, socket, sys, time
+port, password, wanted = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+deadline = time.time() + 10
+while time.time() < deadline:
+    connection = socket.create_connection(("127.0.0.1", port), timeout=5)
+    stream = connection.makefile("rw")
+    def call(i, method, params):
+        stream.write(json.dumps({"id": i, "method": method, "params": params}) + "\n")
+        stream.flush()
+        while True:
+            message = json.loads(stream.readline())
+            if message.get("id") == i:
+                return message
+    call(1, "session.authenticate", {"password": password})
+    outputs = call(2, "outputs.list", {}).get("result", {}).get("outputs", [])
+    connection.close()
+    if any(o.get("id") == wanted and o.get("online") for o in outputs):
+        print("yes")
+        sys.exit(0)
+    time.sleep(0.2)
+print("no")
+PY
+}
+[ "$(listed_as "${port_a}" agent:delta)" = "yes" ] || fail "alpha lists delta's speakers"
+# agent = no: beta, found or not, is not played for.
+! grep -q "playing for beta" "${work}/delta.log" || fail "delta plays for no engine found"
 echo "engine play-for: ok"

@@ -84,6 +84,13 @@ class CatalogueSource final {
     // whether it runs an outdated program.
     [[nodiscard]] bool stopLocalEngine() const;
     [[nodiscard]] bool localEngineOutdated() const;
+    // ADR-0286: started by an older Trackknife where systemd should run it;
+    // and the hand-over, after which systemd's engine answers.
+    [[nodiscard]] bool localEngineWantsService() const;
+    [[nodiscard]] bool handOverToService() const;
+    // Its melodyd.conf changed (config.set) and the engine restarted to use
+    // it; the error, if any, said.
+    [[nodiscard]] core::Result<void> configureLocalEngine(const protocol::Json& changes) const;
 
     [[nodiscard]] Role role() const noexcept { return role_; }
     // Whether this names an engine at all: a remote role with nothing

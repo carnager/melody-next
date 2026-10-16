@@ -20,6 +20,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/metadata/lyrics.hpp"
+#include "trackknife/persistence/list_edits.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
@@ -283,7 +284,10 @@ class Workspace final : public QObject {
     // The queue last pushed to the engine, and the engine revision that
     // produced. Together they answer "is what I am showing what the engine
     // holds, and if not, who changed it".
-    QString engine_queue_;
+    // ADR-0286: as entries and what each plays (EnginePlayback::queuePrint),
+    // so a change is sent as the edits it is; none, not known -- the queue
+    // is then sent whole.
+    std::optional<std::vector<persistence::ListEntryPrint>> engine_queue_;
     quint64 engine_queue_revision_{0};
     // ADR-0269: the engine's Up Next revision last taken; none, not yet --
     // the next state is taken whatever it says.
@@ -692,6 +696,11 @@ class Workspace final : public QObject {
     // starts; then each remote in Settings -- the `first` of them owning the
     // lists an older release made for "the remote".
     void connectLocalEngine();
+    // ADR-0286: the working lists an engine set aside, offered once a run.
+    void offerRetiredLists(const EngineKey& key);
+    void openRetiredLists(const EngineKey& key, const QStringList& ids, qsizetype from);
+    void dropRetiredLists(const EngineKey& key, const QStringList& ids);
+    QSet<QString> retired_offered_;
     void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
     // Settings changed: engines no longer listed let go, new ones connected.
     void syncRemoteEngines();
@@ -824,12 +833,23 @@ class Workspace final : public QObject {
         QString accessible_name;
         // The list playback was last started from: a dot on its tab.
         bool playing{false};
-        // Its files are an engine elsewhere's: an icon says so.
-        bool remote{false};
+        // ADR-0286: where its files are, when that is not the library: this
+        // computer's (a computer icon) or another engine's (a server icon).
+        // A tab of the library's engine is the usual one and has no mark.
+        enum class Mark : std::uint8_t { none, this_computer, elsewhere };
+        Mark mark{Mark::none};
         // ADR-0253: the rule it continues with; empty, none.
         QString continues;
     };
     [[nodiscard]] TabChrome tabChrome(const ListTab& tab) const;
+    // ADR-0286: whether `engine` holds the library (Settings › Engines).
+    [[nodiscard]] bool holdsLibrary(const EngineKey& engine) const;
+    // ADR-0286: the engine holding the library when it is not this
+    // computer's; nothing otherwise.
+    [[nodiscard]] const EngineLink* libraryElsewhere() const;
+    // Files this computer's engine moved: those now in the library's
+    // folders, through its engine's mount, are taken into its library.
+    void libraryTakes(const std::vector<std::string>& moved_here);
     struct Summary {
         QString text;
         QString tooltip;

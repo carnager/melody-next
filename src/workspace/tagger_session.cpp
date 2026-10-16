@@ -48,6 +48,7 @@ constexpr auto remembered_layout_key = "properties/actions/naming-layout";
 constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
 constexpr auto remembered_move_target_prefix = "properties/actions/move-target/";
 constexpr auto remembered_move_folder_prefix = "properties/actions/move-folder/";
+constexpr auto remembered_library_folder_prefix = "properties/actions/move-library-folder/";
 constexpr auto remembered_replaygain_key = "properties/actions/replaygain";
 constexpr auto remembered_skip_existing_gain_key = "properties/actions/replaygain-skip-existing";
 
@@ -112,10 +113,18 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         if (!folder.isEmpty()) {
             move_folder_ = std::string{folder.constData(), static_cast<std::size_t>(folder.size())};
         }
+        if (const auto library =
+                remembered.value(QLatin1String(remembered_library_folder_prefix) + engine)
+                    .toByteArray();
+            !library.isEmpty()) {
+            library_folder_ =
+                std::string{library.constData(), static_cast<std::size_t>(library.size())};
+        }
         const auto target =
             remembered.value(QLatin1String(remembered_move_target_prefix) + engine).toString();
-        move_target_ = target == QLatin1String("library") && services_.library_roots
-                           ? MoveTarget::library
+        move_target_ = target == QLatin1String("library-folder") && library_folder_ &&
+                               services_.library_elsewhere
+                           ? MoveTarget::library_folder
                        : target == QLatin1String("folder") && move_folder_ ? MoveTarget::folder
                                                                            : MoveTarget::saved;
     }
@@ -2132,11 +2141,12 @@ bool TaggerSession::layoutReady() const {
 }
 
 bool TaggerSession::destinationReady() const {
-    if (move_target_ == MoveTarget::library) {
-        return static_cast<bool>(services_.library_roots);
-    }
     if (move_target_ == MoveTarget::folder) {
         return move_folder_.has_value();
+    }
+    if (move_target_ == MoveTarget::library_folder) {
+        const auto folder = chosenLibraryFolder();
+        return folder && folder->here;
     }
     return editing_destination_id_.has_value() &&
            std::ranges::any_of(destination_catalog_, [this](const auto& entry) {
@@ -2162,6 +2172,13 @@ QString TaggerSession::renameTooltip() const {
 QString TaggerSession::moveTooltip() const {
     if (!services_.file_plan_applier_factory) {
         return QStringLiteral("File publication is unavailable");
+    }
+    if (move_target_ == MoveTarget::library_folder && layoutReady() && !destinationReady()) {
+        const auto folder = chosenLibraryFolder();
+        return folder ? QStringLiteral("%1's music is not reachable from this computer: mount it "
+                                       "and say where under Settings → Engines → Advanced")
+                            .arg(folder->engine)
+                      : QStringLiteral("That library folder is gone; choose another");
     }
     return layoutReady() && destinationReady()
                ? QStringLiteral("Move below the saved destination using the saved layout")
@@ -2215,21 +2232,66 @@ std::vector<TaggerSession::Choice> TaggerSession::layouts() const {
     return choices;
 }
 
-std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
-    std::vector<Choice> choices;
-    choices.reserve(destination_catalog_.size() + 2U);
-    for (const auto& saved : destination_catalog_) {
-        choices.push_back(Choice{.id = QString::fromStdString(saved.id.to_string()),
-                                 .name = display_utf8(saved.profile.name)});
+std::vector<TaggerSession::DestinationRow> TaggerSession::destinationRows() const {
+    std::vector<DestinationRow> rows;
+    for (std::size_t index = 0U; index < destination_catalog_.size(); ++index) {
+        rows.push_back({.target = MoveTarget::saved, .index = index});
     }
-    if (services_.library_roots) {
-        choices.push_back(Choice{.id = QStringLiteral("library"),
-                                 .name = QStringLiteral("The library folder each is in")});
+    if (services_.library_elsewhere) {
+        const auto folders = services_.library_elsewhere();
+        for (std::size_t index = 0U; index < folders.size(); ++index) {
+            rows.push_back({.target = MoveTarget::library_folder, .index = index});
+        }
     }
     if (move_folder_) {
-        choices.push_back(
-            Choice{.id = QStringLiteral("folder"),
-                   .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
+        rows.push_back({.target = MoveTarget::folder});
+    }
+    return rows;
+}
+
+std::optional<TaggerServices::LibraryFolder> TaggerSession::chosenLibraryFolder() const {
+    if (!library_folder_ || !services_.library_elsewhere) {
+        return std::nullopt;
+    }
+    for (auto& folder : services_.library_elsewhere()) {
+        if (folder.root == *library_folder_) {
+            return std::move(folder);
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
+    std::vector<Choice> choices;
+    const auto folders = services_.library_elsewhere ? services_.library_elsewhere()
+                                                     : std::vector<TaggerServices::LibraryFolder>{};
+    for (const auto& row : destinationRows()) {
+        switch (row.target) {
+        case MoveTarget::saved: {
+            const auto& saved = destination_catalog_[row.index];
+            choices.push_back(Choice{.id = QString::fromStdString(saved.id.to_string()),
+                                     .name = display_utf8(saved.profile.name)});
+            break;
+        }
+        case MoveTarget::library_folder: {
+            // ADR-0286: adding them to the library, on the engine holding it.
+            const auto& folder = folders[row.index];
+            auto name = QStringLiteral("Library on %1 · %2")
+                            .arg(folder.engine,
+                                 QString::fromStdString(core::display_raw_path(folder.root)));
+            if (!folder.here) {
+                name += QStringLiteral(" (not reachable here)");
+            }
+            choices.push_back(
+                Choice{.id = QStringLiteral("library-folder:%1").arg(row.index), .name = name});
+            break;
+        }
+        case MoveTarget::folder:
+            choices.push_back(
+                Choice{.id = QStringLiteral("folder"),
+                       .name = QString::fromStdString(core::display_raw_path(*move_folder_))});
+            break;
+        }
     }
     return choices;
 }
@@ -2246,21 +2308,29 @@ int TaggerSession::layoutIndex() const {
 }
 
 int TaggerSession::destinationIndex() const {
-    const auto saved = static_cast<int>(destination_catalog_.size());
-    if (move_target_ == MoveTarget::library) {
-        return saved;
+    const auto rows = destinationRows();
+    const auto folder =
+        move_target_ == MoveTarget::library_folder ? chosenLibraryFolder() : std::nullopt;
+    const auto folders =
+        folder ? services_.library_elsewhere() : std::vector<TaggerServices::LibraryFolder>{};
+    for (std::size_t row = 0U; row < rows.size(); ++row) {
+        const auto& candidate = rows[row];
+        if (candidate.target != move_target_) {
+            continue;
+        }
+        const bool matches =
+            candidate.target == MoveTarget::saved
+                ? editing_destination_id_ &&
+                      destination_catalog_[candidate.index].id == *editing_destination_id_
+            : candidate.target == MoveTarget::library_folder
+                ? folder && candidate.index < folders.size() &&
+                      folders[candidate.index].root == folder->root
+                : true;
+        if (matches) {
+            return static_cast<int>(row);
+        }
     }
-    if (move_target_ == MoveTarget::folder) {
-        return saved + (services_.library_roots ? 1 : 0);
-    }
-    if (!editing_destination_id_) {
-        return -1;
-    }
-    const auto found = std::ranges::find(destination_catalog_, *editing_destination_id_,
-                                         &persistence::SavedDestinationProfile::id);
-    return found == destination_catalog_.end()
-               ? -1
-               : static_cast<int>(std::distance(destination_catalog_.begin(), found));
+    return -1;
 }
 
 void TaggerSession::selectLayout(const int index) {
@@ -2274,19 +2344,20 @@ void TaggerSession::selectLayout(const int index) {
 }
 
 void TaggerSession::selectDestination(const int index) {
-    const auto saved = static_cast<int>(destination_catalog_.size());
-    const auto library = services_.library_roots ? saved : -1;
-    const auto folder = move_folder_ ? saved + (services_.library_roots ? 1 : 0) : -1;
-    if (index >= 0 && index == library) {
-        move_target_ = MoveTarget::library;
-    } else if (index >= 0 && index == folder) {
-        move_target_ = MoveTarget::folder;
-    } else if (index < 0 || index >= saved) {
+    const auto rows = destinationRows();
+    if (index < 0 || static_cast<std::size_t>(index) >= rows.size()) {
         move_target_ = MoveTarget::saved;
         editing_destination_id_.reset();
     } else {
-        move_target_ = MoveTarget::saved;
-        editing_destination_id_ = destination_catalog_[static_cast<std::size_t>(index)].id;
+        const auto& row = rows[static_cast<std::size_t>(index)];
+        move_target_ = row.target;
+        if (row.target == MoveTarget::saved) {
+            editing_destination_id_ = destination_catalog_[row.index].id;
+        } else if (row.target == MoveTarget::library_folder) {
+            const auto folders = services_.library_elsewhere();
+            library_folder_ =
+                row.index < folders.size() ? std::optional{folders[row.index].root} : std::nullopt;
+        }
     }
     reconcileOutputProfileChoices();
     invalidateWritePlan();
@@ -2324,6 +2395,12 @@ std::string TaggerSession::moveFolderStart() const {
 std::optional<operations::DestinationProfile> TaggerSession::moveDestination() const {
     if (move_target_ == MoveTarget::folder && move_folder_) {
         return folderDestination(*move_folder_);
+    }
+    if (move_target_ == MoveTarget::library_folder) {
+        if (auto folder = chosenLibraryFolder(); folder && folder->here) {
+            return folderDestination(std::move(*folder->here));
+        }
+        return std::nullopt;
     }
     if (move_target_ == MoveTarget::saved && editing_destination_id_) {
         const auto found = std::ranges::find(destination_catalog_, *editing_destination_id_,
@@ -2426,9 +2503,14 @@ void TaggerSession::rememberActionChoices() const {
     // Destinations are the engine's: one remembered for each.
     const auto& engine = services_.output_profile_store.destinations_key;
     settings.setValue(QLatin1String(remembered_move_target_prefix) + engine,
-                      move_target_ == MoveTarget::library  ? QStringLiteral("library")
-                      : move_target_ == MoveTarget::folder ? QStringLiteral("folder")
-                                                           : QStringLiteral("saved"));
+                      move_target_ == MoveTarget::library_folder ? QStringLiteral("library-folder")
+                      : move_target_ == MoveTarget::folder       ? QStringLiteral("folder")
+                                                                 : QStringLiteral("saved"));
+    if (library_folder_) {
+        settings.setValue(
+            QLatin1String(remembered_library_folder_prefix) + engine,
+            QByteArray{library_folder_->data(), static_cast<qsizetype>(library_folder_->size())});
+    }
     if (move_folder_) {
         settings.setValue(
             QLatin1String(remembered_move_folder_prefix) + engine,
@@ -2507,28 +2589,7 @@ void TaggerSession::startWritePlan() {
             return;
         }
         output_layout = layout->profile;
-        if (operation_selection.move_files && move_target_ == MoveTarget::library) {
-            // One plan has one destination: the files' one library folder.
-            const auto roots =
-                services_.library_roots ? services_.library_roots() : std::vector<std::string>{};
-            std::optional<std::string> root;
-            const auto& selection = grid_model_->selection();
-            for (std::size_t item = 0U; item < selection.item_count(); ++item) {
-                const auto here = libraryFolderOf(selection.source(item).raw_path, roots);
-                if (!here) {
-                    refuse(QStringLiteral("A file is in no library folder; choose where to move "
-                                          "to"));
-                    return;
-                }
-                if (root && *root != *here) {
-                    refuse(QStringLiteral("These files are in more than one library folder; "
-                                          "choose where to move to"));
-                    return;
-                }
-                root = here;
-            }
-            destination = root ? std::optional{folderDestination(*root)} : std::nullopt;
-        } else if (operation_selection.move_files) {
+        if (operation_selection.move_files) {
             destination = moveDestination();
             if (!destination) {
                 refuse(QStringLiteral("Choose where to move to before applying"));

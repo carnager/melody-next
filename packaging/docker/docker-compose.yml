@@ -18,11 +18,15 @@ services:
     restart: unless-stopped
     # The owner of the state directory below; match your own user.
     user: "1000:1000"
+    # The settings are ./state/melodyd.conf (ADR-0286). Without a password
+    # the engine stays off the network; give it the one all your engines
+    # share, then restart it:
+    #   docker exec melodyd melody-cli config password 'a long sentence'
+    #   docker exec melodyd melody-cli config name gemenon
+    #   docker compose restart melodyd
     environment:
-      # --name: what Trackknife and the agents call it.
-      # --password-file: every client and agent gives it; without one the
-      # engine stays off the network. /state/password holds one line.
-      MELODYD_OPTIONS: "--name gemenon --password-file /state/password"
+      # Flags on top of the file, should any be wanted.
+      MELODYD_OPTIONS: ""
     volumes:
       # The library, database and saved queue: keep this.
       - ./state:/state

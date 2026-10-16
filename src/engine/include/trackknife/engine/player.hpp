@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -92,6 +93,12 @@ class Player final {
     // without what the list dropped, with what it gained -- `fresh` -- and
     // without what had already left the queue (consumed, say). Answers
     // whether it did.
+    // ADR-0286: the queue changed in place by `edit`, which is handed a copy
+    // of it under the lock -- refused, the queue is as it was. False when it
+    // was played from another list than `list` (empty: any).
+    [[nodiscard]] core::Result<bool>
+    edit_queue(const std::string& list,
+               const std::function<core::Result<void>(std::vector<QueueEntry>&)>& edit);
     bool follow_list(const std::string& list, std::vector<QueueEntry> entries,
                      const std::vector<core::StableId>& fresh);
     // ADR-0253: whether nothing would follow the entry playing now -- the

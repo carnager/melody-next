@@ -43,6 +43,42 @@ target_link_libraries(
 )
 add_test(NAME core-primitives COMMAND trackknife_core_tests)
 
+add_executable(trackknife_config_file_tests config_file_test.cpp)
+target_link_libraries(
+    trackknife_config_file_tests
+    PRIVATE Trackknife::Core trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME config-file COMMAND trackknife_config_file_tests)
+
+add_executable(trackknife_daemon_settings_tests daemon_settings_test.cpp)
+target_link_libraries(
+    trackknife_daemon_settings_tests
+    PRIVATE trackknife_daemon_settings trackknife_project_options trackknife_project_warnings
+)
+target_compile_definitions(
+    trackknife_daemon_settings_tests
+    PRIVATE TRACKKNIFE_MELODYD_SKELETON="${PROJECT_SOURCE_DIR}/packaging/melodyd.conf"
+)
+add_test(NAME daemon-settings COMMAND trackknife_daemon_settings_tests)
+add_test(
+    NAME melody-cli-config
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cli_config_test.sh" $<TARGET_FILE:melody_cli>
+)
+set_tests_properties(melody-cli-config PROPERTIES TIMEOUT 60)
+add_test(
+    NAME engine-service
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_service_test.sh"
+            $<TARGET_FILE:trackknife_engine_daemon>
+)
+set_tests_properties(engine-service PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+
+add_executable(trackknife_guests_plan_tests guests_plan_test.cpp)
+target_link_libraries(
+    trackknife_guests_plan_tests
+    PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME guests-plan COMMAND trackknife_guests_plan_tests)
+
 add_executable(trackknife_metadata_reader_tests metadata_reader_test.cpp)
 target_link_libraries(
     trackknife_metadata_reader_tests
@@ -259,6 +295,10 @@ add_executable(trackknife_list_repository_tests list_repository_test.cpp)
 target_link_libraries(
     trackknife_list_repository_tests
     PRIVATE Trackknife::Persistence trackknife_project_options trackknife_project_warnings
+)
+target_compile_definitions(
+    trackknife_list_repository_tests
+    PRIVATE TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
 )
 add_test(NAME list-repository COMMAND trackknife_list_repository_tests)
 
@@ -914,8 +954,8 @@ if(TRACKKNIFE_BUILD_UI)
     add_dependencies(trackknife_bench_main_window_tests trackknife_engine_daemon melody_agent)
     target_link_libraries(
         trackknife_bench_main_window_tests
-        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options
-                trackknife_project_warnings
+        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test PkgConfig::SQLITE3
+                trackknife_project_options trackknife_project_warnings
     )
     # The window's cases start an engine each and run for minutes in one
     # process; as shares (qtest_shard.hpp) they run side by side. Each process
@@ -1105,4 +1145,16 @@ set_tests_properties(
     speaker-plays-through
     melody-cli
     PROPERTIES LABELS realtime
+)
+
+# ADR-0286: no test reads or writes the melodyd.conf of whoever runs it, and
+# no test engine plays for the engines on the network unless asked (--agent):
+# with a password, an engine would by default.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
+     "# Every test engine's, unless it names its own.\nagent = no\n")
+get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
+set_property(
+    TEST ${trackknife_all_tests}
+    APPEND PROPERTY ENVIRONMENT "MELODYD_CONFIG=${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
+                                "TRACKKNIFE_NO_SYSTEMD=1"
 )

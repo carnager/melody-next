@@ -264,7 +264,11 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
                 takeEngineChange(*tab);
                 // Nor is it in the engine's queue any more, as this window
                 // knows it.
-                engine_queue_.remove(state.consumed);
+                if (engine_queue_) {
+                    std::erase_if(*engine_queue_, [&state](const auto& held) {
+                        return QString::fromStdString(held.entry.to_string()) == state.consumed;
+                    });
+                }
                 schedulePersist();
                 break;
             }

@@ -28,18 +28,21 @@ lending its speakers with `--agent`, uses its own unless told otherwise.
 
 ## Headless melodyd
 
-On a desktop, Trackknife starts its engine for you. On a server or a Pi, run
-it yourself, as a user service:
+On a desktop the engine is a user service too, started the first time
+Trackknife connects: the package enables `melodyd.socket` for every user, and
+Trackknife hands it its settings (`melodyd.conf`). It goes on playing with
+the window closed. On macOS Trackknife starts it itself. On a server or a Pi,
+run it as a user service:
 
 ```sh
-# ~/.config/melody/melodyd.conf
-MELODYD_OPTIONS=--name myserver --password-file /home/you/.config/melody/password
+melody-cli config password 'the one all your engines share'
+melody-cli config name myserver
 ```
 
-```sh
-printf '%s\n' 'your password' > ~/.config/melody/password
-chmod 600 ~/.config/melody/password
-```
+That writes `~/.config/melody/melodyd.conf`, started from a commented
+skeleton of every setting (ADR-0286); `melody-cli config --edit` opens it,
+and takes it only when melodyd would. A setting is `key = value`, the
+options below without their `--`.
 
 ```sh
 systemctl --user enable --now melodyd
@@ -134,9 +137,9 @@ gets Opus instead of the original files.
 
 ## UPnP speakers
 
-When UPnP support was included at build time, enable **Settings → Engine →
-Discover UPnP speakers**. Trackknife restarts its engine with discovery and a
-LAN-facing stream listener. A headless setup uses, for example:
+When UPnP support was included at build time, enable **Settings → Engines →
+Discover UPnP speakers**. Trackknife sets `upnp = yes` and a LAN-facing stream
+listener in its engine's `melodyd.conf` and restarts it. A headless setup uses, for example:
 
 ```sh
 melodyd --upnp --http 0.0.0.0:6604

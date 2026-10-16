@@ -376,7 +376,8 @@ engine "{\"id\":20,\"method\":\"list.save\",\"params\":{\"name\":\"Road trip\",\
 engine "{\"id\":21,\"method\":\"list.save\",\"params\":{\"name\":\"Road work\",\"items\":[{\"path\":\"${first}\"}]}}" > /dev/null
 cli lists > "${work}/lists.txt" || fail "lists lists"
 grep -q "^Road trip (2 tracks)$" "${work}/lists.txt" || fail "a saved list, by name and size"
-grep -q "^Road work (1 tracks, working)$" "${work}/lists.txt" || fail "a working list says so"
+# ADR-0286: a list saved without a kind is a saved playlist too.
+grep -q "^Road work (1 tracks)$" "${work}/lists.txt" || fail "every list is a saved playlist"
 cli --keys lists | matches -P "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
 cli play list trip 2>/dev/null | matches "^playing:" || fail "play list plays one by a word of its name"
 cli --json status | python3 -c '

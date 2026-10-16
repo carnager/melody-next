@@ -29,7 +29,12 @@ struct RemoteEngineSetting final {
     // ADR-0239: what it streams to this computer's speakers, whatever the
     // route: kbps of Opus, 0 the original files, -1 by the route.
     int stream_kbps{-1};
+    // ADR-0286: the name it goes by, as it said when last reached or found;
+    // empty until then.
+    QString name{};
 
+    // What to call it: its name, else its address.
+    [[nodiscard]] QString label() const;
     // The password to use: its own, or this computer's engine's.
     [[nodiscard]] QString effectivePassword() const;
     [[nodiscard]] RemoteMount mount() const;
@@ -44,5 +49,7 @@ struct RemoteEngineSetting final {
 void saveRemoteEngines(const std::vector<RemoteEngineSetting>& engines);
 // Keeps the id an engine gave, found by its address.
 void rememberEngineId(const QString& address, const QString& id);
+// ADR-0286: and the name it goes by.
+void rememberEngineName(const QString& address, const QString& name);
 
 } // namespace trackknife::bench

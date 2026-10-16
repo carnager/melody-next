@@ -294,6 +294,7 @@ class BenchMainWindowTest final : public QObject {
     void shortcutSettingsValidateSaveAndCancel();
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void quittingStopsTheEngineForGood();
+    void sharingSettingsAreHandedToTheEngineOnce();
     void theWindowsListsAreOnItsEngine();
     void listsTravelAsEdits();
     void anotherClientsListChangesReachTheWindow();
@@ -307,11 +308,16 @@ class BenchMainWindowTest final : public QObject {
     void remoteEnginesStartFromTheOneRemoteOfBefore();
     void twoEnginesElsewhereSideBySide();
     void settingsListTheEnginesElsewhere();
+    void anEnginesOwnPasswordIsSaidAndCanGo();
     void enginesAddedOrRemovedApplyAtOnce();
     void aPasswordGivenLaterReachesTheEngine();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
-    void aWorkingListClosedAfterAReconnectLeavesItsEngine();
+    void aScratchTabNeverReachesItsEngine();
+    void listsLeftOnTheEngineAreOfferedOnce();
+    void theTabStoreKeepsWhatItCannotRead();
+    void aPlayingTabsEditsReachTheQueueAsEdits();
+    void thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -384,6 +390,7 @@ class BenchMainWindowTest final : public QObject {
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void thisComputersFilesMoveIntoTheLibrary();
     void aRatingSetElsewhereShowsInTheTabs();
     void dynamicPlaylistsReadTheLibraryChosen();
     void replacingARemoteTabFromItsLibraryPlays();

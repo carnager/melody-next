@@ -25,6 +25,11 @@ namespace trackknife::bench {
 struct LocalEngine final {
     std::filesystem::path state; // The database directory, Trackknife's own.
     std::filesystem::path socket;
+    // ADR-0286: this user's engine -- Trackknife's own folder, the default
+    // socket -- which systemd runs on Linux (melodyd.socket). Any other, a
+    // test's or a second workspace's, and every one on macOS, is started
+    // here, with a melodyd.conf beside its database when not this user's.
+    bool standard{false};
 };
 
 // Starting an engine is the application's decision, made once in main():
@@ -36,14 +41,17 @@ void allowLocalEngine(bool allowed);
 // Nothing unless allowed.
 [[nodiscard]] std::optional<LocalEngine> localEngine();
 
-// Connects to the local engine, starting it first if nothing answers. Waits
-// at most timeout for a started engine to listen.
+// Connects to the local engine. When nothing answers, this user's engine on
+// Linux is systemd's to start: its socket is started if it is enabled and
+// is not yet, else what to do is said. Any other is started here, as
+// `melodyd` with its socket, folder and file -- every setting is in
+// melodyd.conf (ADR-0286). Waits at most timeout for it to listen.
 [[nodiscard]] core::Result<std::unique_ptr<protocol::Client>>
 connectLocalEngine(const LocalEngine& engine,
                    std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
-// How this computer's engine is shared, from Settings; read each time the
-// engine is started, so a restart takes up a change.
+// How this computer's engine is shared, from Settings; handed to the engine
+// as melodyd.conf settings (sharingChanges), a restart taking them up.
 struct LocalEngineSharing final {
     bool share{false};
     QString listen;     // host:port for clients and agents
@@ -72,19 +80,33 @@ struct LocalEngineSharing final {
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
 };
 [[nodiscard]] LocalEngineSharing localEngineSharing();
-// The command line melodyd is started with, beyond its socket and state.
-// Writes the password, if any, to a file only its owner can read, rather
-// than putting it where `ps` shows it.
-[[nodiscard]] QStringList localEngineArguments(const LocalEngine& engine,
-                                               const LocalEngineSharing& sharing);
+// ADR-0286: the config.set changes that share this computer's engine as
+// `now` says -- each key it manages set or taken out -- and take out the
+// [engine] sections of engines `before` played for and `now` does not.
+[[nodiscard]] protocol::Json sharingChanges(const LocalEngineSharing& now,
+                                            const LocalEngineSharing& before);
+// Hands this computer's engine those changes and restarts it to use them.
+[[nodiscard]] core::Result<void> configureLocalEngine(const LocalEngine& engine,
+                                                      const protocol::Json& changes);
 
-// Stops this computer's engine: its queue is saved, and it comes back
-// paused the next time it is started.
+// Stops this computer's engine for good (engine.stop: under systemd, not
+// restarted until a client connects again); one older than that is
+// signalled. Its queue is saved, and comes back paused.
 [[nodiscard]] core::Result<void> stopLocalEngine(const LocalEngine& engine);
 
-// Stops this computer's engine and starts it again, with the settings as
-// they are now. Playback is saved and comes back paused.
+// Starts this computer's engine again, with its settings as they are now:
+// a service's restarts itself (engine.restart), one started here is stopped
+// and started. Playback is saved and comes back paused.
 [[nodiscard]] core::Result<void> restartLocalEngine(const LocalEngine& engine);
+
+// Whether a service manager runs it (engine.info's `service`).
+[[nodiscard]] bool localEngineIsService(const LocalEngine& engine);
+// ADR-0286: this user's engine on Linux, running, but started by an older
+// Trackknife rather than systemd -- with melodyd.socket there to take over.
+[[nodiscard]] bool localEngineWantsService(const LocalEngine& engine);
+// Stops that engine and starts melodyd.socket, whose engine then answers:
+// the one time Trackknife starts anything of systemd's.
+[[nodiscard]] core::Result<void> handOverToService(const LocalEngine& engine);
 
 // Whether this computer's engine runs a program other than the one this build
 // would start: rebuilt or updated since it started. It outlives the window,

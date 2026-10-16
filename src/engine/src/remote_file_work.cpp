@@ -1107,6 +1107,61 @@ RemoteFileWork::missing(const std::vector<std::string>& paths) {
     return gone;
 }
 
+core::Result<std::vector<std::optional<RemoteFileWork::Moved>>> RemoteFileWork::resolve_moves(
+    const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    const auto revision_json = [](const core::LocalSourceRevision& revision) {
+        return Json{{"device", revision.device},
+                    {"inode", revision.inode},
+                    {"size", revision.size},
+                    {"seconds", revision.modification_time_seconds},
+                    {"nanoseconds", revision.modification_time_nanoseconds}};
+    };
+    std::vector<std::optional<Moved>> moved;
+    moved.reserve(sources.size());
+    constexpr std::size_t part = 2'000U;
+    for (std::size_t from = 0; from < sources.size(); from += part) {
+        auto items = Json::array();
+        const auto to = std::min(sources.size(), from + part);
+        for (std::size_t at = from; at < to; ++at) {
+            items.push_back(Json{{"path", protocol::encode_raw_path(sources[at].first)},
+                                 {"revision", revision_json(sources[at].second)}});
+        }
+        auto answer =
+            (*connection)->call("catalogue.resolve_moves", Json{{"items", std::move(items)}});
+        if (!answer) {
+            return std::unexpected(std::move(answer.error()));
+        }
+        const auto answered = answer->value("items", Json::array());
+        for (std::size_t at = from; at < to; ++at) {
+            const auto index = at - from;
+            std::optional<Moved> now;
+            if (index < answered.size()) {
+                const auto& found = answered[index].value("moved", Json{});
+                if (found.is_object() && found.contains("path") && found["path"].is_string()) {
+                    if (auto raw = protocol::decode_raw_path(found["path"].get<std::string>())) {
+                        const auto& revision = found.value("revision", Json::object());
+                        now = Moved{.raw_path = std::move(*raw),
+                                    .revision = core::LocalSourceRevision{
+                                        .device = revision.value("device", std::uint64_t{0}),
+                                        .inode = revision.value("inode", std::uint64_t{0}),
+                                        .size = revision.value("size", std::uint64_t{0}),
+                                        .modification_time_seconds =
+                                            revision.value("seconds", std::int64_t{0}),
+                                        .modification_time_nanoseconds =
+                                            revision.value("nanoseconds", std::int64_t{0})}};
+                    }
+                }
+            }
+            moved.push_back(std::move(now));
+        }
+    }
+    return moved;
+}
+
 core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::string& path) {
     auto connection = client();
     if (!connection) {

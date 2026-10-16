@@ -495,6 +495,21 @@ void Player::replace_queue(std::vector<QueueEntry> entries, std::string list) {
     replace_queue_locked(std::move(entries), std::move(list));
 }
 
+core::Result<bool>
+Player::edit_queue(const std::string& list,
+                   const std::function<core::Result<void>(std::vector<QueueEntry>&)>& edit) {
+    const std::lock_guard guard{mutex_};
+    if (!list.empty() && queue_list_ != list) {
+        return false;
+    }
+    auto queue = queue_;
+    if (auto edited = edit(queue); !edited) {
+        return std::unexpected(std::move(edited.error()));
+    }
+    replace_queue_locked(std::move(queue), queue_list_);
+    return true;
+}
+
 bool Player::follow_list(const std::string& list, std::vector<QueueEntry> entries,
                          const std::vector<core::StableId>& fresh) {
     const std::lock_guard guard{mutex_};

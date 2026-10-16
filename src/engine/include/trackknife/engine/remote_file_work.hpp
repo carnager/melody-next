@@ -145,6 +145,15 @@ class RemoteFileWork final {
     // (files.missing), asked in parts.
     [[nodiscard]] core::Result<std::vector<std::string>>
     missing(const std::vector<std::string>& paths);
+    // ADR-0286: where files seen at a path and revision are now, by the
+    // engine's move journal (catalogue.resolve_moves), asked in parts: one
+    // answer each, empty for a file it did not move.
+    struct Moved {
+        std::string raw_path;
+        core::LocalSourceRevision revision;
+    };
+    [[nodiscard]] core::Result<std::vector<std::optional<Moved>>>
+    resolve_moves(const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources);
     struct BackupLocation {
         std::string place;
         std::string folder;

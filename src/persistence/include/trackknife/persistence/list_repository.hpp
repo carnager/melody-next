@@ -387,6 +387,19 @@ class ListRepository final {
     // ADR-0233: lists, the engine's own -- working and saved -- not list_documents,
     // which is Trackknife's workspace and rewritten whole by it.
     [[nodiscard]] core::Result<std::vector<EngineListSummary>> load_engine_lists() const;
+    // ADR-0286: the working lists and drafts schema 56 set aside, for a
+    // client to offer once: listed, read, and dropped once dealt with.
+    [[nodiscard]] core::Result<std::vector<EngineListSummary>> load_retired_engine_lists() const;
+    [[nodiscard]] core::Result<std::optional<EngineList>>
+    load_retired_engine_list(const core::StableId& id) const;
+    [[nodiscard]] core::Result<std::size_t>
+    drop_retired_engine_lists(const std::vector<core::StableId>& ids);
+    // ADR-0286: where each file now is, by the move journal -- a file moved
+    // by this engine since a client saw it at that path and revision; empty
+    // for one not moved. What a tab kept in a client follows a move by.
+    [[nodiscard]] core::Result<std::vector<std::optional<std::pair<std::string, core::LocalSourceRevision>>>>
+    resolve_local_source_moves(
+        const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources) const;
     // Empty when there is no such list.
     [[nodiscard]] core::Result<std::optional<EngineList>>
     load_engine_list(const core::StableId& id) const;

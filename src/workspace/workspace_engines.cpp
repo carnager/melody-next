@@ -100,7 +100,7 @@ std::vector<std::string> Workspace::crossEnginePaths(std::vector<std::string> pa
                       .arg(engineName(to))
                 : QStringLiteral("%1 of %2 tracks are not reachable on this computer; they were "
                                  "left out. Where the remote's music is mounted here is set in "
-                                 "Settings → Engine.")
+                                 "Settings → Engines → Advanced.")
                       .arg(left)
                       .arg(paths.size()),
             10'000);
@@ -137,7 +137,31 @@ std::vector<LocalTrackRow> Workspace::crossEngineRows(std::vector<LocalTrackRow>
 }
 
 void Workspace::renewOutdatedLocalEngine() {
-    if (!localCatalogue() || !localCatalogue()->localEngineOutdated()) {
+    auto* local = localCatalogue();
+    if (local == nullptr) {
+        engine_renewal_pending_ = false;
+        return;
+    }
+    // ADR-0286: what this computer's engine is owed. Started by an older
+    // Trackknife, it is handed over to systemd, once; outdated, restarted;
+    // and its sharing settings, kept in Settings until now, are handed to it
+    // as melodyd.conf settings, once -- unless there are none to hand over.
+    const bool hand_over = local->localEngineWantsService();
+    const bool outdated = !hand_over && local->localEngineOutdated();
+    QSettings settings;
+    const auto sharing = localEngineSharing();
+    const bool nothing_shared = !sharing.share && !sharing.upnp && sharing.music_root.isEmpty() &&
+                                sharing.play_for.empty() && sharing.play_for_found &&
+                                sharing.found_nearby_kbps ==
+                                    SettingsKeys::engine_stream_nearby_default &&
+                                sharing.found_away_kbps == SettingsKeys::engine_stream_away_default;
+    if (nothing_shared) {
+        settings.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key), true);
+    }
+    const bool unconfigured =
+        local->startsOwnEngine() &&
+        !settings.value(QLatin1String(SettingsKeys::engine_settings_in_config_key), false).toBool();
+    if (!hand_over && !outdated && !unconfigured) {
         engine_renewal_pending_ = false;
         return;
     }
@@ -145,8 +169,10 @@ void Workspace::renewOutdatedLocalEngine() {
     if (localPlayback() != nullptr &&
         localPlayback()->state().status == QStringLiteral("playing")) {
         if (!engine_renewal_pending_) {
-            view_->showMessage(QStringLiteral("This computer's engine is out of date; it "
-                                              "restarts when playback stops"),
+            view_->showMessage(hand_over ? QStringLiteral("This computer's engine moves to its "
+                                                          "service when playback stops")
+                                         : QStringLiteral("This computer's engine is out of date; "
+                                                          "it restarts when playback stops"),
                                10'000);
         }
         engine_renewal_pending_ = true;
@@ -154,13 +180,33 @@ void Workspace::renewOutdatedLocalEngine() {
     }
     engine_renewal_pending_ = false;
     QGuiApplication::setOverrideCursor(QCursor{Qt::WaitCursor});
-    const bool renewed = localCatalogue()->restartLocalEngine();
+    QString said;
+    bool renewed = true;
+    if (hand_over) {
+        renewed = local->handOverToService();
+        said = renewed ? QStringLiteral("This computer's engine now runs as a service "
+                                        "(melodyd.socket)")
+                       : QStringLiteral("This computer's engine could not move to its service: "
+                                        "systemctl --user start melodyd.socket");
+    } else if (outdated) {
+        renewed = local->restartLocalEngine();
+        said = renewed ? QStringLiteral("This computer's engine was out of date and has been "
+                                        "restarted")
+                       : QStringLiteral("This computer's engine is out of date and did not "
+                                        "restart; see its log");
+    }
+    if (renewed && unconfigured) {
+        if (auto configured = local->configureLocalEngine(sharingChanges(sharing, {}))) {
+            settings.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key), true);
+        } else {
+            said = QStringLiteral("This computer's engine was not given its settings: %1")
+                       .arg(QString::fromStdString(configured.error().message));
+        }
+    }
     QGuiApplication::restoreOverrideCursor();
-    view_->showMessage(renewed ? QStringLiteral("This computer's engine was out of date and "
-                                                "has been restarted")
-                               : QStringLiteral("This computer's engine is out of date and "
-                                                "did not restart; see its log"),
-                       8'000);
+    if (!said.isEmpty()) {
+        view_->showMessage(said, 8'000);
+    }
 }
 
 void Workspace::settingsSaved(const LocalEngineSharing& before) {
@@ -219,16 +265,24 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
     }
     // ADR-0234: engines added, removed or pointed elsewhere, at once.
     syncRemoteEngines();
-    // ADR-0226: this computer's engine runs apart from the window, so a
-    // change to how it is shared means starting it again.
-    if (localEngineSharing() != before && localCatalogue()) {
+    // ADR-0286: how this computer's engine is shared is its melodyd.conf;
+    // a change is handed to it, and it restarts to use it.
+    if (const auto now = localEngineSharing(); now != before && localCatalogue() &&
+                                                 localCatalogue()->startsOwnEngine()) {
         QGuiApplication::setOverrideCursor(QCursor{Qt::WaitCursor});
-        const bool restarted = localCatalogue()->restartLocalEngine();
+        auto configured = localCatalogue()->configureLocalEngine(sharingChanges(now, before));
         QGuiApplication::restoreOverrideCursor();
-        view_->showMessage(
-            restarted ? QStringLiteral("This computer's engine restarted with its new settings")
-                      : QStringLiteral("This computer's engine did not restart; see its log"),
-            8'000);
+        if (configured) {
+            QSettings{}.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key),
+                                 true);
+        }
+        view_->showMessage(configured
+                               ? QStringLiteral("This computer's engine restarted with its new "
+                                                "settings")
+                               : QStringLiteral("This computer's engine did not take its new "
+                                                "settings: %1")
+                                     .arg(QString::fromStdString(configured.error().message)),
+                           8'000);
     }
     reloadPlaybackPreferences();
     if (notifier_ != nullptr) {

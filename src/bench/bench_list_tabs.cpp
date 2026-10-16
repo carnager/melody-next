@@ -92,7 +92,7 @@ void BenchMainWindow::workspaceRestored(const bool restored) {
         localEngine().library =
             new LocalLibraryPanel(*localCatalogue(), EngineKey::local(), source_stack_);
         connect(localLibrary(), &LocalLibraryPanel::manageFoldersRequested, this,
-                [this] { showSettingsDialog(SettingsDialog::Page::library); });
+                [this] { showSettingsDialog(SettingsDialog::Page::engine); });
         source_stack_->addWidget(localLibrary());
         workspace_.attachLibrary(&localLibrary()->browser());
         // "Add to list": this computer's lists, in tab order.
@@ -141,13 +141,18 @@ void BenchMainWindow::scheduleWorkspaceRestore() {
 }
 
 int BenchMainWindow::engineRank(const QWidget* view) const {
+    // ADR-0286: the library's tabs first -- the usual ones -- then the
+    // others' in the order the engines are, this computer's among them.
     const auto engine = engineOfView(view);
+    if (workspace_.holdsLibrary(engine)) {
+        return 0;
+    }
     for (std::size_t index = 0; index < engines_.size(); ++index) {
         if (engines_[index]->key == engine) {
-            return static_cast<int>(index);
+            return static_cast<int>(index) + 1;
         }
     }
-    return static_cast<int>(engines_.size());
+    return static_cast<int>(engines_.size()) + 1;
 }
 
 void BenchMainWindow::keepTabGroupsTogether() {
@@ -155,11 +160,11 @@ void BenchMainWindow::keepTabGroupsTogether() {
         return;
     }
     regrouping_tabs_ = true;
-    // ADR-0234: each engine's tabs together, in the order the engines are
-    // -- this computer's first -- and within each group as they were left.
+    // ADR-0234: each engine's tabs together -- ADR-0286: the library's
+    // first -- and within each group as they were left.
     // A tab dragged into another group goes back to its own.
     int next = 0;
-    for (int rank = 0; rank <= static_cast<int>(engines_.size()); ++rank) {
+    for (int rank = 0; rank <= static_cast<int>(engines_.size()) + 1; ++rank) {
         for (int index = next; index < tabs_->count(); ++index) {
             if (engineRank(tabs_->widget(index)) == rank) {
                 if (index != next) {
@@ -682,9 +687,23 @@ void BenchMainWindow::applyLocalLibraryVisibility() {
         return;
     }
     constexpr int library_tab = 1;
+    // Noted first: hiding the current tab moves the bar to another.
+    const auto current = local_source_tabs_->currentIndex();
     const bool shown = localLibraryShown();
     local_source_tabs_->setTabVisible(library_tab, shown);
-    if (!shown && local_source_tabs_->currentIndex() == library_tab) {
+    // ADR-0286: one library -- of the engines elsewhere, only the one that
+    // holds it has a library tab.
+    const auto library = libraryEngine();
+    for (int index = 0; index < local_source_tabs_->count(); ++index) {
+        const auto key = local_source_tabs_->tabData(index).toString();
+        if (key.isEmpty()) {
+            continue;
+        }
+        const auto* engine = link(EngineKey::fromText(key));
+        local_source_tabs_->setTabVisible(index,
+                                          engine != nullptr && engine->setting.address == library);
+    }
+    if (!local_source_tabs_->isTabVisible(current)) {
         selectPreferredSource();
     }
 }
@@ -699,7 +718,8 @@ void BenchMainWindow::selectPreferredSource() {
     // A library tab of another engine carries that engine's key.
     int remote = -1;
     for (int index = 0; index < local_source_tabs_->count(); ++index) {
-        if (!local_source_tabs_->tabData(index).toString().isEmpty()) {
+        if (!local_source_tabs_->tabData(index).toString().isEmpty() &&
+            local_source_tabs_->isTabVisible(index)) {
             remote = index;
         }
     }
@@ -772,8 +792,11 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, chrome.playing);
     tabs_->setTabText(index, chrome.text);
-    tabs_->setTabIcon(index,
-                      chrome.remote ? QIcon::fromTheme(QStringLiteral("network-server")) : QIcon{});
+    tabs_->setTabIcon(index, chrome.mark == Workspace::TabChrome::Mark::this_computer
+                                 ? QIcon::fromTheme(QStringLiteral("computer"))
+                             : chrome.mark == Workspace::TabChrome::Mark::elsewhere
+                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                 : QIcon{});
     tabs_->setTabToolTip(index, chrome.tooltip);
     tab.view->setAccessibleName(chrome.accessible_name);
     if (auto* close = tabs_->tabBar()->tabButton(index, QTabBar::RightSide)) {
@@ -1168,6 +1191,31 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
 
 // Dynamic results from an engine's library show a rating it stored, and
 // rules on ratings look again.
+// ADR-0286: lists an engine set aside when tabs became this window's,
+// offered once: asked without holding the window -- nothing waits on it.
+void BenchMainWindow::offerRetiredLists(const QString& engine, const QStringList& names,
+                                        std::function<void(RetiredChoice)> answer) {
+    auto* box = new QMessageBox(QMessageBox::Question, tr("Lists left on %1").arg(engine),
+                                tr("%n list(s) from earlier tabs are left on %1. Tabs are this "
+                                   "window's now, and only saved playlists stay on an engine.",
+                                   nullptr, static_cast<int>(names.size()))
+                                    .arg(engine),
+                                QMessageBox::NoButton, this);
+    box->setObjectName(QStringLiteral("bench-retired-lists"));
+    box->setInformativeText(names.join(QStringLiteral(", ")));
+    auto* open = box->addButton(tr("Open as tabs"), QMessageBox::AcceptRole);
+    auto* discard = box->addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    box->addButton(tr("Later"), QMessageBox::RejectRole);
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    connect(box, &QMessageBox::buttonClicked, this,
+            [open, discard, answer = std::move(answer)](QAbstractButton* clicked) {
+                answer(clicked == open      ? RetiredChoice::open
+                       : clicked == discard ? RetiredChoice::discard
+                                            : RetiredChoice::later);
+            });
+    box->open();
+}
+
 void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
                                            const QHash<QString, unsigned>& ratings) {
     // What plays, rated here or anywhere else.

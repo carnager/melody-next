@@ -349,21 +349,8 @@ int main(int argc, char** argv) {
     auto& agent_music_root = settings.agent_music_root;
     const auto agent_nearby_kbps = settings.agent_nearby_kbps;
     const auto agent_away_kbps = settings.agent_away_kbps;
-    // An [engine NAME] with an address is played for as --play-for was.
-    for (const auto& engine : settings.engines) {
-        if (!engine.address || engine.agent) {
-            std::cerr << "melodyd: " << engine.where << ": [engine " << engine.name
-                      << "] wants an address, and agent is not there yet\n";
-            return EXIT_FAILURE;
-        }
-        play_fors.push_back(PlayFor{.address = *engine.address,
-                                    .name = engine.name,
-                                    .password = engine.password,
-                                    .password_file = engine.password_file,
-                                    .music_root = engine.music_root,
-                                    .nearby_kbps = engine.nearby_kbps,
-                                    .away_kbps = engine.away_kbps});
-    }
+    // ADR-0286: the [engine NAME] sections, each password file read below.
+    auto& listed_engines = settings.engines;
 
     std::vector<std::pair<std::string*, std::string*>> password_files{
         {&password_file, &password},
@@ -371,6 +358,9 @@ int main(int argc, char** argv) {
         {&agent_password_file, &agent_password}};
     for (auto& target : play_fors) {
         password_files.emplace_back(&target.password_file, &target.password);
+    }
+    for (auto& engine : listed_engines) {
+        password_files.emplace_back(&engine.password_file, &engine.password);
     }
     for (const auto& [file, password_read] : password_files) {
         if (file->empty()) {
@@ -911,8 +901,38 @@ int main(int argc, char** argv) {
 
     // This run's identity among engines on the network: what an engine that
     // plays for others looks for, so it does not play for itself.
+    // ADR-0286: listed engines, played for -- by their address while the
+    // network does not find them -- or left out.
+    std::vector<trackknife::agent::ListedEngine> listed;
+    for (const auto& engine : listed_engines) {
+        std::optional<trackknife::protocol::Endpoint> address;
+        if (engine.address) {
+            address = trackknife::protocol::Endpoint::parse(*engine.address, engine.password);
+            if (!address || !address->tcp()) {
+                std::cerr << "melodyd: " << engine.where << ": [engine " << engine.name
+                          << "] wants its address as HOST:PORT, got " << *engine.address << "\n";
+                return EXIT_FAILURE;
+            }
+        }
+        std::optional<trackknife::agent::StreamChoice> stream;
+        if (engine.nearby_kbps || engine.away_kbps) {
+            stream = stream_choice(engine.nearby_kbps ? engine.nearby_kbps : agent_nearby_kbps,
+                                   engine.away_kbps ? engine.away_kbps : agent_away_kbps);
+        }
+        listed.push_back(trackknife::agent::ListedEngine{
+            .name = engine.name,
+            .address = std::move(address),
+            .music_root = engine.music_root,
+            .stream = std::move(stream),
+            .password = engine.password,
+            // An engine listed with its address is one to play for; one
+            // without is played for as every other is, unless it says.
+            .play = engine.agent.value_or(engine.address.has_value() || agent_for_all)});
+    }
+    const bool any_listed_played = std::ranges::any_of(
+        listed, [](const auto& engine) { return engine.play && engine.address; });
     std::unique_ptr<trackknife::agent::Guests> guests;
-    if (agent_for_all) {
+    if (agent_for_all || any_listed_played) {
         if (!arbiter) {
             arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(player.get());
         }
@@ -935,7 +955,9 @@ int main(int argc, char** argv) {
                         }
                         return addresses;
                     }(),
-                .stream = stream_choice(agent_nearby_kbps, agent_away_kbps)},
+                .stream = stream_choice(agent_nearby_kbps, agent_away_kbps),
+                .listed = std::move(listed),
+                .play_found = agent_for_all},
             *arbiter);
     }
     // Listening on the network, it says so there: agents and clients find it

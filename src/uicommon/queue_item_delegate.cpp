@@ -83,6 +83,17 @@ namespace {
     return settings.view() != nullptr && settings.property(property).toBool();
 }
 
+// The row that plays, as every list draws it: its text semi-bold in the
+// accent, unless a cell has a colour of its own -- the rating's stars.
+void markPlaying(QStyleOptionViewItem& item, const QModelIndex& index) {
+    item.font.setWeight(QFont::DemiBold);
+    if (!index.data(Qt::ForegroundRole).isValid()) {
+        const auto accent = item.palette.color(QPalette::Highlight).lighter(115);
+        item.palette.setColor(QPalette::Text, accent);
+        item.palette.setColor(QPalette::HighlightedText, accent);
+    }
+}
+
 // A lone track is an album of its own (ADR-0250).
 [[nodiscard]] TrackGroupColumns groupColumns(const TrackViewSettings& settings) {
     return {.album = configuredColumn(settings, track_album_column_property, track_album_column),
@@ -278,14 +289,19 @@ void TrackLinesDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
         return;
     }
     const auto lines = rowLines(*settings_);
-    if (lines <= 1) {
-        QStyledItemDelegate::paint(painter, option, index);
-        return;
-    }
     auto item = option;
     initStyleOption(&item, index);
+    // The playing row is marked here as in the album view: this delegate
+    // drew it like every other.
+    if (index.data(track_current_role).toBool()) {
+        markPlaying(item, index);
+    }
     const auto* widget = item.widget;
     auto* style = widget != nullptr ? widget->style() : QApplication::style();
+    if (lines <= 1) {
+        style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+        return;
+    }
     // The selection and stripes under every line, the text on the first.
     auto background = item;
     background.text.clear();
@@ -427,14 +443,7 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         item.state &= ~QStyle::State_HasFocus;
     }
     if (current_track) {
-        item.font.setWeight(QFont::DemiBold);
-        // The row's text takes the accent; a cell with a colour of its own
-        // -- the rating's stars -- keeps it.
-        if (!index.data(Qt::ForegroundRole).isValid()) {
-            const auto accent = item.palette.color(QPalette::Highlight).lighter(115);
-            item.palette.setColor(QPalette::Text, accent);
-            item.palette.setColor(QPalette::HighlightedText, accent);
-        }
+        markPlaying(item, index);
         if (cell.playing_icon) {
             item.icon = QIcon::fromTheme(QStringLiteral("media-playback-start"),
                                          QApplication::style()->standardIcon(QStyle::SP_MediaPlay));

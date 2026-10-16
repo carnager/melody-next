@@ -125,6 +125,7 @@ class QueueTableViewTest final : public QObject {
     void eachDiscOfAnAlbumGetsItsName();
     void aDiscLearnedLaterNamesTheFirstToo();
     void thePlayingRowsStarsKeepTheirColour();
+    void aListWithoutAlbumsMarksThePlayingRow();
     void largeGroupedResultsScrollToLastRow();
     void homeAndEndSelectQueueBoundaries();
     void shiftHomeAndEndExtendFromSelectionAnchor();
@@ -499,6 +500,50 @@ void QueueTableViewTest::thePlayingRowsStarsKeepTheirColour() {
         }
     }
     QVERIFY2(yellow > 10, qPrintable(QStringLiteral("%1 yellow pixels").arg(yellow)));
+}
+
+// The list views without albums -- plain columns, two-line tracks -- drew
+// the playing row like any other; it takes the accent there too.
+void QueueTableViewTest::aListWithoutAlbumsMarksThePlayingRow() {
+    for (const int lines : {1, 2}) {
+        QStandardItemModel model{2, track_column_count};
+        model.setData(model.index(0, track_title_column), QStringLiteral("Playing now"));
+        model.setData(model.index(1, track_title_column), QStringLiteral("Waiting here"));
+        for (int column = 0; column < track_column_count; ++column) {
+            model.setData(model.index(0, column), true, track_current_role);
+        }
+        QueueTableView view{nullptr};
+        view.setModel(&model);
+        view.setProperty(track_row_lines_property, lines);
+        view.setItemDelegate(new TrackLinesDelegate{&view});
+        view.setColumnWidth(track_title_column, 300);
+        view.resize(900, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto accent = view.palette().color(QPalette::Highlight).lighter(115);
+        const auto accented = [&view, &model, &accent](const int row) {
+            const auto image = view.viewport()
+                                   ->grab(view.visualRect(model.index(row, track_title_column)))
+                                   .toImage();
+            int count = 0;
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor pixel = image.pixelColor(x, y);
+                    if (std::abs(pixel.red() - accent.red()) +
+                            std::abs(pixel.green() - accent.green()) +
+                            std::abs(pixel.blue() - accent.blue()) <
+                        60) {
+                        ++count;
+                    }
+                }
+            }
+            return count;
+        };
+        QVERIFY2(
+            accented(0) > 10,
+            qPrintable(QStringLiteral("%1 lines: %2 accent pixels").arg(lines).arg(accented(0))));
+        QCOMPARE(accented(1), 0);
+    }
 }
 
 void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {

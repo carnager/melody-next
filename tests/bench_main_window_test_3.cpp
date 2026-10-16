@@ -1627,7 +1627,6 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
             .layout_store = {},
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
-            .library_roots = {},
             .library_elsewhere = {},
             .undo = {},
         });
@@ -1757,7 +1756,6 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
             .layout_store = {},
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
-            .library_roots = {},
             .library_elsewhere = {},
             .undo = {},
         });
@@ -2003,7 +2001,6 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
             .layout_store = {},
             .musicbrainz = service,
             .tools = engineFileWorkTools(work),
-            .library_roots = [root = raw(library)] { return std::vector{root}; },
             .library_elsewhere = {},
             .undo =
                 [work](std::vector<operations::UndoRequest> requests,
@@ -2111,20 +2108,19 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QCOMPARE(session->albums()[cover].state, AlbumBatchSession::State::staged);
     QVERIFY(row_of(band)->text(2).startsWith(QStringLiteral("Written")));
 
-    // Cover renamed and moved by the layout into the library folder it is
-    // in, its gain kept; Third's file changed since it was read, so Third
+    // Cover renamed and moved by the layout into the library's folder, its
+    // gain kept; Third's file changed since it was read, so Third
     // is left out.
     row_of(cover)->setCheckState(0, Qt::Checked);
     row_of(third)->setCheckState(0, Qt::Checked);
     QTRY_COMPARE(write->text(), QStringLiteral("Write 2 albums"));
     QTRY_VERIFY(tagger->layoutsAvailable());
     tagger->selectLayout(1);
-    // Named by the music folder the files are in.
-    QCOMPARE(tagger->destinations().back().name, QStringLiteral("Its music folder · ") + library);
-    tagger->selectDestination(static_cast<int>(tagger->destinations().size()) - 1);
+    tagger->chooseMoveFolder(raw(library));
+    QCOMPARE(tagger->destinations().back().name, library);
     tagger->chooseRename(true);
     tagger->chooseMove(true);
-    QVERIFY(tagger->renameFiles() && tagger->moveFiles() && tagger->movesIntoLibraryFolders());
+    QVERIFY(tagger->renameFiles() && tagger->moveFiles() && tagger->moveAvailable());
     QVERIFY(retag(sources[4].source.raw_path, {{"COMMENT", "changed elsewhere"}}));
     QTRY_VERIFY(write->isEnabled());
     write->click();

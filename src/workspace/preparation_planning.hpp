@@ -39,10 +39,6 @@ struct PreparationRequest {
 [[nodiscard]] core::Result<operations::PreparationPlan>
 planPreparation(PreparationRequest request, const core::CancellationToken& cancellation);
 
-// The library folder `raw_path` is in: the deepest of `roots` holding it.
-[[nodiscard]] std::optional<std::string> libraryFolderOf(const std::string& raw_path,
-                                                         const std::vector<std::string>& roots);
-
 // A folder moved into, as a destination.
 [[nodiscard]] operations::DestinationProfile folderDestination(std::string root_raw_path);
 

@@ -99,9 +99,6 @@ void AlbumBatchWrite::start() {
         changed.insert(patch.item_index);
     }
     const auto path_operation = operations_.rename_files || operations_.move_files;
-    const auto roots = operations_.move_files && tagger_->services().library_roots
-                           ? tagger_->services().library_roots()
-                           : std::vector<std::string>{};
     std::vector<std::pair<std::optional<std::string>, std::size_t>> placed;
     for (const auto& album : albums_) {
         auto& outcome = outcomeOf(album.album);
@@ -113,17 +110,13 @@ void AlbumBatchWrite::start() {
             continue;
         }
         std::optional<std::string> root;
-        if (operations_.move_files && options_.destination) {
-            root = options_.destination->root_raw_path;
-        } else if (operations_.move_files) {
-            root = album.items.empty()
-                       ? std::nullopt
-                       : libraryFolderOf(selection->source(album.items.front()).raw_path, roots);
-            if (!root) {
+        if (operations_.move_files) {
+            if (!options_.destination) {
                 outcome.outcome = Outcome::left_out;
-                outcome.note = QStringLiteral("Not in a library folder, so not moved");
+                outcome.note = QStringLiteral("No folder to move to, so not moved");
                 continue;
             }
+            root = options_.destination->root_raw_path;
         }
         placed.emplace_back(std::move(root), album.album);
     }

@@ -122,9 +122,7 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
         }
         const auto target =
             remembered.value(QLatin1String(remembered_move_target_prefix) + engine).toString();
-        move_target_ = target == QLatin1String("library") && services_.library_roots
-                           ? MoveTarget::library
-                       : target == QLatin1String("library-folder") && library_folder_ &&
+        move_target_ = target == QLatin1String("library-folder") && library_folder_ &&
                                services_.library_elsewhere
                            ? MoveTarget::library_folder
                        : target == QLatin1String("folder") && move_folder_ ? MoveTarget::folder
@@ -2143,9 +2141,6 @@ bool TaggerSession::layoutReady() const {
 }
 
 bool TaggerSession::destinationReady() const {
-    if (move_target_ == MoveTarget::library) {
-        return static_cast<bool>(services_.library_roots);
-    }
     if (move_target_ == MoveTarget::folder) {
         return move_folder_.has_value();
     }
@@ -2242,9 +2237,6 @@ std::vector<TaggerSession::DestinationRow> TaggerSession::destinationRows() cons
     for (std::size_t index = 0U; index < destination_catalog_.size(); ++index) {
         rows.push_back({.target = MoveTarget::saved, .index = index});
     }
-    if (services_.library_roots) {
-        rows.push_back({.target = MoveTarget::library});
-    }
     if (services_.library_elsewhere) {
         const auto folders = services_.library_elsewhere();
         for (std::size_t index = 0U; index < folders.size(); ++index) {
@@ -2255,23 +2247,6 @@ std::vector<TaggerSession::DestinationRow> TaggerSession::destinationRows() cons
         rows.push_back({.target = MoveTarget::folder});
     }
     return rows;
-}
-
-std::optional<std::string> TaggerSession::sharedMusicFolder() const {
-    if (grid_model_ == nullptr || !services_.library_roots) {
-        return std::nullopt;
-    }
-    const auto roots = services_.library_roots();
-    const auto& selection = grid_model_->selection();
-    std::optional<std::string> shared;
-    for (std::size_t item = 0U; item < selection.item_count(); ++item) {
-        auto here = libraryFolderOf(selection.source(item).raw_path, roots);
-        if (!here || (shared && *shared != *here)) {
-            return std::nullopt;
-        }
-        shared = std::move(here);
-    }
-    return shared;
 }
 
 std::optional<TaggerServices::LibraryFolder> TaggerSession::chosenLibraryFolder() const {
@@ -2296,16 +2271,6 @@ std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
             const auto& saved = destination_catalog_[row.index];
             choices.push_back(Choice{.id = QString::fromStdString(saved.id.to_string()),
                                      .name = display_utf8(saved.profile.name)});
-            break;
-        }
-        case MoveTarget::library: {
-            // The music folder the files are in, named when they share one.
-            auto name = QStringLiteral("Its music folder");
-            if (const auto shared = sharedMusicFolder()) {
-                name +=
-                    QStringLiteral(" · ") + QString::fromStdString(core::display_raw_path(*shared));
-            }
-            choices.push_back(Choice{.id = QStringLiteral("library"), .name = name});
             break;
         }
         case MoveTarget::library_folder: {
@@ -2538,11 +2503,9 @@ void TaggerSession::rememberActionChoices() const {
     // Destinations are the engine's: one remembered for each.
     const auto& engine = services_.output_profile_store.destinations_key;
     settings.setValue(QLatin1String(remembered_move_target_prefix) + engine,
-                      move_target_ == MoveTarget::library ? QStringLiteral("library")
-                      : move_target_ == MoveTarget::library_folder
-                          ? QStringLiteral("library-folder")
-                      : move_target_ == MoveTarget::folder ? QStringLiteral("folder")
-                                                           : QStringLiteral("saved"));
+                      move_target_ == MoveTarget::library_folder ? QStringLiteral("library-folder")
+                      : move_target_ == MoveTarget::folder       ? QStringLiteral("folder")
+                                                                 : QStringLiteral("saved"));
     if (library_folder_) {
         settings.setValue(
             QLatin1String(remembered_library_folder_prefix) + engine,
@@ -2626,28 +2589,7 @@ void TaggerSession::startWritePlan() {
             return;
         }
         output_layout = layout->profile;
-        if (operation_selection.move_files && move_target_ == MoveTarget::library) {
-            // One plan has one destination: the files' one library folder.
-            const auto roots =
-                services_.library_roots ? services_.library_roots() : std::vector<std::string>{};
-            std::optional<std::string> root;
-            const auto& selection = grid_model_->selection();
-            for (std::size_t item = 0U; item < selection.item_count(); ++item) {
-                const auto here = libraryFolderOf(selection.source(item).raw_path, roots);
-                if (!here) {
-                    refuse(QStringLiteral("A file is in none of the music folders; choose where "
-                                          "to move to"));
-                    return;
-                }
-                if (root && *root != *here) {
-                    refuse(QStringLiteral("These files are in more than one music folder; "
-                                          "choose where to move to"));
-                    return;
-                }
-                root = here;
-            }
-            destination = root ? std::optional{folderDestination(*root)} : std::nullopt;
-        } else if (operation_selection.move_files) {
+        if (operation_selection.move_files) {
             destination = moveDestination();
             if (!destination) {
                 refuse(QStringLiteral("Choose where to move to before applying"));

@@ -3,8 +3,8 @@ _new_trackknife() {
 ==> This Trackknife is a rewrite, not an update of the old one.
 
 It no longer connects to MPD. Playback and the library belong to Melody's
-engine (melodyd-git), which Trackknife starts on its own the first time --
-or it connects to one on your network, found by name under
+engine (melodyd-git), a user service started the first time Trackknife
+connects (melodyd.socket) -- or one on your network, found by name under
 Settings > Engine. The old MPD connection settings are not used.
 
 Your music files and their tags are untouched. Add your music folders

@@ -2,7 +2,8 @@
 
 ## On one computer
 
-1. Start Trackknife. It starts its own engine; nothing to configure.
+1. Start Trackknife. Its engine starts with it (a user service, on the first
+   connection); nothing to configure.
 2. In the library panel, click **Folders…** and add your music folder.
 3. Click **Refresh**.
 

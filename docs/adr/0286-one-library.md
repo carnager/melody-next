@@ -56,28 +56,48 @@ Measured on 2026-10-16:
    client.
 6. **No migration for two libraries**: none of the three users has one.
 7. **Every engine plays for every other** by default (`agent = yes` in
-   melodyd itself, not only when Trackknife starts it). An engine with
+   melodyd itself, not only when Trackknife starts it) -- when it has a
+   password, for without one no other engine would take it. An engine with
    speakers -- headless or not -- is a speaker for the others; newest wins
    (ADR-0229). An engine with no audio device offers nothing.
 
 ### melodyd runs as a service; Trackknife only connects
 
-Trackknife no longer starts melodyd. The package ships `melodyd.service` and
-`melodyd.socket`, the socket enabled for every user
+On Linux Trackknife no longer starts melodyd. The package ships
+`melodyd.service` and `melodyd.socket`, the socket enabled for every user
 (`/usr/lib/systemd/user/sockets.target.wants`): the first connection to
 `$XDG_RUNTIME_DIR/melodyd.sock` starts the engine (socket activation, read
-from `LISTEN_FDS` without libsystemd). An engine stopped or not installed is
-said plainly, with the command that starts it. On macOS a documented launchd
-agent does the same. The desktop engine is then configured and run exactly as
-a server's.
+from `LISTEN_FDS` without libsystemd). When nothing answers, Trackknife
+starts the socket if it is enabled and not running yet -- just installed --
+and otherwise says what starts it. The desktop engine is then configured and
+run exactly as a server's; `engine.info` says `service` when a service
+manager runs it.
 
-Restarting is the service manager's: the engine exits and systemd, launchd
-or Docker starts it again.
+On macOS, and for an engine of another folder (a test's, a second
+workspace's), Trackknife still starts the engine when nothing answers -- as
+`melodyd` with its socket, folder and file, no other flag. Every setting is
+in `melodyd.conf` there too.
+
+Restarting is the service manager's: `engine.restart` exits and systemd
+(`Restart=always`) or Docker starts it again; one Trackknife started is
+stopped and started by it. `engine.stop` -- Quit and stop engine -- exits
+with 64, which the unit does not restart after
+(`RestartPreventExitStatus=64`); the next client on the socket starts it.
+
+Trackknife's sharing settings become the engine's: `config.get`/`config.set`
+read and change its `melodyd.conf` over the protocol, all or none, checked as
+melodyd reads it. Settings' sharing is handed over once, when the window
+first meets the engine, and on every save, the engine restarting to use it.
+An engine an older Trackknife started is stopped and `melodyd.socket`
+started, once, when nothing plays: the one time Trackknife starts anything of
+systemd's.
 
 ### `melodyd.conf`
 
 One file configures an engine, `~/.config/melody/melodyd.conf` by default,
-another with `--config FILE` (Docker: `/state/melodyd.conf`). It takes over
+another with `--config FILE` or `$MELODYD_CONFIG` (Docker sets
+`/state/melodyd.conf`; the test suite one of its own, so no test reads or
+writes a user's). It takes over
 the name of today's environment file; a file still holding
 `MELODYD_OPTIONS=…` is converted once into keys.
 
@@ -120,10 +140,11 @@ address = 192.168.0.200:6603
 
 ### Setting up an engine: edit the file
 
-`melodyd` copies a commented skeleton -- every option, commented out, with
-what it does above it, installed as `/usr/share/melody/melodyd.conf` -- to its
-config path on its first start when there is no file. `melody-cli config
---edit` does the same and opens `$EDITOR`, checks the file with the engine's
+A new file starts from a commented skeleton -- every option, commented out,
+with what it does above it, installed as `/usr/share/melody/melodyd.conf` and
+built in -- when `melody-cli config` or `config.set` first writes one;
+melodyd itself never writes it at start. A new key goes below its example
+there. `melody-cli config --edit` opens it in `$EDITOR`, checks the file with the engine's
 parser when it is saved, and offers to edit again on a mistake.
 `melody-cli config KEY [VALUE]` and `--unset` read and change one key
 (`--engine NAME` for a section), changing that line only, keeping comments and

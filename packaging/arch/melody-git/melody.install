@@ -26,7 +26,14 @@ post_install() {
   _new_melody
   cat <<'MESSAGE'
 
-On a desktop, Trackknife starts the engine itself. On a server:
+On a desktop the engine starts with Trackknife: melodyd.socket is enabled
+for every user. If an older Trackknife had started one, the new one moves it
+over once; if it says no engine runs, start it:
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now melodyd.socket
+
+On a server:
 
   melody-cli config password 'the one all your engines share'
   systemctl --user enable --now melodyd.service

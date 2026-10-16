@@ -81,6 +81,13 @@ void adoptTrackknifeNames() {
     }
 }
 
+void isolateTestEngineState() {
+    if (QStandardPaths::isTestModeEnabled() && qEnvironmentVariableIsEmpty("MELODY_STATE_DIR")) {
+        qputenv("MELODY_STATE_DIR", QFile::encodeName(QStandardPaths::writableLocation(
+                                        QStandardPaths::AppDataLocation)));
+    }
+}
+
 QString applyPendingWorkspaceRestore() {
     QString restore_notice;
     QSettings settings;

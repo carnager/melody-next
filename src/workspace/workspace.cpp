@@ -8,6 +8,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/remote_engines.hpp"
+#include "workspace/startup.hpp"
 #include "workspace/tab_store.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -52,6 +53,7 @@ void Workspace::start() {
     // from where Trackknife kept it before an engine is asked for, so neither
     // this window nor the engine it starts opens an empty one beside it. An
     // engine of before still running there keeps it, and this follows.
+    isolateTestEngineState();
     if (core::environment_variable("MELODY_STATE_DIR") == nullptr) {
         if (const auto adopted =
                 core::adopt_legacy_engine_state(core::default_engine_state_directory());

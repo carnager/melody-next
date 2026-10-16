@@ -42,3 +42,7 @@ target_link_libraries(
 )
 add_test(NAME library-views-benchmark-smoke COMMAND trackknife_library_views_benchmark
          "${PROJECT_SOURCE_DIR}/tests/fixtures/audio" --quick)
+
+# The benchmarks run windows and engines too: apart from the user, as the
+# tests (cmake/TestIsolation.cmake).
+melody_isolate_tests()

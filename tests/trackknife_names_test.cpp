@@ -22,6 +22,7 @@ class TrackknifeNamesTest final : public QObject {
 
   private slots:
     void movesTheWindowsOwnOnce();
+    void aWindowUnderTestNeverTakesTheRealEngineFolder();
 };
 
 namespace {
@@ -83,6 +84,27 @@ void TrackknifeNamesTest::movesTheWindowsOwnOnce() {
     touch(old_data + QStringLiteral("/tabs/two.json"));
     adoptTrackknifeNames();
     QVERIFY(!QFile::exists(data + QStringLiteral("/tabs/two.json")));
+}
+
+// A window in test mode with no engine folder named -- the benchmark once --
+// moved a user's library out of Trackknife's folder while their engine was
+// down. It keeps its engine in its own test folder instead.
+void TrackknifeNamesTest::aWindowUnderTestNeverTakesTheRealEngineFolder() {
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    qputenv("XDG_DATA_HOME", QFile::encodeName(home.filePath(QStringLiteral("data"))));
+    qunsetenv("MELODY_STATE_DIR");
+    QStandardPaths::setTestModeEnabled(true);
+    isolateTestEngineState();
+    const auto named = qEnvironmentVariable("MELODY_STATE_DIR");
+    QCOMPARE(named, QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    QVERIFY(!named.startsWith(home.path()));
+    // One named is kept.
+    qputenv("MELODY_STATE_DIR", "/somewhere/chosen");
+    isolateTestEngineState();
+    QCOMPARE(qEnvironmentVariable("MELODY_STATE_DIR"), QStringLiteral("/somewhere/chosen"));
+    qunsetenv("MELODY_STATE_DIR");
+    QStandardPaths::setTestModeEnabled(false);
 }
 
 } // namespace trackknife::bench

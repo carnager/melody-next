@@ -1107,21 +1107,6 @@ target_link_libraries(
 add_test(NAME discovery COMMAND trackknife_discovery_tests)
 set_tests_properties(discovery PROPERTIES TIMEOUT 60)
 
-# No test writes into the real home's data: every one gets data and cache
-# directories of its own under the build tree. Tests once left databases and
-# engine logs in ~/.local/share. The config directory stays the real one:
-# fontconfig reads it, and the layout tests measure rows in the desktop's
-# font; settings are isolated by the tests themselves.
-get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
-foreach(trackknife_test IN LISTS trackknife_all_tests)
-    set(trackknife_test_home "${CMAKE_CURRENT_BINARY_DIR}/test-home/${trackknife_test}")
-    set_property(TEST ${trackknife_test} APPEND PROPERTY ENVIRONMENT
-        "XDG_DATA_HOME=${trackknife_test_home}/data"
-        "XDG_CACHE_HOME=${trackknife_test_home}/cache"
-        # Engines a test starts are announced under a service of the test's
-        # own: not found by the real ones on the network, nor by other tests.
-        "MELODY_DISCOVERY_SERVICE=_mt-${trackknife_test}._tcp")
-endforeach()
 
 if(MELODY_ENABLE_UPNP)
     add_executable(trackknife_upnp_tests upnp_test.cpp)
@@ -1129,24 +1114,6 @@ if(MELODY_ENABLE_UPNP)
     add_test(NAME upnp COMMAND trackknife_upnp_tests)
 endif()
 
-# Every test runs with a runtime directory of its own, not the user's: the
-# engines tests start leave their socket locks there, one per state
-# directory, and a test must not find -- or be found by -- the engine the
-# user is running. Owner-only, as a runtime directory has to be.
-set(trackknife_test_runtime "${CMAKE_BINARY_DIR}/test-runtime")
-file(MAKE_DIRECTORY "${trackknife_test_runtime}")
-file(CHMOD "${trackknife_test_runtime}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE
-     OWNER_EXECUTE)
-set(trackknife_test_environment "XDG_RUNTIME_DIR=set:${trackknife_test_runtime}")
-# Audio is still the machine's: PipeWire is found where it was.
-if(DEFINED ENV{PIPEWIRE_RUNTIME_DIR})
-    list(APPEND trackknife_test_environment "PIPEWIRE_RUNTIME_DIR=set:$ENV{PIPEWIRE_RUNTIME_DIR}")
-elseif(DEFINED ENV{XDG_RUNTIME_DIR})
-    list(APPEND trackknife_test_environment "PIPEWIRE_RUNTIME_DIR=set:$ENV{XDG_RUNTIME_DIR}")
-endif()
-get_property(trackknife_tests DIRECTORY PROPERTY TESTS)
-set_tests_properties(${trackknife_tests} PROPERTIES ENVIRONMENT_MODIFICATION
-                     "${trackknife_test_environment}")
 
 # Tests that need audio to play in real time through a sound server. A shared
 # CI runner's null sink stalls now and then; CI leaves them out (-LE
@@ -1162,14 +1129,5 @@ set_tests_properties(
     PROPERTIES LABELS realtime
 )
 
-# ADR-0286: no test reads or writes the melodyd.conf of whoever runs it, and
-# no test engine plays for the engines on the network unless asked (--agent):
-# with a password, an engine would by default.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
-     "# Every test engine's, unless it names its own.\nagent = no\n")
-get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
-set_property(
-    TEST ${trackknife_all_tests}
-    APPEND PROPERTY ENVIRONMENT "MELODYD_CONFIG=${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
-                                "MELODY_NO_SYSTEMD=1"
-)
+# Every test apart from the user running it (cmake/TestIsolation.cmake).
+melody_isolate_tests()

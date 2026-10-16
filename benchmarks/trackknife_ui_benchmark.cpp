@@ -178,6 +178,9 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationName(QStringLiteral("TrackknifeBenchmarks"));
     QApplication::setApplicationName(QStringLiteral("TrackknifeUiBenchmark"));
     QStandardPaths::setTestModeEnabled(true);
+    // ADR-0287: the engine's state in the benchmark's own folder.
+    qputenv("MELODY_STATE_DIR",
+            QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)));
     QSettings{}.clear();
     const auto application_data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     for (const auto& name : {QStringLiteral("lists.sqlite"), QStringLiteral("lists.sqlite-wal"),

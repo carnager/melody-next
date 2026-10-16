@@ -18,6 +18,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CTest)
 include(CompilerWarnings)
+include(TestIsolation)
 include(Sanitizers)
 
 option(MELODY_BUILD_UI "Build the Qt Widgets application and UI tests" ON)

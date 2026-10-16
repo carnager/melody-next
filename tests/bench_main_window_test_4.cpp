@@ -371,7 +371,7 @@ void BenchMainWindowTest::identifyAlbumsReviewsWhatNeedsYou() {
     // The matcher's own heading and Stage are the window's here.
     QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"))
                  ->isVisible());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/identify-albums-review.png")));
     }
@@ -774,7 +774,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         QCOMPARE(tracks->topLevelItem(1)->text(0), second_album_track);
     }
     QTRY_VERIFY(stage_matches->isEnabled());
-    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
     if (untagged && !screenshot_dir.isEmpty()) {
         QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/musicbrainz-matching.png")));
     }
@@ -1869,7 +1869,7 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     window.enqueueLocalRequests({row, row});
     QCOMPARE(window.playback_.requests.pending().size(), 2U);
     QVERIFY(!window.up_next_view_->albumGroupingEnabled());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         window.up_next_dock_->setVisible(true);
         window.resize(1320, 760);

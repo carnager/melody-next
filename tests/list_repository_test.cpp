@@ -2472,7 +2472,7 @@ void working_lists_are_retired_and_come_back() {
                 "a saved list is stored");
     }
     const auto run = [&path](const char* file) {
-        std::ifstream stream{std::string{TRACKKNIFE_MIGRATION_DIR} + "/" + file,
+        std::ifstream stream{std::string{MELODY_MIGRATION_DIR} + "/" + file,
                              std::ios::binary};
         const std::string sql{std::istreambuf_iterator<char>{stream},
                               std::istreambuf_iterator<char>{}};

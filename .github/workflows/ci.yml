@@ -38,11 +38,11 @@ env:
   XDG_RUNTIME_DIR: /tmp/ci-runtime
   # Shared runners time too unevenly to judge the UI budgets; they are
   # reported, and held on real hardware.
-  TRACKKNIFE_BENCHMARK_REPORT_ONLY: "1"
+  MELODY_BENCHMARK_REPORT_ONLY: "1"
   # The null sink of a shared runner stalls now and then, so what needs audio
   # to play in real time is left to machines with a sound server: tests
   # labelled realtime (-LE realtime) and window cases that skip themselves.
-  TRACKKNIFE_TEST_SKIP_REALTIME: "1"
+  MELODY_TEST_SKIP_REALTIME: "1"
 
 jobs:
   build-and-test:

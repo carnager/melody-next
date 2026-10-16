@@ -408,7 +408,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_upnp_->setToolTip(
         QStringLiteral("Play on network speakers. ReplayGain is unavailable on these outputs. "
                        "Changing this restarts the engine."));
-#if !TRACKKNIFE_ENABLE_UPNP
+#if !MELODY_ENABLE_UPNP
     engine_upnp_->setChecked(false);
     engine_upnp_->setEnabled(false);
     engine_upnp_->setToolTip(

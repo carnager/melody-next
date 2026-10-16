@@ -19,7 +19,7 @@ class LanguageReferenceTest final : public QObject {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         // To look at the pages: they are kept, and where is said.
-        if (qEnvironmentVariableIsSet("TRACKKNIFE_KEEP_REFERENCE")) {
+        if (qEnvironmentVariableIsSet("MELODY_KEEP_REFERENCE")) {
             directory.setAutoRemove(false);
             qInfo("pages in %s", qPrintable(directory.path()));
         }

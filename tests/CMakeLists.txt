@@ -27,11 +27,11 @@ int main() {
     return 0;
 }
 ]=]
-        TRACKKNIFE_QTRY_KEEPS_ITS_TYPES
+        MELODY_QTRY_KEEPS_ITS_TYPES
     )
     unset(CMAKE_REQUIRED_LIBRARIES)
     unset(CMAKE_REQUIRED_FLAGS)
-    if(NOT TRACKKNIFE_QTRY_KEEPS_ITS_TYPES)
+    if(NOT MELODY_QTRY_KEEPS_ITS_TYPES)
         add_compile_options(-include "${CMAKE_CURRENT_SOURCE_DIR}/qtry_narrowing.hpp")
     endif()
 endif()
@@ -57,7 +57,7 @@ target_link_libraries(
 )
 target_compile_definitions(
     trackknife_daemon_settings_tests
-    PRIVATE TRACKKNIFE_MELODYD_SKELETON="${PROJECT_SOURCE_DIR}/packaging/melodyd.conf"
+    PRIVATE MELODY_MELODYD_SKELETON="${PROJECT_SOURCE_DIR}/packaging/melodyd.conf"
 )
 add_test(NAME daemon-settings COMMAND trackknife_daemon_settings_tests)
 add_test(
@@ -305,7 +305,7 @@ target_link_libraries(
 )
 target_compile_definitions(
     trackknife_list_repository_tests
-    PRIVATE TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
+    PRIVATE MELODY_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
 )
 add_test(NAME list-repository COMMAND trackknife_list_repository_tests)
 
@@ -547,7 +547,7 @@ target_link_libraries(
 )
 target_compile_definitions(
     trackknife_output_agent_tests
-    PRIVATE TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+    PRIVATE MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 add_test(
     NAME output-agent
@@ -665,8 +665,8 @@ if(TARGET trackknife_bench_ui)
     )
     target_compile_definitions(
         trackknife_engine_launcher_tests
-        PRIVATE TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
-                TRACKKNIFE_ZOMBIE_LEADER_HELPER="$<TARGET_FILE:trackknife_zombie_leader_helper>"
+        PRIVATE MELODY_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
+                MELODY_ZOMBIE_LEADER_HELPER="$<TARGET_FILE:trackknife_zombie_leader_helper>"
     )
     add_dependencies(trackknife_engine_launcher_tests trackknife_engine_daemon
                      trackknife_zombie_leader_helper)
@@ -805,7 +805,7 @@ add_test(
             "$join(artist, + )|$info(channels)"
 )
 
-if(TRACKKNIFE_BUILD_UI)
+if(MELODY_BUILD_UI)
     qt_add_executable(trackknife_musicbrainz_web_service_tests musicbrainz_web_service_test.cpp)
     target_link_libraries(
         trackknife_musicbrainz_web_service_tests
@@ -943,9 +943,9 @@ if(TRACKKNIFE_BUILD_UI)
         "QT_QPA_PLATFORM=offscreen")
     qt_add_executable(trackknife_local_library_tests local_library_test.cpp)
     target_compile_definitions(trackknife_local_library_tests PRIVATE
-        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
-        TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
-        TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>")
+        MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+        MELODY_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
+        MELODY_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>")
     add_dependencies(trackknife_local_library_tests trackknife_engine_daemon)
     target_link_libraries(trackknife_local_library_tests PRIVATE Trackknife::BenchUi
         Qt6::Test PkgConfig::TAGLIB PkgConfig::SQLITE3 trackknife_project_options trackknife_project_warnings)
@@ -954,9 +954,9 @@ if(TRACKKNIFE_BUILD_UI)
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
     target_compile_definitions(
         trackknife_bench_main_window_tests
-        PRIVATE TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
-                TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
-                TRACKKNIFE_AGENT_BINARY="$<TARGET_FILE:melody_agent>"
+        PRIVATE MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+                MELODY_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
+                MELODY_AGENT_BINARY="$<TARGET_FILE:melody_agent>"
     )
     add_dependencies(trackknife_bench_main_window_tests trackknife_engine_daemon melody_agent)
     target_link_libraries(
@@ -967,9 +967,9 @@ if(TRACKKNIFE_BUILD_UI)
     # The window's cases start an engine each and run for minutes in one
     # process; as shares (qtest_shard.hpp) they run side by side. Each process
     # has a home of its own, so the shares cannot meet.
-    set(TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS 12 CACHE STRING
+    set(MELODY_BENCH_MAIN_WINDOW_SHARDS 12 CACHE STRING
         "Processes ctest runs the main window tests as")
-    math(EXPR last_shard "${TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS} - 1")
+    math(EXPR last_shard "${MELODY_BENCH_MAIN_WINDOW_SHARDS} - 1")
     foreach(shard RANGE ${last_shard})
         add_test(NAME bench-main-window-${shard} COMMAND trackknife_bench_main_window_tests)
         set_tests_properties(
@@ -977,14 +977,14 @@ if(TRACKKNIFE_BUILD_UI)
             PROPERTIES
                 TIMEOUT 600
                 ENVIRONMENT
-                    "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp;TRACKKNIFE_TEST_SHARD=${shard}/${TRACKKNIFE_BENCH_MAIN_WINDOW_SHARDS}"
+                    "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp;MELODY_TEST_SHARD=${shard}/${MELODY_BENCH_MAIN_WINDOW_SHARDS}"
         )
     endforeach()
     qt_add_executable(trackknife_m3u8_tests m3u8_test.cpp)
     target_link_libraries(trackknife_m3u8_tests PRIVATE Trackknife::BenchUi Qt6::Test
         trackknife_project_options trackknife_project_warnings)
     target_compile_definitions(trackknife_m3u8_tests PRIVATE
-        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+        MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME m3u8 COMMAND trackknife_m3u8_tests)
     # ADR-0220: the library panel routed through an engine by a setting.
     qt_add_executable(trackknife_library_panel_engine_tests library_panel_engine_test.cpp)
@@ -995,7 +995,7 @@ if(TRACKKNIFE_BUILD_UI)
                 trackknife_project_options trackknife_project_warnings
     )
     target_compile_definitions(trackknife_library_panel_engine_tests PRIVATE
-        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+        MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME library-panel-engine COMMAND trackknife_library_panel_engine_tests)
 
     qt_add_executable(trackknife_library_browser_merge_tests library_browser_merge_test.cpp)
@@ -1015,7 +1015,7 @@ if(TRACKKNIFE_BUILD_UI)
                 PkgConfig::TAGLIB trackknife_project_options trackknife_project_warnings
     )
     target_compile_definitions(trackknife_library_views_panel_tests PRIVATE
-        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+        MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME library-views-panel COMMAND trackknife_library_views_panel_tests)
     set_tests_properties(library-views-panel PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
@@ -1023,7 +1023,7 @@ if(TRACKKNIFE_BUILD_UI)
     # ADR-0220 Phase 2: playing a track drives the engine's local player, not
     # the window's own. Builds without a local audio backend exercise playback
     # through the output-specific integration tests instead.
-    if(TRACKKNIFE_ENABLE_LOCAL_AUDIO)
+    if(MELODY_ENABLE_LOCAL_AUDIO)
         qt_add_executable(trackknife_engine_playback_tests engine_playback_test.cpp)
         target_link_libraries(
             trackknife_engine_playback_tests
@@ -1031,7 +1031,7 @@ if(TRACKKNIFE_BUILD_UI)
                     trackknife_project_options trackknife_project_warnings
         )
         target_compile_definitions(trackknife_engine_playback_tests PRIVATE
-            TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+            MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
         add_test(NAME engine-playback COMMAND trackknife_engine_playback_tests)
         set_tests_properties(engine-playback PROPERTIES TIMEOUT 120 ENVIRONMENT
             "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
@@ -1081,7 +1081,7 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
-if(TRACKKNIFE_BUILD_UI)
+if(MELODY_BUILD_UI)
 add_executable(trackknife_debug_log_tests debug_log_test.cpp)
 target_link_libraries(
     trackknife_debug_log_tests
@@ -1112,10 +1112,10 @@ foreach(trackknife_test IN LISTS trackknife_all_tests)
         "XDG_CACHE_HOME=${trackknife_test_home}/cache"
         # Engines a test starts are announced under a service of the test's
         # own: not found by the real ones on the network, nor by other tests.
-        "TRACKKNIFE_DISCOVERY_SERVICE=_mt-${trackknife_test}._tcp")
+        "MELODY_DISCOVERY_SERVICE=_mt-${trackknife_test}._tcp")
 endforeach()
 
-if(TRACKKNIFE_ENABLE_UPNP)
+if(MELODY_ENABLE_UPNP)
     add_executable(trackknife_upnp_tests upnp_test.cpp)
     target_link_libraries(trackknife_upnp_tests PRIVATE Trackknife::Output trackknife_project_warnings)
     add_test(NAME upnp COMMAND trackknife_upnp_tests)
@@ -1163,5 +1163,5 @@ get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
 set_property(
     TEST ${trackknife_all_tests}
     APPEND PROPERTY ENVIRONMENT "MELODYD_CONFIG=${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
-                                "TRACKKNIFE_NO_SYSTEMD=1"
+                                "MELODY_NO_SYSTEMD=1"
 )

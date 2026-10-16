@@ -13,7 +13,7 @@ each published build.
   clang static-analysis and parser/evaluator fuzz jobs.
 - MPD session/reconnect, Melody endpoint, local playback, conversion, and
   online workspace-backup tests pass 25 consecutive iterations as a focused
-  fault/stress check. The application retains the `TRACKKNIFE_SOAK_LOG` hook
+  fault/stress check. The application retains the `MELODY_SOAK_LOG` hook
   for release-candidate listening so a publisher can record long-run memory,
   QObject, underrun, and event-loop measurements.
 - The checked UI suite covers keyboard shortcuts, focus-driven operations,

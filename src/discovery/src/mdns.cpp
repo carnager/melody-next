@@ -228,7 +228,7 @@ void send_to_group(const int socket, const Message& message) {
 [[nodiscard]] std::string resolved_service(std::string service) {
     if (service == engine_service) {
         if (const char* other =
-                trackknife::core::environment_variable("TRACKKNIFE_DISCOVERY_SERVICE");
+                trackknife::core::environment_variable("MELODY_DISCOVERY_SERVICE");
             other != nullptr && *other != '\0') {
             return other;
         }

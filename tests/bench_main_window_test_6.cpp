@@ -741,7 +741,7 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     auto* capacity = dialog->findChild<QSpinBox*>(QStringLiteral("bench-settings-buffer-capacity"));
     QVERIFY(capacity != nullptr && capacity->maximumWidth() <= 260);
     dialog->showPage(SettingsDialog::Page::metadata_services);
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-metadata-small.png")));
     }
@@ -905,7 +905,7 @@ void BenchMainWindowTest::librarySettingsManageFoldersWithoutScanning() {
     QCOMPARE(roots->item(0)->data(Qt::UserRole).toByteArray().toStdString(), raw_root);
     QVERIFY(roots->item(0)->text().contains(QStringLiteral("not scanned")));
     QVERIFY(!panel->property("scanning").toBool());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-library.png")));
     }
@@ -980,7 +980,7 @@ void BenchMainWindowTest::playbackSettingsApplyLiveAndCancel() {
     with_gain->setValue(-3.5);
     without_gain->setValue(-6.0);
     notifications->setChecked(true);
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-playback.png")));
         dialog->showPage(SettingsDialog::Page::general);
@@ -1037,7 +1037,7 @@ void BenchMainWindowTest::playbackSettingsApplyLiveAndCancel() {
 // ADR-0235: the UPnP choice is saved and shown as saved when Settings opens
 // again -- it was saved, and then shown off.
 void BenchMainWindowTest::upnpSettingRoundTrip() {
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     QSettings{}.remove(QStringLiteral("engine/upnp"));
     {
         SettingsDialog dialog;

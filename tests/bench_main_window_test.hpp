@@ -176,10 +176,10 @@
 
 // A case that needs audio to play in real time -- a track to finish, a
 // listen to count. A shared CI runner's null sink stalls now and then, so CI
-// skips them (TRACKKNIFE_TEST_SKIP_REALTIME); where there is a sound server
+// skips them (MELODY_TEST_SKIP_REALTIME); where there is a sound server
 // they run.
-#define TRACKKNIFE_REQUIRE_REALTIME_AUDIO()                                                        \
-    if (qEnvironmentVariableIsSet("TRACKKNIFE_TEST_SKIP_REALTIME")) {                              \
+#define MELODY_REQUIRE_REALTIME_AUDIO()                                                        \
+    if (qEnvironmentVariableIsSet("MELODY_TEST_SKIP_REALTIME")) {                              \
         QSKIP("needs audio to play in real time");                                                 \
     }
 
@@ -250,7 +250,7 @@ inline void write_wave(const QString& path, const std::uint32_t frames) {
 }
 
 inline bool materialize_audio_fixture(const QString& encoded_name, const QString& output_path) {
-    QFile source{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR) + QLatin1Char('/') + encoded_name};
+    QFile source{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR) + QLatin1Char('/') + encoded_name};
     if (!source.open(QIODevice::ReadOnly)) {
         return false;
     }

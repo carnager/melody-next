@@ -903,7 +903,7 @@ void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
 }
 
 void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
-    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
+    MELODY_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto music = media.filePath(QStringLiteral("music"));
@@ -1357,15 +1357,15 @@ void BenchMainWindowTest::quittingStopsTheEngineForGood() {
     settings.remove(QLatin1String(SettingsDialog::library_local_engine_socket_key));
     settings.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
     settings.sync();
-    const auto program = qgetenv("TRACKKNIFE_ENGINE");
-    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+    const auto program = qgetenv("MELODY_ENGINE");
+    qputenv("MELODY_ENGINE", MELODY_ENGINE_BINARY);
     allowLocalEngine(true);
     const auto engine = localEngine();
     QVERIFY(engine.has_value());
     const auto restore = qScopeGuard([&] {
         static_cast<void>(stopLocalEngine(*engine));
         allowLocalEngine(false);
-        qputenv("TRACKKNIFE_ENGINE", program);
+        qputenv("MELODY_ENGINE", program);
     });
 
     BenchMainWindow window;
@@ -1399,8 +1399,8 @@ void BenchMainWindowTest::sharingSettingsAreHandedToTheEngineOnce() {
     settings.setValue(QLatin1String(SettingsDialog::engine_music_root_key),
                       QStringLiteral("/srv/handed-over"));
     settings.sync();
-    const auto program = qgetenv("TRACKKNIFE_ENGINE");
-    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+    const auto program = qgetenv("MELODY_ENGINE");
+    qputenv("MELODY_ENGINE", MELODY_ENGINE_BINARY);
     allowLocalEngine(true);
     const auto engine = localEngine();
     QVERIFY(engine.has_value());
@@ -1409,7 +1409,7 @@ void BenchMainWindowTest::sharingSettingsAreHandedToTheEngineOnce() {
     const auto restore = qScopeGuard([&] {
         static_cast<void>(stopLocalEngine(*engine));
         allowLocalEngine(false);
-        qputenv("TRACKKNIFE_ENGINE", program);
+        qputenv("MELODY_ENGINE", program);
         QFile::remove(QString::fromStdString((engine->state / "melodyd.conf").string()));
     });
     const auto config = [&engine] {
@@ -2151,7 +2151,7 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     const auto remote_at = [&] { return window.tabs_->indexOf(remote_tab->view); };
     const auto local_at = [&] { return window.tabs_->indexOf(local_tab->view); };
     QVERIFY2(local_at() < remote_at(), "a local list opens before the remote's group");
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(bar->grab().save(directory + QStringLiteral("/tabs-grouped-by-engine.png")));
     }
@@ -2206,7 +2206,7 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     const auto own_id = QString::fromStdString(own->document.id.to_string());
     QTRY_VERIFY(panel->itemFor(own_id) != nullptr);
     QVERIFY(panel->itemFor(own_id)->isSelected());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(window.grab().save(directory + QStringLiteral("/lists-panel.png")));
     }
@@ -2365,4 +2365,4 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
 
 } // namespace trackknife::bench
 
-TRACKKNIFE_QTEST_SHARDED_MAIN(trackknife::bench::BenchMainWindowTest)
+MELODY_QTEST_SHARDED_MAIN(trackknife::bench::BenchMainWindowTest)

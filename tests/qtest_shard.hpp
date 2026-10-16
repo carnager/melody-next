@@ -2,7 +2,7 @@
 #pragma once
 
 // One share of a QtTest class, so ctest can run a long class as several
-// processes at once. TRACKKNIFE_TEST_SHARD="i/n" (0 <= i < n) runs every n-th
+// processes at once. MELODY_TEST_SHARD="i/n" (0 <= i < n) runs every n-th
 // test -- a function, or one row of a data-driven one -- starting at the i-th,
 // in the order QtTest lists them (-datatags). Unset, or with tests named on
 // the command line, everything runs as QTest::qExec would.
@@ -19,7 +19,7 @@
 
 namespace trackknife::testing {
 
-inline constexpr char shard_variable[] = "TRACKKNIFE_TEST_SHARD";
+inline constexpr char shard_variable[] = "MELODY_TEST_SHARD";
 
 // "function" or "function:tag" for each test the binary has, asked of the
 // binary itself so that what counts as a test is QtTest's own answer.
@@ -90,7 +90,7 @@ inline constexpr char shard_variable[] = "TRACKKNIFE_TEST_SHARD";
 } // namespace trackknife::testing
 
 // QTEST_MAIN, run by share.
-#define TRACKKNIFE_QTEST_SHARDED_MAIN(TestObject)                                                  \
+#define MELODY_QTEST_SHARDED_MAIN(TestObject)                                                  \
     int main(int argc, char* argv[]) {                                                             \
         QT_PREPEND_NAMESPACE(QTest::Internal::callInitMain)<TestObject>();                         \
         QTEST_MAIN_SETUP()                                                                         \

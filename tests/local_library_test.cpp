@@ -58,7 +58,7 @@ std::string fixture(const std::filesystem::path& root, const std::string& name,
                     const std::string& album = "Test album",
                     const std::string& track_number = "3") {
     std::filesystem::create_directories(root);
-    QFile encoded{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
+    QFile encoded{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
     if (!encoded.open(QIODevice::ReadOnly)) {
         return {};
     }
@@ -680,7 +680,7 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
                              "0034_metadata_field_filters.down",
                              "0033_complete_library_fields.down"}) {
         QFile downgrade{
-            QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
+            QStringLiteral(MELODY_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));
         QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
                  SQLITE_OK);
@@ -980,7 +980,7 @@ void LocalLibraryTest::migrationRoundTrip() {
                              "0046_engine_lists.up",
                              "0047_list_engine.up"}) {
         QFile migration{
-            QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
+            QStringLiteral(MELODY_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
         QCOMPARE(sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr), SQLITE_OK);
         QCOMPARE(sqlite3_exec(db, migration.readAll().constData(), nullptr, nullptr, nullptr),
@@ -1000,7 +1000,7 @@ void LocalLibraryTest::migrationRoundTrip() {
                                    .dialect = "words-1"};
     QVERIFY(repository->save_search(saved).has_value());
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
-    QFile downgrade{QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0032_saved_searches.down.sql")};
+    QFile downgrade{QStringLiteral(MELODY_MIGRATION_DIR "/0032_saved_searches.down.sql")};
     QVERIFY(downgrade.open(QIODevice::ReadOnly));
     QCOMPARE(sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr), SQLITE_OK);
     QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
@@ -1012,7 +1012,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QVERIFY(repository->save_local_resume(std::string(64U, 'a'), 500, 1'000));
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile history_downgrade{
-        QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0039_local_listening_history.down.sql")};
+        QStringLiteral(MELODY_MIGRATION_DIR "/0039_local_listening_history.down.sql")};
     QVERIFY(history_downgrade.open(QIODevice::ReadOnly));
     QCOMPARE(sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr), SQLITE_OK);
     QCOMPARE(sqlite3_exec(db, history_downgrade.readAll().constData(), nullptr, nullptr, nullptr),
@@ -1031,7 +1031,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QVERIFY(key);
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile occurrence_downgrade{
-        QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0040_local_listening_occurrences.down.sql")};
+        QStringLiteral(MELODY_MIGRATION_DIR "/0040_local_listening_occurrences.down.sql")};
     QVERIFY(occurrence_downgrade.open(QIODevice::ReadOnly));
     QCOMPARE(sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr), SQLITE_OK);
     QCOMPARE(
@@ -1087,7 +1087,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
           "0042_engine_state", "0041_list_entry_identity", "0040_local_listening_occurrences",
           "0039_local_listening_history", "0038_folder_image_journal"}) {
         QFile downgrade{
-            QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.down.sql").arg(QLatin1String{name})};
+            QStringLiteral(MELODY_MIGRATION_DIR "/%1.down.sql").arg(QLatin1String{name})};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));
         QCOMPARE(exec("BEGIN IMMEDIATE"), SQLITE_OK);
         QVERIFY2(exec(downgrade.readAll().constData()) == SQLITE_OK, sqlite3_errmsg(db));
@@ -1755,7 +1755,7 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         QTest::qWait(300);
         QCOMPARE(local->rowCount(), 2);
         QVERIFY(!panel->property("scanning").toBool());
-        if (const auto screenshot = qgetenv("TRACKKNIFE_LIBRARY_SCREENSHOT");
+        if (const auto screenshot = qgetenv("MELODY_LIBRARY_SCREENSHOT");
             !screenshot.isEmpty()) {
             tree->setFocus();
             tree->setCurrentIndex(album_index());

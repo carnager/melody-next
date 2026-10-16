@@ -154,7 +154,7 @@ void M3u8Test::publicationNeverClobbersAndCancels() {
 void M3u8Test::asynchronousImportAndExport() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
+    QFile fixture{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
     QVERIFY(fixture.open(QIODevice::ReadOnly));
     put(path(dir, "audio.flac"), QByteArray::fromBase64(fixture.readAll()));
     put(path(dir, "input.m3u8"),

@@ -10,7 +10,7 @@
 // the join functions ThreadSanitizer does intercept. Remove it once the
 // upstream interceptor ships.
 
-#if defined(TRACKKNIFE_THREAD_SANITIZER) && defined(__linux__)
+#if defined(MELODY_THREAD_SANITIZER) && defined(__linux__)
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE

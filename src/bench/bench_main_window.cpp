@@ -35,7 +35,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
 extern "C" void __tsan_acquire(void* address);
 #endif
 
@@ -59,7 +59,7 @@ void BenchMainWindow::stopBackgroundWork() {
     if (artwork_watcher_.isRunning()) {
         artwork_watcher_.waitForFinished();
     }
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
     if (artwork_outcome_) {
         __tsan_acquire(artwork_outcome_.get());
     }

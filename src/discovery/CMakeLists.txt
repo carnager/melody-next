@@ -19,7 +19,7 @@ target_link_libraries(
 )
 target_compile_features(trackknife_discovery PUBLIC cxx_std_23)
 
-if(NOT TRACKKNIFE_CLI_ONLY AND TRACKKNIFE_ENABLE_UPNP)
+if(NOT MELODY_CLI_ONLY AND MELODY_ENABLE_UPNP)
     add_library(trackknife_upnp STATIC src/upnp.cpp)
     add_library(Trackknife::UPnP ALIAS trackknife_upnp)
     target_include_directories(trackknife_upnp PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

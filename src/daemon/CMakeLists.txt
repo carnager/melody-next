@@ -20,9 +20,9 @@ target_link_libraries(
     PRIVATE trackknife_project_options trackknife_project_warnings
 )
 
-# melody-cli on its own (TRACKKNIFE_CLI_ONLY) needs only the settings above,
+# melody-cli on its own (MELODY_CLI_ONLY) needs only the settings above,
 # not the engine and its media libraries.
-if(TRACKKNIFE_CLI_ONLY)
+if(MELODY_CLI_ONLY)
     return()
 endif()
 
@@ -52,4 +52,4 @@ install(CODE [[
 ]] COMPONENT engine)
 # ADR-0260: the release engine.info reports, for logs and bug reports.
 target_compile_definitions(trackknife_engine_daemon PRIVATE
-    TRACKKNIFE_RELEASE="${PROJECT_VERSION}")
+    MELODY_RELEASE="${PROJECT_VERSION}")

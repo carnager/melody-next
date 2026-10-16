@@ -282,7 +282,7 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     folder->setText(QStringLiteral("/srv/music"));
     reachable->setText(QStringLiteral("/media/desktop"));
     QVERIFY(row(2).startsWith(QStringLiteral("192.0.2.20:6603")));
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-engines.png")));
     }
@@ -448,7 +448,7 @@ void BenchMainWindowTest::aPasswordGivenLaterReachesTheEngine() {
     }();
     const auto password = QStringLiteral("correct horse");
     QProcess engine;
-    engine.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
+    engine.setProgram(QStringLiteral(MELODY_ENGINE_BINARY));
     engine.setArguments({QStringLiteral("--socket"), state.filePath(QStringLiteral("melodyd.sock")),
                          QStringLiteral("--state"), state.path(), QStringLiteral("--listen"),
                          QStringLiteral("127.0.0.1:%1").arg(port), QStringLiteral("--password"),
@@ -1030,7 +1030,7 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     QCOMPARE(selection->selectedRows().size(), 0);
     QTest::keyClick(files_view, Qt::Key_Space);
     QCOMPARE(selection->selectedRows().size(), 1);
-    if (const auto screenshots = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto screenshots = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !screenshots.isEmpty()) {
         QVERIFY(
             properties->grab().save(screenshots + QStringLiteral("/tag-window-checkboxes.png")));
@@ -2051,7 +2051,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QVERIFY(profile_sections);
     QCOMPARE(profile_sections->count(), 4);
     QVERIFY(layout_directory->width() > 450);
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(settings.grab().save(directory + QStringLiteral("/settings-naming.png")));
     }
@@ -2092,7 +2092,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
     profile_sections->setCurrentIndex(1);
     QCOMPARE(destination_name->text(), QStringLiteral("Library"));
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(settings.grab().save(directory + QStringLiteral("/settings-destinations.png")));
     }

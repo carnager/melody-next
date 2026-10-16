@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <utility>
 
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
 extern "C" void __tsan_acquire(void* address);
 extern "C" void __tsan_release(void* address);
 #endif
@@ -25,7 +25,7 @@ namespace trackknife::ui {
 namespace {
 
 void threadSanitizerAcquire(void* const address) noexcept {
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
     __tsan_acquire(address);
 #else
     static_cast<void>(address);
@@ -33,7 +33,7 @@ void threadSanitizerAcquire(void* const address) noexcept {
 }
 
 void threadSanitizerRelease(void* const address) noexcept {
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
     __tsan_release(address);
 #else
     static_cast<void>(address);
@@ -80,13 +80,13 @@ template <typename Callable> class QueuedInvocation final {
 
   private:
     void release() noexcept {
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
         __tsan_release(&synchronization_);
 #endif
     }
 
     void acquire() noexcept {
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
         __tsan_acquire(&synchronization_);
 #endif
     }

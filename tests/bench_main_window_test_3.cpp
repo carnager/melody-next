@@ -271,7 +271,7 @@ void BenchMainWindowTest::actionChoicesAreRemembered() {
     popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-move-files"))->click();
     QVERIFY(hidden(first, "bench-preparation-rename-files")->isChecked());
     QVERIFY(hidden(first, "bench-preparation-move-files")->isChecked());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(popover->grab().save(directory + QStringLiteral("/actions-popover.png")));
     }
@@ -1497,7 +1497,7 @@ void BenchMainWindowTest::identifyAlbumsGroupsLooksUpAndStages() {
     QVERIFY(detail->toPlainText().contains(QStringLiteral("Paired by track number")));
     QVERIFY(detail->toPlainText().contains(QStringLiteral("2 files, 2 tracks, 2 paired")));
 
-    if (const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !screenshot_dir.isEmpty()) {
         QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/identify-albums.png")));
     }

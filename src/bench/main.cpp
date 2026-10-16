@@ -50,13 +50,13 @@ void filtered_message_handler(const QtMsgType type, const QMessageLogContext& co
 
 } // namespace
 
-// QA soak hook: TRACKKNIFE_SOAK_LOG=<path> appends one line per minute —
+// QA soak hook: MELODY_SOAK_LOG=<path> appends one line per minute —
 // timestamp, resident memory, live QObject/widget counts, and event-loop
 // lateness — so gradual degradation over long sessions becomes measurable
 // instead of anecdotal.
 namespace {
 void startSoakLog(QObject* parent) {
-    const auto path = qEnvironmentVariable("TRACKKNIFE_SOAK_LOG");
+    const auto path = qEnvironmentVariable("MELODY_SOAK_LOG");
     if (path.isEmpty()) {
         return;
     }

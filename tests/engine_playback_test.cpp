@@ -81,7 +81,7 @@ bool engine_started(const std::unique_ptr<engine::Player>& player) {
 }
 
 bool materialize_audio_fixture(const QString& encoded_name, const QString& output_path) {
-    QFile source{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR) + QLatin1Char('/') + encoded_name};
+    QFile source{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR) + QLatin1Char('/') + encoded_name};
     if (!source.open(QIODevice::ReadOnly)) {
         return false;
     }

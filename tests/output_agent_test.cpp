@@ -162,7 +162,7 @@ void require(const bool condition, const std::string_view message) {
 // A fixture, decoded from its base64 text.
 [[nodiscard]] bool write_fixture(const std::string& name,
                                  const std::filesystem::path& destination) {
-    std::ifstream input{std::filesystem::path{TRACKKNIFE_AUDIO_FIXTURE_DIR} / name};
+    std::ifstream input{std::filesystem::path{MELODY_AUDIO_FIXTURE_DIR} / name};
     const std::string encoded{std::istreambuf_iterator<char>{input}, {}};
     static constexpr std::string_view alphabet{
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"};

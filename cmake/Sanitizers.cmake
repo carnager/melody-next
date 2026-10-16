@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-option(TRACKKNIFE_ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
-option(TRACKKNIFE_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
+option(MELODY_ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
+option(MELODY_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
 
 function(trackknife_enable_sanitizers target)
-    if(NOT TRACKKNIFE_ENABLE_SANITIZERS AND NOT TRACKKNIFE_ENABLE_THREAD_SANITIZER)
+    if(NOT MELODY_ENABLE_SANITIZERS AND NOT MELODY_ENABLE_THREAD_SANITIZER)
         return()
     endif()
 
@@ -12,12 +12,12 @@ function(trackknife_enable_sanitizers target)
         message(FATAL_ERROR "The Trackknife sanitizer presets currently support GCC and Clang")
     endif()
 
-    if(TRACKKNIFE_ENABLE_SANITIZERS AND TRACKKNIFE_ENABLE_THREAD_SANITIZER)
+    if(MELODY_ENABLE_SANITIZERS AND MELODY_ENABLE_THREAD_SANITIZER)
         message(FATAL_ERROR "AddressSanitizer/UBSan and ThreadSanitizer cannot be enabled together")
     endif()
 
-    if(TRACKKNIFE_ENABLE_THREAD_SANITIZER)
-        target_compile_definitions(${target} INTERFACE TRACKKNIFE_THREAD_SANITIZER=1)
+    if(MELODY_ENABLE_THREAD_SANITIZER)
+        target_compile_definitions(${target} INTERFACE MELODY_THREAD_SANITIZER=1)
         target_compile_options(${target} INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
         target_link_options(${target} INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
         # ThreadSanitizer lacks a pthread_clockjoin_np interceptor

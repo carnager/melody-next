@@ -17,7 +17,7 @@ when only compilation succeeds.
 - Development, release, ASan/UBSan, and static-analysis configurations build.
 - Every functional test passes offscreen; parser/evaluator fuzz smoke and the
   million-row UI benchmark pass their checked budgets.
-- A soak run uses `TRACKKNIFE_SOAK_LOG` and shows no sustained resident-memory,
+- A soak run uses `MELODY_SOAK_LOG` and shows no sustained resident-memory,
   QObject, underrun, or event-loop-lateness growth during combined playback,
   search, tag, ReplayGain, and conversion work.
 

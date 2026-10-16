@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "TRACKKNIFE_BUILD_FUZZERS requires Clang")
+    message(FATAL_ERROR "MELODY_BUILD_FUZZERS requires Clang")
 endif()
 
 function(trackknife_add_fuzzer target source)

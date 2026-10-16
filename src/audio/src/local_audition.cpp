@@ -1311,7 +1311,7 @@ LocalAuditionService::~LocalAuditionService() = default;
 
 core::Result<std::unique_ptr<LocalAuditionService>>
 LocalAuditionService::create(LocalAuditionConfig config) {
-#if !TRACKKNIFE_ENABLE_LOCAL_AUDIO
+#if !MELODY_ENABLE_LOCAL_AUDIO
     static_cast<void>(config);
     return std::unexpected(
         core::Error{.code = core::ErrorCode::unsupported,

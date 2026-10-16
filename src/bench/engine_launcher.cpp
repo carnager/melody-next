@@ -85,7 +85,7 @@ std::optional<LocalEngine> localEngine() {
 }
 
 QString engineProgram() {
-    if (const auto explicit_program = qEnvironmentVariable("TRACKKNIFE_ENGINE");
+    if (const auto explicit_program = qEnvironmentVariable("MELODY_ENGINE");
         !explicit_program.isEmpty()) {
         return explicit_program;
     }
@@ -168,7 +168,7 @@ LocalEngineSharing localEngineSharing() {
             settings.value(QLatin1String(SettingsKeys::engine_play_for_remote_key), true).toBool(),
         .found_nearby_kbps = streamNearbyKbps(settings),
         .found_away_kbps = streamAwayKbps(settings),
-        .upnp = TRACKKNIFE_ENABLE_UPNP &&
+        .upnp = MELODY_ENABLE_UPNP &&
                 settings.value(QLatin1String(SettingsKeys::engine_upnp_key), false).toBool(),
     };
 }
@@ -224,7 +224,7 @@ struct Ran final {
     return false;
 #else
     // Tests never touch the systemd of whoever runs them.
-    if (!qEnvironmentVariableIsEmpty("TRACKKNIFE_NO_SYSTEMD")) {
+    if (!qEnvironmentVariableIsEmpty("MELODY_NO_SYSTEMD")) {
         return false;
     }
     const auto enabled =

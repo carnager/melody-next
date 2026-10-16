@@ -262,7 +262,7 @@ void streams() {
 // The skeleton melody-cli config starts a file from: taken as it is, and
 // each example in it -- "#key = value" -- a setting melodyd takes, alone.
 void theSkeletonHolds() {
-    std::ifstream stream{TRACKKNIFE_MELODYD_SKELETON, std::ios::binary};
+    std::ifstream stream{MELODY_MELODYD_SKELETON, std::ios::binary};
     const std::string skeleton{std::istreambuf_iterator<char>{stream},
                                std::istreambuf_iterator<char>{}};
     CHECK(!skeleton.empty());

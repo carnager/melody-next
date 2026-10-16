@@ -159,7 +159,7 @@ std::vector<Outputs::Listed> Outputs::list() const {
                                 .selected = selected_ == id,
                                 .files = agent->files()});
     }
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     for (const auto& [udn, renderer] : renderers_) {
         const auto id = "upnp:" + udn;
         listed.push_back(Listed{.id = id,
@@ -185,7 +185,7 @@ core::Result<void> Outputs::select(const std::string& id) {
                                                    .message = "this machine has no audio output",
                                                    .context = {}});
             }
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
         } else if (id.starts_with("upnp:")) {
             auto found = renderers_.find(id.substr(5));
             if (found == renderers_.end()) {
@@ -237,7 +237,7 @@ void Outputs::restore() {
             slot = make_agent(id.substr(agent_prefix.size()));
         }
     }
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     if (id.starts_with("upnp:")) {
         const std::lock_guard guard{mutex_};
         auto& slot = renderers_[id.substr(5)];
@@ -252,7 +252,7 @@ void Outputs::restore() {
     }
 }
 
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
 void Outputs::configure_upnp(std::shared_ptr<discovery::UpnpControl> control,
                              output::UpnpAudition::Prepare prepare) {
     const std::lock_guard guard{mutex_};

@@ -14,9 +14,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "BUILD_TESTING": "ON",
-        "TRACKKNIFE_BUILD_BENCHMARKS": "ON",
-        "TRACKKNIFE_BUILD_UI": "ON",
-        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+        "MELODY_BUILD_BENCHMARKS": "ON",
+        "MELODY_BUILD_UI": "ON",
+        "MELODY_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
@@ -25,7 +25,7 @@
       "inherits": "dev",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "TRACKKNIFE_ENABLE_SANITIZERS": "ON"
+        "MELODY_ENABLE_SANITIZERS": "ON"
       }
     },
     {
@@ -35,7 +35,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "clang++",
-        "TRACKKNIFE_ENABLE_THREAD_SANITIZER": "ON"
+        "MELODY_ENABLE_THREAD_SANITIZER": "ON"
       }
     },
     {
@@ -45,7 +45,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "clang++",
-        "TRACKKNIFE_ENABLE_CLANG_TIDY": "ON"
+        "MELODY_ENABLE_CLANG_TIDY": "ON"
       }
     },
     {
@@ -57,10 +57,10 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_CXX_COMPILER": "clang++",
         "BUILD_TESTING": "OFF",
-        "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
-        "TRACKKNIFE_BUILD_FUZZERS": "ON",
-        "TRACKKNIFE_BUILD_UI": "OFF",
-        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+        "MELODY_BUILD_BENCHMARKS": "OFF",
+        "MELODY_BUILD_FUZZERS": "ON",
+        "MELODY_BUILD_UI": "OFF",
+        "MELODY_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
@@ -71,9 +71,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "BUILD_TESTING": "ON",
-        "TRACKKNIFE_BUILD_BENCHMARKS": "ON",
-        "TRACKKNIFE_BUILD_UI": "ON",
-        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+        "MELODY_BUILD_BENCHMARKS": "ON",
+        "MELODY_BUILD_UI": "ON",
+        "MELODY_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
@@ -84,12 +84,12 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "BUILD_TESTING": "ON",
-        "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
-        "TRACKKNIFE_BUILD_UI": "ON",
-        "TRACKKNIFE_BUILD_WATCH": "OFF",
-        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "ON",
-        "TRACKKNIFE_ENABLE_UPNP": "ON",
-        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+        "MELODY_BUILD_BENCHMARKS": "OFF",
+        "MELODY_BUILD_UI": "ON",
+        "MELODY_BUILD_WATCH": "OFF",
+        "MELODY_ENABLE_LOCAL_AUDIO": "ON",
+        "MELODY_ENABLE_UPNP": "ON",
+        "MELODY_WARNINGS_AS_ERRORS": "ON"
       },
       "condition": {
         "type": "equals",
@@ -105,12 +105,12 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "BUILD_TESTING": "OFF",
-        "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
-        "TRACKKNIFE_BUILD_UI": "OFF",
-        "TRACKKNIFE_BUILD_WATCH": "OFF",
-        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "OFF",
-        "TRACKKNIFE_ENABLE_UPNP": "ON",
-        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+        "MELODY_BUILD_BENCHMARKS": "OFF",
+        "MELODY_BUILD_UI": "OFF",
+        "MELODY_BUILD_WATCH": "OFF",
+        "MELODY_ENABLE_LOCAL_AUDIO": "OFF",
+        "MELODY_ENABLE_UPNP": "ON",
+        "MELODY_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
@@ -119,7 +119,7 @@
       "inherits": "server",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "ON"
+        "MELODY_ENABLE_LOCAL_AUDIO": "ON"
       },
       "condition": {
         "type": "equals",

@@ -5,7 +5,7 @@
 namespace trackknife::bench {
 
 void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
-    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
+    MELODY_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir remote_state;
     QTemporaryDir media;
     QVERIFY(remote_state.isValid() && media.isValid());
@@ -217,7 +217,7 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
     QVERIFY(output_action(QStringLiteral("agent:bedside")) == nullptr);
 
     QProcess agent;
-    agent.setProgram(QStringLiteral(TRACKKNIFE_AGENT_BINARY));
+    agent.setProgram(QStringLiteral(MELODY_AGENT_BINARY));
     agent.setArguments({QStringLiteral("--server"), engine_.socket(), QStringLiteral("--name"),
                         QStringLiteral("bedside")});
     agent.setProcessChannelMode(QProcess::MergedChannels);
@@ -1190,7 +1190,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {
     QTest::newRow("consume") << true;
 }
 void BenchMainWindowTest::upNextPreservesNormalPlayback() {
-    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
+    MELODY_REQUIRE_REALTIME_AUDIO();
     QFETCH(bool, consume);
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -1512,7 +1512,7 @@ void BenchMainWindowTest::dynamicPlaylistCatalogAndEditor() {
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("dynamic-status"));
     QTRY_VERIFY(status->text().startsWith(QStringLiteral("0 tracks")));
     QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("dynamic-open"))->isEnabled());
-    if (const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !screenshot_dir.isEmpty()) {
         QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/dynamic-playlists.png")));
     }
@@ -2018,7 +2018,7 @@ void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
         rename->click();
         QTRY_COMPARE(saved->currentText(), QStringLiteral("My rock"));
         QTRY_COMPARE(results->count(), 1);
-        const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         if (!screenshot_dir.isEmpty()) {
             QVERIFY(dialog.grab().save(screenshot_dir + QStringLiteral("/saved-searches.png")));
         }

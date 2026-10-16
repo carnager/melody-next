@@ -127,7 +127,7 @@ void LibraryPanelEngineTest::theEngineReadsCoversWhereTheFilesAre() {
     const auto music = directory.path() + QStringLiteral("/music");
     const auto elsewhere = directory.path() + QStringLiteral("/elsewhere");
     QVERIFY(QDir{}.mkpath(music) && QDir{}.mkpath(elsewhere));
-    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    QFile fixture{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
     QVERIFY(fixture.open(QIODevice::ReadOnly));
     const auto bytes = QByteArray::fromBase64(fixture.readAll());
     for (const auto& folder : {music, elsewhere}) {
@@ -176,7 +176,7 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
     QVERIFY(directory.isValid());
     const auto music = directory.path() + QStringLiteral("/music");
     QVERIFY(QDir{}.mkpath(music));
-    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    QFile fixture{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
     QVERIFY(fixture.open(QIODevice::ReadOnly));
     QFile track{music + QStringLiteral("/art.flac")};
     QVERIFY(track.open(QIODevice::WriteOnly) &&
@@ -252,7 +252,7 @@ struct TwoAlbums {
     TwoAlbums albums{.music = directory.path() + QStringLiteral("/music"),
                      .first = directory.path() + QStringLiteral("/music/Artist/First"),
                      .second = directory.path() + QStringLiteral("/music/Artist/Second")};
-    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    QFile fixture{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
     if (!fixture.open(QIODevice::ReadOnly)) {
         return std::nullopt;
     }

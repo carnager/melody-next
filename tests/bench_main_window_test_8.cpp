@@ -601,7 +601,7 @@ void BenchMainWindowTest::metadataFieldReviewPreservesDraftAndSelectionScope() {
 
     show_files->setChecked(true);
     QTRY_VERIFY(files->isVisible());
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/tag-file-scope.png")));
     }
@@ -678,7 +678,7 @@ void BenchMainWindowTest::metadataFieldReviewPreservesDraftAndSelectionScope() {
              QStringLiteral("Reviewed title"));
     search->clear();
     QTRY_VERIFY(!fields->isRowHidden(*title));
-    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
     if (!screenshot_dir.isEmpty()) {
         QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/tag-field-review.png")));
     }
@@ -1489,7 +1489,7 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QCOMPARE(pending->model()->rowCount(), 1);
     QTest::mouseClick(remove, Qt::LeftButton);
     QCOMPARE(pending->model()->rowCount(), 2);
-    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
     if (!screenshot_dir.isEmpty()) {
         properties->resize(1200, 850);
         QVERIFY(properties->grab().save(screenshot_dir + QStringLiteral("/artwork-pending.png")));
@@ -1914,7 +1914,7 @@ void BenchMainWindowTest::localPlaybackModesAdvance_data() {
 }
 
 void BenchMainWindowTest::localPlaybackModesAdvance() {
-    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
+    MELODY_REQUIRE_REALTIME_AUDIO();
     QFETCH(bool, repeat);
     QFETCH(bool, random);
     QFETCH(int, single);
@@ -2085,7 +2085,7 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {
-    TRACKKNIFE_REQUIRE_REALTIME_AUDIO();
+    MELODY_REQUIRE_REALTIME_AUDIO();
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const std::array names{QStringLiteral("a.wav"), QStringLiteral("b.wav"),

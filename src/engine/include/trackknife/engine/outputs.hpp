@@ -6,7 +6,7 @@
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/output/agent_audition.hpp"
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
 #include "trackknife/output/upnp_audition.hpp"
 #endif
 #include "trackknife/protocol/dispatch.hpp"
@@ -59,7 +59,7 @@ class Outputs final {
     // What was chosen last time. An agent chosen then and not connected yet
     // is waited for: playback resumes on it once it registers.
     void restore();
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     // Configured before discovery starts. A restored renderer can wait offline.
     void configure_upnp(std::shared_ptr<discovery::UpnpControl> control,
                         output::UpnpAudition::Prepare prepare);
@@ -80,7 +80,7 @@ class Outputs final {
     // Stable addresses: the player holds a pointer to whichever is playing.
     std::map<std::string, std::unique_ptr<output::AgentAudition>> agents_;
     std::string selected_;
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     std::shared_ptr<discovery::UpnpControl> upnp_control_;
     output::UpnpAudition::Prepare upnp_prepare_;
     std::map<std::string, std::unique_ptr<output::UpnpAudition>> renderers_;

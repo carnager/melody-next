@@ -125,7 +125,7 @@ void EngineLauncherTest::initTestCase() {
     QCoreApplication::setOrganizationName(QStringLiteral("trackknife-tests"));
     QCoreApplication::setApplicationName(QStringLiteral("engine-launcher-test"));
     QSettings{}.clear();
-    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+    qputenv("MELODY_ENGINE", MELODY_ENGINE_BINARY);
 }
 
 void EngineLauncherTest::startsAnEngineAndFindsItAgain() {
@@ -172,7 +172,7 @@ void EngineLauncherTest::aProcessIsRunningUntilItsLastThreadEnds() {
     const auto lock =
         std::filesystem::path{directory.filePath(QStringLiteral("held.lock")).toStdString()};
     QProcess helper;
-    helper.start(QStringLiteral(TRACKKNIFE_ZOMBIE_LEADER_HELPER),
+    helper.start(QStringLiteral(MELODY_ZOMBIE_LEADER_HELPER),
                  {QString::fromStdString(lock.string())});
     QVERIFY(helper.waitForStarted());
     const auto pid = static_cast<pid_t>(helper.processId());
@@ -208,10 +208,10 @@ void EngineLauncherTest::twoClientsStartingAtOnceShareOneEngine() {
 
 void EngineLauncherTest::aMissingProgramSaysSo() {
     Scratch scratch;
-    const auto saved = qgetenv("TRACKKNIFE_ENGINE");
-    qputenv("TRACKKNIFE_ENGINE", "/nonexistent/melodyd");
+    const auto saved = qgetenv("MELODY_ENGINE");
+    qputenv("MELODY_ENGINE", "/nonexistent/melodyd");
     const auto result = connectLocalEngine(scratch.engine, std::chrono::seconds{2});
-    qputenv("TRACKKNIFE_ENGINE", saved);
+    qputenv("MELODY_ENGINE", saved);
     QVERIFY(!result.has_value());
 }
 
@@ -229,8 +229,8 @@ void EngineLauncherTest::nothingStartsOneUnlessAllowed() {
 void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
     // With no override, the program is found beside the executable or not at
     // all -- never on PATH, where another melodyd may live.
-    const auto saved = qgetenv("TRACKKNIFE_ENGINE");
-    qunsetenv("TRACKKNIFE_ENGINE");
+    const auto saved = qgetenv("MELODY_ENGINE");
+    qunsetenv("MELODY_ENGINE");
     QTemporaryDir bin;
     QVERIFY(bin.isValid());
     QFile impostor{bin.filePath(QStringLiteral("melodyd"))};
@@ -242,7 +242,7 @@ void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
     qputenv("PATH", bin.path().toLocal8Bit() + ":" + path);
     const auto program = engineProgram();
     qputenv("PATH", path);
-    qputenv("TRACKKNIFE_ENGINE", saved);
+    qputenv("MELODY_ENGINE", saved);
     QVERIFY(!program.startsWith(bin.path()));
 }
 
@@ -369,7 +369,7 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     QTemporaryDir remote_state;
     QVERIFY(remote_state.isValid());
     QProcess remote;
-    remote.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
+    remote.setProgram(QStringLiteral(MELODY_ENGINE_BINARY));
     remote.setArguments({QStringLiteral("--socket"),
                          remote_state.filePath(QStringLiteral("r.sock")), QStringLiteral("--state"),
                          remote_state.path(), QStringLiteral("--name"), QStringLiteral("remote"),
@@ -517,7 +517,7 @@ void EngineLauncherTest::thisUsersEngineIsNotStartedHere() {
     const LocalEngine engine{.state = directory.filePath(QStringLiteral("state")).toStdString(),
                              .socket = directory.filePath(QStringLiteral("s.sock")).toStdString(),
                              .standard = true};
-    QVERIFY(qEnvironmentVariableIsSet("TRACKKNIFE_NO_SYSTEMD"));
+    QVERIFY(qEnvironmentVariableIsSet("MELODY_NO_SYSTEMD"));
     const auto result = connectLocalEngine(engine, std::chrono::seconds{2});
     QVERIFY(!result.has_value());
     QCOMPARE(result.error().code, core::ErrorCode::not_found);
@@ -538,17 +538,17 @@ void EngineLauncherTest::anOutdatedEngineIsSeenAndStopped() {
     // Its own copy of the program, so the test can replace it as a rebuild
     // does without touching the build tree's.
     const auto program = scratch.directory.filePath(QStringLiteral("melodyd"));
-    QVERIFY(QFile::copy(QStringLiteral(TRACKKNIFE_ENGINE_BINARY), program));
-    const auto saved = qgetenv("TRACKKNIFE_ENGINE");
-    qputenv("TRACKKNIFE_ENGINE", program.toLocal8Bit());
-    const auto restore = qScopeGuard([saved] { qputenv("TRACKKNIFE_ENGINE", saved); });
+    QVERIFY(QFile::copy(QStringLiteral(MELODY_ENGINE_BINARY), program));
+    const auto saved = qgetenv("MELODY_ENGINE");
+    qputenv("MELODY_ENGINE", program.toLocal8Bit());
+    const auto restore = qScopeGuard([saved] { qputenv("MELODY_ENGINE", saved); });
 
     QVERIFY(connectLocalEngine(scratch.engine).has_value());
     QVERIFY(!localEngineOutdated(scratch.engine));
 
     // Rebuilt: a new file where the old one was, the old one still running.
     QVERIFY(QFile::remove(program));
-    QVERIFY(QFile::copy(QStringLiteral(TRACKKNIFE_ENGINE_BINARY), program));
+    QVERIFY(QFile::copy(QStringLiteral(MELODY_ENGINE_BINARY), program));
     QVERIFY(localEngineOutdated(scratch.engine));
     QVERIFY(restartLocalEngine(scratch.engine).has_value());
     QVERIFY(!localEngineOutdated(scratch.engine));

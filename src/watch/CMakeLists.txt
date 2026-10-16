@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # ADR-0232: watching music folders where they are, for an engine elsewhere.
-# Core and the protocol client only, so the light build (TRACKKNIFE_CLI_ONLY)
+# Core and the protocol client only, so the light build (MELODY_CLI_ONLY)
 # makes it for a NAS without FFmpeg, PipeWire, SQLite or Qt.
 add_library(trackknife_watch STATIC src/watch.cpp)
 add_library(Trackknife::Watch ALIAS trackknife_watch)

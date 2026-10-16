@@ -29,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
 extern "C" void __tsan_acquire(void* address);
 extern "C" void __tsan_release(void* address);
 #endif
@@ -734,7 +734,7 @@ void Workspace::pumpArtworkQueue() {
             } else {
                 outcome->image = ui::loadLocalArtwork(raw_path, cancellation);
             }
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
             __tsan_release(outcome.get());
 #endif
         }));
@@ -747,7 +747,7 @@ void Workspace::finishArtworkLoad() {
         pumpArtworkQueue();
         return;
     }
-#if defined(TRACKKNIFE_THREAD_SANITIZER)
+#if defined(MELODY_THREAD_SANITIZER)
     __tsan_acquire(outcome.get());
 #endif
     if (artwork_invalidated_while_loading_.remove(outcome->key)) {

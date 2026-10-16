@@ -14,7 +14,7 @@
 #include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
 #endif
 #include "trackknife/core/engine_state.hpp"
@@ -234,7 +234,7 @@ void usage() {
         << "                 every agent and client. There is no TLS: on an untrusted\n"
         << "                 network use WireGuard, or put a TLS proxy in front of a\n"
         << "                 loopback --listen (ADR-0223).\n"
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
         << "  --upnp [--upnp-interface NAME]\n"
         << "      Discover UPnP renderers (requires a LAN-reachable --http listener).\n"
 #endif
@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
     auto& http_address = settings.http_address;
     const auto transcode_cache_mb = settings.transcode_cache_mb;
     auto& local_only = settings.local_only;
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     const bool upnp_enabled = settings.upnp_enabled;
     const auto& upnp_interface = settings.upnp_interface;
 #else
@@ -544,7 +544,7 @@ int main(int argc, char** argv) {
                           {"id", engine_id},
                           {"protocol", trackknife::protocol::protocol_version},
                           {"level", trackknife::protocol::protocol_level},
-                          {"release", TRACKKNIFE_RELEASE},
+                          {"release", MELODY_RELEASE},
                           {"service", service}};
                   });
     // ADR-0286: its melodyd.conf over the protocol, and a restart to use it:
@@ -710,7 +710,7 @@ int main(int argc, char** argv) {
     // ADR-0228: the files an agent without its own copy fetches -- only
     // what the player holds, with a token that lives as long as this run and
     // reaches agents only in the URLs the engine gives them.
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     // ADR-0235: discovery starts before the streams, for its address: an
     // engine kept to this machine serves its renderers there only, not on
     // every network it is on. Renderers reach the outputs once it begins.
@@ -808,7 +808,7 @@ int main(int argc, char** argv) {
     if (tcp_server) {
         tcp_server->on_agent(admit);
     }
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     if (upnp) {
         if (!streams) {
             std::cerr << "melodyd: --upnp needs --http bound to a LAN address\n";
@@ -1037,7 +1037,7 @@ int main(int argc, char** argv) {
     if (streams) {
         streams->start();
     }
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     if (upnp) {
         upnp->begin();
     }
@@ -1059,7 +1059,7 @@ int main(int argc, char** argv) {
     wait_for_stop();
 
     std::cerr << "melodyd: stopping\n";
-#if TRACKKNIFE_ENABLE_UPNP
+#if MELODY_ENABLE_UPNP
     if (upnp) {
         upnp->stop();
     }

@@ -36,7 +36,7 @@ fail() {
 
 # A private service per run, so nothing real on this network is found or
 # finds these (the test environment sets one too; this makes it unique).
-export TRACKKNIFE_DISCOVERY_SERVICE="_mt-$$-${RANDOM}._tcp"
+export MELODY_DISCOVERY_SERVICE="_mt-$$-${RANDOM}._tcp"
 port=$((20000 + RANDOM % 20000))
 password="discovery-test-$$"
 

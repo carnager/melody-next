@@ -122,7 +122,7 @@ struct LocalEngineSharing final {
 [[nodiscard]] std::vector<pid_t> lockHolders(const std::filesystem::path& lock);
 
 // The melodyd installed beside this executable, or the build tree's.
-// TRACKKNIFE_ENGINE overrides. Never a search of PATH: another program of
+// MELODY_ENGINE overrides. Never a search of PATH: another program of
 // the same name there is not this engine (the Go melodyd was, once, and a
 // test started it). Empty when there is none.
 [[nodiscard]] QString engineProgram();

@@ -15,7 +15,7 @@ target_link_libraries(
 )
 add_test(NAME titleformat-benchmark-smoke COMMAND trackknife_titleformat_benchmark --quick)
 
-if(TRACKKNIFE_BUILD_UI)
+if(MELODY_BUILD_UI)
     qt_add_executable(trackknife_ui_benchmark trackknife_ui_benchmark.cpp)
     target_link_libraries(
         trackknife_ui_benchmark
@@ -23,7 +23,7 @@ if(TRACKKNIFE_BUILD_UI)
                 trackknife_project_warnings
     )
     set(trackknife_ui_benchmark_arguments --quick)
-    if(TRACKKNIFE_ENABLE_SANITIZERS OR TRACKKNIFE_ENABLE_THREAD_SANITIZER)
+    if(MELODY_ENABLE_SANITIZERS OR MELODY_ENABLE_THREAD_SANITIZER)
         list(APPEND trackknife_ui_benchmark_arguments --report-only)
     endif()
     add_test(NAME trackknife-ui-benchmark-smoke

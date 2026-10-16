@@ -190,7 +190,7 @@ int main(int argc, char* argv[]) {
     // slower, and a shared CI machine's timings, taken once, are noise. Its
     // timings say nothing about the budgets, which hold on real hardware.
     const auto report_only = application.arguments().contains(QStringLiteral("--report-only")) ||
-                             qEnvironmentVariableIsSet("TRACKKNIFE_BENCHMARK_REPORT_ONLY");
+                             qEnvironmentVariableIsSet("MELODY_BENCHMARK_REPORT_ONLY");
     const auto row_count = requestedRowCount(application.arguments(), quick);
     const auto sample_count = quick ? 12 : 120;
 

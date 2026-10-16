@@ -46,7 +46,7 @@ namespace {
 
 std::string tagged(const QString& folder, const std::string& name, const std::string& artist,
                    const std::string& album, const std::vector<std::string>& genres) {
-    QFile encoded{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
+    QFile encoded{QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/tagged-tone-flac.b64")};
     if (!encoded.open(QIODevice::ReadOnly)) {
         return {};
     }

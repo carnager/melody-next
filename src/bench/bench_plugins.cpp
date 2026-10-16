@@ -26,9 +26,21 @@ void BenchMainWindow::addPluginActions(
         return;
     }
     menu->addSeparator();
+    // A few entries stand in the menu itself; more go in a submenu for each
+    // plugin, under its name, so many plugins still leave a short menu.
+    std::size_t count = 0U;
     for (const auto& plugin : plugins) {
+        count += plugin.actions.size();
+    }
+    const bool grouped = count > flat_plugin_actions;
+    for (const auto& plugin : plugins) {
+        auto* into = menu;
+        if (grouped) {
+            into = menu->addMenu(plugin.title);
+            into->setObjectName(QStringLiteral("menu-plugin-%1").arg(plugin.name));
+        }
         for (const auto& action : plugin.actions) {
-            auto* entry = menu->addAction(action.label);
+            auto* entry = into->addAction(action.label);
             entry->setObjectName(QStringLiteral("action-plugin-%1-%2").arg(plugin.name, action.id));
             entry->setToolTip(plugin.description.isEmpty() ? plugin.title : plugin.description);
             connect(entry, &QAction::triggered, this,

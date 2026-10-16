@@ -54,6 +54,10 @@ Accepted, 2026-10-17.
      or `none`.
    - `timeout`: seconds before it is stopped (default 120).
 
+   The entries stand at the end of the menu; with more than three in all,
+   each plugin's go in a submenu under its name, as foobar2000 groups its
+   components'. Where they go is not a setting.
+
    Melody runs it in the plugin's folder and writes on its stdin:
 
    ```json

@@ -430,8 +430,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void renameCurrentList();
     void showTabContextMenu(const QPoint& position);
     void showTrackContextMenu(QTableView* view, const QPoint& position);
-    // ADR-0288: the enabled plugins' actions, at the end of a context menu;
+    // ADR-0288: the enabled plugins' actions, at the end of a context menu --
+    // up to `flat_plugin_actions` in it, more in a submenu for each plugin;
     // `run` is given the one chosen.
+    static constexpr std::size_t flat_plugin_actions = 3U;
     void addPluginActions(QMenu* menu, std::function<void(const Plugin&, const PluginAction&)> run);
     void runPlugin(const Plugin& plugin, const PluginAction& action,
                    std::vector<PluginTrack> tracks, const EngineKey& engine);

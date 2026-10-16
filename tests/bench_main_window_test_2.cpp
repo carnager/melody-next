@@ -2622,4 +2622,62 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0288: more than a few plugin entries go in a submenu for each plugin,
+// under its name; a few stand in the menu itself (above).
+void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto file = media.filePath(QStringLiteral("01.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+                        QStringLiteral("/melody/plugins/many");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Many", "actions": [
+            {"id": "a", "label": "First", "run": ["true"]},
+            {"id": "b", "label": "Second", "run": ["true"]},
+            {"id": "c", "label": "Third", "run": ["true"]},
+            {"id": "d", "label": "Fourth", "run": ["true"]}]})");
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("many")), true);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    const auto encoded = QFile::encodeName(file);
+    window.openLocalPaths(
+        {std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}});
+    Workspace::ListTab* tab = nullptr;
+    QTRY_VERIFY((tab = [&window]() -> Workspace::ListTab* {
+                    for (auto& candidate : window.list_tabs_) {
+                        if (candidate->model->rowCount() == 1) {
+                            return candidate.get();
+                        }
+                    }
+                    return nullptr;
+                }()) != nullptr);
+    window.tabs_->setCurrentWidget(tab->view);
+    tab->view->selectionModel()->select(
+        tab->model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QVERIFY(QMetaObject::invokeMethod(
+        tab->view, "customContextMenuRequested", Qt::DirectConnection,
+        Q_ARG(QPoint, tab->view->visualRect(tab->model->index(0, local_title_column)).center())));
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
+    QVERIFY(menu != nullptr);
+    auto* submenu = menu->findChild<QMenu*>(QStringLiteral("menu-plugin-many"));
+    QVERIFY(submenu != nullptr);
+    QCOMPARE(submenu->title(), QStringLiteral("Many"));
+    QCOMPARE(submenu->actions().size(), 4);
+    QCOMPARE(submenu->actions().front()->text(), QStringLiteral("First"));
+    // None of them in the menu itself.
+    QVERIFY(std::ranges::none_of(menu->actions(), [](const QAction* action) {
+        return action->text() == QStringLiteral("First");
+    }));
+    menu->close();
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 } // namespace trackknife::bench

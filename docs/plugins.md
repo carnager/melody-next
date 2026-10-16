@@ -55,6 +55,10 @@ any program you start: enable only those you trust.
 An unknown key, or a value out of place, makes the plugin unusable, and
 Settings says why.
 
+The entries stand at the end of the context menu. With more than three of
+them, from every plugin enabled, each plugin's go in a submenu of its own,
+under its name, so the menu stays short however many there are.
+
 ## What the program is told
 
 It runs in its own folder and gets the choice on stdin, as one JSON object:

@@ -9,9 +9,9 @@ namespace trackknife::bench {
 // Before anything opens the settings or the workspace database, as either
 // window starts.
 //
-// The application reclaimed its original name: settings and the database
-// written under the interim "trackbench" identity are adopted, once.
-void adoptInterimIdentity();
+// ADR-0287: the application is Melody. Its settings, its data and its cache
+// move from Trackknife's names, once.
+void adoptTrackknifeNames();
 // A restore chosen last time (File › Restore workspace database…) is applied
 // now, the database it replaces kept beside it. What happened, to tell the
 // user; empty when nothing was pending.

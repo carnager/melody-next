@@ -4,6 +4,7 @@
 
 #include "bench/remote_engines.hpp"
 #include "bench/settings_keys.hpp"
+#include "trackknife/core/engine_state.hpp"
 #include "trackknife/core/environment.hpp"
 
 #include <QCoreApplication>
@@ -46,22 +47,6 @@ namespace {
     return std::filesystem::temp_directory_path();
 }
 
-// What melodyd uses when started with no arguments, so the engine a
-// workspace starts and one started by hand or by the user service are the
-// same engine on the same socket.
-[[nodiscard]] std::filesystem::path standard_state() {
-    if (const auto* data_home = trackknife::core::environment_variable("XDG_DATA_HOME");
-        data_home != nullptr && *data_home) {
-        return std::filesystem::path{data_home} / "trackknife" / "trackknife";
-    }
-#ifdef __APPLE__
-    return std::filesystem::path{QDir::homePath().toStdString()} / "Library" /
-           "Application Support" / "trackknife";
-#endif
-    return std::filesystem::path{QDir::homePath().toStdString()} / ".local" / "share" /
-           "trackknife" / "trackknife";
-}
-
 [[nodiscard]] std::filesystem::path path_from_text(const QString& text) {
     return std::filesystem::path{QFile::encodeName(text).toStdString()};
 }
@@ -80,17 +65,13 @@ std::optional<LocalEngine> localEngine() {
     if (!local_engine_allowed.load()) {
         return std::nullopt;
     }
-    const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (data.isEmpty()) {
-        return std::nullopt;
-    }
-    LocalEngine engine{.state = std::filesystem::path{QFile::encodeName(data).toStdString()},
-                       .socket = {},
-                       .standard = false};
+    // ADR-0287: the engine's own folder, not the window's: the one melodyd
+    // uses when started with no arguments.
+    LocalEngine engine{.state = core::engine_state_directory(), .socket = {}, .standard = false};
+    const auto data = QFile::decodeName(QByteArray::fromStdString(engine.state.native()));
     // Another database gets another socket, or its engine would be asked
     // about a library it does not have.
-    if (std::filesystem::weakly_canonical(engine.state) ==
-        std::filesystem::weakly_canonical(standard_state())) {
+    if (core::environment_variable("MELODY_STATE_DIR") == nullptr) {
         engine.socket = runtime_directory() / "melodyd.sock";
         engine.standard = true;
     } else {
@@ -206,8 +187,9 @@ namespace {
 }
 
 // One request to this computer's engine, on a connection of its own.
-[[nodiscard]] core::Result<protocol::Json> ask(const LocalEngine& engine, const std::string& method,
-                                               const protocol::Json& params = protocol::Json::object()) {
+[[nodiscard]] core::Result<protocol::Json>
+ask(const LocalEngine& engine, const std::string& method,
+    const protocol::Json& params = protocol::Json::object()) {
     auto client = protocol::Client::connect(
         protocol::Endpoint{.socket = engine.socket, .host = {}, .port = 0, .token = {}});
     if (!client) {
@@ -245,10 +227,11 @@ struct Ran final {
     if (!qEnvironmentVariableIsEmpty("TRACKKNIFE_NO_SYSTEMD")) {
         return false;
     }
-    const auto enabled = systemctl({QStringLiteral("is-enabled"), QStringLiteral("melodyd.socket")});
-    return enabled.status == 0 &&
-           (enabled.output == QStringLiteral("enabled") || enabled.output == QStringLiteral("static") ||
-            enabled.output == QStringLiteral("enabled-runtime"));
+    const auto enabled =
+        systemctl({QStringLiteral("is-enabled"), QStringLiteral("melodyd.socket")});
+    return enabled.status == 0 && (enabled.output == QStringLiteral("enabled") ||
+                                   enabled.output == QStringLiteral("static") ||
+                                   enabled.output == QStringLiteral("enabled-runtime"));
 #endif
 }
 
@@ -286,27 +269,28 @@ protocol::Json sharingChanges(const LocalEngineSharing& now, const LocalEngineSh
     if (shared) {
         if (const auto colon = now.listen.lastIndexOf(QLatin1Char(':'));
             colon > 0 && now.stream_port > 0) {
-            http = QStringLiteral("%1:%2").arg(now.listen.left(colon)).arg(now.stream_port).toStdString();
+            http = QStringLiteral("%1:%2")
+                       .arg(now.listen.left(colon))
+                       .arg(now.stream_port)
+                       .toStdString();
         }
     } else if (now.upnp) {
         // UPnP renderers fetch from the stream port, shared or not.
         http = QStringLiteral("0.0.0.0:%1").arg(now.stream_port).toStdString();
     }
     put("http", http);
-    put("music-root", now.music_root.isEmpty() ? std::nullopt
-                                               : std::optional{now.music_root.toStdString()});
+    put("music-root",
+        now.music_root.isEmpty() ? std::nullopt : std::optional{now.music_root.toStdString()});
     put("upnp", now.upnp ? std::optional<std::string>{"yes"} : std::nullopt);
     // Played for: every engine found, unless turned off; with a password
     // the engine does so by itself.
     put("agent", now.play_for_found ? std::nullopt : std::optional<std::string>{"no"});
-    put("agent-stream-home",
-        now.found_nearby_kbps == SettingsKeys::engine_stream_nearby_default
-            ? std::nullopt
-            : std::optional{stream_text(now.found_nearby_kbps)});
-    put("agent-stream-away",
-        now.found_away_kbps == SettingsKeys::engine_stream_away_default
-            ? std::nullopt
-            : std::optional{stream_text(now.found_away_kbps)});
+    put("agent-stream-home", now.found_nearby_kbps == SettingsKeys::engine_stream_nearby_default
+                                 ? std::nullopt
+                                 : std::optional{stream_text(now.found_nearby_kbps)});
+    put("agent-stream-away", now.found_away_kbps == SettingsKeys::engine_stream_away_default
+                                 ? std::nullopt
+                                 : std::optional{stream_text(now.found_away_kbps)});
     // Each engine elsewhere: an [engine HOST] with its address, used while
     // the network does not find it, its mount, its own password and streams.
     std::vector<std::string> kept;
@@ -326,8 +310,9 @@ protocol::Json sharingChanges(const LocalEngineSharing& now, const LocalEngineSh
                 : std::optional{target.password.toStdString()},
             name);
         put("stream-home",
-            target.nearby_kbps == now.found_nearby_kbps ? std::nullopt
-                                                        : std::optional{stream_text(target.nearby_kbps)},
+            target.nearby_kbps == now.found_nearby_kbps
+                ? std::nullopt
+                : std::optional{stream_text(target.nearby_kbps)},
             name);
         put("stream-away",
             target.away_kbps == now.found_away_kbps ? std::nullopt
@@ -339,7 +324,8 @@ protocol::Json sharingChanges(const LocalEngineSharing& now, const LocalEngineSh
         if (std::ranges::contains(kept, name)) {
             continue;
         }
-        for (const auto* key : {"address", "music-root", "password", "stream-home", "stream-away"}) {
+        for (const auto* key :
+             {"address", "music-root", "password", "stream-home", "stream-away"}) {
             put(key, std::nullopt, name);
         }
     }

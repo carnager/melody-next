@@ -59,7 +59,12 @@ class LibraryPanelEngineTest final : public QObject {
 };
 
 // Settings go to Qt's test location, never the user's own.
-void LibraryPanelEngineTest::initTestCase() { QStandardPaths::setTestModeEnabled(true); }
+void LibraryPanelEngineTest::initTestCase() {
+    QStandardPaths::setTestModeEnabled(true);
+    // ADR-0287: the engine keeps its state in the test's own folder.
+    qputenv("MELODY_STATE_DIR",
+            QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)));
+}
 
 void LibraryPanelEngineTest::init() {
     QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_socket_key));

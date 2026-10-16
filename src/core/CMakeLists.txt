@@ -4,6 +4,7 @@ add_library(
     trackknife_core STATIC
     src/atomic_rename.cpp
     src/config_file.cpp
+    src/engine_state.cpp
     src/local_sources.cpp
     src/sha256.cpp
     src/stable_id.cpp

@@ -105,7 +105,12 @@ class LibraryViewsPanelTest final : public QObject {
     void theFooterFollowsALaterPalette();
 };
 
-void LibraryViewsPanelTest::initTestCase() { QStandardPaths::setTestModeEnabled(true); }
+void LibraryViewsPanelTest::initTestCase() {
+    QStandardPaths::setTestModeEnabled(true);
+    // ADR-0287: the engine keeps its state in the test's own folder.
+    qputenv("MELODY_STATE_DIR",
+            QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)));
+}
 
 void LibraryViewsPanelTest::init() {
     QSettings settings;

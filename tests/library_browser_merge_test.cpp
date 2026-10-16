@@ -66,7 +66,12 @@ class LibraryBrowserTest final : public QObject {
     QTemporaryDir directory_;
 };
 
-void LibraryBrowserTest::init() { QStandardPaths::setTestModeEnabled(true); }
+void LibraryBrowserTest::init() {
+    QStandardPaths::setTestModeEnabled(true);
+    // ADR-0287: the engine keeps its state in the test's own folder.
+    qputenv("MELODY_STATE_DIR",
+            QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)));
+}
 
 void LibraryBrowserTest::aLevelIsMergedInPlace() {
     CatalogueSource catalogues{directory_.path().toStdString() + "/unused.sqlite3",

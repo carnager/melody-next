@@ -4,8 +4,10 @@
 
 #include "workspace/tab_store.hpp"
 
+#include "trackknife/core/engine_state.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -17,17 +19,54 @@
 
 namespace trackknife::bench {
 
-void adoptInterimIdentity() {
+namespace {
+
+// The same place under Trackknife's name (ADR-0287): each of the path's last
+// two components that is the application's name now, the old one.
+[[nodiscard]] QString underOldName(const QString& path) {
+    const auto name = QCoreApplication::applicationName();
+    auto parts = QDir::cleanPath(path).split(QLatin1Char('/'));
+    for (auto index = parts.size() - 1; index >= 0 && index >= parts.size() - 2; --index) {
+        if (parts[index] == name) {
+            parts[index] = QStringLiteral("trackknife");
+        } else if (parts[index] == name + QStringLiteral(".conf")) {
+            parts[index] = QStringLiteral("trackknife.conf");
+        }
+    }
+    return parts.join(QLatin1Char('/'));
+}
+
+} // namespace
+
+void adoptTrackknifeNames() {
+    // ADR-0287: settings, the window's data and its cache move from
+    // Trackknife's names, once. The data folder was the engine's too: only
+    // the window's own entries move here, the engine moves its own.
     const auto new_settings = QSettings{}.fileName();
-    const auto old_settings =
-        QFileInfo{new_settings}.dir().filePath(QStringLiteral("trackbench.conf"));
-    if (!QFile::exists(new_settings) && QFile::exists(old_settings)) {
+    if (const auto old_settings = underOldName(new_settings); old_settings != new_settings &&
+                                                              !QFile::exists(new_settings) &&
+                                                              QFile::exists(old_settings)) {
+        QDir{}.mkpath(QFileInfo{new_settings}.absolutePath());
         QFile::rename(old_settings, new_settings);
     }
     const auto new_data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    const auto old_data = QFileInfo{new_data}.dir().filePath(QStringLiteral("trackbench"));
-    if (!QDir{new_data}.exists() && QDir{old_data}.exists()) {
-        QDir{}.rename(old_data, new_data);
+    if (const QDir old_data{underOldName(new_data)};
+        old_data.path() != new_data && old_data.exists()) {
+        QDir{}.mkpath(new_data);
+        for (const auto& name : old_data.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
+            const bool windows =
+                name == QStringLiteral("tabs") || name == QStringLiteral("lastfm-v1.json") ||
+                name == QStringLiteral("melodyd.log") || name.startsWith(QStringLiteral("before-"));
+            if (windows && !QFileInfo::exists(new_data + QLatin1Char('/') + name)) {
+                QDir{}.rename(old_data.filePath(name), new_data + QLatin1Char('/') + name);
+            }
+        }
+    }
+    const auto new_cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (const auto old_cache = underOldName(new_cache);
+        old_cache != new_cache && !QDir{new_cache}.exists() && QDir{old_cache}.exists()) {
+        QDir{}.mkpath(QFileInfo{new_cache}.absolutePath());
+        QDir{}.rename(old_cache, new_cache);
     }
 }
 
@@ -39,7 +78,9 @@ QString applyPendingWorkspaceRestore() {
     const auto pending_settings =
         settings.value(QStringLiteral("recovery/pending-settings-restore")).toString();
     if (!pending.isEmpty()) {
-        const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        // ADR-0287: the database is the engine's, in its folder.
+        const auto data =
+            QFile::decodeName(QByteArray::fromStdString(core::engine_state_directory().native()));
         QDir{}.mkpath(data);
         const auto live = std::filesystem::path{
             QFile::encodeName(data + QStringLiteral("/lists.sqlite")).toStdString()};

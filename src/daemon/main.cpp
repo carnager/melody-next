@@ -9,14 +9,15 @@
 #include "agent/agent.hpp"
 #include "agent/guests.hpp"
 #include "agent/speaker_arbiter.hpp"
-#include "trackknife/core/posix.hpp"
-#include "trackknife/core/stable_id.hpp"
 #include "config_methods.hpp"
 #include "settings.hpp"
+#include "trackknife/core/posix.hpp"
+#include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #if TRACKKNIFE_ENABLE_UPNP
 #include "trackknife/discovery/upnp.hpp"
 #endif
+#include "trackknife/core/engine_state.hpp"
 #include "trackknife/core/environment.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
@@ -52,7 +53,6 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <thread>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -64,6 +64,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 
 namespace {
 
@@ -118,28 +119,6 @@ void wait_for_stop() {
     char byte = 0;
     while (::read(stop_pipe[0], &byte, 1) < 0 && errno == EINTR) {
     }
-}
-
-// Where Trackknife has always kept its data (Qt's AppDataLocation for the
-// "trackknife" organisation and application), so the engine a workspace
-// starts adopts the library, ratings and history already there rather than
-// beginning empty beside them.
-[[nodiscard]] std::filesystem::path default_state_directory() {
-    if (const auto* explicit_home =
-            trackknife::core::environment_variable("TRACKKNIFE_STATE_DIR")) {
-        return explicit_home;
-    }
-    if (const auto* data_home = trackknife::core::environment_variable("XDG_DATA_HOME")) {
-        return std::filesystem::path{data_home} / "trackknife" / "trackknife";
-    }
-    if (const auto* home = trackknife::core::environment_variable("HOME")) {
-#ifdef __APPLE__
-        return std::filesystem::path{home} / "Library" / "Application Support" / "trackknife";
-#else
-        return std::filesystem::path{home} / ".local" / "share" / "trackknife" / "trackknife";
-#endif
-    }
-    return std::filesystem::current_path();
 }
 
 // ADR-0234: who this engine is, across restarts -- minted once and kept in
@@ -236,8 +215,8 @@ void usage() {
         << "  --config FILE  the settings to read (default $MELODYD_CONFIG, else\n"
         << "                 " << trackknife::daemon::default_config_path().string() << ")\n"
         << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
-        << "  --state DIR    where the database lives (default\n"
-        << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
+        << "  --state DIR    where the database lives (default $MELODY_STATE_DIR, else\n"
+        << "                 $XDG_DATA_HOME/melody/engine)\n"
         << "  --music-root DIR\n"
         << "                 where the music is: output agents with their own copy are\n"
         << "                 sent paths relative to it (ADR-0228)\n"
@@ -333,7 +312,7 @@ int main(int argc, char** argv) {
     const std::vector<std::string_view> arguments(argv + 1, argv + argc);
     trackknife::daemon::Settings defaults;
     defaults.socket_path = default_socket_path();
-    defaults.state_directory = default_state_directory();
+    defaults.state_directory = trackknife::core::default_engine_state_directory();
     auto given = trackknife::daemon::read_settings(arguments, std::move(defaults));
     if (!given) {
         std::cerr << "melodyd: " << given.error().message << "\n";
@@ -461,6 +440,29 @@ int main(int argc, char** argv) {
         std::cerr << "melodyd: another engine is using " << state_directory.string() << "\n";
         return EXIT_FAILURE;
     }
+    // ADR-0287: the default folder takes over an engine's state from where
+    // it was kept under Trackknife's name, once, before anything is opened.
+    if (state_directory == trackknife::core::default_engine_state_directory() &&
+        trackknife::core::environment_variable("MELODY_STATE_DIR") == nullptr) {
+        if (const auto adopted = trackknife::core::adopt_legacy_engine_state(state_directory);
+            !adopted) {
+            const auto legacy = trackknife::core::legacy_engine_state_directory();
+            if (adopted.error().code == trackknife::core::ErrorCode::conflict) {
+                // An engine of before still has it: starting empty beside it
+                // would only hide the library.
+                std::cerr << "melodyd: " << adopted.error().message << ", " << legacy.string()
+                          << "; stop it first\n";
+                return EXIT_FAILURE;
+            }
+            std::cerr << "melodyd: could not move the engine's files to "
+                      << state_directory.string() << ": " << adopted.error().message
+                      << "; running from " << legacy.string() << "\n";
+            state_directory = legacy;
+        } else if (*adopted > 0U) {
+            std::cerr << "melodyd: moved the engine's files to " << state_directory.string()
+                      << "\n";
+        }
+    }
     if (!hold_lock(std::filesystem::path{socket_path.string() + ".lock"})) {
         std::cerr << "melodyd: another engine is starting on " << socket_path.string() << "\n";
         return EXIT_FAILURE;
@@ -547,15 +549,13 @@ int main(int argc, char** argv) {
                   });
     // ADR-0286: its melodyd.conf over the protocol, and a restart to use it:
     // a stop, answered first, for the service manager to start it again.
-    trackknife::daemon::register_config_methods(
-        dispatcher, settings,
-        [](const bool for_good) {
-            exit_status.store(for_good ? stopped_on_request : EXIT_SUCCESS);
-            std::thread{[] {
-                std::this_thread::sleep_for(std::chrono::milliseconds{200});
-                request_stop(0);
-            }}.detach();
-        });
+    trackknife::daemon::register_config_methods(dispatcher, settings, [](const bool for_good) {
+        exit_status.store(for_good ? stopped_on_request : EXIT_SUCCESS);
+        std::thread{[] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{200});
+            request_stop(0);
+        }}.detach();
+    });
 
     auto server = activated ? trackknife::engine::Server::adopt(*activated, dispatcher)
                             : trackknife::engine::Server::listen(socket_path, dispatcher);

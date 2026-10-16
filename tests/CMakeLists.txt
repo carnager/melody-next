@@ -72,6 +72,13 @@ add_test(
 )
 set_tests_properties(engine-service PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
+add_executable(trackknife_engine_state_tests engine_state_test.cpp)
+target_link_libraries(
+    trackknife_engine_state_tests
+    PRIVATE Trackknife::Core trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME engine-state COMMAND trackknife_engine_state_tests)
+
 add_executable(trackknife_guests_plan_tests guests_plan_test.cpp)
 target_link_libraries(
     trackknife_guests_plan_tests

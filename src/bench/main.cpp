@@ -112,9 +112,9 @@ int main(int argc, char** argv) {
     if (screenshot_run) {
         QStandardPaths::setTestModeEnabled(true);
     }
-    QApplication::setOrganizationName(QStringLiteral("trackknife"));
-    QApplication::setApplicationName(QStringLiteral("trackknife"));
-    QApplication::setApplicationDisplayName(QStringLiteral("Trackknife"));
+    QApplication::setOrganizationName(QStringLiteral("melody"));
+    QApplication::setApplicationName(QStringLiteral("melody"));
+    QApplication::setApplicationDisplayName(QStringLiteral("Melody"));
 
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
     // background probing has had a moment, and exits -- in test mode, set
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
             return 0;
         }
     }
-    trackknife::bench::adoptInterimIdentity();
+    trackknife::bench::adoptTrackknifeNames();
     const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
 
     // ADR-0247: the colours chosen, with a style that paints them.

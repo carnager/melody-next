@@ -13,6 +13,10 @@ void BenchMainWindowTest::initTestCase() {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings_directory_.path());
     QStandardPaths::setTestModeEnabled(true);
+    // ADR-0287: the engine keeps its state in the test's own folder, as the
+    // window opens it: not the shared default, nor its socket.
+    qputenv("MELODY_STATE_DIR",
+            QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)));
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
 }
 

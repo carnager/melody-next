@@ -75,7 +75,9 @@ std::array<int, 2> stop_pipe{-1, -1};
 void request_stop(int) {
     const char byte = 1;
     // write() is async-signal-safe; a full pipe already holds a stop.
-    static_cast<void>(::write(stop_pipe[1], &byte, 1));
+    // Nothing to do here if it fails; a void cast does not quiet GCC's
+    // warn_unused_result, a variable does.
+    [[maybe_unused]] const auto written = ::write(stop_pipe[1], &byte, 1);
 }
 
 [[nodiscard]] bool open_stop_pipe() {

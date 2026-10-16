@@ -20,10 +20,10 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/metadata/lyrics.hpp"
+#include "trackknife/persistence/list_edits.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
-#include "trackknife/persistence/list_edits.hpp"
 #include "workspace/convert_job.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -844,6 +844,12 @@ class Workspace final : public QObject {
     [[nodiscard]] TabChrome tabChrome(const ListTab& tab) const;
     // ADR-0286: whether `engine` holds the library (Settings › Engines).
     [[nodiscard]] bool holdsLibrary(const EngineKey& engine) const;
+    // ADR-0286: the engine holding the library when it is not this
+    // computer's; nothing otherwise.
+    [[nodiscard]] const EngineLink* libraryElsewhere() const;
+    // Files this computer's engine moved: those now in the library's
+    // folders, through its engine's mount, are taken into its library.
+    void libraryTakes(const std::vector<std::string>& moved_here);
     struct Summary {
         QString text;
         QString tooltip;

@@ -17,6 +17,7 @@
 #include "workspace/library_browser.hpp"
 #include "workspace/workspace_view.hpp"
 
+#include <QDebug>
 #include <QFutureWatcher>
 #include <QPointer>
 #include <QTimer>
@@ -215,6 +216,9 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                 [this, elsewhere, work_engine,
                  mounted](const operations::FilePublicationApplyResult& result) {
                     auto committed = false;
+                    // Moved on this computer: what landed in the library's
+                    // folders, through its engine's mount, it is told of.
+                    std::vector<std::string> moved_here;
                     for (const auto& source : result.sources) {
                         if (source.metadata_commit) {
                             applyCommittedMetadata(*source.metadata_commit);
@@ -239,6 +243,7 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                             committed = true;
                         } else if (source.commit) {
                             applyCommittedRelocation(*source.commit);
+                            moved_here.push_back(source.commit->target_raw_path);
                             if (source.published_metadata) {
                                 applyCommittedPublicationMetadata(*source.commit,
                                                                   *source.published_metadata);
@@ -248,6 +253,7 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                             committed = true;
                         }
                     }
+                    libraryTakes(moved_here);
                     if (committed) {
                         schedulePersist();
                     }
@@ -283,6 +289,26 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                 [browser = work_link != nullptr ? work_link->browser : QPointer<LibraryBrowser>{}] {
                     return browser ? browser->rootPaths() : std::vector<std::string>{};
                 },
+            .library_elsewhere =
+                elsewhere ? std::function<std::vector<TaggerServices::LibraryFolder>()>{}
+                          : [this] {
+                                std::vector<TaggerServices::LibraryFolder> folders;
+                                const auto* library = libraryElsewhere();
+                                if (library == nullptr || !library->browser) {
+                                    return folders;
+                                }
+                                const auto through = mountOf(*library);
+                                const auto name = library->catalogue != nullptr
+                                                      ? library->catalogue->name()
+                                                      : QString{};
+                                for (auto& root : library->browser->rootPaths()) {
+                                    auto here = through.local_path_of(root);
+                                    folders.push_back({.engine = name,
+                                                       .root = std::move(root),
+                                                       .here = std::move(here)});
+                                }
+                                return folders;
+                            },
             .undo = [work](std::vector<operations::UndoRequest> requests,
                            const core::CancellationToken& cancellation)
                 -> core::Result<std::vector<operations::UndoOutcome>> {
@@ -333,6 +359,37 @@ template <typename Work, typename Done> void offThread(QObject* context, Work wo
 }
 
 } // namespace
+
+void Workspace::libraryTakes(const std::vector<std::string>& moved_here) {
+    const auto* library = libraryElsewhere();
+    if (moved_here.empty() || library == nullptr || library->catalogue == nullptr) {
+        return;
+    }
+    // Its own paths for them, and only those in its library folders: it
+    // indexes those, and a move elsewhere on the mount is none of its.
+    const auto mount = mountOf(*library);
+    const auto roots =
+        library->browser ? library->browser->rootPaths() : std::vector<std::string>{};
+    std::vector<std::string> theirs;
+    for (const auto& path : moved_here) {
+        if (auto remote = mount.to_remote(path, roots)) {
+            theirs.push_back(std::move(*remote));
+        }
+    }
+    if (theirs.empty()) {
+        return;
+    }
+    offThread(
+        this,
+        [catalogue = std::shared_ptr{library->catalogue->openDeferred()},
+         theirs = std::move(theirs)] { return catalogue->refresh(theirs); },
+        [](const auto& refreshed) {
+            if (!refreshed) {
+                qWarning().noquote() << "The library did not take in the files moved to it:"
+                                     << QString::fromStdString(refreshed.error().message);
+            }
+        });
+}
 
 EngineFolderLister
 Workspace::engineFolderLister(const std::shared_ptr<engine::RemoteFileWork>& work) {

@@ -157,8 +157,17 @@ are chosen in Trackknife, which finds it on the network.
 
 ## Left for later
 
-- What a drop of this computer's files on a library tab does ("Add to
-  library…"). How the two kinds of tab differ is settled (2026-10-16): when
+- What a drop of this computer's files on a library tab does. Adding them
+  to the library is settled (2026-10-16): the tagger's Move offers the
+  library's folders, "Library on gemenon · /srv/music", for this computer's
+  files when the library is elsewhere; this computer's engine moves them
+  there through that engine's mount (Settings → Engines → Advanced), and
+  every move on this computer that lands in the library's folders -- by a
+  saved destination or a folder chosen, too -- is handed to the library's
+  engine to take in (`catalogue.refresh`). Without a mount the folder is
+  offered but cannot be chosen, and says so; sending the files over the
+  protocol instead is for later. How the two kinds of tab differ is settled
+  (2026-10-16): when
   the library is on another engine, this computer's tabs carry a computer
   mark and say in their tooltip that their files are here and play here; the
   library's tabs are unmarked and come first; the sidebar's folder view is

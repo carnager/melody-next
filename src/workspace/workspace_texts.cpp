@@ -39,6 +39,15 @@ bool Workspace::holdsLibrary(const EngineKey& engine) const {
     return false;
 }
 
+const Workspace::EngineLink* Workspace::libraryElsewhere() const {
+    for (const auto& link : engines_) {
+        if (!link->key.isLocal() && holdsLibrary(link->key)) {
+            return link.get();
+        }
+    }
+    return nullptr;
+}
+
 QString Workspace::emptyListTitle(const EngineKey& engine) const {
     return !engine.isLocal() ? tr("Nothing from %1 here yet").arg(engineName(engine))
                              : tr("This list is empty");
@@ -78,9 +87,10 @@ Workspace::TabChrome Workspace::tabChrome(const ListTab& tab) const {
                        : chrome.mark == TabChrome::Mark::elsewhere
                            ? tr(" · files on %1, played there").arg(engineName(engine))
                            : QString{};
-    chrome.tooltip = QStringLiteral("%1%2%3%4").arg(
-        kind, where, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
-        tab.document.dirty ? QStringLiteral(" · modified") : QString{});
+    chrome.tooltip =
+        QStringLiteral("%1%2%3%4")
+            .arg(kind, where, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
+                 tab.document.dirty ? QStringLiteral(" · modified") : QString{});
     if (chrome.playing) {
         chrome.tooltip += tr(" · Active playback queue");
     }

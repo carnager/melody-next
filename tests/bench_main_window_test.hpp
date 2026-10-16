@@ -390,6 +390,7 @@ class BenchMainWindowTest final : public QObject {
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void thisComputersFilesMoveIntoTheLibrary();
     void aRatingSetElsewhereShowsInTheTabs();
     void dynamicPlaylistsReadTheLibraryChosen();
     void replacingARemoteTabFromItsLibraryPlays();

@@ -1628,6 +1628,7 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_roots = {},
+            .library_elsewhere = {},
             .undo = {},
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
@@ -1757,6 +1758,7 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_roots = {},
+            .library_elsewhere = {},
             .undo = {},
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
@@ -2002,6 +2004,7 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
             .musicbrainz = service,
             .tools = engineFileWorkTools(work),
             .library_roots = [root = raw(library)] { return std::vector{root}; },
+            .library_elsewhere = {},
             .undo =
                 [work](std::vector<operations::UndoRequest> requests,
                        const core::CancellationToken& cancellation) {

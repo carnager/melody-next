@@ -19,8 +19,12 @@ Type=simple
 # itself on the network; without one, or with local-only = yes, it keeps to
 # this machine.
 ExecStart=/usr/bin/melodyd
-Restart=on-failure
-RestartSec=2
+# Started again whenever it stops by itself -- engine.restart is an exit --
+# but not after systemctl stop.
+Restart=always
+RestartSec=1
 
 [Install]
 WantedBy=default.target
+# melodyd.socket hands it its socket (ADR-0286).
+Also=melodyd.socket

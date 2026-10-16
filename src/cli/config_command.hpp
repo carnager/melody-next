@@ -13,7 +13,4 @@ namespace trackknife::cli {
 // "config". Returns the exit status.
 [[nodiscard]] int config_command(const std::vector<std::string>& words);
 
-// The commented settings a new melodyd.conf starts from.
-[[nodiscard]] std::string_view config_skeleton();
-
 } // namespace trackknife::cli

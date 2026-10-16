@@ -65,6 +65,12 @@ add_test(
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cli_config_test.sh" $<TARGET_FILE:melody_cli>
 )
 set_tests_properties(melody-cli-config PROPERTIES TIMEOUT 60)
+add_test(
+    NAME engine-service
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_service_test.sh"
+            $<TARGET_FILE:trackknife_engine_daemon>
+)
+set_tests_properties(engine-service PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 add_executable(trackknife_guests_plan_tests guests_plan_test.cpp)
 target_link_libraries(

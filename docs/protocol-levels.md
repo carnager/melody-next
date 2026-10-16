@@ -7,6 +7,20 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 14 (2026-10-16)
+
+- `engine.info` says whether a service manager runs the engine: `service`,
+  true when systemd handed it its socket or runs its unit (ADR-0286). An
+  older engine leaves it out, which reads as false.
+- The engine's own `melodyd.conf` (ADR-0286): `config.get {}` answers `{path,
+  exists, settings, secrets, engines: [{name, settings, secrets}],
+  from_flags}` -- a password is never sent, only named among `secrets` --
+  and `config.set {changes: [{key, value, engine?}]}` sets each, a null
+  `value` taking it out, all or none, checked as melodyd reads the file and
+  written with the rest of it kept: `{path, restart, overridden}`.
+  `engine.restart {}` answers, then stops the engine for its service manager
+  to start again with what the file says.
+
 ### Level 13 (2026-10-15)
 
 - `playback.now_playing` answers what plays as fields, for a client that lays

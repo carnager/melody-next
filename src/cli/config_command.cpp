@@ -2,7 +2,6 @@
 
 #include "config_command.hpp"
 
-#include "melodyd_skeleton.hpp"
 #include "settings.hpp"
 #include "trackknife/core/config_file.hpp"
 
@@ -82,7 +81,7 @@ int write_checked(const std::filesystem::path& path, const std::string& text) {
 
 int edit_command(const std::filesystem::path& path) {
     const auto before = read_text(path);
-    auto text = before ? *before : std::string{config_skeleton()};
+    auto text = before ? *before : std::string{daemon::config_skeleton()};
     if (!before) {
         std::cerr << "No " << path.string() << " yet; starting from the skeleton.\n";
     }
@@ -144,8 +143,6 @@ int edit_command(const std::filesystem::path& path) {
 
 } // namespace
 
-std::string_view config_skeleton() { return melodyd_skeleton; }
-
 int config_command(const std::vector<std::string>& words) {
     std::optional<std::filesystem::path> given;
     std::string section;
@@ -200,7 +197,8 @@ int config_command(const std::vector<std::string>& words) {
 
     const auto& key = rest.front();
     const std::string_view kind = section.empty() ? "" : "engine";
-    auto parsed = ConfigFile::parse(text ? *text : std::string{config_skeleton()}, path.string());
+    auto parsed = ConfigFile::parse(text ? *text : std::string{daemon::config_skeleton()},
+                                    path.string());
     if (!parsed) {
         return refuse(parsed.error().message + "\n(melody-cli config --edit to mend it)");
     }

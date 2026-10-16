@@ -71,6 +71,12 @@ struct Settings {
 
     // The file read, when there was one.
     std::optional<std::filesystem::path> config_file;
+    // The file the settings are kept in, there or not: what config.set
+    // writes.
+    std::filesystem::path config_path;
+    // Keys given on the command line, which win over the file: a change to
+    // one there does not show until the engine starts without it.
+    std::vector<std::string> from_flags;
     // Worth saying at start: a file converted, one others can read.
     std::vector<std::string> notes;
     bool help = false;
@@ -93,6 +99,10 @@ config_path(std::span<const std::string_view> arguments);
 // Whether a melodyd.conf would be taken: its format and every setting in
 // it. What melody-cli config checks before it writes one.
 [[nodiscard]] core::Result<Settings> check_config(std::string_view text, std::string origin);
+
+// The commented settings a new melodyd.conf starts from
+// (packaging/melodyd.conf, built in).
+[[nodiscard]] std::string_view config_skeleton();
 
 // "original" is 0, "opus N" is N, for N in 16..512 (ADR-0239).
 [[nodiscard]] std::optional<int> parse_stream(std::string_view text);

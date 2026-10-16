@@ -11,6 +11,7 @@
 #include "agent/speaker_arbiter.hpp"
 #include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "config_methods.hpp"
 #include "settings.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #if TRACKKNIFE_ENABLE_UPNP
@@ -44,11 +45,13 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <thread>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -81,6 +84,26 @@ void request_stop(int) {
         static_cast<void>(::fcntl(fd, F_SETFD, FD_CLOEXEC));
     }
     return true;
+}
+
+// ADR-0286: the socket systemd listens on for this engine (melodyd.socket),
+// handed over as descriptor 3 -- sd_listen_fds(3), read without libsystemd.
+// The variables go, so nothing this engine starts takes them for its own.
+[[nodiscard]] std::optional<int> activated_socket() {
+    const auto* pid = trackknife::core::environment_variable("LISTEN_PID");
+    const auto* fds = trackknife::core::environment_variable("LISTEN_FDS");
+    std::optional<int> socket;
+    if (pid != nullptr && fds != nullptr && std::string_view{pid} == std::to_string(::getpid()) &&
+        std::string_view{fds} != "0") {
+        constexpr int first = 3;
+        if (struct stat info{}; ::fstat(first, &info) == 0 && S_ISSOCK(info.st_mode)) {
+            socket = first;
+        }
+    }
+    ::unsetenv("LISTEN_PID");
+    ::unsetenv("LISTEN_FDS");
+    ::unsetenv("LISTEN_FDNAMES");
+    return socket;
 }
 
 void wait_for_stop() {
@@ -496,8 +519,13 @@ int main(int argc, char** argv) {
     // here and over the network knows it is one engine, and one that stores
     // the id finds it again after a restart (ADR-0234).
     const auto engine_id = stable_engine_id(state_directory);
+    // ADR-0286: started by a service manager -- systemd's socket or unit --
+    // so a client knows it is not one an older Trackknife started itself.
+    const auto activated = activated_socket();
+    const bool service =
+        activated.has_value() || trackknife::core::environment_variable("INVOCATION_ID") != nullptr;
     dispatcher.on("engine.info",
-                  [&engine_name, engine_id](const trackknife::protocol::Json&)
+                  [&engine_name, engine_id, service](const trackknife::protocol::Json&)
                       -> trackknife::core::Result<trackknife::protocol::Json> {
                       // ADR-0260: what it speaks, for a client to decide
                       // once whether and how it can work with it.
@@ -506,10 +534,20 @@ int main(int argc, char** argv) {
                           {"id", engine_id},
                           {"protocol", trackknife::protocol::protocol_version},
                           {"level", trackknife::protocol::protocol_level},
-                          {"release", TRACKKNIFE_RELEASE}};
+                          {"release", TRACKKNIFE_RELEASE},
+                          {"service", service}};
                   });
+    // ADR-0286: its melodyd.conf over the protocol, and a restart to use it:
+    // a stop, answered first, for the service manager to start it again.
+    trackknife::daemon::register_config_methods(dispatcher, settings, [] {
+        std::thread{[] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{200});
+            request_stop(0);
+        }}.detach();
+    });
 
-    auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
+    auto server = activated ? trackknife::engine::Server::adopt(*activated, dispatcher)
+                            : trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
         std::cerr << "melodyd: could not listen on " << socket_path.string() << ": "
                   << server.error().message << "\n";

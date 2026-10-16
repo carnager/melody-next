@@ -2,6 +2,8 @@
 
 #include "settings.hpp"
 
+#include "melodyd_skeleton.hpp"
+
 #include "trackknife/core/config_file.hpp"
 #include "trackknife/core/environment.hpp"
 
@@ -422,6 +424,8 @@ std::filesystem::path config_path(const std::span<const std::string_view> argume
     return default_config_path();
 }
 
+std::string_view config_skeleton() { return melodyd_skeleton; }
+
 std::optional<int> parse_stream(const std::string_view text) {
     if (text == "original") {
         return 0;
@@ -632,6 +636,7 @@ core::Result<Settings> read_settings(const std::span<const std::string_view> arg
     }
 
     const auto path = config_path(arguments);
+    settings.config_path = path;
     if (auto text = read_text(path)) {
         if (is_options_file(*text)) {
             auto converted = convert_options_file(*text);
@@ -702,6 +707,7 @@ core::Result<Settings> read_settings(const std::span<const std::string_view> arg
         if (auto applied = apply(settings, key, value, std::string{argument}); !applied) {
             return std::unexpected(applied.error());
         }
+        settings.from_flags.emplace_back(key);
     }
     return settings;
 }

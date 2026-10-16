@@ -2,10 +2,19 @@
 
 find_package(Threads REQUIRED)
 
+# ADR-0286: melodyd.conf and the command line, apart so it can be tested.
+add_library(trackknife_daemon_settings STATIC settings.cpp)
+target_include_directories(trackknife_daemon_settings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    trackknife_daemon_settings
+    PUBLIC Trackknife::Core
+    PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
+)
+
 add_executable(trackknife_engine_daemon main.cpp)
 target_link_libraries(
     trackknife_engine_daemon
-    PRIVATE Trackknife::Agent Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+    PRIVATE trackknife_daemon_settings Trackknife::Agent Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
 # ADR-0220: melodyd is the Go daemon's name until the Phase 6 migration is

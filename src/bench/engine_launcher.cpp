@@ -197,11 +197,18 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     }
     // Any engine found on the network may play here -- and the configured
     // remote by name as well, for one multicast does not reach (WireGuard).
+    // Off is said: with a password the engine plays for others by itself
+    // (ADR-0286).
     if (sharing.play_for_found) {
-        arguments << QStringLiteral("--agent") << QStringLiteral("--agent-bitrate-nearby")
-                  << QString::number(sharing.found_nearby_kbps)
-                  << QStringLiteral("--agent-bitrate-away")
-                  << QString::number(sharing.found_away_kbps);
+        const auto stream = [](const int kbps) {
+            return kbps == 0 ? QStringLiteral("original")
+                             : QStringLiteral("opus %1").arg(kbps);
+        };
+        arguments << QStringLiteral("--agent") << QStringLiteral("--agent-stream-home")
+                  << stream(sharing.found_nearby_kbps) << QStringLiteral("--agent-stream-away")
+                  << stream(sharing.found_away_kbps);
+    } else {
+        arguments << QStringLiteral("--no-agent");
     }
     // Each engine elsewhere on the network, by name -- for one multicast does
     // not reach (WireGuard). One on this computer's own socket plays here

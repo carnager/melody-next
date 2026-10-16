@@ -50,6 +50,13 @@ target_link_libraries(
 )
 add_test(NAME config-file COMMAND trackknife_config_file_tests)
 
+add_executable(trackknife_daemon_settings_tests daemon_settings_test.cpp)
+target_link_libraries(
+    trackknife_daemon_settings_tests
+    PRIVATE trackknife_daemon_settings trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME daemon-settings COMMAND trackknife_daemon_settings_tests)
+
 add_executable(trackknife_metadata_reader_tests metadata_reader_test.cpp)
 target_link_libraries(
     trackknife_metadata_reader_tests
@@ -1112,4 +1119,11 @@ set_tests_properties(
     speaker-plays-through
     melody-cli
     PROPERTIES LABELS realtime
+)
+
+# ADR-0286: no test reads or writes the melodyd.conf of whoever runs it.
+get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
+set_property(
+    TEST ${trackknife_all_tests}
+    APPEND PROPERTY ENVIRONMENT "MELODYD_CONFIG=${CMAKE_CURRENT_BINARY_DIR}/no-melodyd.conf"
 )

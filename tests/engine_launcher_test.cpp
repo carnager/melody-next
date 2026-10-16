@@ -424,9 +424,11 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
         QVERIFY(first < second);
         QCOMPARE(arguments.at(first + 1), QStringLiteral("0"));
         QCOMPARE(arguments.at(first + 3), QStringLiteral("96"));
-        const auto found = arguments.indexOf(QStringLiteral("--agent-bitrate-away"));
+        const auto found = arguments.indexOf(QStringLiteral("--agent-stream-away"));
         QVERIFY(found >= 0);
-        QCOMPARE(arguments.at(found + 1), QStringLiteral("96"));
+        QCOMPARE(arguments.at(found + 1), QStringLiteral("opus 96"));
+        QCOMPARE(arguments.at(arguments.indexOf(QStringLiteral("--agent-stream-home")) + 1),
+                 QStringLiteral("original"));
         settings.remove(QLatin1String(SettingsDialog::engine_stream_away_key));
         engines.pop_back();
         saveRemoteEngines(engines);
@@ -439,6 +441,9 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
                  .contains(QStringLiteral("--play-for")));
     QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
                  .contains(QStringLiteral("--agent")));
+    // Said, for the engine would play for others by itself (ADR-0286).
+    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
+                .contains(QStringLiteral("--no-agent")));
     settings.clear();
     stop(scratch.engine);
     remote.terminate();

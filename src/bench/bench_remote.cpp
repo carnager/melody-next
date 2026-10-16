@@ -141,6 +141,7 @@ void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
     selectPreferredSource();
 
     link->library->setListTargets([this, link] { return listTargets(link->key); });
+    addLibraryPluginActions(link->library, link->key);
 }
 
 } // namespace trackknife::bench

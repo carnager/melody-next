@@ -97,6 +97,7 @@ void BenchMainWindow::workspaceRestored(const bool restored) {
         workspace_.attachLibrary(&localLibrary()->browser());
         // "Add to list": this computer's lists, in tab order.
         localLibrary()->setListTargets([this] { return listTargets(EngineKey::local()); });
+        addLibraryPluginActions(localLibrary(), EngineKey::local());
         // Restored rows carry their identity hashes; load stored values
         // once the rating store is reachable.
         refreshLocalRatings();
@@ -1091,6 +1092,29 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     tools->addAction(convert_action_);
 
     auto* source_tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
+    // ADR-0288: the tracks chosen, for a plugin's action.
+    if (source_tab != nullptr) {
+        std::vector<PluginTrack> chosen;
+        for (const auto& index : view->selectionModel()->selectedRows()) {
+            if (index.row() < 0 || index.row() >= source_tab->model->rowCount()) {
+                continue;
+            }
+            const auto& row = source_tab->model->rows()[static_cast<std::size_t>(index.row())];
+            chosen.push_back(PluginTrack{.path = row.raw_path,
+                                         .title = row.title,
+                                         .artist = row.artist,
+                                         .album = row.album,
+                                         .album_artist = row.album_artist,
+                                         .date = row.date,
+                                         .track_number = row.track_number});
+        }
+        addPluginActions(
+            track_context_menu_,
+            [this, chosen = std::move(chosen), engine = EngineKey::of(source_tab->document)](
+                const Plugin& plugin, const PluginAction& action) {
+                runPlugin(plugin, action, chosen, engine);
+            });
+    }
     if (source_tab != nullptr && target.row() < source_tab->model->rowCount()) {
         const auto path =
             source_tab->model->rows()[static_cast<std::size_t>(target.row())].raw_path;

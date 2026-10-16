@@ -91,6 +91,8 @@ qt_add_library(
     settings_session.hpp
     sources.cpp
     sources.hpp
+    plugins.cpp
+    plugins.hpp
     startup.cpp
     startup.hpp
     preparation_planning.cpp

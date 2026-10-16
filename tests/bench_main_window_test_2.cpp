@@ -2497,4 +2497,108 @@ void BenchMainWindowTest::aboutShowsTheMascotAndTheRelease() {
     dialog->close();
 }
 
+// ADR-0288: an enabled plugin's action in a tab's and in the library's
+// context menu, handed what is chosen; its answer notified and copied.
+void BenchMainWindowTest::aPluginActionSharesWhatIsChosen() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto album_folder = media.filePath(QStringLiteral("music/Band/Record"));
+    QVERIFY(QDir{}.mkpath(album_folder));
+    const auto file = album_folder + QStringLiteral("/01.flac");
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto raw = [](const QString& path) {
+        const auto encoded = QFile::encodeName(path);
+        return std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    };
+    // A plugin answering with the album's folder within the music folder,
+    // else with its name.
+    const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+                        QStringLiteral("/melody/plugins/echo");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Echo", "actions": [{"id": "share",
+                          "label": "Share album", "run": ["./share"],
+                          "result": "notify-and-copy"}]})");
+        QFile script{folder + QStringLiteral("/share")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"sh(#!/bin/sh
+input=$(cat)
+relative=$(printf '%s' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/\1/p')
+album=$(printf '%s' "$input" | sed -n 's/.*"album":"\([^"]*\)".*/\1/p')
+echo "shared:${relative:-$album}"
+)sh");
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("echo")), true);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY(window.notifier_ != nullptr);
+    QStringList notified;
+    window.notifier_->setSendOverride([&notified](const QString& summary, const QString& body) {
+        notified << summary + ": " + body;
+    });
+    window.openLocalPaths({raw(file)});
+    Workspace::ListTab* tab = nullptr;
+    QTRY_VERIFY((tab = [&window]() -> Workspace::ListTab* {
+                    for (auto& candidate : window.list_tabs_) {
+                        if (candidate->model->rowCount() == 1) {
+                            return candidate.get();
+                        }
+                    }
+                    return nullptr;
+                }()) != nullptr);
+    window.tabs_->setCurrentWidget(tab->view);
+    QTRY_VERIFY_WITH_TIMEOUT(tab->model->rows().front().probed, 5'000);
+    const auto album = QString::fromStdString(tab->model->rows().front().album);
+    QVERIFY(!album.isEmpty());
+    tab->view->selectionModel()->select(
+        tab->model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QVERIFY(QMetaObject::invokeMethod(
+        tab->view, "customContextMenuRequested", Qt::DirectConnection,
+        Q_ARG(QPoint, tab->view->visualRect(tab->model->index(0, local_title_column)).center())));
+    auto* share = window.findChild<QAction*>(QStringLiteral("action-plugin-echo-share"));
+    QVERIFY(share != nullptr);
+    QCOMPARE(share->text(), QStringLiteral("Share album"));
+    window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"))->close();
+    QGuiApplication::clipboard()->clear();
+    share->trigger();
+    // Not in a music folder of this computer's: its album's name.
+    QTRY_COMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("shared:") + album);
+    QTRY_VERIFY(notified.contains(QStringLiteral("Echo: shared:") + album));
+
+    // The library's: the album's folder within the music folder, the
+    // folder added as Settings adds it.
+    auto* panel = window.localLibrary();
+    QVERIFY(panel != nullptr);
+    panel->browser().addRoot(raw(media.filePath(QStringLiteral("music"))));
+    QTRY_VERIFY(!panel->browser().rootPaths().empty());
+    {
+        persistence::LibraryScanProgress progress;
+        QVERIFY(window.localCatalogue()->open()->scan({}, progress).has_value());
+    }
+    panel->browser().reload();
+    auto* tree = panel->findChild<QTreeView*>();
+    QTRY_VERIFY(tree->model()->rowCount() > 0);
+    const auto first = tree->model()->index(0, 0);
+    tree->scrollTo(first);
+    QMetaObject::invokeMethod(tree, "customContextMenuRequested", Qt::DirectConnection,
+                              Q_ARG(QPoint, tree->visualRect(first).center()));
+    auto* menu = panel->findChild<QMenu*>(QStringLiteral("local-library-context-menu"));
+    QVERIFY(menu != nullptr);
+    auto* from_library = menu->findChild<QAction*>(QStringLiteral("action-plugin-echo-share"));
+    QVERIFY(from_library != nullptr);
+    menu->close();
+    QGuiApplication::clipboard()->clear();
+    from_library->trigger();
+    QTRY_COMPARE_WITH_TIMEOUT(QGuiApplication::clipboard()->text(),
+                              QStringLiteral("shared:Band/Record"), 10'000);
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 } // namespace trackknife::bench

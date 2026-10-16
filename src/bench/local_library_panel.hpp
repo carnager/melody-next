@@ -20,6 +20,7 @@ class QComboBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QListWidget;
 class QTimer;
 class QToolButton;
@@ -75,6 +76,10 @@ class LocalLibraryPanel final : public QWidget {
     // each time it opens: this library's engine's lists open in the window.
     using ListTargets = std::function<std::vector<std::pair<QString, QString>>()>;
     void setListTargets(ListTargets targets) { list_targets_ = std::move(targets); }
+    // ADR-0288: more for the context menu, given the entries it is for --
+    // the window's plugin actions.
+    using MenuExtras = std::function<void(QMenu*, std::vector<persistence::LibraryEntry>)>;
+    void setMenuExtras(MenuExtras extras) { menu_extras_ = std::move(extras); }
 
   signals:
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
@@ -96,6 +101,7 @@ class LocalLibraryPanel final : public QWidget {
     void requestCovers();
 
     ListTargets list_targets_;
+    MenuExtras menu_extras_;
     LibraryBrowser* browser_{nullptr};
     QLabel* source_label_{nullptr};
     QLineEdit* search_{nullptr};

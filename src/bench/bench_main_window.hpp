@@ -28,6 +28,7 @@
 #include "uicommon/panel_layout.hpp"
 #include "uicommon/track_view_layout.hpp"
 #include "workspace/folder_browser.hpp"
+#include "workspace/plugins.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -148,7 +149,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     EngineKey& up_next_engine_{workspace_.up_next_engine_};
     QString& engine_entry_{workspace_.engine_entry_};
     QString& engine_consumed_{workspace_.engine_consumed_};
-    std::optional<std::vector<persistence::ListEntryPrint>>& engine_queue_{workspace_.engine_queue_};
+    std::optional<std::vector<persistence::ListEntryPrint>>& engine_queue_{
+        workspace_.engine_queue_};
     quint64& engine_queue_revision_{workspace_.engine_queue_revision_};
     quint64& engine_queue_asked_{workspace_.engine_queue_asked_};
     quint64& engine_reattach_asked_{workspace_.engine_reattach_asked_};
@@ -428,6 +430,14 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void renameCurrentList();
     void showTabContextMenu(const QPoint& position);
     void showTrackContextMenu(QTableView* view, const QPoint& position);
+    // ADR-0288: the enabled plugins' actions, at the end of a context menu;
+    // `run` is given the one chosen.
+    void addPluginActions(QMenu* menu, std::function<void(const Plugin&, const PluginAction&)> run);
+    void runPlugin(const Plugin& plugin, const PluginAction& action,
+                   std::vector<PluginTrack> tracks, const EngineKey& engine);
+    // The plugin actions of a library's context menu: its entries resolved
+    // to their tracks first.
+    void addLibraryPluginActions(LocalLibraryPanel* panel, const EngineKey& engine);
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();

@@ -24,6 +24,10 @@ class DesktopNotifier final : public QObject {
     void setEnabled(bool enabled) noexcept { enabled_ = enabled; }
     void setBackgroundOnly(bool value) noexcept { background_only_ = value; }
     void sendTest();
+    // ADR-0288: a message of its own -- a plugin's result -- shown whether
+    // track notifications are on or not, replacing none and kept in the
+    // desktop's history: a link in it is still there after it goes.
+    void announce(const QString& summary, const QString& body);
     [[nodiscard]] bool isEnabled() const noexcept { return enabled_; }
 
     // Consumes one authority-aware now-playing snapshot; returns true
@@ -69,7 +73,8 @@ class DesktopNotifier final : public QObject {
     void notificationClosed(uint id, uint reason);
 
   private:
-    void send(const QString& summary, const QString& body, const QString& image = {});
+    void send(const QString& summary, const QString& body, const QString& image = {},
+              bool standalone = false);
 
     bool enabled_{false};
     bool background_only_{false};

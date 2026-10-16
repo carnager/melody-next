@@ -483,6 +483,9 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                             }
                         });
     }
+    if (menu_extras_) {
+        menu_extras_(menu, entries);
+    }
     menu->popup(tree_->viewport()->mapToGlobal(position));
 }
 

@@ -858,6 +858,14 @@ if(MELODY_BUILD_UI)
     )
     add_test(NAME album-lookup-queue COMMAND trackknife_album_lookup_queue_tests)
 
+    qt_add_executable(trackknife_plugins_tests plugins_test.cpp)
+    target_link_libraries(
+        trackknife_plugins_tests
+        PRIVATE Trackknife::Workspace Qt6::Test trackknife_project_options
+                trackknife_project_warnings
+    )
+    add_test(NAME plugins COMMAND trackknife_plugins_tests)
+
     qt_add_executable(trackknife_names_tests trackknife_names_test.cpp)
     target_link_libraries(
         trackknife_names_tests

@@ -319,6 +319,7 @@ class BenchMainWindowTest final : public QObject {
     void aPlayingTabsEditsReachTheQueueAsEdits();
     void thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere();
     void aboutShowsTheMascotAndTheRelease();
+    void aPluginActionSharesWhatIsChosen();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

@@ -8,10 +8,11 @@
 #include "trackknife/discovery/mdns.hpp"
 #include "workspace/color_scheme.hpp"
 #include "workspace/interface_scale.hpp"
+#include "workspace/plugins.hpp"
 
 #include <QAbstractSpinBox>
-#include <QButtonGroup>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -222,6 +223,44 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));
     bind(lists_display_, SettingsSession::listsDisplays(), "appearance/lists-display");
     general_form->addRow(QStringLiteral("Show lists as:"), lists_display_);
+
+    // ADR-0288: the plugins found, each off until enabled here.
+    auto* plugins = new QWidget(general);
+    plugins->setObjectName(QStringLiteral("bench-settings-plugins"));
+    auto* plugin_list = new QVBoxLayout(plugins);
+    plugin_list->setContentsMargins(0, 0, 0, 0);
+    const auto found = discoverPlugins();
+    for (const auto& plugin : found) {
+        auto* box = new QCheckBox(plugin.plugin ? plugin.plugin->title : plugin.name, plugins);
+        box->setObjectName(QStringLiteral("bench-settings-plugin-%1").arg(plugin.name));
+        box->setChecked(plugin.plugin && pluginEnabled(plugin.name));
+        box->setEnabled(plugin.plugin.has_value());
+        box->setToolTip(
+            plugin.plugin ? QStringLiteral("%1\n%2").arg(plugin.plugin->description, plugin.folder)
+                          : QStringLiteral("%1: %2").arg(plugin.folder, plugin.problem));
+        const auto key = pluginEnabledKey(plugin.name);
+        connect(box, &QCheckBox::toggled, this,
+                [this, key](const bool on) { session_->setValue(key, on); });
+        plugin_list->addWidget(box);
+        if (!plugin.plugin) {
+            auto* problem = new QLabel(plugin.problem, plugins);
+            problem->setWordWrap(true);
+            problem->setForegroundRole(QPalette::PlaceholderText);
+            plugin_list->addWidget(problem);
+        }
+    }
+    auto* plugin_note = new QLabel(
+        found.empty()
+            ? QStringLiteral("None found. A plugin is a folder with a plugin.json in %1.")
+                  .arg(pluginFolders().value(0))
+            : QStringLiteral("A plugin runs a program of its own with your rights: enable only "
+                             "those you trust. They are found in %1.")
+                  .arg(pluginFolders().value(0)),
+        plugins);
+    plugin_note->setWordWrap(true);
+    plugin_note->setForegroundRole(QPalette::PlaceholderText);
+    plugin_list->addWidget(plugin_note);
+    general_form->addRow(QStringLiteral("Plugins:"), plugins);
     add_page(QStringLiteral("General"), general);
 
     auto* playback = new QWidget(this);
@@ -522,9 +561,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     own_password_->setObjectName(QStringLiteral("bench-settings-engine-own-password"));
     auto* own_row = new QHBoxLayout(own_password_);
     own_row->setContentsMargins(0, 0, 0, 0);
-    auto* own_note =
-        new QLabel(QStringLiteral("It has a password of its own, not the one above."),
-                   own_password_);
+    auto* own_note = new QLabel(QStringLiteral("It has a password of its own, not the one above."),
+                                own_password_);
     own_note->setWordWrap(true);
     auto* own_drop = new QPushButton(QStringLiteral("Use the shared password"), own_password_);
     own_drop->setObjectName(QStringLiteral("bench-settings-engine-own-password-drop"));
@@ -1115,9 +1153,9 @@ void SettingsDialog::refreshEngineRows() {
         QString address;
         int engine;
     };
-    std::vector<Row> rows{{describe(QStringLiteral("This computer"),
-                                    QLatin1String(library_engine_local)),
-                           QLatin1String(library_engine_local), -1}};
+    std::vector<Row> rows{
+        {describe(QStringLiteral("This computer"), QLatin1String(library_engine_local)),
+         QLatin1String(library_engine_local), -1}};
     const auto labels = session_->engineLabels();
     for (int index = 0; index < session_->engineCount(); ++index) {
         const auto address = session_->engineAt(index).address;

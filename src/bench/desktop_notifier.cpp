@@ -80,7 +80,12 @@ void DesktopNotifier::sendTest() {
     send(QStringLiteral("Melody"), QStringLiteral("Track-change notifications are working."));
 }
 
-void DesktopNotifier::send(const QString& summary, const QString& body, const QString& image) {
+void DesktopNotifier::announce(const QString& summary, const QString& body) {
+    send(summary, markup_escaped(body), {}, true);
+}
+
+void DesktopNotifier::send(const QString& summary, const QString& body, const QString& image,
+                           const bool standalone) {
     if (send_override_) {
         send_override_(summary, body);
         emit deliveryFinished({});
@@ -102,7 +107,9 @@ void DesktopNotifier::send(const QString& summary, const QString& body, const QS
                                                QStringLiteral("Notify"));
     QVariantMap hints;
     hints.insert(QStringLiteral("urgency"), QVariant::fromValue(static_cast<uchar>(1U)));
-    hints.insert(QStringLiteral("transient"), true);
+    if (!standalone) {
+        hints.insert(QStringLiteral("transient"), true);
+    }
     hints.insert(QStringLiteral("suppress-sound"), true);
     hints.insert(QStringLiteral("desktop-entry"), QStringLiteral("melody"));
     // The album's cover beside the text, where the desktop shows images.
@@ -111,15 +118,18 @@ void DesktopNotifier::send(const QString& summary, const QString& body, const QS
                      QUrl::fromLocalFile(image).toString(QUrl::FullyEncoded));
     }
     const auto replaces =
-        replacing(replace_id_, replace_sent_.isValid() ? replace_sent_.elapsed() : -1);
-    replace_sent_.start();
+        standalone ? 0U
+                   : replacing(replace_id_, replace_sent_.isValid() ? replace_sent_.elapsed() : -1);
+    if (!standalone) {
+        replace_sent_.start();
+    }
     call << QStringLiteral("Melody") << replaces << QStringLiteral("audio-x-generic") << summary
          << body << QStringList{} << hints << -1;
     auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(call), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
-            [this](QDBusPendingCallWatcher* finished) {
+            [this, standalone](QDBusPendingCallWatcher* finished) {
                 const QDBusPendingReply<quint32> reply{*finished};
-                if (reply.isValid()) {
+                if (reply.isValid() && !standalone) {
                     replace_id_ = reply.value();
                 }
                 emit deliveryFinished(reply.isError() ? reply.error().message() : QString{});

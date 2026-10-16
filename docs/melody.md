@@ -137,7 +137,7 @@ gets Opus instead of the original files.
 
 ## UPnP speakers
 
-When UPnP support was included at build time, enable **Settings → Engine →
+When UPnP support was included at build time, enable **Settings → Engines →
 Discover UPnP speakers**. Trackknife sets `upnp = yes` and a LAN-facing stream
 listener in its engine's `melodyd.conf` and restarts it. A headless setup uses, for example:
 

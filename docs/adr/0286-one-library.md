@@ -196,10 +196,15 @@ are chosen in Trackknife, which finds it on the network.
 ## Stages
 
 1. `melodyd.conf`: the parser (core, shared), melodyd reading it, the
-   renames, `agent` on by default, the skeleton, `melody-cli config`.
+   renames, `agent` on by default, the skeleton, `melody-cli config`. Done
+   (2026-10-16).
 2. Socket activation and the units; Trackknife connects instead of starting
-   the engine, and caprica's state moves once.
-3. The Engines page and the one password.
+   the engine. Done (2026-10-16); no state had to move -- Trackknife's
+   engine already used melodyd's default folder and socket.
+3. The Engines page and the one password. Done (2026-10-16): Library and
+   Engine are one page; sharing follows the password (no switch); the
+   library's engine (`library/engine`) decides whose library has a tab and
+   whose folders are shown; engines are listed by the name they go by.
 4. Tabs in Trackknife; working lists leave the engine.
 
 ## Verification

@@ -324,8 +324,9 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     (*admitted)->close();
     const auto first = enginePid(scratch.engine);
 
-    // Not shared: nothing listens on the network, and the password is gone.
-    settings.setValue(QLatin1String(SettingsDialog::engine_share_key), false);
+    // ADR-0286: without a password nothing listens on the network -- there
+    // is no switch of its own -- and the password is gone from the file.
+    settings.remove(QLatin1String(SettingsDialog::engine_password_key));
     settings.sync();
     configured =
         configureLocalEngine(scratch.engine, sharingChanges(localEngineSharing(), shared));
@@ -338,12 +339,18 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
                  .contains(QRegularExpression{QStringLiteral("^password = "),
                                               QRegularExpression::MultilineOption}));
 
-    // ADR-0223: shared without a password is not shared at all -- there is
-    // no open TCP engine -- rather than an engine that will not start.
+    // The old switch decides nothing now: off, with a password, it is
+    // shared; on, without one, it is not (ADR-0223: no open TCP engine).
+    settings.setValue(QLatin1String(SettingsDialog::engine_share_key), false);
+    settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
+                      QStringLiteral("correct horse"));
+    settings.sync();
+    auto changes = sharingChanges(localEngineSharing(), shared);
+    QVERIFY(change(changes, "local-only")->at("value").is_null());
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
     settings.remove(QLatin1String(SettingsDialog::engine_password_key));
     settings.sync();
-    const auto changes = sharingChanges(localEngineSharing(), shared);
+    changes = sharingChanges(localEngineSharing(), shared);
     QCOMPARE(change(changes, "local-only")->at("value"), protocol::Json("yes"));
     QVERIFY(change(changes, "password")->at("value").is_null());
     settings.clear();
@@ -391,6 +398,17 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
     settings.sync();
     QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("correct horse"));
+    // Shared, with that password, the remote's is this engine's own: the
+    // section needs none of its own.
+    QVERIFY(change(sharingChanges(localEngineSharing(), {}), "password", "127.0.0.1")
+                ->at("value")
+                .is_null());
+    // This computer's left without one -- not on the network -- and the
+    // remote's given as its own.
+    settings.remove(QLatin1String(SettingsDialog::engine_password_key));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                      QStringLiteral("correct horse"));
+    settings.sync();
 
     // The remote as an [engine] section named after its host, its address
     // used while the network does not find it; this engine, not shared, has

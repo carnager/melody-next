@@ -143,7 +143,11 @@ namespace {
 LocalEngineSharing localEngineSharing() {
     const QSettings settings;
     return LocalEngineSharing{
-        .share = settings.value(QLatin1String(SettingsKeys::engine_share_key), false).toBool(),
+        // ADR-0286: with a password the engine is on the network, as melodyd
+        // is by itself; there is no switch of its own.
+        .share = !settings.value(QLatin1String(SettingsKeys::engine_password_key), QString{})
+                      .toString()
+                      .isEmpty(),
         .listen = settings
                       .value(QLatin1String(SettingsKeys::engine_listen_key),
                              QString::fromLatin1(SettingsKeys::engine_listen_default))

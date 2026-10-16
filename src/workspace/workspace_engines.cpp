@@ -100,7 +100,7 @@ std::vector<std::string> Workspace::crossEnginePaths(std::vector<std::string> pa
                       .arg(engineName(to))
                 : QStringLiteral("%1 of %2 tracks are not reachable on this computer; they were "
                                  "left out. Where the remote's music is mounted here is set in "
-                                 "Settings → Engine.")
+                                 "Settings → Engines → Advanced.")
                       .arg(left)
                       .arg(paths.size()),
             10'000);

@@ -86,7 +86,7 @@ cmake --build --preset macos
 ```
 
 The output menu beside the volume control lists the system default and the
-Mac's CoreAudio devices. Open **Settings → Engine** to enable **Discover UPnP
+Mac's CoreAudio devices. Open **Settings → Engines** to enable **Discover UPnP
 speakers** and choose a stream port. The Mac and renderer must be on the same
 LAN, and macOS may ask for permission to find devices on the local network.
 UPnP streams play at unity gain; the output reports ReplayGain as unavailable.

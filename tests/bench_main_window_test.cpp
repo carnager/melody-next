@@ -564,8 +564,8 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
     for (int row = 0; row < pages->count(); ++row) {
         titles << pages->item(row)->text();
     }
-    QCOMPARE(titles.mid(0, 7), (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
-                                            QStringLiteral("Library"), QStringLiteral("Engine"),
+    QCOMPARE(titles.mid(0, 6), (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
+                                            QStringLiteral("Engines"),
                                             QStringLiteral("File operations"),
                                             QStringLiteral("Ratings"), QStringLiteral("Covers")}));
     QCOMPARE(titles, SettingsSession::pageTitles().mid(0, titles.size()));
@@ -596,13 +596,17 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
     };
     QCOMPARE(page_of("bench-settings-ratings-in-tags"),
              static_cast<int>(SettingsDialog::Page::ratings));
-    // Library: the engine picker, not needed with this computer alone.
-    auto* picker = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-library-engine"));
-    QVERIFY(picker != nullptr);
-    QCOMPARE(page_of("bench-settings-library-engine"),
-             static_cast<int>(SettingsDialog::Page::library));
-    QCOMPARE(picker->count(), 1);
-    QVERIFY(!picker->isVisibleTo(dialog));
+    // ADR-0286: Engines -- this computer alone, holding the library, its
+    // music folders on the same page.
+    QCOMPARE(page_of("bench-settings-library-folders"),
+             static_cast<int>(SettingsDialog::Page::engine));
+    auto* engines = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-engines"));
+    QVERIFY(engines != nullptr);
+    QCOMPARE(engines->count(), 1);
+    auto* holder =
+        dialog->findChild<QRadioButton*>(QStringLiteral("bench-settings-library-holder-0"));
+    QVERIFY(holder != nullptr && holder->isChecked());
+    QVERIFY(holder->text().startsWith(QStringLiteral("This computer")));
     dialog->close();
 }
 

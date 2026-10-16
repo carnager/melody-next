@@ -9,6 +9,7 @@
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/metadata/ratings.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/sources.hpp"
 
 #include <QPointer>
 #include <QSettings>
@@ -88,6 +89,8 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
          SettingsKeys::undo_keep_gigabytes_default);
     read(QLatin1String(SettingsKeys::engine_password_key), QString{});
     read(QLatin1String(SettingsKeys::library_show_local_key), true);
+    // ADR-0286: which engine holds the library, as Settings had it.
+    values_.insert(QLatin1String(SettingsKeys::library_engine_key), bench::libraryEngine());
     read(QLatin1String(SettingsKeys::engine_upnp_key), false);
     read(QLatin1String(SettingsKeys::engine_share_key), false);
     read(QLatin1String(SettingsKeys::engine_listen_key),
@@ -156,16 +159,17 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
 SettingsSession::~SettingsSession() = default;
 
 QStringList SettingsSession::pageTitles() {
-    return {QStringLiteral("General"),         QStringLiteral("Playback"),
-            QStringLiteral("Library"),         QStringLiteral("Engine"),
-            QStringLiteral("File operations"), QStringLiteral("Ratings"),
-            QStringLiteral("Covers"),          QStringLiteral("Metadata services"),
-            QStringLiteral("Last.fm"),         QStringLiteral("Shortcuts")};
+    return {QStringLiteral("General"), QStringLiteral("Playback"),
+            QStringLiteral("Engines"), QStringLiteral("File operations"),
+            QStringLiteral("Ratings"), QStringLiteral("Covers"),
+            QStringLiteral("Metadata services"), QStringLiteral("Last.fm"),
+            QStringLiteral("Shortcuts")};
 }
 
 QString SettingsSession::saveNote(const Page page) {
-    if (page == Page::library) {
-        return QStringLiteral("Folder changes save immediately. Cancel does not undo them.");
+    if (page == Page::engine) {
+        return QStringLiteral("Music folder changes save immediately. Cancel does not undo "
+                              "them.");
     }
     if (page == Page::file_operations) {
         return QStringLiteral("Save layout, Save destination, and Remove take effect immediately. "
@@ -290,9 +294,9 @@ bool SettingsSession::bufferCustom() const {
 // What to run on the machine with the speakers, kept in step with the
 // fields: the one thing the sharing part of the page is for, spelled out.
 QString SettingsSession::agentCommand() const {
-    if (!values_.value(QLatin1String(SettingsKeys::engine_share_key)).toBool()) {
-        return QStringLiteral("Only Trackknife on this computer controls this engine. UPnP "
-                              "speakers can play when discovery is enabled.");
+    if (values_.value(QLatin1String(SettingsKeys::engine_password_key)).toString().isEmpty()) {
+        return QStringLiteral("Without a password only Trackknife on this computer controls this "
+                              "engine. UPnP speakers can play when discovery is enabled.");
     }
     const auto listen =
         values_.value(QLatin1String(SettingsKeys::engine_listen_key)).toString().trimmed();
@@ -318,7 +322,7 @@ QString SettingsSession::agentCommand() const {
 QStringList SettingsSession::engineLabels() const {
     QStringList labels;
     for (const auto& engine : engines_) {
-        labels.push_back(engine.address.isEmpty() ? QStringLiteral("New engine") : engine.address);
+        labels.push_back(engine.address.isEmpty() ? QStringLiteral("New engine") : engine.label());
     }
     return labels;
 }
@@ -327,6 +331,18 @@ RemoteEngineSetting SettingsSession::engine() const {
     return engine_current_ >= 0 && engine_current_ < static_cast<int>(engines_.size())
                ? engines_[static_cast<std::size_t>(engine_current_)]
                : RemoteEngineSetting{};
+}
+
+QString SettingsSession::libraryEngine() const {
+    return values_.value(QLatin1String(SettingsKeys::library_engine_key)).toString();
+}
+
+void SettingsSession::setLibraryEngine(const QString& engine) {
+    if (engine == libraryEngine()) {
+        return;
+    }
+    values_.insert(QLatin1String(SettingsKeys::library_engine_key), engine);
+    emit changed();
 }
 
 void SettingsSession::selectEngine(const int row) {
@@ -340,9 +356,14 @@ void SettingsSession::editEngine(const RemoteEngineSetting& edited) {
     }
     auto& chosen = engines_[static_cast<std::size_t>(engine_current_)];
     const auto address = edited.address.trimmed();
-    // Another address may be another engine: its id is learned anew.
+    // Another address may be another engine: its id and name are learned
+    // anew. Holding the library, it goes on holding it at its new address.
     if (address != chosen.address) {
         chosen.id.clear();
+        chosen.name.clear();
+        if (libraryEngine() == chosen.address && !chosen.address.isEmpty()) {
+            values_.insert(QLatin1String(SettingsKeys::library_engine_key), address);
+        }
     }
     chosen.address = address;
     chosen.password = edited.password.trimmed();
@@ -360,6 +381,11 @@ void SettingsSession::addEngine() {
 void SettingsSession::removeEngine() {
     if (engine_current_ < 0 || engine_current_ >= static_cast<int>(engines_.size())) {
         return;
+    }
+    // The library's engine removed: this computer holds it.
+    if (libraryEngine() == engines_[static_cast<std::size_t>(engine_current_)].address) {
+        values_.insert(QLatin1String(SettingsKeys::library_engine_key),
+                       QLatin1String(SettingsKeys::library_engine_local));
     }
     engines_.erase(engines_.begin() + engine_current_);
     if (engines_.empty()) {
@@ -393,11 +419,6 @@ void SettingsSession::chooseFoundEngine(const QString& address) {
 // Saving.
 
 std::optional<SettingsSession::Page> SettingsSession::save() {
-    // ADR-0223: sharing without a password is not a thing to save.
-    if (values_.value(QLatin1String(SettingsKeys::engine_share_key)).toBool() &&
-        values_.value(QLatin1String(SettingsKeys::engine_password_key)).toString().isEmpty()) {
-        return Page::engine;
-    }
     QSettings settings;
     const auto trimmed = [this](const QString& key) {
         return values_.value(key).toString().trimmed();

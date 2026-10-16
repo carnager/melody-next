@@ -21,6 +21,8 @@ QString RemoteEngineSetting::effectivePassword() const {
     return password.isEmpty() ? text(QSettings{}, SettingsKeys::engine_password_key) : password;
 }
 
+QString RemoteEngineSetting::label() const { return name.isEmpty() ? address : name; }
+
 RemoteMount RemoteEngineSetting::mount() const {
     return RemoteMount{.remote_folder = music_folder.toStdString(),
                        .local_folder = reachable_at.toStdString()};
@@ -54,7 +56,8 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
             .music_folder = settings.value("music-folder").toString().trimmed(),
             .reachable_at = settings.value("reachable-at").toString().trimmed(),
             .id = settings.value("id").toString().trimmed(),
-            .stream_kbps = settings.value("stream-kbps", -1).toInt()};
+            .stream_kbps = settings.value("stream-kbps", -1).toInt(),
+            .name = settings.value("name").toString().trimmed()};
         if (!engine.address.isEmpty()) {
             engines.push_back(std::move(engine));
         }
@@ -76,9 +79,10 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
         if (engines.empty()) {
             engines.push_back(first);
         } else if (engines.front().address == address) {
-            // The old keys know nothing of streams: what it streams stays.
+            // The old keys know nothing of streams or names: they stay.
             first.id = engines.front().id;
             first.stream_kbps = engines.front().stream_kbps;
+            first.name = engines.front().name;
             engines.front() = first;
         } else {
             engines.front() = first;
@@ -102,6 +106,7 @@ void saveRemoteEngines(const std::vector<RemoteEngineSetting>& engines) {
         settings.setValue("reachable-at", engine.reachable_at);
         settings.setValue("id", engine.id);
         settings.setValue("stream-kbps", engine.stream_kbps);
+        settings.setValue("name", engine.name);
     }
     settings.endArray();
     // What an older release reads, kept to the first: the one it knows of.
@@ -119,6 +124,23 @@ void rememberEngineId(const QString& address, const QString& id) {
     for (auto& engine : engines) {
         if (engine.address == address && engine.id != id) {
             engine.id = id;
+            changed = true;
+        }
+    }
+    if (changed) {
+        saveRemoteEngines(engines);
+    }
+}
+
+void rememberEngineName(const QString& address, const QString& name) {
+    if (name.isEmpty()) {
+        return;
+    }
+    auto engines = loadRemoteEngines();
+    bool changed = false;
+    for (auto& engine : engines) {
+        if (engine.address == address && engine.name != name) {
+            engine.name = name;
             changed = true;
         }
     }

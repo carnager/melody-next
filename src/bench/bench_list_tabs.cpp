@@ -92,7 +92,7 @@ void BenchMainWindow::workspaceRestored(const bool restored) {
         localEngine().library =
             new LocalLibraryPanel(*localCatalogue(), EngineKey::local(), source_stack_);
         connect(localLibrary(), &LocalLibraryPanel::manageFoldersRequested, this,
-                [this] { showSettingsDialog(SettingsDialog::Page::library); });
+                [this] { showSettingsDialog(SettingsDialog::Page::engine); });
         source_stack_->addWidget(localLibrary());
         workspace_.attachLibrary(&localLibrary()->browser());
         // "Add to list": this computer's lists, in tab order.
@@ -682,9 +682,23 @@ void BenchMainWindow::applyLocalLibraryVisibility() {
         return;
     }
     constexpr int library_tab = 1;
+    // Noted first: hiding the current tab moves the bar to another.
+    const auto current = local_source_tabs_->currentIndex();
     const bool shown = localLibraryShown();
     local_source_tabs_->setTabVisible(library_tab, shown);
-    if (!shown && local_source_tabs_->currentIndex() == library_tab) {
+    // ADR-0286: one library -- of the engines elsewhere, only the one that
+    // holds it has a library tab.
+    const auto library = libraryEngine();
+    for (int index = 0; index < local_source_tabs_->count(); ++index) {
+        const auto key = local_source_tabs_->tabData(index).toString();
+        if (key.isEmpty()) {
+            continue;
+        }
+        const auto* engine = link(EngineKey::fromText(key));
+        local_source_tabs_->setTabVisible(index,
+                                          engine != nullptr && engine->setting.address == library);
+    }
+    if (!local_source_tabs_->isTabVisible(current)) {
         selectPreferredSource();
     }
 }
@@ -699,7 +713,8 @@ void BenchMainWindow::selectPreferredSource() {
     // A library tab of another engine carries that engine's key.
     int remote = -1;
     for (int index = 0; index < local_source_tabs_->count(); ++index) {
-        if (!local_source_tabs_->tabData(index).toString().isEmpty()) {
+        if (!local_source_tabs_->tabData(index).toString().isEmpty() &&
+            local_source_tabs_->isTabVisible(index)) {
             remote = index;
         }
     }

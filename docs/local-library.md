@@ -233,9 +233,9 @@ network mounts.
 
 ### Managing indexed folders
 
-Use **Settings → Library**, or the sidebar’s **Folders…** shortcut, to add or
+Use **Settings → Engines**, or the sidebar’s **Folders…** shortcut, to add or
 remove indexed folders and see their scan/availability status. Changes save
 immediately; removing a folder leaves its files untouched. Only **Refresh** in
 the Library sidebar starts a filesystem scan. These folders are separate from
 Folders-browser bookmarks and from where an engine elsewhere's music folder is
-mounted here (**Settings → Engine → Engines elsewhere**).
+mounted here (**Settings → Engines → Advanced**).

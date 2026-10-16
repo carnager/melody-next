@@ -122,6 +122,11 @@ void Workspace::adoptEngineIdentity(EngineLink& engine) {
     if (remote->catalogue == nullptr) {
         return;
     }
+    // ADR-0286: shown by the name it goes by, in Settings among the rest.
+    if (const auto name = remote->catalogue->name(); name != remote->setting.address) {
+        remote->setting.name = name;
+        rememberEngineName(remote->setting.address, name);
+    }
     const auto id = remote->catalogue->engineId();
     if (id.isEmpty() || id == remote->key.text()) {
         return;

@@ -77,7 +77,7 @@ void BenchMainWindow::showConvertForView(QTableView* view) {
         statusBar()->showMessage(
             QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
                            "out. Where that engine's music is reachable here is set in "
-                           "Settings → Engine.")
+                           "Settings → Engines → Advanced.")
                 .arg(opening.unreachable)
                 .arg(opening.unreachable + opening.items.size()),
             10'000);
@@ -185,7 +185,7 @@ void BenchMainWindow::openForScreenshot(const QString& name) {
         static const std::array pages{
             std::pair{"general", SettingsDialog::Page::general},
             std::pair{"playback", SettingsDialog::Page::playback},
-            std::pair{"library", SettingsDialog::Page::library},
+            std::pair{"library", SettingsDialog::Page::engine},
             std::pair{"engine", SettingsDialog::Page::engine},
             std::pair{"naming", SettingsDialog::Page::naming},
             std::pair{"replaygain", SettingsDialog::Page::replaygain},

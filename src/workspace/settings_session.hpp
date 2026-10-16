@@ -36,7 +36,6 @@ class SettingsSession final : public QObject {
     enum class Page : std::uint8_t {
         general,
         playback,
-        library,
         engine,
         file_operations,
         ratings,
@@ -91,9 +90,19 @@ class SettingsSession final : public QObject {
     [[nodiscard]] bool bufferCustom() const;
     [[nodiscard]] QString agentCommand() const;
 
+    // ADR-0286: the engine holding the library -- "local", or an engine
+    // elsewhere by its address -- as edited.
+    [[nodiscard]] QString libraryEngine() const;
+    void setLibraryEngine(const QString& engine);
+
     // The engines elsewhere, as edited; one is shown.
     [[nodiscard]] QStringList engineLabels() const;
     [[nodiscard]] int currentEngine() const { return engine_current_; }
+    [[nodiscard]] int engineCount() const { return static_cast<int>(engines_.size()); }
+    [[nodiscard]] RemoteEngineSetting engineAt(int index) const {
+        return index >= 0 && index < engineCount() ? engines_[static_cast<std::size_t>(index)]
+                                                   : RemoteEngineSetting{};
+    }
     [[nodiscard]] RemoteEngineSetting engine() const;
     void selectEngine(int row);
     void editEngine(const RemoteEngineSetting& edited);
@@ -104,8 +113,7 @@ class SettingsSession final : public QObject {
     // Why no engines can be found here, if they cannot.
     [[nodiscard]] QString discoveryError() const { return discovery_error_; }
 
-    // Written; or the page whose value Save refuses (sharing without a
-    // password), untouched.
+    // Written; or the page whose value Save refuses, untouched.
     [[nodiscard]] std::optional<Page> save();
 
   signals:

@@ -308,6 +308,7 @@ class BenchMainWindowTest final : public QObject {
     void remoteEnginesStartFromTheOneRemoteOfBefore();
     void twoEnginesElsewhereSideBySide();
     void settingsListTheEnginesElsewhere();
+    void anEnginesOwnPasswordIsSaidAndCanGo();
     void enginesAddedOrRemovedApplyAtOnce();
     void aPasswordGivenLaterReachesTheEngine();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();

@@ -952,41 +952,30 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return existing;
         }
     }
-    // Every engine's music folders, one at a time: the same folders its
+    // ADR-0286: every engine's music folders, a page each, naming the engine
+    // it is of ("local", or its address) and what is known of it: the
+    // Engines page shows the one holding the library. The same folders its
     // library's Folders… opens.
     std::function<QWidget*(QWidget*)> library_folders;
     if (std::ranges::any_of(engines_,
                             [](const auto& engine) { return engine->library != nullptr; })) {
         library_folders = [this](QWidget* parent) -> QWidget* {
-            auto* widget = new QWidget(parent);
-            auto* layout = new QVBoxLayout(widget);
-            layout->setContentsMargins(0, 0, 0, 0);
-            auto* row = new QHBoxLayout;
-            auto* label = new QLabel(tr("Engine:"), widget);
-            auto* picker = new QComboBox(widget);
-            picker->setObjectName(QStringLiteral("bench-settings-library-engine"));
-            picker->setAccessibleName(tr("Engine whose music folders are shown"));
-            row->addWidget(label);
-            row->addWidget(picker);
-            row->addStretch(1);
-            layout->addLayout(row);
-            auto* folders = new QStackedWidget(widget);
+            auto* pages = new QWidget(parent);
             for (const auto& engine : engines_) {
                 if (engine->library == nullptr) {
                     continue;
                 }
-                picker->addItem(engine->key.isLocal() ? tr("This computer")
-                                                      : engineName(engine->key),
-                                engine->key.text());
-                folders->addWidget(engine->library->createFoldersWidget(folders));
+                auto* folders = engine->library->createFoldersWidget(pages);
+                folders->setProperty("engine-address",
+                                  engine->key.isLocal()
+                                      ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                      : engine->setting.address);
+                folders->setProperty("engine-state",
+                                  engine->catalogue != nullptr && engine->catalogue->reachable()
+                                      ? tr("connected")
+                                      : tr("not reached"));
             }
-            // One engine: nothing to choose.
-            label->setVisible(picker->count() > 1);
-            picker->setVisible(picker->count() > 1);
-            connect(picker, &QComboBox::currentIndexChanged, folders,
-                    &QStackedWidget::setCurrentIndex);
-            layout->addWidget(folders, 1);
-            return widget;
+            return pages;
         };
     }
     // ADR-0266: where each engine keeps its undo copies, asked of it.

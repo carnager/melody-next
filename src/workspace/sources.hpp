@@ -20,7 +20,10 @@ void storeFolderBookmarks(const std::vector<std::string>& raw_paths);
 [[nodiscard]] QString folderBookmarkLabel(const std::string& raw_path);
 [[nodiscard]] QString folderBookmarkTooltip(const std::string& raw_path);
 
-// Whether this computer's library is offered (Settings › Library).
+// ADR-0286: the engine holding the library: "local", or an engine elsewhere
+// by its address (Settings › Engines).
+[[nodiscard]] QString libraryEngine();
+// Whether this computer's library is offered: it holds the library.
 [[nodiscard]] bool localLibraryShown();
 // Which source the panel opens on, as chosen last: "folders", "library" or
 // "remote" -- a library unless Folders was chosen.

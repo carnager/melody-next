@@ -2,6 +2,10 @@
 
 #include "bench_main_window_test.hpp"
 
+#include "workspace/sources.hpp"
+
+#include <QGroupBox>
+
 namespace trackknife::bench {
 
 // ADR-0234: pending removals are kept by engine key now; one an older release
@@ -252,31 +256,59 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-add"));
     auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-remove"));
     QVERIFY(list && address && folder && reachable && add && remove);
-    QCOMPARE(list->count(), 1);
+    // ADR-0286: this computer first, then the engines elsewhere, each with
+    // its "holds the library" choice.
+    const auto row = [list](const int index) {
+        auto* holder = qobject_cast<QRadioButton*>(list->itemWidget(list->item(index)));
+        return holder != nullptr ? holder->text() : QString{};
+    };
+    QCOMPARE(list->count(), 2);
+    QVERIFY(row(0).startsWith(QStringLiteral("This computer")));
+    QVERIFY(row(1).startsWith(QStringLiteral("192.0.2.10:6603")));
     QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
     QCOMPARE(folder->text(), QStringLiteral("/mnt/nas/Music"));
 
     // One more, filled in.
     add->click();
-    QCOMPARE(list->count(), 2);
+    QCOMPARE(list->count(), 3);
     QVERIFY(address->text().isEmpty());
     address->setText(QStringLiteral("192.0.2.20:6603"));
     folder->setText(QStringLiteral("/srv/music"));
     reachable->setText(QStringLiteral("/media/desktop"));
-    QCOMPARE(list->item(1)->text(), QStringLiteral("192.0.2.20:6603"));
+    QVERIFY(row(2).startsWith(QStringLiteral("192.0.2.20:6603")));
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-engines.png")));
     }
     // Back to the first: its fields, untouched.
-    list->setCurrentRow(0);
+    list->setCurrentRow(1);
     QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
     QVERIFY(reachable->text().isEmpty());
+    // This computer chosen: nothing of an engine elsewhere to edit or remove.
+    list->setCurrentRow(0);
+    QVERIFY(!remove->isEnabled());
+    QVERIFY(!address->isVisibleTo(dialog));
+    list->setCurrentRow(2);
+    QVERIFY(remove->isEnabled());
     // A third, left empty, and removed again.
     add->click();
-    QCOMPARE(list->count(), 3);
+    QCOMPARE(list->count(), 4);
     remove->click();
-    QCOMPARE(list->count(), 2);
+    QCOMPARE(list->count(), 3);
+    // The second engine elsewhere holds the library; its folders are shown.
+    auto* holder = qobject_cast<QRadioButton*>(list->itemWidget(list->item(2)));
+    QVERIFY(holder != nullptr);
+    holder->click();
+    const auto folders_title = [dialog] {
+        for (auto* box : dialog->findChildren<QGroupBox*>()) {
+            if (box->title().startsWith(QStringLiteral("Music folders of "))) {
+                return box->title();
+            }
+        }
+        return QString{};
+    };
+    QCOMPARE(folders_title(), QStringLiteral("Music folders of 192.0.2.20:6603"));
+    QVERIFY(row(2).endsWith(QStringLiteral("holds the library")));
 
     QPointer<SettingsDialog> lifetime = dialog;
     dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
@@ -291,6 +323,48 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     QCOMPARE(saved[1].music_folder, QStringLiteral("/srv/music"));
     QCOMPARE(saved[1].reachable_at, QStringLiteral("/media/desktop"));
     QVERIFY(saved[1].id.isEmpty());
+    QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::library_engine_key)).toString(),
+             QStringLiteral("192.0.2.20:6603"));
+    QCOMPARE(libraryEngine(), QStringLiteral("192.0.2.20:6603"));
+    QVERIFY(!localLibraryShown());
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_key));
+    saveRemoteEngines({});
+}
+
+// ADR-0286: one password for every engine. One of its own kept from before
+// still works, is said under Advanced, and can go.
+void BenchMainWindowTest::anEnginesOwnPasswordIsSaidAndCanGo() {
+    QSettings{}.setValue(QLatin1String(SettingsDialog::engine_password_key),
+                         QStringLiteral("shared"));
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = QStringLiteral("its own"),
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}}});
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    QVERIFY(dialog != nullptr);
+    auto* list = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-engines"));
+    auto* own = dialog->findChild<QWidget*>(QStringLiteral("bench-settings-engine-own-password"));
+    auto* drop =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-own-password-drop"));
+    QVERIFY(list && own && drop);
+    list->setCurrentRow(1);
+    QVERIFY(own->isVisibleTo(own->parentWidget()));
+    drop->click();
+    QVERIFY(!own->isVisibleTo(own->parentWidget()));
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    const auto saved = loadRemoteEngines();
+    QCOMPARE(saved.size(), std::size_t{1});
+    QVERIFY(saved[0].password.isEmpty());
+    QCOMPARE(saved[0].effectivePassword(), QStringLiteral("shared"));
+    QSettings{}.remove(QLatin1String(SettingsDialog::engine_password_key));
     saveRemoteEngines({});
 }
 

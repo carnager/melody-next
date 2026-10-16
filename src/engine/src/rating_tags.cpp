@@ -4,6 +4,7 @@
 
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
@@ -47,6 +48,9 @@ RatingTags::RatingTags(std::filesystem::path database, LocalCatalogue& catalogue
     if (auto stored = workspace_.load_engine_state(backup_key); stored && *stored) {
         backup_tag_ = **stored;
     }
+    // A visit cut short by a stop is finished: asking costs no file, only
+    // the library, and what already holds its rating is not opened.
+    visit_wanted_ = enabled_;
     // Ratings in files are imported as they are read. A library read before
     // that is caught up once, from what it read.
     if (auto done = workspace_.load_engine_state(imported_key); done && !*done) {
@@ -91,8 +95,10 @@ core::Result<void> RatingTags::set_enabled(const bool enabled) {
         if (!enabled) {
             // What is waiting is not written; what is in the files stays.
             queue_.clear();
+            visit_.clear();
+            visit_wanted_ = false;
         } else if (!was) {
-            queue_.push_back(Work{.hash = std::nullopt, .rating = 0U});
+            visit_wanted_ = true;
         }
     }
     changed_.notify_all();
@@ -128,7 +134,7 @@ core::Result<void> RatingTags::set_backup_tag(std::string tag) {
                   << "\n";
         // Every rated track once, now that the copy goes somewhere new.
         if (enabled_ && !tag.empty()) {
-            queue_.push_back(Work{.hash = std::nullopt, .rating = 0U});
+            visit_wanted_ = true;
         }
     }
     changed_.notify_all();
@@ -144,8 +150,10 @@ void RatingTags::rated(const std::string& hash, const bool album, const unsigned
         if (!enabled_) {
             return;
         }
+        // A visit's files of this track are written now, with this rating.
+        std::erase_if(visit_, [&hash](const Visit& visit) { return visit.hash == hash; });
         // Rated again before it was written: only the last one is.
-        const auto queued = std::ranges::find(queue_, std::optional{hash}, &Work::hash);
+        const auto queued = std::ranges::find(queue_, hash, &Work::hash);
         if (queued != queue_.end()) {
             queued->rating = rating;
             return;
@@ -183,51 +191,82 @@ core::Result<void> RatingTags::set_plain_scale(const metadata::PlainRatingScale 
 
 std::size_t RatingTags::pending() const {
     const std::lock_guard guard{mutex_};
-    return queue_.size() + in_flight_;
+    return queue_.size() + visit_.size() + (visit_wanted_ ? 1U : 0U) + in_flight_;
 }
 
 void RatingTags::wait_idle() {
     std::unique_lock lock{mutex_};
-    changed_.wait(lock, [this] { return (queue_.empty() && in_flight_ == 0U) || stopping_; });
+    changed_.wait(lock, [this] {
+        return (queue_.empty() && visit_.empty() && !visit_wanted_ && in_flight_ == 0U) ||
+               stopping_;
+    });
+}
+
+std::string RatingTags::marked_field(const std::string_view backup) {
+    // As the library names what it read -- an unknown name in its own
+    // spelling, underscores and all -- not as a query folds it.
+    return metadata::resolve_text_property_identity(backup.empty() ? rating_field : backup)
+        .canonical_name;
+}
+
+std::deque<RatingTags::Visit> RatingTags::plan_visit(const std::string& backup,
+                                                     const core::CancellationToken& token) const {
+    std::deque<Visit> visit;
+    // The backup tag is written by nothing else: holding the rating, the
+    // file was written by this. Without one, FMPS_RATING says.
+    auto rated = catalogue_.rated_tracks(marked_field(backup), token);
+    if (!rated) {
+        std::cerr << "melodyd: could not list the rated tracks: " << rated.error().message << "\n";
+        return visit;
+    }
+    for (auto& track : *rated) {
+        const auto wanted =
+            track.rating == 0U
+                ? std::vector<std::string>{}
+                : std::vector{backup.empty() ? metadata::fmps_rating_text(track.rating)
+                                             : std::to_string(track.rating)};
+        if (track.indexed != wanted) {
+            visit.push_back(Visit{.raw_path = std::move(track.raw_path), .hash = track.hash});
+        }
+    }
+    return visit;
 }
 
 void RatingTags::run() {
     const auto token = cancellation_.token();
     while (true) {
-        Work work;
+        std::optional<Work> given;
+        std::optional<Visit> visited;
+        bool planning = false;
+        std::string backup;
         {
             std::unique_lock lock{mutex_};
-            changed_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
+            changed_.wait(lock, [this] {
+                return stopping_ || !queue_.empty() || visit_wanted_ || !visit_.empty();
+            });
             if (stopping_) {
                 return;
             }
-            work = std::move(queue_.front());
-            queue_.pop_front();
+            // A rating given goes before the next of a visit's files.
+            if (!queue_.empty()) {
+                given = std::move(queue_.front());
+                queue_.pop_front();
+            } else if (visit_wanted_) {
+                visit_wanted_ = false;
+                planning = true;
+            } else {
+                visited = std::move(visit_.front());
+                visit_.pop_front();
+            }
+            backup = backup_tag_;
             ++in_flight_;
         }
-        std::vector<std::pair<std::string, unsigned>> files;
-        if (work.hash) {
-            if (auto paths = catalogue_.rated_paths(*work.hash)) {
-                for (auto& path : *paths) {
-                    files.emplace_back(std::move(path), work.rating);
-                }
-            }
-        } else if (auto rated = catalogue_.rated_tracks(token)) {
-            files = std::move(*rated);
-        }
-        for (const auto& [path, rating] : files) {
-            if (token.is_cancellation_requested()) {
-                break;
-            }
-            std::string backup;
-            {
-                // Turned off meanwhile: nothing more is written.
-                const std::lock_guard guard{mutex_};
-                if (!enabled_) {
-                    break;
-                }
-                backup = backup_tag_;
-            }
+        const auto still_enabled = [this] {
+            // Turned off meanwhile: nothing more is written.
+            const std::lock_guard guard{mutex_};
+            return enabled_;
+        };
+        const auto write_one = [&](const std::string& path, const unsigned rating) {
             if (auto written = write(database_, catalogue_, path, rating, token, backup);
                 !written) {
                 // With which fields, when the read-back named them: "differs"
@@ -240,6 +279,32 @@ void RatingTags::run() {
                     }
                 }
                 std::cerr << "\n";
+            }
+        };
+        if (given) {
+            if (auto paths = catalogue_.rated_paths(given->hash)) {
+                for (const auto& path : *paths) {
+                    if (token.is_cancellation_requested() || !still_enabled()) {
+                        break;
+                    }
+                    write_one(path, given->rating);
+                }
+            }
+        } else if (planning) {
+            auto visit = plan_visit(backup, token);
+            if (!visit.empty()) {
+                std::cerr << "melodyd: writing the rating into " << visit.size()
+                          << " file(s) that do not hold it yet\n";
+            }
+            const std::lock_guard guard{mutex_};
+            if (enabled_) {
+                visit_ = std::move(visit);
+            }
+        } else if (visited && !token.is_cancellation_requested() && still_enabled()) {
+            // Its rating as it is now: one given since the visit was planned
+            // is not written over with the one before.
+            if (auto rating = catalogue_.ratings({visited->hash}); rating && rating->size() == 1U) {
+                write_one(visited->raw_path, rating->front());
             }
         }
         {

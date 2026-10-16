@@ -892,6 +892,112 @@ void ratings_go_into_tags_when_asked(const std::filesystem::path& directory,
     }
 }
 
+// What a visit of every rated track opens: only the files the library read
+// without their rating -- the backup tag, which nothing else writes, holding
+// it means the file was written. And a rating given as one starts is the one
+// the file ends with.
+void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
+                                        const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto music = directory / "visited";
+    std::filesystem::create_directories(music);
+    const auto flac = materialize(fixtures, "tagged-tone-flac", music / "visited.flac").string();
+    const auto database = directory / "visits.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value() && catalogue.add_root(music.string()).has_value(),
+            "a library");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "scanned");
+    trackknife::persistence::LibraryQuery lookup;
+    lookup.kind = trackknife::persistence::LibraryEntryKind::track;
+    lookup.raw_path = flac;
+    lookup.limit = 1;
+    const auto found = catalogue.query(lookup);
+    require(found && found->entries.size() == 1U, "the track is in it");
+    const auto hash = found->entries.front().rating_hash;
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "a workspace");
+    const auto in_file = [&flac](const char* field) {
+        const auto read = metadata::read_local_metadata(flac);
+        return read ? read->document.effective_values(field)
+                    : std::vector<std::string>{"unreadable"};
+    };
+    const auto bytes = [&flac] {
+        std::ifstream in{flac, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, {}};
+    };
+    require(catalogue.set_rating(hash, false, 6).has_value(), "rated");
+
+    engine::RatingTags tags{database, catalogue, *workspace};
+    require(tags.set_backup_tag("TRACKKNIFE_RATING").has_value(), "a backup tag");
+    require(tags.set_enabled(true).has_value(), "turned on");
+    tags.wait_idle();
+    require(in_file("FMPS_RATING") == std::vector<std::string>{"0.6"} &&
+                in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"6"},
+            "the first visit writes the rating and its copy");
+    // And the library holds it under the name a visit asks for, so the next
+    // one knows the file without opening it.
+    const auto known =
+        catalogue.rated_tracks(engine::RatingTags::marked_field("TRACKKNIFE_RATING"));
+    require(known && known->size() == 1U && known->front().indexed == std::vector<std::string>{"6"},
+            "the library knows what the file holds");
+    const auto without = catalogue.rated_tracks(engine::RatingTags::marked_field(""));
+    require(without && without->size() == 1U &&
+                without->front().indexed == std::vector<std::string>{"0.6"},
+            "FMPS_RATING too");
+
+    // Visited again: the file holds its rating, and is not opened to write.
+    const auto written = bytes();
+    const auto when = std::filesystem::last_write_time(flac);
+    require(tags.set_enabled(false).has_value() && tags.set_enabled(true).has_value(),
+            "turned off and on");
+    tags.wait_idle();
+    require(bytes() == written && std::filesystem::last_write_time(flac) == when,
+            "a file that holds its rating is left alone");
+
+    // Its tags taken away (the library reads it again): written again.
+    require(tags.set_enabled(false).has_value(), "off");
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+                    .has_value() &&
+                in_file("TRACKKNIFE_RATING").empty(),
+            "the tags taken out of the file");
+    require(tags.set_enabled(true).has_value(), "on");
+    tags.wait_idle();
+    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"6"},
+            "a file without its rating is written");
+
+    // Rated as a visit starts: the file ends with that rating, not the one
+    // the visit found.
+    require(tags.set_enabled(false).has_value(), "off again");
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+                .has_value(),
+            "taken out again");
+    require(tags.set_enabled(true).has_value(), "on again");
+    require(catalogue.set_rating(hash, false, 9).has_value(), "rated anew");
+    tags.rated(hash, false, 9);
+    tags.wait_idle();
+    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"9"} &&
+                in_file("FMPS_RATING") == std::vector<std::string>{"0.9"},
+            "the rating given last is the one in the file");
+    require(tags.pending() == 0U, "and nothing is left to write");
+
+    // A visit cut short by a stop is finished at the next start.
+    require(tags.set_enabled(false).has_value(), "off once more");
+    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "TRACKKNIFE_RATING")
+                .has_value(),
+            "taken out once more");
+    // Left on as a stop would leave it, without this one visiting.
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    require(workspace->save_engine_state("ratings.write-tags", "1", now + 1000).has_value(),
+            "kept on");
+    engine::RatingTags restarted{database, catalogue, *workspace};
+    restarted.wait_idle();
+    require(in_file("TRACKKNIFE_RATING") == std::vector<std::string>{"9"},
+            "a start writes what a visit left");
+}
+
 // A rating another player put in a file is taken into the library.
 void ratings_in_files_are_imported(const std::filesystem::path& directory,
                                    const std::filesystem::path& fixtures) {
@@ -1867,6 +1973,7 @@ int main(int argc, char** argv) {
     backups_are_kept_as_long_as_asked(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
+    ratings_visit_only_what_lacks_them(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);
     ratings_are_written_where_players_read_them(directory, argv[1]);
     ratings_are_copied_into_a_backup_tag(directory, argv[1]);

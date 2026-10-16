@@ -12,15 +12,18 @@ it's where you left it.
 ## Music on a server
 
 On the server, install `melodyd` ([Installation](install.md)) and give it a
-name and a password in `~/.config/melody/melodyd.conf`:
+password and a name:
 
 ```sh
-MELODYD_OPTIONS=--name myserver --password-file /home/you/.config/melody/password
+melody-cli config password 'the one all your engines share'
+melody-cli config name myserver
 ```
 
-The password file holds one line; make it readable only by you
-(`chmod 600`). Without a password the engine doesn't listen on the network
-at all. Use the same password on every engine and agent you run.
+That writes `~/.config/melody/melodyd.conf`, only you can read it, and each
+setting is checked as the engine reads it; `melody-cli config --edit` opens
+the whole file, every setting explained in it. Without a password the engine
+doesn't listen on the network at all. Use the same password on every engine
+and agent you run.
 
 ```sh
 systemctl --user enable --now melodyd

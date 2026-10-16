@@ -32,14 +32,14 @@ On a desktop, Trackknife starts its engine for you. On a server or a Pi, run
 it yourself, as a user service:
 
 ```sh
-# ~/.config/melody/melodyd.conf
-MELODYD_OPTIONS=--name myserver --password-file /home/you/.config/melody/password
+melody-cli config password 'the one all your engines share'
+melody-cli config name myserver
 ```
 
-```sh
-printf '%s\n' 'your password' > ~/.config/melody/password
-chmod 600 ~/.config/melody/password
-```
+That writes `~/.config/melody/melodyd.conf`, started from a commented
+skeleton of every setting (ADR-0286); `melody-cli config --edit` opens it,
+and takes it only when melodyd would. A setting is `key = value`, the
+options below without their `--`.
 
 ```sh
 systemctl --user enable --now melodyd

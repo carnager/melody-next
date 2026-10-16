@@ -11,13 +11,14 @@ Wants=pipewire.service network-online.target
 
 [Service]
 Type=simple
-# Options in ~/.config/melody/melodyd.conf, e.g.
-#   MELODYD_OPTIONS=--name gemenon --agent --password-file /home/you/.config/melody/password
+# ADR-0286: settings in ~/.config/melody/melodyd.conf, which
+#   melody-cli config --edit
+# starts from a commented skeleton; or one at a time:
+#   melody-cli config password 'a long sentence'
 # With a password it listens on port 6603 (streams on 6604) and announces
-# itself on the network; without one, or with --local-only, it keeps to this
-# machine.
-EnvironmentFile=-%h/.config/melody/melodyd.conf
-ExecStart=/usr/bin/melodyd $MELODYD_OPTIONS
+# itself on the network; without one, or with local-only = yes, it keeps to
+# this machine.
+ExecStart=/usr/bin/melodyd
 Restart=on-failure
 RestartSec=2
 

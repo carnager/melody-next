@@ -15,7 +15,8 @@ add_executable(melody_agent main.cpp)
 set_target_properties(melody_agent PROPERTIES OUTPUT_NAME melody-agent)
 target_link_libraries(
     melody_agent
-    PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
+    PRIVATE Trackknife::Agent trackknife_daemon_settings trackknife_project_options
+            trackknife_project_warnings
 )
 
 # Packaged as "agent": the output agent and its systemd user unit.

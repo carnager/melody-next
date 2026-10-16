@@ -28,7 +28,7 @@ post_install() {
 
 On a desktop, Trackknife starts the engine itself. On a server:
 
-  echo 'MELODYD_OPTIONS=--name myserver' > ~/.config/melody/melodyd.conf
+  melody-cli config password 'the one all your engines share'
   systemctl --user enable --now melodyd.service
   loginctl enable-linger $USER    # to run without being logged in
 MESSAGE

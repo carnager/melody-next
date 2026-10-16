@@ -49,8 +49,12 @@ Measured on 2026-10-16:
    window title, notifications, MPRIS' identity, dialogs, help, docs. The
    binary is `melody`, the desktop file `melody.desktop`, MPRIS
    `org.mpris.MediaPlayer2.melody`, the PipeWire application id and the
-   User-Agents Melody's. Its icon is not decided; the crate icons are
-   installed as a placeholder.
+   User-Agents Melody's. Its icon is the vinyl bird -- a blackbird whose
+   body is a record (`packaging/icons/melodies-vinyl-bird-v7.svg`) --
+   replacing the crate icons; the blackbird
+   (`packaging/icons/melodies-blackbird-v2.svg`) is its mascot, shown in a
+   new **Help → About Melody**: the version and commit, the licence
+   (GPL-3.0) and links to the project and its documentation.
 2. **One folder per kind, named melody.** Qt's organisation and application
    become `melody`: settings in `~/.config/melody/melody.conf`, beside
    `melodyd.conf`; the window's data in `~/.local/share/melody/melody`, its
@@ -102,6 +106,8 @@ Measured on 2026-10-16:
 - melodyd alone (a server): its files move, nothing else is touched.
 - A move that cannot complete -- the new folder not writable -- leaves the
   old folder as it was and the engine running from it.
+- The desktop entry, the window and the About box show the vinyl bird at
+  16 px and up; About shows the blackbird, the version and the licence.
 - No user-visible string, desktop entry, MPRIS name or package says
   Trackknife; `grep -r TRACKKNIFE_` finds nothing.
 - A fresh install writes no backup tag; one that had the copy on under the

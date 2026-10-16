@@ -1,7 +1,12 @@
-# Melodies icons
+# Melody icons
 
-The application icon for Melodies -- what Trackknife is to be called -- as
-vector sources. Not used by the build yet; they are here for the rename.
+ADR-0287: the application is Melody, and its icon is the **vinyl bird**,
+`melodies-vinyl-bird-v7.svg` -- a blackbird whose body is a record. The
+**blackbird**, `melodies-blackbird-v2.svg`, is the mascot, for the About box.
+Both are traced vector sources, not used by the build yet; the rename wires
+them in and retires the crate icons below.
+
+The crate icons, drawn for the name Melodies before:
 
 | File | Size | Use |
 |---|---|---|

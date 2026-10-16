@@ -689,6 +689,8 @@ class TaggerSession final : public QObject {
     };
     [[nodiscard]] std::vector<DestinationRow> destinationRows() const;
     [[nodiscard]] std::optional<TaggerServices::LibraryFolder> chosenLibraryFolder() const;
+    // The one music folder (library root) every file chosen is in.
+    [[nodiscard]] std::optional<std::string> sharedMusicFolder() const;
     std::optional<std::string> move_folder_;
     bool write_plan_running_{false};
     bool apply_running_{false};

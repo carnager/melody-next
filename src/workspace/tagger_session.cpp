@@ -2257,6 +2257,23 @@ std::vector<TaggerSession::DestinationRow> TaggerSession::destinationRows() cons
     return rows;
 }
 
+std::optional<std::string> TaggerSession::sharedMusicFolder() const {
+    if (grid_model_ == nullptr || !services_.library_roots) {
+        return std::nullopt;
+    }
+    const auto roots = services_.library_roots();
+    const auto& selection = grid_model_->selection();
+    std::optional<std::string> shared;
+    for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+        auto here = libraryFolderOf(selection.source(item).raw_path, roots);
+        if (!here || (shared && *shared != *here)) {
+            return std::nullopt;
+        }
+        shared = std::move(here);
+    }
+    return shared;
+}
+
 std::optional<TaggerServices::LibraryFolder> TaggerSession::chosenLibraryFolder() const {
     if (!library_folder_ || !services_.library_elsewhere) {
         return std::nullopt;
@@ -2281,10 +2298,16 @@ std::vector<TaggerSession::Choice> TaggerSession::destinations() const {
                                      .name = display_utf8(saved.profile.name)});
             break;
         }
-        case MoveTarget::library:
-            choices.push_back(Choice{.id = QStringLiteral("library"),
-                                     .name = QStringLiteral("Within its library folder")});
+        case MoveTarget::library: {
+            // The music folder the files are in, named when they share one.
+            auto name = QStringLiteral("Its music folder");
+            if (const auto shared = sharedMusicFolder()) {
+                name +=
+                    QStringLiteral(" · ") + QString::fromStdString(core::display_raw_path(*shared));
+            }
+            choices.push_back(Choice{.id = QStringLiteral("library"), .name = name});
             break;
+        }
         case MoveTarget::library_folder: {
             // ADR-0286: adding them to the library, on the engine holding it.
             const auto& folder = folders[row.index];
@@ -2612,12 +2635,12 @@ void TaggerSession::startWritePlan() {
             for (std::size_t item = 0U; item < selection.item_count(); ++item) {
                 const auto here = libraryFolderOf(selection.source(item).raw_path, roots);
                 if (!here) {
-                    refuse(QStringLiteral("A file is in no library folder; choose where to move "
-                                          "to"));
+                    refuse(QStringLiteral("A file is in none of the music folders; choose where "
+                                          "to move to"));
                     return;
                 }
                 if (root && *root != *here) {
-                    refuse(QStringLiteral("These files are in more than one library folder; "
+                    refuse(QStringLiteral("These files are in more than one music folder; "
                                           "choose where to move to"));
                     return;
                 }

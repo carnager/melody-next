@@ -243,15 +243,34 @@ void Workspace::describeEngineRowsFrom(const QString& document_id,
         done();
         return;
     }
+    // ADR-0286: by path -- a tab is no list of the engine's -- from an engine
+    // of level 15; by entry of the engine's list from one older.
+    const bool by_path = engine->engineLevel() >= 15;
     auto asked = protocol::Json::array();
-    for (auto index = from; index < std::min(entries.size(), from + part); ++index) {
-        asked.push_back(entries[index].to_string());
+    std::vector<std::string> asked_entries;
+    {
+        std::unordered_map<std::string, std::string> path_of;
+        if (by_path) {
+            for (const auto& row : tab->model->rows()) {
+                path_of.emplace(row.entry_id.to_string(), row.raw_path);
+            }
+        }
+        for (auto index = from; index < std::min(entries.size(), from + part); ++index) {
+            const auto entry = entries[index].to_string();
+            if (!by_path) {
+                asked.push_back(entry);
+            } else if (const auto path = path_of.find(entry); path != path_of.end()) {
+                asked.push_back(protocol::encode_raw_path(path->second));
+                asked_entries.push_back(entry);
+            }
+        }
     }
     engine->request(
-        QStringLiteral("list.describe"),
-        protocol::Json{{"id", document_id.toStdString()}, {"entries", std::move(asked)}},
-        [this, document_id, entries = std::move(entries), from,
-         done](const core::Result<protocol::Json>& answer) mutable {
+        by_path ? QStringLiteral("catalogue.describe") : QStringLiteral("list.describe"),
+        by_path ? protocol::Json{{"paths", std::move(asked)}}
+                : protocol::Json{{"id", document_id.toStdString()}, {"entries", std::move(asked)}},
+        [this, document_id, entries = std::move(entries), from, done,
+         asked_entries = std::move(asked_entries)](const core::Result<protocol::Json>& answer) mutable {
             auto* target = tabForDocument(document_id);
             // An engine from before ADR-0259 does not describe: the rows keep
             // the names they were saved with.
@@ -265,9 +284,14 @@ void Workspace::describeEngineRowsFrom(const QString& document_id,
                 row_of.emplace(rows[static_cast<std::size_t>(row)].entry_id.to_string(), row);
             }
             bool described = false;
-            for (const auto& item : answer->value("items", protocol::Json::array())) {
+            const auto items = answer->value("items", protocol::Json::array());
+            for (std::size_t index = 0; index < items.size(); ++index) {
+                const auto& item = items[index];
                 const auto library = item.find("library");
-                const auto at = row_of.find(item.value("entry", std::string{}));
+                // By path, the answers come in the order asked.
+                const auto entry = index < asked_entries.size() ? asked_entries[index]
+                                                                : item.value("entry", std::string{});
+                const auto at = row_of.find(entry);
                 if (library == item.end() || library->is_null() || at == row_of.end()) {
                     continue;
                 }
@@ -1122,6 +1146,14 @@ void Workspace::backupWorkspace(const QString& path) {
     const auto destination = std::filesystem::path{
         std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
     persistNow(false);
+    // ADR-0286: the tabs' rows too -- for a tab that is no saved playlist,
+    // their only copy.
+    if (tab_store_ != nullptr && !tab_store_->copyTo(path + QStringLiteral(".tabs"))) {
+        QFile::remove(temporary_settings);
+        view_->showMessage(QStringLiteral("Workspace backup failed: the tabs could not be copied"),
+                           10'000);
+        return;
+    }
     view_->showMessage(QStringLiteral("Backing up workspace database…"), 0);
     persistence_->backupDatabase(
         destination, [this, path, settings_path, temporary_settings](QString error) {
@@ -1132,7 +1164,8 @@ void Workspace::backupWorkspace(const QString& path) {
             }
             view_->showMessage(
                 error.isEmpty()
-                    ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
+                    ? QStringLiteral("Workspace backed up to %1, %2 and %1.tabs")
+                          .arg(path, settings_path)
                     : QStringLiteral("Workspace backup failed: %1").arg(error),
                 error.isEmpty() ? 7'000 : 10'000);
         });

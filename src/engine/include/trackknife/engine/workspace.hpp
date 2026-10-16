@@ -124,6 +124,17 @@ class Workspace final {
     [[nodiscard]] core::Result<std::pair<std::uint64_t, std::vector<std::optional<std::string>>>>
     engine_list_entry_paths(const core::StableId& id,
                             const std::vector<core::StableId>& entries) const;
+    // ADR-0286: see ListRepository::load_retired_engine_lists and the rest.
+    [[nodiscard]] core::Result<std::vector<persistence::EngineListSummary>>
+    load_retired_engine_lists() const;
+    [[nodiscard]] core::Result<std::optional<persistence::EngineList>>
+    load_retired_engine_list(const core::StableId& id) const;
+    [[nodiscard]] core::Result<std::size_t>
+    drop_retired_engine_lists(const std::vector<core::StableId>& ids);
+    [[nodiscard]] core::Result<
+        std::vector<std::optional<std::pair<std::string, core::LocalSourceRevision>>>>
+    resolve_local_source_moves(
+        const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources) const;
     // ADR-0259: see ListRepository::draft_engine_list and
     // commit_engine_list_draft.
     [[nodiscard]] core::Result<persistence::EngineListSummary>

@@ -692,6 +692,11 @@ class Workspace final : public QObject {
     // starts; then each remote in Settings -- the `first` of them owning the
     // lists an older release made for "the remote".
     void connectLocalEngine();
+    // ADR-0286: the working lists an engine set aside, offered once a run.
+    void offerRetiredLists(const EngineKey& key);
+    void openRetiredLists(const EngineKey& key, const QStringList& ids, qsizetype from);
+    void dropRetiredLists(const EngineKey& key, const QStringList& ids);
+    QSet<QString> retired_offered_;
     void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
     // Settings changed: engines no longer listed let go, new ones connected.
     void syncRemoteEngines();

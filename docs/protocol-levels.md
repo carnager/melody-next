@@ -7,6 +7,31 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 15 (2026-10-16)
+
+ADR-0286: tabs are Trackknife's; only saved playlists live on the engine.
+
+- `list.save` makes saved lists (`kind` defaults to `saved`); `kind:
+  "working"`, there and in `list.edit`, is refused as `unsupported`.
+  `list.from_query` makes a saved list. `list.draft` and `list.commit` are
+  gone (no client used them).
+- Schema 56 sets the working lists and drafts there were aside:
+  `list.retired {}` answers `{lists}` as `list.all` does, `list.retired_get
+  {id}` one with its `items`, `list.retired_drop {ids}` drops them once a
+  client has dealt with them.
+- `catalogue.describe {paths}` (at most 2,000): `{items: [{path, library}]}`,
+  `library` as `list.describe` gives it, null for a file the library does not
+  index.
+- `catalogue.resolve_moves {items: [{path, revision}]}` (at most 2,000):
+  `{items: [{path, moved}]}`, `moved` `{path, revision}` for a file this
+  engine moved since it was at that path and revision, else null.
+- `playback.edit_queue {list?, edits}`: the queue changed in place with
+  `list.edit`'s edits -- a long queue sent in parts after
+  `playback.replace_queue`, and a tab's edits after. An edit naming an entry
+  the queue no longer holds leaves it out; an insert after one goes at the
+  end. Answers `{queue_revision}`; refused as `conflict` when the queue plays
+  another `list`.
+
 ### Level 14 (2026-10-16)
 
 - `engine.info` says whether a service manager runs the engine: `service`,

@@ -107,8 +107,11 @@ items = [{"path": encode(f"{work}/one.wav"), "title": "One", "artist": "Someone"
          {"path": encode(f"{work}/two.wav"), "segment": {"start_sample": 0, "end_sample": 44100},
           "selection": {"stream_index": None, "subsong_index": 1}, "duration_ms": 1000}]
 created = a.call("list.save", {"name": "Untitled", "items": items})["result"]
-check(created["kind"] == "working" and created["revision"] == 1 and created["tracks"] == 2,
-      "a list saved without a kind is a working list, at revision 1")
+check(created["kind"] == "saved" and created["revision"] == 1 and created["tracks"] == 2,
+      "a list saved without a kind is a saved playlist, at revision 1")
+# ADR-0286: a working list is a Trackknife tab, not a list here.
+check(a.call("list.save", {"name": "Scratch", "kind": "working", "items": []})["error"]["code"]
+      == "unsupported", "a working list is refused")
 list_id = created["id"]
 event = b.wait_event("list.changed")
 check(event and event["data"]["id"] == list_id and event["data"]["revision"] == 1,
@@ -123,7 +126,7 @@ entries = [i["entry"] for i in got["items"]]
 saved = a.call("list.save", {"id": list_id, "name": "Road trip", "kind": "saved",
                              "items": got["items"], "revision": 1})["result"]
 check(saved["kind"] == "saved" and saved["revision"] == 2 and saved["name"] == "Road trip",
-      "saving by name makes it a saved list")
+      "saving it again renames it")
 check([i["entry"] for i in a.call("list.get", {"id": list_id})["result"]["items"]] == entries,
       "entries keep their identities through a save")
 
@@ -226,77 +229,29 @@ check(renamed["name"] == "Kept" and renamed["kind"] == "saved" and
 check(a.call("list.edit", {"id": edited["id"], "edits": []})["error"]["code"] == "invalid_argument",
       "an edit names the revision it was worked out from")
 
-# ADR-0259: a saved list's unsaved edits are a draft on the engine, which
-# every client sees, and saving it writes the list.
+# ADR-0286: no drafts any more -- a saved list's unsaved edits are its tab's.
 kept = a.call("list.save", {"name": "Kept", "kind": "saved", "items": [
     {"path": encode(f"{work}/one.wav")}, {"path": encode(f"{work}/two.wav")}]})["result"]
-draft = a.call("list.draft", {"of": kept["id"]})["result"]
-check(draft["kind"] == "working" and draft["draft_of"] == kept["id"] and
-      draft["draft_base"] == kept["revision"] and draft["tracks"] == 2,
-      "a draft is a working list naming the saved list and its revision")
-check(a.call("list.draft", {"of": kept["id"]})["result"]["id"] == draft["id"],
-      "a saved list has one draft")
-def heard_of(client, ids, seconds=5):
-    """What `client` hears of the lists `ids`: each id's deleted flag."""
-    found = {}
-    deadline = time.time() + seconds
-    while set(found) != set(ids) and time.time() < deadline:
-        event = client.wait_event("list.changed", 1)
-        if event and event["data"]["id"] in ids:
-            found[event["data"]["id"]] = event["data"]["deleted"]
-    return found
-
-def drain(client):
-    """Reads what `client` has been told so far, so what follows is news."""
-    client.s.settimeout(0.3)
-    try:
-        while client.wait_event("list.changed", 0.3):
-            pass
-    finally:
-        client.s.settimeout(10)
-    client.events.clear()
-
-check(heard_of(b, [draft["id"]]) == {draft["id"]: False}, "another client hears of the draft")
-check(a.call("list.draft", {"of": draft["id"]})["error"]["code"] == "invalid_argument",
-      "a draft has no draft")
-d_entries = [i["entry"] for i in a.call("list.get", {"id": draft["id"]})["result"]["items"]]
-check(d_entries == [i["entry"] for i in a.call("list.get", {"id": kept["id"]})["result"]["items"]],
-      "with the saved list's entries")
-check("result" in a.call("list.play", {"id": draft["id"], "entry": d_entries[0]}),
-      "the draft plays")
-edited_draft = a.call("list.edit", {"id": draft["id"], "revision": draft["revision"],
-                                    "edits": [{"move": [d_entries[1]], "after": None}],
-                                    "name": "Kept, reordered"})
-check("result" in edited_draft, "the draft is edited")
-drain(b)
-committed = a.call("list.commit", {"id": draft["id"]})["result"]
-check(committed["id"] == kept["id"] and committed["revision"] == kept["revision"] + 1 and
-      committed["name"] == "Kept, reordered" and committed["draft_of"] is None,
-      "saving the draft writes the list it drafts")
-check([i["entry"] for i in a.call("list.get", {"id": kept["id"]})["result"]["items"]] ==
-      [d_entries[1], d_entries[0]], "with the draft's entries")
-check(a.call("list.get", {"id": draft["id"]})["error"]["code"] == "not_found", "and the draft goes")
-check(heard_of(b, [draft["id"], kept["id"]]) == {draft["id"]: True, kept["id"]: False},
-      "another client hears both")
-moved_back = a.call("list.edit", {"id": kept["id"], "revision": committed["revision"],
-                                  "edits": [{"move": [d_entries[0]], "after": None}]})
-check("result" in moved_back and
-      [e["entry"] for e in a.call("playback.queue")["result"]["entries"]] == d_entries,
-      "the queue played from the draft follows the saved list now")
-stale = a.call("list.draft", {"of": kept["id"]})["result"]
-check("result" in a.call("list.save", {"id": kept["id"], "name": "Kept", "kind": "saved",
-                                       "items": [{"path": encode(f"{work}/one.wav")}]}),
-      "someone saves the list itself")
-check(a.call("list.commit", {"id": stale["id"]})["error"]["code"] == "conflict",
-      "saving a draft of an older revision is a conflict")
-check("result" in a.call("list.commit", {"id": stale["id"], "force": True}),
-      "unless it is kept regardless")
-last = a.call("list.draft", {"of": kept["id"]})["result"]
-drain(b)
+check(a.call("list.draft", {"of": kept["id"]})["error"]["code"] == "unsupported" and
+      a.call("list.commit", {"id": kept["id"]})["error"]["code"] == "unsupported",
+      "list.draft and list.commit are gone")
+check(a.call("list.edit", {"id": kept["id"], "revision": kept["revision"], "edits": [],
+                           "kind": "working"})["error"]["code"] == "unsupported",
+      "nor does a saved list become a working one")
+check(a.call("list.retired")["result"]["lists"] == [], "a new engine set no working lists aside")
 check(a.call("list.delete", {"id": kept["id"]})["result"]["deleted"] is True, "the list is deleted")
-check(a.call("list.get", {"id": last["id"]})["error"]["code"] == "not_found", "and its draft")
-check(heard_of(b, [kept["id"], last["id"]]) == {kept["id"]: True, last["id"]: True},
-      "and both are told as gone")
+def heard_of(client, ids):
+    # The list.changed events another client hears, by list: deleted or not.
+    # The last heard of each is what it is now.
+    seen = {}
+    while True:
+        event = client.wait_event("list.changed", 1)
+        if event is None:
+            break
+        if event["data"]["id"] in ids:
+            seen[event["data"]["id"]] = event["data"]["deleted"]
+    return seen
+check(heard_of(b, [kept["id"]]) == {kept["id"]: True}, "and told as gone")
 
 # ADR-0259: asked to, the engine describes each item from its library -- a
 # file it indexes with its tags and revision, one it does not as saved.
@@ -334,8 +289,8 @@ check(a.call("list.describe", {"id": str(uuid.uuid4()), "entries": []})["error"]
 
 # ADR-0259: a kept search made on the engine, from its library.
 everything = a.call("list.from_query", {"query": "ALL", "name": "Everything"})["result"]
-check(everything["kind"] == "working" and everything["tracks"] == 1 and
-      everything["name"] == "Everything", "a query's matches become a working list")
+check(everything["kind"] == "saved" and everything["tracks"] == 1 and
+      everything["name"] == "Everything", "a query's matches become a saved list")
 made = a.call("list.get", {"id": everything["id"]})["result"]["items"]
 check([i["path"] for i in made] == [encode(f"{music}/one.wav")] and made[0]["duration_ms"] == 30000,
       "of the files the library indexes, named from it")
@@ -345,6 +300,40 @@ check(a.call("list.from_query", {"query": "codec (((", "name": "Bad"})["error"][
       "invalid_argument", "a query that does not compile is refused")
 check("result" in a.call("list.from_query", {"query": "codec (((", "name": "Words", "words": True}),
       "unless it is a word search, which any text is")
+
+# ADR-0286: what the library knows of files, by path, for a tab kept in a
+# client: as list.describe has it.
+by_path = a.call("catalogue.describe", {"paths": [encode(f"{music}/one.wav"),
+                                                  encode(f"{work}/two.wav")]})["result"]["items"]
+check(by_path[0]["path"] == encode(f"{music}/one.wav") and by_path[0]["library"] is not None and
+      by_path[0]["library"]["duration_ms"] == 30000 and by_path[0]["library"]["revision"] is not None,
+      "an indexed file is described by its path, with its revision")
+check(by_path[1]["library"] is None, "one the library does not index is not")
+check(a.call("catalogue.describe", {"paths": [encode("/x")] * 2001})["error"]["code"] ==
+      "invalid_argument", "at most 2000 at a time")
+revision = by_path[0]["library"]["revision"]
+unmoved = a.call("catalogue.resolve_moves",
+                 {"items": [{"path": encode(f"{music}/one.wav"), "revision": revision}]})["result"]
+check(unmoved["items"][0]["moved"] is None, "a file not moved is where it was")
+
+# ADR-0286: the queue sent in parts and edited in place, by list.edit's edits.
+tab = str(uuid.uuid4())
+first, second, third = (str(uuid.uuid4()) for _ in range(3))
+check("result" in a.call("playback.replace_queue", {"list": tab, "entries": [
+    {"entry": first, "path": encode(f"{work}/one.wav"), "duration_ms": 1000}]}), "a queue's first part")
+grown = a.call("playback.edit_queue", {"list": tab, "edits": [{"insert": [
+    {"entry": second, "path": encode(f"{work}/two.wav")},
+    {"entry": third, "path": encode(f"{work}/one.wav")}], "after": first}]})
+check("result" in grown, "and the rest, after it")
+queue = [e["entry"] for e in a.call("playback.queue")["result"]["entries"]]
+check(queue == [first, second, third], "in order")
+moved = a.call("playback.edit_queue", {"list": tab, "edits": [
+    {"move": [third], "after": None}, {"remove": [second, str(uuid.uuid4())]}]})
+check("result" in moved and
+      [e["entry"] for e in a.call("playback.queue")["result"]["entries"]] == [third, first],
+      "edits naming an entry the queue no longer holds leave it out, not the rest")
+check(a.call("playback.edit_queue", {"list": str(uuid.uuid4()), "edits": []})["error"]["code"] ==
+      "conflict", "the queue of another list is not edited")
 PY
 
 echo "engine lists: ok"

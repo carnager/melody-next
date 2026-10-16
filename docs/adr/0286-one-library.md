@@ -48,7 +48,8 @@ Measured on 2026-10-16:
    network with the password; there is no separate sharing switch.
 4. **Only saved playlists live on the engine.** Tabs are Trackknife's: it
    keeps their rows itself, and a tab plays by sending its rows as the queue
-   (`playback.replace_queue`, already the client's fallback). The phone and
+   -- in parts within the engine's line (`playback.replace_queue`, then
+   `playback.edit_queue`). The phone and
    `melody-cli` see saved playlists only. Working lists and drafts leave the
    engine by a reversible migration.
 5. **One queue**, on the engine that plays, as now; moving it to another
@@ -205,7 +206,17 @@ are chosen in Trackknife, which finds it on the network.
    Engine are one page; sharing follows the password (no switch); the
    library's engine (`library/engine`) decides whose library has a tab and
    whose folders are shown; engines are listed by the name they go by.
-4. Tabs in Trackknife; working lists leave the engine.
+4. Tabs in Trackknife; working lists leave the engine. Done (2026-10-16):
+   tabs are never sent; a tab plays as a queue sent in parts
+   (`playback.edit_queue`, since one line holds a megabyte and a long tab is
+   more); rows are described by path (`catalogue.describe`) and follow moves
+   made while the window was closed through the engine's move journal
+   (`catalogue.resolve_moves`, asked for rows whose files are gone); the tab
+   store lives with the window's data and is backed up. Schema 56 sets the
+   working lists and drafts aside rather than deleting them, and the window
+   offers them once -- open as tabs, or discard (`list.retired`); the down
+   migration puts them back. The engine refuses new working lists;
+   `list.draft` and `list.commit` are gone. Protocol level 15.
 
 ## Verification
 
@@ -221,7 +232,7 @@ are chosen in Trackknife, which finds it on the network.
   after the state moves.
 - The Engines page connects to a freshly set up engine, chooses its folders
   and starts the first scan, in a two-engine test.
-- After stage 3, `list.all` holds saved playlists only, and tabs survive a
+- After stage 4, `list.all` holds saved playlists only, and tabs survive a
   restart from Trackknife's own store; the migration is undone cleanly.
 - Live: gemenon set up from scratch in a test state folder (systemd drop-in)
   with its skeleton, one password line and Trackknife.

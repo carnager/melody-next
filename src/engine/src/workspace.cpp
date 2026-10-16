@@ -225,6 +225,30 @@ Workspace::engine_list_entry_paths(const core::StableId& id,
     return repository_.engine_list_entry_paths(id, entries);
 }
 
+core::Result<std::vector<persistence::EngineListSummary>>
+Workspace::load_retired_engine_lists() const {
+    const std::lock_guard guard{*mutex_};
+    return repository_.load_retired_engine_lists();
+}
+
+core::Result<std::optional<persistence::EngineList>>
+Workspace::load_retired_engine_list(const core::StableId& id) const {
+    const std::lock_guard guard{*mutex_};
+    return repository_.load_retired_engine_list(id);
+}
+
+core::Result<std::size_t> Workspace::drop_retired_engine_lists(const std::vector<core::StableId>& ids) {
+    const std::lock_guard guard{*mutex_};
+    return repository_.drop_retired_engine_lists(ids);
+}
+
+core::Result<std::vector<std::optional<std::pair<std::string, core::LocalSourceRevision>>>>
+Workspace::resolve_local_source_moves(
+    const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources) const {
+    const std::lock_guard guard{*mutex_};
+    return repository_.resolve_local_source_moves(sources);
+}
+
 core::Result<persistence::EngineListSummary>
 Workspace::draft_engine_list(const core::StableId& of, const core::StableId& id,
                              const std::int64_t now_ms) {

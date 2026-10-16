@@ -5,37 +5,43 @@
 #include "workspace/sources.hpp"
 
 #include <QGroupBox>
+#include <QMessageBox>
+
+#include <sqlite3.h>
 
 namespace trackknife::bench {
 
 // ADR-0234: pending removals are kept by engine key now; one an older release
-// left as "l:<id>" is still carried out on connecting.
+// left as "l:<id>" is still carried out on connecting. ADR-0286: it named a
+// working list, which the engine has set aside since -- so it is let go of,
+// and touches no saved playlist.
 void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
-    const auto made =
-        (*engine)->call("list.save", protocol::Json{{"name", "Closed long ago"},
-                                                    {"kind", "working"},
+    const auto kept =
+        (*engine)->call("list.save", protocol::Json{{"name", "Kept"},
+                                                    {"kind", "saved"},
                                                     {"items", protocol::Json::array()}});
-    QVERIFY(made.has_value());
-    const auto id = made->value("id", std::string{});
+    QVERIFY(kept.has_value());
+    const auto kept_id = kept->value("id", std::string{});
+    const auto gone_id = core::StableId::random().to_string();
     QSettings{}.setValue(QStringLiteral("lists/pending-removals"),
-                         QStringList{QStringLiteral("l:") + QString::fromStdString(id)});
-    const auto listed = [&engine, &id] {
+                         QStringList{QStringLiteral("l:") + QString::fromStdString(gone_id)});
+    const auto listed = [&engine](const std::string& id) {
         auto all = (*engine)->call("list.all");
         return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
                                           [&id](const protocol::Json& list) {
                                               return list.value("id", std::string{}) == id;
                                           });
     };
-    QVERIFY(listed());
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(!listed());
     QTRY_VERIFY(
         QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    QVERIFY(listed(kept_id));
+    QVERIFY((*engine)->call("list.delete", protocol::Json{{"id", kept_id}}).has_value());
     (*engine)->close();
 }
 
@@ -2280,6 +2286,81 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QCOMPARE(status.count(), 1);
     QVERIFY(
         status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
+}
+
+// ADR-0286: the working lists an engine set aside when tabs became the
+// window's are offered once; opened, they are tabs of this window -- never
+// sent back -- and gone from the engine.
+void BenchMainWindowTest::listsLeftOnTheEngineAreOfferedOnce() {
+    engine_.stop();
+    QTemporaryDir state;
+    QVERIFY(state.isValid());
+    const auto folder = std::filesystem::path{state.path().toStdString()};
+    testing::TestEngine own;
+    QVERIFY2(own.start(folder), own.log().constData());
+    own.stop();
+    // As schema 56 sets a working list aside, written where it keeps them.
+    const auto list = core::StableId::random().to_string();
+    const auto first = core::StableId::random().to_string();
+    const auto second = core::StableId::random().to_string();
+    {
+        sqlite3* database = nullptr;
+        QCOMPARE(sqlite3_open((folder / "lists.sqlite").c_str(), &database), SQLITE_OK);
+        const auto sql =
+            "INSERT INTO retired_engine_lists(id, name, kind, revision, created_ms, modified_ms, "
+            "draft_of, draft_base) VALUES('" + list + "', CAST('Left over' AS BLOB), 0, 3, 1, 1, "
+            "NULL, 0);"
+            "INSERT INTO retired_engine_list_items(list_id, position, entry_id, raw_path, "
+            "duration_ms, title, artist, album) VALUES"
+            "('" + list + "', 0, '" + first + "', CAST('/music/left/one.flac' AS BLOB), 1000, "
+            "'One', 'Someone', 'Album'),"
+            "('" + list + "', 1, '" + second + "', CAST('/music/left/two.flac' AS BLOB), 1000, "
+            "'Two', 'Someone', 'Album');";
+        char* error = nullptr;
+        const auto done = sqlite3_exec(database, sql.c_str(), nullptr, nullptr, &error);
+        QVERIFY2(done == SQLITE_OK, error);
+        sqlite3_close(database);
+    }
+    QVERIFY2(own.start(folder), own.log().constData());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = own.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    QCOMPARE((*engine)->call("list.retired")->at("lists").size(), std::size_t{1});
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QMessageBox* offer = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (offer = window.findChild<QMessageBox*>(QStringLiteral("bench-retired-lists"))) != nullptr,
+        10'000);
+    QVERIFY(offer->informativeText().contains(QStringLiteral("Left over")));
+    QAbstractButton* open = nullptr;
+    for (auto* button : offer->buttons()) {
+        if (button->text() == QStringLiteral("Open as tabs")) {
+            open = button;
+        }
+    }
+    QVERIFY(open != nullptr);
+    open->click();
+    BenchMainWindow::ListTab* tab = nullptr;
+    QTRY_VERIFY((tab = window.tabForDocument(QString::fromStdString(list))) != nullptr);
+    QCOMPARE(rowPaths(*tab->model),
+             (std::vector<std::string>{"/music/left/one.flac", "/music/left/two.flac"}));
+    QCOMPARE(tab->model->rows().front().entry_id.to_string(), first);
+    QCOMPARE(displayText(tab->document.name), QStringLiteral("Left over"));
+    QVERIFY(tab->document.kind != persistence::ListKind::saved);
+    QTRY_VERIFY((*engine)->call("list.retired")->at("lists").empty());
+    // A tab of this window's: not sent back to the engine.
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(std::ranges::none_of((*engine)->call("list.all")->at("lists"),
+                                 [&list](const protocol::Json& summary) {
+                                     return summary.value("id", std::string{}) == list;
+                                 }));
+    (*engine)->close();
+    own.stop();
 }
 
 } // namespace trackknife::bench

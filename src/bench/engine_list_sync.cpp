@@ -407,17 +407,12 @@ void EngineListSync::update(const std::vector<persistence::ListDocumentWrite>& d
             compare(key);
         }
     }
-    // Gone from the window: a working list goes from its engine too; a saved
-    // one stays there, which is what saving it was for.
+    // Gone from the window: a saved list stays on its engine, which is what
+    // saving it was for; a tab was never there (ADR-0286).
     for (auto entry = known_.begin(); entry != known_.end();) {
         if (present.contains(entry->first)) {
             ++entry;
             continue;
-        }
-        // Whether or not this window knows it was sent: after a reconnect or
-        // a failed write it cannot tell, and the engine says if it had none.
-        if (entry->second.working) {
-            remove(entry->first, entry->second.engine);
         }
         settle(entry->second, false);
         entry = known_.erase(entry);
@@ -457,8 +452,14 @@ void EngineListSync::sync(const std::string& id) {
     if (!stateFor(known.engine).compared) {
         return;
     }
+    // ADR-0286: a tab that is no saved playlist is this window's alone; it
+    // never goes to an engine.
+    if (known.working) {
+        settle(known, false);
+        return;
+    }
     // A saved list's unsaved edits stay in this window until Save.
-    if (!known.working && known.dirty) {
+    if (known.dirty) {
         settle(known, false);
         return;
     }

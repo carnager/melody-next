@@ -98,7 +98,7 @@ void usage(std::ostream& out) {
            "  play list NAME...           play one of the engine's lists: by its name,\n"
            "                              or every word found in one name\n"
            "\n"
-           "  lists                       the engine's lists, saved and working\n"
+           "  lists                       the engine's saved playlists\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  find QUERY [--format EXPR]  tracks a query finds, one line each, formatted\n"

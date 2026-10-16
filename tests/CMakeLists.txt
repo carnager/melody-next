@@ -296,6 +296,10 @@ target_link_libraries(
     trackknife_list_repository_tests
     PRIVATE Trackknife::Persistence trackknife_project_options trackknife_project_warnings
 )
+target_compile_definitions(
+    trackknife_list_repository_tests
+    PRIVATE TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
+)
 add_test(NAME list-repository COMMAND trackknife_list_repository_tests)
 
 add_executable(trackknife_list_edits_tests list_edits_test.cpp)
@@ -950,8 +954,8 @@ if(TRACKKNIFE_BUILD_UI)
     add_dependencies(trackknife_bench_main_window_tests trackknife_engine_daemon melody_agent)
     target_link_libraries(
         trackknife_bench_main_window_tests
-        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options
-                trackknife_project_warnings
+        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test PkgConfig::SQLITE3
+                trackknife_project_options trackknife_project_warnings
     )
     # The window's cases start an engine each and run for minutes in one
     # process; as shares (qtest_shard.hpp) they run side by side. Each process

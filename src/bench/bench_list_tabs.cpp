@@ -1183,6 +1183,31 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
 
 // Dynamic results from an engine's library show a rating it stored, and
 // rules on ratings look again.
+// ADR-0286: lists an engine set aside when tabs became this window's,
+// offered once: asked without holding the window -- nothing waits on it.
+void BenchMainWindow::offerRetiredLists(const QString& engine, const QStringList& names,
+                                        std::function<void(RetiredChoice)> answer) {
+    auto* box = new QMessageBox(QMessageBox::Question, tr("Lists left on %1").arg(engine),
+                                tr("%n list(s) from earlier tabs are left on %1. Tabs are this "
+                                   "window's now, and only saved playlists stay on an engine.",
+                                   nullptr, static_cast<int>(names.size()))
+                                    .arg(engine),
+                                QMessageBox::NoButton, this);
+    box->setObjectName(QStringLiteral("bench-retired-lists"));
+    box->setInformativeText(names.join(QStringLiteral(", ")));
+    auto* open = box->addButton(tr("Open as tabs"), QMessageBox::AcceptRole);
+    auto* discard = box->addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    box->addButton(tr("Later"), QMessageBox::RejectRole);
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    connect(box, &QMessageBox::buttonClicked, this,
+            [open, discard, answer = std::move(answer)](QAbstractButton* clicked) {
+                answer(clicked == open      ? RetiredChoice::open
+                       : clicked == discard ? RetiredChoice::discard
+                                            : RetiredChoice::later);
+            });
+    box->open();
+}
+
 void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
                                            const QHash<QString, unsigned>& ratings) {
     // What plays, rated here or anywhere else.

@@ -9,6 +9,8 @@
 #include <QObject>
 #include <QString>
 
+#include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace trackknife::bench {
@@ -16,6 +18,9 @@ namespace trackknife::bench {
 // What the workspace asks of the window drawing it (ADR-0220): to say
 // something, and -- while the window's logic moves into the workspace --
 // the parts of it that have not moved yet. The window implements it.
+// ADR-0286: what to do with the lists an engine set aside.
+enum class RetiredChoice : std::uint8_t { later, open, discard };
+
 class WorkspaceView {
   public:
     WorkspaceView() = default;
@@ -73,6 +78,11 @@ class WorkspaceView {
     virtual void enginesSynced() = 0;
     // An engine's lists changed, or who has which.
     virtual void engineListsChanged() = 0;
+    // ADR-0286: lists an engine set aside when tabs became the window's,
+    // offered once; `answer` is called with what was chosen, and not at all
+    // when the question goes unanswered.
+    virtual void offerRetiredLists(const QString& engine, const QStringList& names,
+                                   std::function<void(RetiredChoice)> answer) = 0;
     // One engine's stored ratings changed.
     virtual void engineRatingsChanged(const EngineKey& engine,
                                       const QHash<QString, unsigned>& ratings) = 0;

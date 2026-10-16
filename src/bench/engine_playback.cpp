@@ -68,6 +68,7 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
     // is not used; one that is older is, and said so.
     if (auto info = client->call("engine.info")) {
         const auto peer = protocol::peer_version(*info);
+        engine_level_.store(peer.level);
         auto said = protocol::compatibility_message(
             peer, protocol::displayable_text(info->value("name", std::string{})), "Trackknife");
         bool tell = false;
@@ -795,19 +796,94 @@ void EnginePlayback::setRequests(const std::vector<LocalTrackRow>& rows,
     send(std::move(calls));
 }
 
-void EnginePlayback::replaceQueue(
-    const std::vector<LocalTrackRow>& rows,
-    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides, const QString& list) {
-    auto entries = protocol::Json::array();
+namespace {
+
+// ADR-0286: a queue entry as list.edit's items have it -- the group's fields
+// on the item itself -- for playback.edit_queue.
+[[nodiscard]] protocol::Json listItemOf(protocol::Json entry) {
+    if (const auto group = entry.find("group"); group != entry.end() && group->is_object()) {
+        for (const auto* key : {"album_artist", "artist", "album", "date"}) {
+            if (const auto value = group->find(key); value != group->end()) {
+                entry[key] = *value;
+            }
+        }
+        entry.erase("group");
+    }
+    return entry;
+}
+
+// Within the line an engine takes (a megabyte), as the list sync's batches.
+constexpr std::size_t queue_part_bytes = 256U * 1024U;
+
+} // namespace
+
+std::vector<std::pair<QString, protocol::Json>>
+EnginePlayback::queueCalls(const std::vector<LocalTrackRow>& rows,
+                           const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                           const QString& list) const {
+    std::vector<protocol::Json> entries;
+    entries.reserve(rows.size());
     for (std::size_t index = 0; index < rows.size(); ++index) {
         entries.push_back(
             entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
     }
-    protocol::Json params{{"entries", std::move(entries)}};
-    if (!list.isEmpty()) {
-        params["list"] = list.toStdString();
+    std::vector<std::pair<QString, protocol::Json>> calls;
+    const auto with_list = [&list](protocol::Json params) {
+        if (!list.isEmpty()) {
+            params["list"] = list.toStdString();
+        }
+        return params;
+    };
+    // An engine before level 15 takes a queue whole, as it always did.
+    if (engine_level_.load() < 15) {
+        auto whole = protocol::Json::array();
+        for (auto& entry : entries) {
+            whole.push_back(std::move(entry));
+        }
+        calls.emplace_back(QStringLiteral("playback.replace_queue"),
+                           with_list(protocol::Json{{"entries", std::move(whole)}}));
+        return calls;
     }
-    send(QStringLiteral("playback.replace_queue"), std::move(params));
+    // ADR-0286: in parts, each within a line: the first replaces the queue,
+    // each after it is inserted after the last entry so far.
+    auto part = protocol::Json::array();
+    std::size_t bytes = 0U;
+    std::string after;
+    bool first = true;
+    const auto flush = [&] {
+        if (first) {
+            calls.emplace_back(QStringLiteral("playback.replace_queue"),
+                               with_list(protocol::Json{{"entries", std::move(part)}}));
+            first = false;
+        } else if (!part.empty()) {
+            protocol::Json insert{{"insert", std::move(part)}, {"after", after}};
+            calls.emplace_back(QStringLiteral("playback.edit_queue"),
+                               with_list(protocol::Json{
+                                   {"edits", protocol::Json::array({std::move(insert)})}}));
+        }
+        part = protocol::Json::array();
+        bytes = 0U;
+    };
+    for (auto& entry : entries) {
+        auto item = first ? std::move(entry) : listItemOf(std::move(entry));
+        const auto size = item.dump().size();
+        if (!part.empty() && bytes + size > queue_part_bytes) {
+            const auto last = part.back().value("entry", std::string{});
+            flush();
+            after = last;
+            item = listItemOf(std::move(item));
+        }
+        bytes += size;
+        part.push_back(std::move(item));
+    }
+    flush();
+    return calls;
+}
+
+void EnginePlayback::replaceQueue(
+    const std::vector<LocalTrackRow>& rows,
+    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides, const QString& list) {
+    send(queueCalls(rows, overrides, list));
 }
 
 QHash<QString, EnginePlayback::Continuation>
@@ -888,17 +964,7 @@ void EnginePlayback::setContinuation(const QString& list, const std::optional<Co
 void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
                           const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
                           const core::StableId& entry, const QString& list) {
-    auto entries = protocol::Json::array();
-    for (std::size_t index = 0; index < rows.size(); ++index) {
-        entries.push_back(
-            entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
-    }
-    std::vector<std::pair<QString, protocol::Json>> calls;
-    protocol::Json queue{{"entries", std::move(entries)}};
-    if (!list.isEmpty()) {
-        queue["list"] = list.toStdString();
-    }
-    calls.emplace_back(QStringLiteral("playback.replace_queue"), std::move(queue));
+    auto calls = queueCalls(rows, overrides, list);
     calls.emplace_back(QStringLiteral("playback.play"),
                        protocol::Json{{"entry", entry.to_string()}});
     send(std::move(calls));

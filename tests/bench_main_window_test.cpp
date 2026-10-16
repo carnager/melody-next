@@ -1443,10 +1443,9 @@ void BenchMainWindowTest::sharingSettingsAreHandedToTheEngineOnce() {
     settings.remove(QLatin1String(SettingsDialog::engine_music_root_key));
 }
 
-// ADR-0233: the window's lists are on the engine that owns their files, so
-// the phone and the CLI see them. A working list follows its tab -- changed as
-// it changes, gone when it closes; a saved one is written when saved, not
-// while it has unsaved edits.
+// ADR-0286: a tab is the window's; only a saved playlist is on its engine,
+// for the phone and the CLI to see. A tab that is none never reaches it; one
+// saved is written with the tab's own id, and not while it has unsaved edits.
 void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     BenchMainWindow window;
     window.show();
@@ -1478,11 +1477,13 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
         return made;
     };
 
-    // The window's own first list, restored and then saved, is there.
+    // The window's own first tab: its own, not the engine's.
     QVERIFY(!window.list_tabs_.empty());
     const auto first = window.list_tabs_.front()->document.id.to_string();
-    QTRY_VERIFY(listed(first).has_value());
-    QCOMPARE(listed(first)->value("kind", std::string{}), std::string{"working"});
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(first).has_value());
 
     auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                             .kind = persistence::ListKind::scratch,
@@ -1495,19 +1496,24 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     tab->model->appendRows(rows(3));
     window.markTabDirty(*tab);
     window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(id).has_value());
+
+    // Saved: a saved playlist of the tab's own id, with its entries.
+    tab->document.kind = persistence::ListKind::saved;
+    tab->document.dirty = false;
+    window.persistNow(false);
     QTRY_VERIFY(listed(id).has_value() && listed(id)->value("tracks", 0) == 3);
     QCOMPARE(listed(id)->value("name", std::string{}), std::string{"Party"});
+    QCOMPARE(listed(id)->value("kind", std::string{}), std::string{"saved"});
     auto items = (*engine)->call("list.get", protocol::Json{{"id", id}});
     QVERIFY(items.has_value());
     QCOMPARE(items->at("items").at(1).value("title", std::string{}), std::string{"Track 1"});
     QCOMPARE(items->at("items").at(0).value("entry", std::string{}),
              tab->model->rows().front().entry_id.to_string());
 
-    // Saved: written as saved. Then edited, unsaved: not written.
-    tab->document.kind = persistence::ListKind::saved;
-    tab->document.dirty = false;
-    window.persistNow(false);
-    QTRY_COMPARE(listed(id)->value("kind", std::string{}), std::string{"saved"});
+    // Edited, unsaved: not written.
     tab->model->appendRows(rows(1));
     tab->document.dirty = true;
     window.persistNow(false);
@@ -1515,7 +1521,8 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     QTRY_VERIFY(!window.list_sync_->busy());
     QCOMPARE(listed(id)->value("tracks", 0), 3);
 
-    // A working list's tab closed: gone from the engine. A saved one stays.
+    // A tab that is no saved playlist, filled and closed: never on the
+    // engine.
     auto* scratch =
         window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                     .kind = persistence::ListKind::scratch,
@@ -1527,10 +1534,11 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     const auto scratch_id = scratch->document.id.to_string();
     scratch->model->appendRows(rows(1));
     window.persistNow(false);
-    QTRY_VERIFY(listed(scratch_id).has_value());
+    QTest::qWait(300);
+    QVERIFY(!listed(scratch_id).has_value());
     window.closeTabAt(window.tabs_->indexOf(scratch->view));
     window.persistNow(false);
-    QTRY_VERIFY(!listed(scratch_id).has_value());
+    QVERIFY(!listed(scratch_id).has_value());
     // Saved again -- the edits go too -- and then closed, with nothing to ask
     // about: the list stays on the engine.
     tab->document.dirty = false;
@@ -1583,9 +1591,10 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     };
 
     // 8,000 tracks, over two megabytes of list: more than the engine takes
-    // in one line, so it arrives in batches.
+    // in one line, so it arrives in batches. A saved playlist: what is on an
+    // engine (ADR-0286).
     auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                            .kind = persistence::ListKind::scratch,
+                                                            .kind = persistence::ListKind::saved,
                                                             .name = "Long",
                                                             .pinned = false,
                                                             .dirty = false,
@@ -1607,17 +1616,20 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     }
     tab->model->appendRows(std::move(made));
     window.markTabDirty(*tab);
+    // Saved.
+    tab->document.dirty = false;
     window.persistNow(false);
     QTRY_VERIFY_WITH_TIMEOUT(summary(id).value("tracks", 0) == 8'000 && !window.list_sync_->busy(),
                              30'000);
     QCOMPARE(entries(id), shown(*tab->model));
     const auto made_at = summary(id).value("revision", std::uint64_t{0});
 
-    // Three rows dragged: one edit, the list as shown.
+    // Three rows dragged and saved: one edit, the list as shown.
     auto rows = tab->model->rows();
     std::rotate(rows.begin() + 5, rows.begin() + 8, rows.begin() + 101);
     tab->model->replaceRows(std::move(rows));
     window.markTabDirty(*tab);
+    tab->document.dirty = false;
     window.persistNow(false);
     QTRY_VERIFY(summary(id).value("revision", std::uint64_t{0}) == made_at + 1U &&
                 !window.list_sync_->busy());
@@ -1642,14 +1654,47 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     QCOMPARE(held.at(10).at("group").value("album_artist", std::string{}), std::string{"Someone"});
     QCOMPARE(summary(id).value("revision", std::uint64_t{0}), made_at + 1U);
 
-    // A row taken from the playing list leaves the engine's queue as well.
+    // A row taken from the playing list leaves the engine's queue as well;
+    // the playlist keeps it until Save.
     tab->model->removeRowIndexes({0});
     window.markTabDirty(*tab);
     QTRY_VERIFY(window.localPlayback()->state().queue_size == 7'999U);
     QTRY_VERIFY(!window.list_sync_->busy());
     QTest::qWait(300);
     QCOMPARE(tab->model->rowCount(), 7'999);
-    QCOMPARE(entries(id), shown(*tab->model));
+    QCOMPARE(entries(id).size(), std::size_t{8'000});
+
+    // ADR-0286: a tab that is no saved playlist plays as long as it is: its
+    // queue sent in parts, each within a line, and never a list.
+    auto* scratch = window.addListTab(persistence::ListDocument{
+                                          .id = core::StableId::random(),
+                                          .kind = persistence::ListKind::scratch,
+                                          .name = "Long scratch",
+                                          .pinned = false,
+                                          .dirty = false,
+                                          .items = {}},
+                                      true);
+    std::vector<LocalTrackRow> copied = tab->model->rows();
+    for (auto& row : copied) {
+        row.entry_id = core::StableId::random();
+    }
+    scratch->model->appendRows(std::move(copied));
+    window.markTabDirty(*scratch);
+    window.persistNow(false);
+    window.playRow(*scratch, 7'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback()->state().queue_size == 7'999U &&
+                                 window.localPlayback()->state().entry ==
+                                     QString::fromStdString(
+                                         scratch->model->rows()[7'000].entry_id.to_string()),
+                             10'000);
+    queue = (*engine)->call("playback.queue");
+    QVERIFY(queue.has_value());
+    QCOMPARE(queue->at("entries").size(), std::size_t{7'999});
+    QCOMPARE(queue->at("entries").at(7'998).value("entry", std::string{}),
+             scratch->model->rows().back().entry_id.to_string());
+    QCOMPARE(queue->at("entries").at(5'000).at("group").value("album", std::string{}),
+             std::string{"An album of some length"});
+    QVERIFY(summary(scratch->document.id.to_string()).empty());
     QVERIFY2(!engine_.log().contains("refused a"), "nothing the window sent was too long");
     (*engine)->close();
 }
@@ -1670,8 +1715,9 @@ void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
         return got ? got->value("revision", std::uint64_t{0}) : std::uint64_t{0};
     };
 
+    // A saved playlist: what other clients see (ADR-0286).
     auto* tab = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                            .kind = persistence::ListKind::scratch,
+                                                            .kind = persistence::ListKind::saved,
                                                             .name = "Shared",
                                                             .pinned = false,
                                                             .dirty = false,
@@ -2211,9 +2257,10 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     QVERIFY(window.lists_pane_->isHidden());
 }
 
-// A working list closed here leaves its engine, whether or not this window
-// can still tell it was sent -- after a reconnect it cannot.
-void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
+// ADR-0286: a tab that is no saved playlist is the window's alone: never on
+// its engine -- not after a reconnect, not on closing -- and nothing is left
+// to remove there.
+void BenchMainWindowTest::aScratchTabNeverReachesItsEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
@@ -2240,14 +2287,23 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
     LocalTrackRow row;
     row.raw_path = "/music/scratch.flac";
     scratch->model->appendRows({row});
+    window.markTabDirty(*scratch);
     window.persistNow(false);
-    QTRY_VERIFY(listed(id));
+    QTest::qWait(300);
     QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(id));
     window.list_sync_->reconnected(window.localPlayback());
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(id));
+    // Closed with nothing to ask: its contents let go of, as Discard would.
+    scratch->document.dirty = false;
     window.closeTabAt(window.tabs_->indexOf(scratch->view));
     window.persistNow(false);
-    QTRY_VERIFY(!listed(id));
-    QTRY_VERIFY(
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(id));
+    QVERIFY(
         QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
@@ -2272,7 +2328,7 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
     };
     auto* scratch =
         window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                    .kind = persistence::ListKind::scratch,
+                                                    .kind = persistence::ListKind::saved,
                                                     .name = "Scratch",
                                                     .pinned = false,
                                                     .dirty = false,

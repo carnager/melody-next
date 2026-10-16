@@ -313,7 +313,9 @@ class BenchMainWindowTest final : public QObject {
     void aPasswordGivenLaterReachesTheEngine();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
-    void aWorkingListClosedAfterAReconnectLeavesItsEngine();
+    void aScratchTabNeverReachesItsEngine();
+    void listsLeftOnTheEngineAreOfferedOnce();
+    void theTabStoreKeepsWhatItCannotRead();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

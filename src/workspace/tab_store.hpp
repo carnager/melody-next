@@ -18,11 +18,12 @@
 
 namespace trackknife::bench {
 
-// ADR-0259: what of its tabs a window keeps -- not the lists, which are their
-// engines'. Which lists are open and how, in the window's settings; and a
-// cache of each tab's rows, so it opens at once and shows what it held while
-// its engine is away. The cache is never sent anywhere, and losing it costs
-// a tab that is blank until its engine answers.
+// ADR-0286: the window's tabs -- which are open and how, in its settings;
+// and each tab's rows, kept here. A tab that is no saved playlist is kept
+// nowhere else: this is its only copy, so it lives with the window's data,
+// not in a cache, a file that cannot be read is set aside and said rather
+// than forgotten, and the workspace backup takes the tabs too. A saved
+// playlist's rows here open it at once; its engine has it as well.
 class TabStore {
   public:
     struct Tab {
@@ -46,8 +47,9 @@ class TabStore {
         friend bool operator==(const State&, const State&) = default;
     };
 
-    // Rows are cached under `cache_directory`; empty, the window's own.
-    explicit TabStore(QString cache_directory = {});
+    // Rows are kept under `directory`; empty, the window's own
+    // (defaultDirectory, where those kept in its cache before are moved).
+    explicit TabStore(QString directory = {});
     ~TabStore();
     TabStore(const TabStore&) = delete;
     TabStore& operator=(const TabStore&) = delete;
@@ -60,21 +62,36 @@ class TabStore {
 
     // Written on a thread of its own, the latest of a tab's rows only.
     void writeRows(persistence::ListDocument document);
-    // Any thread; nothing for a tab with no cache, or one unreadable.
+    // Any thread; nothing for a tab with no rows kept. One whose file cannot
+    // be read is set aside beside it (".unreadable") and named by
+    // takeUnreadable, for the window to say.
     [[nodiscard]] std::optional<persistence::ListDocument> readRows(const core::StableId& id) const;
+    [[nodiscard]] std::vector<QString> takeUnreadable();
     // Every cache but those of `keep`.
     void dropAllBut(const std::vector<core::StableId>& keep);
     // Until what was asked to be written is.
     void flush();
 
     [[nodiscard]] QString directory() const { return directory_; }
+    // AppDataLocation/tabs: with the window's data.
+    [[nodiscard]] static QString defaultDirectory();
+    // ADR-0286: the rows of every tab copied into `destination`, a folder
+    // made for them -- the workspace backup's.
+    [[nodiscard]] bool copyTo(const QString& destination);
+    // The tabs of a backup put in place of these, which are kept beside them
+    // ("tabs-before-restore-…"). Before any TabStore is made.
+    [[nodiscard]] static bool restoreFrom(const QString& source);
 
   private:
     [[nodiscard]] QString pathOf(const core::StableId& id) const;
+    void setAside(const QString& path) const;
     void work();
 
     QString directory_;
     mutable std::mutex mutex_;
+    // Files set aside by readRows, not said yet.
+    mutable std::mutex unreadable_mutex_;
+    mutable std::vector<QString> unreadable_;
     std::condition_variable wake_;
     std::condition_variable idle_;
     std::map<std::string, persistence::ListDocument> pending_;

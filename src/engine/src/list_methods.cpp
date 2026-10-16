@@ -6,11 +6,14 @@
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/track_description.hpp"
 #include "trackknife/engine/workspace.hpp"
+#include "trackknife/persistence/list_edits.hpp"
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -244,6 +247,55 @@ using protocol::Json;
     return item;
 }
 
+// ADR-0286: a working list is a Trackknife tab now, not a list here.
+[[nodiscard]] core::Error working_refused() {
+    return core::Error{.code = core::ErrorCode::unsupported,
+                       .message = "working lists are Trackknife's tabs now; only saved "
+                                  "playlists live on the engine (ADR-0286)",
+                       .context = {}};
+}
+
+[[nodiscard]] Json revision_json(const core::LocalSourceRevision& revision) {
+    return Json{{"device", revision.device},
+                {"inode", revision.inode},
+                {"size", revision.size},
+                {"seconds", revision.modification_time_seconds},
+                {"nanoseconds", revision.modification_time_nanoseconds}};
+}
+
+// A revision as revision_json gives it, under "revision".
+[[nodiscard]] std::optional<core::LocalSourceRevision> persistence_revision(const Json& value) {
+    const auto found = value.find("revision");
+    if (found == value.end() || !found->is_object()) {
+        return std::nullopt;
+    }
+    const auto unsigned_of = [&found](const char* key) -> std::optional<std::uint64_t> {
+        const auto at = found->find(key);
+        return at != found->end() && at->is_number_unsigned()
+                   ? std::optional{at->get<std::uint64_t>()}
+                   : std::nullopt;
+    };
+    const auto signed_of = [&found](const char* key) -> std::optional<std::int64_t> {
+        const auto at = found->find(key);
+        return at != found->end() && at->is_number_integer()
+                   ? std::optional{at->get<std::int64_t>()}
+                   : std::nullopt;
+    };
+    const auto device = unsigned_of("device");
+    const auto inode = unsigned_of("inode");
+    const auto size = unsigned_of("size");
+    const auto seconds = signed_of("seconds");
+    const auto nanoseconds = signed_of("nanoseconds");
+    if (!device || !inode || !size || !seconds || !nanoseconds) {
+        return std::nullopt;
+    }
+    return core::LocalSourceRevision{.device = *device,
+                                     .inode = *inode,
+                                     .size = *size,
+                                     .modification_time_seconds = *seconds,
+                                     .modification_time_nanoseconds = *nanoseconds};
+}
+
 // What the player plays for a list entry: the same identity, so a client
 // that shows the list can find the entry playing in it.
 [[nodiscard]] QueueEntry queue_entry(const persistence::EngineListItem& item) {
@@ -430,9 +482,14 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         if (!revision) {
             return std::unexpected(std::move(revision.error()));
         }
-        const auto kind_text = params.value("kind", std::string{"working"});
-        if (kind_text != "working" && kind_text != "saved") {
-            return std::unexpected(bad_params("kind is working or saved", "kind"));
+        // ADR-0286: only saved playlists live here; a working list is a
+        // Trackknife tab now.
+        const auto kind_text = params.value("kind", std::string{"saved"});
+        if (kind_text == "working") {
+            return std::unexpected(working_refused());
+        }
+        if (kind_text != "saved") {
+            return std::unexpected(bad_params("kind is saved", "kind"));
         }
         const auto items = params.find("items");
         if (items == params.end() || !items->is_array()) {
@@ -502,8 +559,9 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
             std::optional<persistence::EngineListKind> kind;
             if (const auto given = params.find("kind"); given != params.end()) {
                 if (*given == "working") {
-                    kind = persistence::EngineListKind::working;
-                } else if (*given == "saved") {
+                    return std::unexpected(working_refused());
+                }
+                if (*given == "saved") {
                     kind = persistence::EngineListKind::saved;
                 } else {
                     return std::unexpected(bad_params("kind is working or saved", "kind"));
@@ -685,7 +743,7 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
                 }
             }
             auto made = workspace.save_engine_list(core::StableId::random(), *name,
-                                                   persistence::EngineListKind::working, items, 0U,
+                                                   persistence::EngineListKind::saved, items, 0U,
                                                    now_ms());
             if (!made) {
                 return std::unexpected(std::move(made.error()));
@@ -695,43 +753,204 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         });
 
     // ADR-0259: the draft of a saved list -- the one there is, or a new one.
-    dispatcher.on("list.draft", [&workspace, changed](const Json& params) -> core::Result<Json> {
-        const auto of = params.find("of");
-        auto saved = of != params.end() && of->is_string()
-                         ? core::StableId::parse(of->get<std::string>())
-                         : core::Result<core::StableId>{std::unexpected(core::Error{})};
-        if (!saved) {
-            return std::unexpected(bad_params("of names the saved list to draft", "of"));
+    // ADR-0286: the working lists and drafts schema 56 set aside, for a
+    // client to offer once, read whole, and drop once dealt with.
+    dispatcher.on("list.retired", [&workspace](const Json&) -> core::Result<Json> {
+        auto lists = workspace.load_retired_engine_lists();
+        if (!lists) {
+            return std::unexpected(std::move(lists.error()));
         }
-        auto draft = workspace.draft_engine_list(*saved, core::StableId::random(), now_ms());
-        if (!draft) {
-            return std::unexpected(std::move(draft.error()));
+        auto rendered = Json::array();
+        for (const auto& summary : *lists) {
+            rendered.push_back(summary_json(summary));
         }
-        changed(&*draft, draft->id);
-        return summary_json(*draft);
+        return Json{{"lists", std::move(rendered)}};
+    });
+    dispatcher.on("list.retired_get", [&workspace](const Json& params) -> core::Result<Json> {
+        auto id = required_id(params);
+        if (!id) {
+            return std::unexpected(std::move(id.error()));
+        }
+        auto list = workspace.load_retired_engine_list(*id);
+        if (!list) {
+            return std::unexpected(std::move(list.error()));
+        }
+        if (!*list) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
+                                               .message = "there is no such retired list",
+                                               .context = {}});
+        }
+        auto rendered = summary_json((*list)->summary);
+        auto items = Json::array();
+        for (const auto& item : (*list)->items) {
+            items.push_back(item_json(item));
+        }
+        rendered["items"] = std::move(items);
+        return rendered;
+    });
+    dispatcher.on("list.retired_drop", [&workspace](const Json& params) -> core::Result<Json> {
+        const auto ids = params.find("ids");
+        if (ids == params.end() || !ids->is_array()) {
+            return std::unexpected(bad_params("ids names the retired lists to drop", "ids"));
+        }
+        std::vector<core::StableId> parsed;
+        for (const auto& value : *ids) {
+            auto id = value.is_string() ? core::StableId::parse(value.get<std::string>())
+                                        : core::Result<core::StableId>{std::unexpected(core::Error{})};
+            if (!id) {
+                return std::unexpected(bad_params("a list is named by its identity", "ids"));
+            }
+            parsed.push_back(*id);
+        }
+        auto dropped = workspace.drop_retired_engine_lists(parsed);
+        if (!dropped) {
+            return std::unexpected(std::move(dropped.error()));
+        }
+        return Json{{"dropped", *dropped}};
     });
 
-    // ADR-0259: a draft saved into the list it drafts, and gone. A queue
-    // played from the draft is played from the list from then on.
+    // ADR-0286: what the library knows of files, by path, as list.describe
+    // answers for a list's entries -- for a tab kept in a client.
+    dispatcher.on("catalogue.describe", [catalogue](const Json& params) -> core::Result<Json> {
+        const auto asked = params.find("paths");
+        if (asked == params.end() || !asked->is_array() || asked->size() > describe_limit) {
+            return std::unexpected(bad_params("paths names at most 2000 files", "paths"));
+        }
+        std::vector<std::string> paths;
+        paths.reserve(asked->size());
+        for (const auto& value : *asked) {
+            auto path = value.is_string()
+                            ? protocol::decode_raw_path(value.get<std::string>())
+                            : core::Result<std::string>{std::unexpected(core::Error{})};
+            if (!path) {
+                return std::unexpected(bad_params("a path is an encoded raw path", "paths"));
+            }
+            paths.push_back(std::move(*path));
+        }
+        std::vector<std::optional<persistence::LibraryTrackSnapshot>> tracks(paths.size());
+        if (catalogue != nullptr && !paths.empty()) {
+            auto described = catalogue->described_tracks(paths);
+            if (!described) {
+                return std::unexpected(std::move(described.error()));
+            }
+            tracks = std::move(*described);
+        }
+        auto items = Json::array();
+        for (std::size_t index = 0; index < paths.size(); ++index) {
+            items.push_back(Json{{"path", protocol::encode_raw_path(paths[index])},
+                                 {"library", index < tracks.size() && tracks[index]
+                                                 ? describe_track(*tracks[index])
+                                                 : Json(nullptr)}});
+        }
+        return Json{{"items", std::move(items)}};
+    });
+
+    // ADR-0286: where files a client saw at a path and revision are now,
+    // by this engine's move journal: `moved` for those it moved since.
     dispatcher.on(
-        "list.commit", [&workspace, &player, changed](const Json& params) -> core::Result<Json> {
-            auto id = required_id(params);
-            if (!id) {
-                return std::unexpected(std::move(id.error()));
+        "catalogue.resolve_moves", [&workspace](const Json& params) -> core::Result<Json> {
+            const auto asked = params.find("items");
+            if (asked == params.end() || !asked->is_array() || asked->size() > describe_limit) {
+                return std::unexpected(
+                    bad_params("items names at most 2000 files with their revisions", "items"));
             }
-            auto saved =
-                workspace.commit_engine_list_draft(*id, params.value("force", false), now_ms());
-            if (!saved) {
-                return std::unexpected(std::move(saved.error()));
+            std::vector<std::pair<std::string, core::LocalSourceRevision>> sources;
+            sources.reserve(asked->size());
+            for (const auto& value : *asked) {
+                const auto path =
+                    value.is_object() && value.contains("path") && value.at("path").is_string()
+                        ? protocol::decode_raw_path(value.at("path").get<std::string>())
+                        : core::Result<std::string>{std::unexpected(core::Error{})};
+                const auto described =
+                    value.is_object() ? persistence_revision(value) : std::nullopt;
+                if (!path || !described) {
+                    return std::unexpected(
+                        bad_params("each item is a path with its revision", "items"));
+                }
+                sources.emplace_back(*path, *described);
             }
-            static_cast<void>(player.adopt_queue_list(id->to_string(), saved->id.to_string()));
-            changed(nullptr, *id);
-            changed(&*saved, saved->id);
-            return summary_json(*saved);
+            auto moved = workspace.resolve_local_source_moves(sources);
+            if (!moved) {
+                return std::unexpected(std::move(moved.error()));
+            }
+            auto items = Json::array();
+            for (std::size_t index = 0; index < sources.size(); ++index) {
+                Json item{{"path", protocol::encode_raw_path(sources[index].first)},
+                          {"moved", nullptr}};
+                if (const auto& now = (*moved)[index]) {
+                    item["moved"] = Json{{"path", protocol::encode_raw_path(now->first)},
+                                         {"revision", revision_json(now->second)}};
+                }
+                items.push_back(std::move(item));
+            }
+            return Json{{"items", std::move(items)}};
         });
 
-    // Files moved or renamed -- by Trackknife, which does the file work --
-    // followed in every list here: {"moves": [{"from", "to"}]}, encoded paths.
+    // ADR-0286: the queue changed in place, with list.edit's edits -- how a
+    // tab kept in a client sends a long list in parts, and its edits after.
+    // An edit naming an entry the queue no longer holds -- consumed while it
+    // was on its way -- leaves that entry out rather than refusing the rest;
+    // an insert placed after one is placed at the end.
+    dispatcher.on("playback.edit_queue", [&player](const Json& params) -> core::Result<Json> {
+        const auto list = params.value("list", std::string{});
+        const auto asked = params.find("edits");
+        if (asked == params.end() || !asked->is_array()) {
+            return std::unexpected(bad_params("edits must be a list", "edits"));
+        }
+        std::vector<persistence::ListEdit> edits;
+        edits.reserve(asked->size());
+        for (const auto& value : *asked) {
+            auto parsed = edit_from_json(value);
+            if (!parsed) {
+                return std::unexpected(std::move(parsed.error()));
+            }
+            edits.push_back(std::move(*parsed));
+        }
+        auto edited = player.edit_queue(list, [&edits](std::vector<QueueEntry>& queue)
+                                                  -> core::Result<void> {
+            std::set<core::StableId> held;
+            for (const auto& entry : queue) {
+                held.insert(entry.entry_id);
+            }
+            std::optional<core::StableId> last =
+                queue.empty() ? std::nullopt : std::optional{queue.back().entry_id};
+            for (auto& edit : edits) {
+                std::erase_if(edit.entries,
+                              [&held](const core::StableId& entry) { return !held.contains(entry); });
+                if (edit.kind == persistence::ListEdit::Kind::update) {
+                    std::erase_if(edit.items, [&held](const persistence::EngineListItem& item) {
+                        return !held.contains(item.entry_id);
+                    });
+                }
+                if (edit.after && !held.contains(*edit.after)) {
+                    edit.after = last;
+                }
+                if (edit.kind == persistence::ListEdit::Kind::insert) {
+                    for (const auto& item : edit.items) {
+                        held.insert(item.entry_id);
+                        last = item.entry_id;
+                    }
+                } else if (edit.kind == persistence::ListEdit::Kind::remove) {
+                    for (const auto& entry : edit.entries) {
+                        held.erase(entry);
+                    }
+                }
+            }
+            return persistence::apply_list_edits(
+                queue, edits, [](const QueueEntry& entry) { return entry.entry_id; },
+                [](const persistence::EngineListItem& item) { return queue_entry(item); });
+        });
+        if (!edited) {
+            return std::unexpected(std::move(edited.error()));
+        }
+        if (!*edited) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                               .message = "the queue plays another list",
+                                               .context = {}});
+        }
+        return Json{{"queue_revision", player.state().queue_revision}};
+    });
+
     dispatcher.on("list.relocate", [&workspace, changed](const Json& params) -> core::Result<Json> {
         const auto moves = params.find("moves");
         if (moves == params.end() || !moves->is_array()) {

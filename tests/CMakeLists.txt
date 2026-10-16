@@ -55,7 +55,16 @@ target_link_libraries(
     trackknife_daemon_settings_tests
     PRIVATE trackknife_daemon_settings trackknife_project_options trackknife_project_warnings
 )
+target_compile_definitions(
+    trackknife_daemon_settings_tests
+    PRIVATE TRACKKNIFE_MELODYD_SKELETON="${PROJECT_SOURCE_DIR}/packaging/melodyd.conf"
+)
 add_test(NAME daemon-settings COMMAND trackknife_daemon_settings_tests)
+add_test(
+    NAME melody-cli-config
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cli_config_test.sh" $<TARGET_FILE:melody_cli>
+)
+set_tests_properties(melody-cli-config PROPERTIES TIMEOUT 60)
 
 add_executable(trackknife_guests_plan_tests guests_plan_test.cpp)
 target_link_libraries(

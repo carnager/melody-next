@@ -54,10 +54,12 @@ public:
                                     std::string_view key) const;
     [[nodiscard]] const Section* section(std::string_view kind, std::string_view name) const;
 
-    // Sets a key: its line is rewritten where it is, else a line is added
-    // after the section's last entry -- for the top level, before the
-    // comments that head the first section -- else the section is added at
-    // the end. Refuses a key or value this format cannot hold.
+    // Sets a key: its line is rewritten where it is; else a line is added
+    // below the key's commented example ("#key = ...") in its section, as a
+    // skeleton has them; else after the section's last entry -- for the top
+    // level, before the comments that head the first section, or at the end
+    // when there is none; else the section is added at the end. Refuses a
+    // key or value this format cannot hold.
     [[nodiscard]] Result<void> set(std::string_view kind, std::string_view name,
                                    std::string_view key, std::string_view value);
     // Removes a key's line; false when it was not there.

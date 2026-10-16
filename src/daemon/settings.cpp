@@ -2,7 +2,6 @@
 
 #include "settings.hpp"
 
-#include "agent/stream_route.hpp"
 #include "trackknife/core/config_file.hpp"
 #include "trackknife/core/environment.hpp"
 
@@ -19,6 +18,20 @@ namespace trackknife::daemon {
 namespace {
 
 using core::ConfigFile;
+
+// ADR-0239's rates: 0 for the original files, else Opus at 16 to 512 kbps.
+// The agent's own parse_kbps, here so melody-cli need not link the agent.
+[[nodiscard]] std::optional<int> parse_kbps(const std::string_view text) {
+    int kbps = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), kbps);
+    if (error != std::errc{} || end != text.data() + text.size()) {
+        return std::nullopt;
+    }
+    if (kbps != 0 && (kbps < 16 || kbps > 512)) {
+        return std::nullopt;
+    }
+    return kbps;
+}
 
 enum class Shape : std::uint8_t {
     value,
@@ -209,7 +222,7 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
     } else if (key == "play-for-music-root") {
         play_for().music_root = std::filesystem::path{value};
     } else if (key == "play-for-bitrate-nearby" || key == "play-for-bitrate-away") {
-        const auto kbps = agent::parse_kbps(value);
+        const auto kbps = parse_kbps(value);
         if (!kbps) {
             return std::unexpected(
                 refused(where + " wants 0 (the original files) or 16 to 512 kbps, got " + value));
@@ -421,7 +434,7 @@ std::optional<int> parse_stream(const std::string_view text) {
     if (rate.empty() || rate.size() == text.size() - opus.size()) {
         return std::nullopt;
     }
-    const auto kbps = agent::parse_kbps(rate);
+    const auto kbps = parse_kbps(rate);
     if (!kbps || *kbps == 0) {
         return std::nullopt;
     }
@@ -501,7 +514,7 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
             return flags[++index];
         };
         const auto stream = [&](const std::string& value) -> core::Result<std::string> {
-            const auto kbps = agent::parse_kbps(value);
+            const auto kbps = parse_kbps(value);
             if (!kbps) {
                 return std::unexpected(refused("MELODYD_OPTIONS has " + std::string{flag} + " " +
                                                value + ", which is not a bit rate"));
@@ -595,6 +608,18 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
         return std::unexpected(check.error());
     }
     return converted;
+}
+
+core::Result<Settings> check_config(const std::string_view text, std::string origin) {
+    auto file = ConfigFile::parse(text, std::move(origin));
+    if (!file) {
+        return std::unexpected(file.error());
+    }
+    Settings settings;
+    if (auto applied = apply_file(settings, *file); !applied) {
+        return std::unexpected(applied.error());
+    }
+    return settings;
 }
 
 core::Result<Settings> read_settings(const std::span<const std::string_view> arguments,

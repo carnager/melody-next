@@ -179,6 +179,25 @@ void setsIntoFilesWithoutTopLevelKeys() {
     CHECK(file.set("", "", "name", "caprica").has_value());
     CHECK(file.text() == "# caprica\nname = caprica\n\n# The NAS.\n[engine gemenon]\naddress = a\n");
 
+    // Comments only: at the end, unless the key has a commented example,
+    // which it goes below.
+    auto skeleton = *ConfigFile::parse("# The settings.\n\n# The name.\n#name = gemenon\n\n"
+                                       "# The password.\n#password = x\n",
+                                       "f");
+    CHECK(skeleton.set("", "", "password", "secret").has_value());
+    CHECK(skeleton.set("", "", "upnp", "yes").has_value());
+    CHECK(skeleton.text() == "# The settings.\n\n# The name.\n#name = gemenon\n\n"
+                             "# The password.\n#password = x\npassword = secret\nupnp = yes\n");
+    // In a section, its own example; another section's is not it.
+    auto sections = *ConfigFile::parse("[engine a]\n#address = here\nagent = no\n\n"
+                                       "[engine b]\n# Where.\n# address = 1.2.3.4:6603\n",
+                                       "f");
+    CHECK(sections.set("engine", "b", "address", "5.6.7.8:6603").has_value());
+    CHECK(sections.set("engine", "a", "music-root", "/m").has_value());
+    CHECK(sections.text() == "[engine a]\n#address = here\nagent = no\nmusic-root = /m\n\n"
+                             "[engine b]\n# Where.\n# address = 1.2.3.4:6603\n"
+                             "address = 5.6.7.8:6603\n");
+
     auto empty = *ConfigFile::parse("", "f");
     CHECK(empty.set("", "", "name", "caprica").has_value());
     CHECK(empty.text() == "name = caprica\n");

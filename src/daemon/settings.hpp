@@ -90,6 +90,10 @@ config_path(std::span<const std::string_view> arguments);
 [[nodiscard]] core::Result<Settings> read_settings(std::span<const std::string_view> arguments,
                                                    Settings defaults);
 
+// Whether a melodyd.conf would be taken: its format and every setting in
+// it. What melody-cli config checks before it writes one.
+[[nodiscard]] core::Result<Settings> check_config(std::string_view text, std::string origin);
+
 // "original" is 0, "opus N" is N, for N in 16..512 (ADR-0239).
 [[nodiscard]] std::optional<int> parse_stream(std::string_view text);
 // The other way round, for a file written from flags.

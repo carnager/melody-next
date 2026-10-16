@@ -259,6 +259,43 @@ void streams() {
     CHECK(trackknife::daemon::stream_text(96) == "opus 96");
 }
 
+// The skeleton melody-cli config starts a file from: taken as it is, and
+// each example in it -- "#key = value" -- a setting melodyd takes, alone.
+void theSkeletonHolds() {
+    std::ifstream stream{TRACKKNIFE_MELODYD_SKELETON, std::ios::binary};
+    const std::string skeleton{std::istreambuf_iterator<char>{stream},
+                               std::istreambuf_iterator<char>{}};
+    CHECK(!skeleton.empty());
+    const auto as_is = trackknife::daemon::check_config(skeleton, "skeleton");
+    CHECK(as_is && as_is->engines.empty());
+    std::size_t examples = 0;
+    std::string section;
+    std::size_t start = 0;
+    while (start < skeleton.size()) {
+        const auto end = skeleton.find('\n', start);
+        const auto line = skeleton.substr(start, end - start);
+        start = end == std::string::npos ? skeleton.size() : end + 1;
+        if (line.starts_with("#[")) {
+            section = line.substr(1);
+            continue;
+        }
+        if (line.size() < 2 || line[0] != '#' || line[1] < 'a' || line[1] > 'z' ||
+            line.find(" = ") == std::string::npos) {
+            continue;
+        }
+        ++examples;
+        const auto text = (section.empty() ? "" : section + "\n") + line.substr(1) + "\n";
+        const auto taken = trackknife::daemon::check_config(text, "example");
+        if (!taken) {
+            std::cerr << "skeleton example \"" << line << "\": " << taken.error().message << '\n';
+        }
+        CHECK(taken.has_value());
+    }
+    // Every key has its example: the 18 of the file and the 7 of an
+    // [engine]. A key added to melodyd and not here fails this.
+    CHECK(examples == 25U);
+}
+
 } // namespace
 
 int main() {
@@ -273,6 +310,7 @@ int main() {
     saysWhenOthersCanReadThePassword();
     convertsTheOldFile();
     streams();
+    theSkeletonHolds();
     std::filesystem::remove_all(root);
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";

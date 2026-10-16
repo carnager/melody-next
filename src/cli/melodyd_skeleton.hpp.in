@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Made by CMake from packaging/melodyd.conf: the skeleton a new melodyd.conf
+// starts from (ADR-0286).
+
+#pragma once
+
+#include <string_view>
+
+namespace trackknife::cli {
+
+inline constexpr std::string_view melodyd_skeleton = R"melodyd_skeleton(@MELODYD_SKELETON@)melodyd_skeleton";
+
+} // namespace trackknife::cli

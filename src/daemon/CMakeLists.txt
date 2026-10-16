@@ -8,7 +8,7 @@ target_include_directories(trackknife_daemon_settings PUBLIC ${CMAKE_CURRENT_SOU
 target_link_libraries(
     trackknife_daemon_settings
     PUBLIC Trackknife::Core
-    PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
+    PRIVATE trackknife_project_options trackknife_project_warnings
 )
 
 add_executable(trackknife_engine_daemon main.cpp)

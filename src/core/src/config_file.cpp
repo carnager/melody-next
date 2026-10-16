@@ -241,29 +241,66 @@ Result<void> ConfigFile::set(const std::string_view kind, const std::string_view
         lines_[existing->line - 1] = line;
         return reparse();
     }
-    if (kind.empty()) {
-        std::size_t at = 0;
-        if (!top_.empty()) {
-            at = top_.back().line;
-        } else {
-            // Before the first section and the comments that head it.
-            at = sections_.empty() ? lines_.size() : sections_.front().line - 1;
-            while (at > 0 && trimmed(lines_[at - 1]).starts_with('#')) {
-                --at;
+    const auto insert = [this](const std::size_t at, std::string text) {
+        lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(at), std::move(text));
+    };
+    // A commented example of the key -- "#key = ..." -- among the lines
+    // [from, to) is where the key is explained: the line goes below it.
+    const auto example = [this, key](const std::size_t from,
+                                     const std::size_t to) -> std::optional<std::size_t> {
+        for (auto index = from; index < to && index < lines_.size(); ++index) {
+            auto text = trimmed(lines_[index]);
+            if (!text.starts_with('#')) {
+                continue;
             }
-            while (at > 0 && trimmed(lines_[at - 1]).empty()) {
-                --at;
+            text = trimmed(text.substr(1));
+            if (text.starts_with(key) && trimmed(text.substr(key.size())).starts_with('=')) {
+                return index + 1;
             }
         }
-        lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(at), line);
-        if (top_.empty() && at + 1 < lines_.size() && !trimmed(lines_[at + 1]).empty()) {
-            lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(at + 1), std::string{});
+        return std::nullopt;
+    };
+    if (kind.empty()) {
+        const auto end = sections_.empty() ? lines_.size() : sections_.front().line - 1;
+        if (const auto below = example(0, end)) {
+            insert(*below, line);
+            return reparse();
+        }
+        if (!top_.empty()) {
+            insert(top_.back().line, line);
+            return reparse();
+        }
+        if (sections_.empty()) {
+            lines_.push_back(line);
+            return reparse();
+        }
+        // Before the first section and the comments that head it.
+        auto at = end;
+        while (at > 0 && trimmed(lines_[at - 1]).starts_with('#')) {
+            --at;
+        }
+        while (at > 0 && trimmed(lines_[at - 1]).empty()) {
+            --at;
+        }
+        insert(at, line);
+        if (at + 1 < lines_.size() && !trimmed(lines_[at + 1]).empty()) {
+            insert(at + 1, std::string{});
         }
         return reparse();
     }
     if (const auto* existing = section(kind, name)) {
-        const auto at = existing->entries.empty() ? existing->line : existing->entries.back().line;
-        lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(at), line);
+        const auto header = existing->line;
+        auto end = lines_.size();
+        for (const auto& later : sections_) {
+            if (later.line > header) {
+                end = later.line - 1;
+                break;
+            }
+        }
+        const auto below = example(header, end);
+        insert(below ? *below
+                     : (existing->entries.empty() ? header : existing->entries.back().line),
+               line);
         return reparse();
     }
     if (!lines_.empty() && !trimmed(lines_.back()).empty()) {

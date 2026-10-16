@@ -43,11 +43,9 @@ Measured on 2026-10-16:
    password fields go. The command-line flags stay for unusual setups.
 3. **One Engines page** replaces Settings → Library and Settings → Engine:
    the password, the library engine with its status and its music folders
-   (chosen with the engine folder browser), and this computer's "let the
-   library play on this computer's speakers" (`--play-for`). Mounts, stream
-   rates and the listen address go under Advanced. A library on this computer
-   listens on the network with the password; there is no separate sharing
-   switch.
+   (chosen with the engine folder browser). Mounts, stream choices and the
+   listen address go under Advanced. A library on this computer listens on the
+   network with the password; there is no separate sharing switch.
 4. **Only saved playlists live on the engine.** Tabs are Trackknife's: it
    keeps their rows itself, and a tab plays by sending its rows as the queue
    (`playback.replace_queue`, already the client's fallback). The phone and
@@ -57,31 +55,83 @@ Measured on 2026-10-16:
    speaker is `outputs.select`. One listener does not need a queue per
    client.
 6. **No migration for two libraries**: none of the three users has one.
+7. **Every engine plays for every other** by default (`agent = yes` in
+   melodyd itself, not only when Trackknife starts it). An engine with
+   speakers -- headless or not -- is a speaker for the others; newest wins
+   (ADR-0229). An engine with no audio device offers nothing.
 
-### Setup
+### melodyd runs as a service; Trackknife only connects
 
-- **On the desktop**, nothing: Trackknife starts its engine and gives it the
-  password, as it does now.
-- **On a server**, after installing, the password is given there once:
+Trackknife no longer starts melodyd. The package ships `melodyd.service` and
+`melodyd.socket`, the socket enabled for every user
+(`/usr/lib/systemd/user/sockets.target.wants`): the first connection to
+`$XDG_RUNTIME_DIR/melodyd.sock` starts the engine (socket activation, read
+from `LISTEN_FDS` without libsystemd). An engine stopped or not installed is
+said plainly, with the command that starts it. On macOS a documented launchd
+agent does the same. The desktop engine is then configured and run exactly as
+a server's.
 
-  ```
-  $ melody-cli setup
-  Password for your engines: ********
-  Again: ********
-  gemenon is on the network at 192.168.0.200:6603.
-  ```
+Restarting is the service manager's: the engine exits and systemd, launchd
+or Docker starts it again.
 
-  It runs over the local socket, which is trusted already (`docker exec -it
-  melodyd melody-cli setup` in Docker). The engine keeps the password in its
-  state folder, reads it from there when no `--password`/`--password-file` is
-  given, and goes on the network at once, without a restart. Over TCP the
-  command is refused. Run again, it changes the password.
-- **Everything else is in Trackknife.** The engine is found on the network;
-  connecting uses the shared password. An engine with no music folders says
-  so on the Engines page and offers to choose them; the first scan starts when
-  they are chosen.
-- Changing the password in Trackknife sends the new one to every engine it
-  reaches (`engine.set_password`, authenticated with the old one).
+### `melodyd.conf`
+
+One file configures an engine, `~/.config/melody/melodyd.conf` by default,
+another with `--config FILE` (Docker: `/state/melodyd.conf`). It takes over
+the name of today's environment file; a file still holding
+`MELODYD_OPTIONS=…` is converted once into keys.
+
+```
+# melodyd.conf -- caprica
+
+name = caprica
+password = ********
+
+# How this machine plays for every engine.
+agent-music-root = /mnt/nas/Music/Rips/flac
+agent-stream-home = original
+agent-stream-away = opus 128
+
+[engine gemenon]
+# Its address, for when the network can't find it (WireGuard).
+address = 192.168.0.200:6603
+```
+
+- **Keys are the flag names** without `--`; switches are `yes`/`no`; a flag
+  given on the command line wins. Comments are lines of their own, above
+  what they explain; blank lines are ignored.
+- **`[engine NAME]`** is another engine this one plays for, by the name it
+  announces: `address` (connected only while the network does not find it),
+  `music-root`, `stream-home`, `stream-away`, `password`, `agent` (`no`
+  leaves it out). The top-level `agent-*` keys are the defaults for every
+  engine.
+- **Renamed:** `--play-for` and its options become sections;
+  `--agent-bitrate-nearby`/`-away` become `agent-stream-home`/`-away` with
+  `original` or `opus N`. They are the agent's wish (ADR-0239), so they live
+  only where the agent is. `melody-agent` takes the same names.
+- **Strict:** an unknown key, section or value, or a key given twice, stops
+  the start with file and line.
+- **Values** are the rest of the line, trimmed, as raw bytes: paths need not
+  be UTF-8. No quoting.
+- **The password** is a key; the file is written readable by its owner only,
+  and the engine warns when others can read it. `password-file` stays for a
+  password kept apart; both at once is an error.
+- **Changes take effect on restart.**
+
+### Setting up an engine: edit the file
+
+`melodyd` copies a commented skeleton -- every option, commented out, with
+what it does above it, installed as `/usr/share/melody/melodyd.conf` -- to its
+config path on its first start when there is no file. `melody-cli config
+--edit` does the same and opens `$EDITOR`, checks the file with the engine's
+parser when it is saved, and offers to edit again on a mistake.
+`melody-cli config KEY [VALUE]` and `--unset` read and change one key
+(`--engine NAME` for a section), changing that line only, keeping comments and
+order, writing atomically and through a symlink.
+
+On a server that is: install, set `password` in the file, restart. An engine
+without a password stays on its machine, as now (ADR-0223). Its music folders
+are chosen in Trackknife, which finds it on the network.
 
 ## Left for later
 
@@ -99,9 +149,12 @@ Measured on 2026-10-16:
   client claiming it or an accept on the server: nothing to type on the
   server, but whoever comes first owns the music files, or the accept splits
   one action across two places.
-- **Password and music folders both in `melody-cli setup`**: the server is
-  finished in one go, but the folders are then set in a second place besides
-  the Engines page.
+- **`melody-cli setup` asking for the password**, the engine going on the
+  network by restarting itself in place: one more command, where the
+  skeleton already says everything the questions would.
+- **Trackknife starting its own engine**, as now: about 500 lines of
+  launcher building flags and password files, and a desktop engine that is
+  configured unlike every other.
 - **A queue per client**, held by the library engine: measured, nothing on the
   wire says who asks, one `Player` is handed to about fourteen parts of the
   engine, and outputs are engine-wide -- much work for a second listener there
@@ -109,26 +162,40 @@ Measured on 2026-10-16:
 
 ## Consequences
 
-- One place to set up the library, wherever it lives; a server needs one
-  command and no files edited.
+- One place to set up the library, wherever it lives; every engine, the
+  desktop's included, is one config file and a service.
+- caprica's engine state moves from Trackknife's folder
+  (`~/.local/share/trackknife/trackknife`) to the service's, once, keeping
+  its history, ratings and lists.
+- Without systemd or launchd, melodyd is started by hand.
 - `melody-cli lists` and the phone show playlists, not open tabs.
 - A second library, or a second listener with their own queue, cannot be
   expressed in the UI.
 
 ## Stages
 
-1. `melody-cli setup` and the engine's own password.
-2. The Engines page and the one password.
-3. Tabs in Trackknife; working lists leave the engine.
+1. `melodyd.conf`: the parser (core, shared), melodyd reading it, the
+   renames, `agent` on by default, the skeleton, `melody-cli config`.
+2. Socket activation and the units; Trackknife connects instead of starting
+   the engine, and caprica's state moves once.
+3. The Engines page and the one password.
+4. Tabs in Trackknife; working lists leave the engine.
 
 ## Verification
 
-- An engine without a password takes one from `melody-cli setup` over its
-  socket, refuses the command over TCP, is on the network at once, and keeps
-  the password across a restart; `--password-file` still wins.
+- The parser: every key, sections, switches, raw-byte paths, and each
+  refusal with its line; writing one key keeps comments, order, permissions
+  and a symlink.
+- melodyd started with a file behaves as with the same flags; a flag wins
+  over the file; an old `MELODYD_OPTIONS` file is converted once.
+- `melody-cli config --edit` refuses a broken file before the engine sees it.
+- An `[engine]` address is used only while that engine is not found, and
+  never makes a second connection to it.
+- After stage 2, caprica's history, ratings and lists are the same before and
+  after the state moves.
 - The Engines page connects to a freshly set up engine, chooses its folders
   and starts the first scan, in a two-engine test.
 - After stage 3, `list.all` holds saved playlists only, and tabs survive a
   restart from Trackknife's own store; the migration is undone cleanly.
 - Live: gemenon set up from scratch in a test state folder (systemd drop-in)
-  with one `melody-cli setup` and Trackknife.
+  with its skeleton, one password line and Trackknife.

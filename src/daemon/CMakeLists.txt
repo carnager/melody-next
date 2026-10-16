@@ -20,6 +20,12 @@ target_link_libraries(
     PRIVATE trackknife_project_options trackknife_project_warnings
 )
 
+# melody-cli on its own (TRACKKNIFE_CLI_ONLY) needs only the settings above,
+# not the engine and its media libraries.
+if(TRACKKNIFE_CLI_ONLY)
+    return()
+endif()
+
 add_executable(trackknife_engine_daemon main.cpp config_methods.cpp)
 target_link_libraries(
     trackknife_engine_daemon

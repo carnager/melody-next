@@ -11,6 +11,7 @@
 
 #include <QFile>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTcpServer>
@@ -39,6 +40,7 @@ class EngineLauncherTest final : public QObject {
     void sharingSettingsReachTheEngine();
     void theEnginePlaysForTheRemoteWithoutAnAgent();
     void anOutdatedEngineIsSeenAndStopped();
+    void thisUsersEngineIsNotStartedHere();
 };
 
 namespace {
@@ -244,9 +246,29 @@ void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
     QVERIFY(!program.startsWith(bin.path()));
 }
 
-// ADR-0226/0228: sharing this computer's engine is a setting, which reaches
-// the engine the next time it starts -- and restarting it is how a change is
-// taken up.
+namespace {
+
+// What the engine's melodyd.conf says, beside its database.
+[[nodiscard]] QString configOf(const LocalEngine& engine) {
+    QFile file{QString::fromStdString((engine.state / "melodyd.conf").string())};
+    return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString{};
+}
+
+[[nodiscard]] const protocol::Json* change(const protocol::Json& changes, const std::string& key,
+                                           const std::string& engine = {}) {
+    for (const auto& item : changes) {
+        if (item.value("key", std::string{}) == key &&
+            item.value("engine", std::string{}) == engine) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+// ADR-0286: sharing this computer's engine is a setting, handed to the
+// engine as its melodyd.conf and taken up by a restart.
 void EngineLauncherTest::sharingSettingsReachTheEngine() {
     Scratch scratch;
     QVERIFY(scratch.directory.isValid());
@@ -260,7 +282,23 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     const auto stream_port = stream_probe.serverPort();
     engine_probe.close();
     stream_probe.close();
+    const auto tcp = [port](const std::string& password) {
+        return protocol::Client::connect(
+            protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = password});
+    };
+
+    // Started here -- not this user's engine -- with its own file, empty yet.
+    auto started = connectLocalEngine(scratch.engine);
+    QVERIFY2(
+        started.has_value(),
+        started
+            ? ""
+            : (started.error().message + "\n" + engineLog(scratch.engine).toStdString()).c_str());
+    (*started)->close();
+    QVERIFY(!localEngineIsService(scratch.engine));
+
     QSettings settings;
+    const auto unshared = localEngineSharing();
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
     settings.setValue(QLatin1String(SettingsDialog::engine_listen_key),
                       QStringLiteral("127.0.0.1:%1").arg(port));
@@ -268,21 +306,16 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
                       QStringLiteral("correct horse"));
     settings.sync();
-    const auto tcp = [port](const std::string& password) {
-        return protocol::Client::connect(
-            protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = password});
-    };
-
-    auto started = connectLocalEngine(scratch.engine);
-    QVERIFY2(
-        started.has_value(),
-        started
-            ? ""
-            : (started.error().message + "\n" + engineLog(scratch.engine).toStdString()).c_str());
-    // The password travels in a file only its owner can read, not in argv.
-    const auto password_file = scratch.engine.state / "engine.password";
-    QVERIFY(std::filesystem::exists(password_file));
-    QCOMPARE(std::filesystem::status(password_file).permissions() & std::filesystem::perms::all,
+    const auto shared = localEngineSharing();
+    auto configured = configureLocalEngine(scratch.engine, sharingChanges(shared, unshared));
+    QVERIFY2(configured.has_value(), configured ? "" : configured.error().message.c_str());
+    // In its file, which only its owner can read; nothing in argv.
+    const auto config = configOf(scratch.engine);
+    QVERIFY(config.contains(QStringLiteral("listen = 127.0.0.1:%1\n").arg(port)));
+    QVERIFY(config.contains(QStringLiteral("http = 127.0.0.1:%1\n").arg(stream_port)));
+    QVERIFY(config.contains(QStringLiteral("password = correct horse\n")));
+    QCOMPARE(std::filesystem::status(scratch.engine.state / "melodyd.conf").permissions() &
+                 std::filesystem::perms::all,
              std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
     QVERIFY(!tcp({}).has_value());
     QVERIFY(!tcp("wrong").has_value());
@@ -291,29 +324,34 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     (*admitted)->close();
     const auto first = enginePid(scratch.engine);
 
-    // Not shared: nothing listens on the network.
+    // Not shared: nothing listens on the network, and the password is gone.
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), false);
     settings.sync();
-    QVERIFY(restartLocalEngine(scratch.engine).has_value());
+    configured =
+        configureLocalEngine(scratch.engine, sharingChanges(localEngineSharing(), shared));
+    QVERIFY2(configured.has_value(), configured ? "" : configured.error().message.c_str());
     QVERIFY(enginePid(scratch.engine) != first);
     QVERIFY(!tcp("correct horse").has_value());
-    QVERIFY(!std::filesystem::exists(password_file));
+    QVERIFY(configOf(scratch.engine).contains(QStringLiteral("local-only = yes\n")));
+    // Taken out: no password line, only the skeleton's commented example.
+    QVERIFY(!configOf(scratch.engine)
+                 .contains(QRegularExpression{QStringLiteral("^password = "),
+                                              QRegularExpression::MultilineOption}));
 
     // ADR-0223: shared without a password is not shared at all -- there is
     // no open TCP engine -- rather than an engine that will not start.
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
     settings.remove(QLatin1String(SettingsDialog::engine_password_key));
     settings.sync();
-    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
-                .contains(QStringLiteral("--local-only")));
-    QVERIFY(restartLocalEngine(scratch.engine).has_value());
-    QVERIFY(!tcp("correct horse").has_value());
-    QVERIFY(!std::filesystem::exists(password_file));
+    const auto changes = sharingChanges(localEngineSharing(), shared);
+    QCOMPARE(change(changes, "local-only")->at("value"), protocol::Json("yes"));
+    QVERIFY(change(changes, "password")->at("value").is_null());
     settings.clear();
 }
 
-// ADR-0228: with a remote engine configured, this computer's engine offers
-// itself as one of the remote's outputs -- no melody-agent needed here.
+// ADR-0228, ADR-0286: with a remote engine configured, this computer's
+// engine offers itself as one of the remote's outputs -- no melody-agent
+// needed here -- through an [engine] section of its melodyd.conf.
 void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     Scratch scratch;
     QVERIFY(scratch.directory.isValid());
@@ -329,7 +367,8 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
                          remote_state.filePath(QStringLiteral("r.sock")), QStringLiteral("--state"),
                          remote_state.path(), QStringLiteral("--name"), QStringLiteral("remote"),
                          QStringLiteral("--listen"), QStringLiteral("127.0.0.1:%1").arg(port),
-                         QStringLiteral("--password"), QStringLiteral("correct horse")});
+                         QStringLiteral("--password"), QStringLiteral("correct horse"),
+                         QStringLiteral("--no-agent")});
     remote.setProcessChannelMode(QProcess::MergedChannels);
     remote.start();
     QVERIFY(remote.waitForStarted());
@@ -345,22 +384,30 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     // remote alone wins when it differs.
     settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
                       QStringLiteral("correct horse"));
-    settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
-    settings.sync();
-    QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("correct horse"));
     settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
                       QStringLiteral("its own"));
     settings.sync();
     QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("its own"));
     settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
     settings.sync();
-    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
-                .contains(QStringLiteral("--play-for")));
-    // And every engine found on the network may play here too.
-    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
-                .contains(QStringLiteral("--agent")));
+    QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("correct horse"));
+
+    // The remote as an [engine] section named after its host, its address
+    // used while the network does not find it; this engine, not shared, has
+    // no password of its own, so the section carries the remote's.
+    auto changes = sharingChanges(localEngineSharing(), {});
+    QCOMPARE(change(changes, "address", "127.0.0.1")->at("value"),
+             protocol::Json("127.0.0.1:" + std::to_string(port)));
+    QCOMPARE(change(changes, "password", "127.0.0.1")->at("value"),
+             protocol::Json("correct horse"));
+    QVERIFY(change(changes, "agent")->at("value").is_null());
+
     auto started = connectLocalEngine(scratch.engine);
     QVERIFY2(started.has_value(), started ? "" : started.error().message.c_str());
+    (*started)->close();
+    auto configured = configureLocalEngine(scratch.engine, changes);
+    QVERIFY2(configured.has_value(), configured ? "" : configured.error().message.c_str());
+    QVERIFY(configOf(scratch.engine).contains(QStringLiteral("[engine 127.0.0.1]\n")));
 
     // The remote lists this computer's engine among its outputs.
     const auto listed = [&remote_endpoint] {
@@ -385,17 +432,19 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
         QFile log{QString::fromStdString((scratch.engine.state / "melodyd.log").string())};
         return !(log.open(QIODevice::ReadOnly) && log.readAll().contains("no audio here"));
     };
+    // After the network's grace (five seconds), by its address.
+    QTRY_VERIFY_WITH_TIMEOUT(listed() || !audio_here(), 15'000);
     if (!audio_here()) {
         QSKIP("no audio output here for the built-in agent");
     }
-    QTRY_VERIFY_WITH_TIMEOUT(listed(), 10'000);
 
-    // ADR-0234: every engine elsewhere, each with its own --play-for and what
-    // follows it -- its own password where it differs.
+    // ADR-0239: one fixed for an engine, whatever the route; the engines
+    // found as Settings have it; another engine elsewhere its own section.
     {
         auto engines = loadRemoteEngines();
         QCOMPARE(engines.size(), std::size_t{1});
-        engines.push_back({.address = QStringLiteral("127.0.0.1:1"),
+        const auto before = localEngineSharing();
+        engines.push_back({.address = QStringLiteral("10.8.0.9:6603"),
                            .password = QStringLiteral("another"),
                            .music_folder = {},
                            .reachable_at = QStringLiteral("/media/other"),
@@ -404,50 +453,61 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
         saveRemoteEngines(engines);
         settings.setValue(QLatin1String(SettingsDialog::engine_stream_away_key), 96);
         settings.sync();
-        const auto arguments = localEngineArguments(scratch.engine, localEngineSharing());
-        QCOMPARE(arguments.count(QStringLiteral("--play-for")), 2);
-        const auto second = arguments.lastIndexOf(QStringLiteral("--play-for"));
-        QCOMPARE(arguments.at(second + 1), QStringLiteral("127.0.0.1:1"));
-        QCOMPARE(arguments.at(second + 2), QStringLiteral("--play-for-music-root"));
-        QCOMPARE(arguments.at(second + 3), QStringLiteral("/media/other"));
-        QCOMPARE(arguments.at(second + 4), QStringLiteral("--play-for-password-file"));
-        QFile password{arguments.at(second + 5)};
-        QVERIFY(password.open(QIODevice::ReadOnly));
-        QCOMPARE(password.readAll().trimmed(), QByteArrayLiteral("another"));
-        // ADR-0239: one fixed for this engine, whatever the route; the first
-        // by the route, as Settings have it; the engines found likewise.
-        QCOMPARE(arguments.at(second + 6), QStringLiteral("--play-for-bitrate-nearby"));
-        QCOMPARE(arguments.at(second + 7), QStringLiteral("64"));
-        QCOMPARE(arguments.at(second + 8), QStringLiteral("--play-for-bitrate-away"));
-        QCOMPARE(arguments.at(second + 9), QStringLiteral("64"));
-        const auto first = arguments.indexOf(QStringLiteral("--play-for-bitrate-nearby"));
-        QVERIFY(first < second);
-        QCOMPARE(arguments.at(first + 1), QStringLiteral("0"));
-        QCOMPARE(arguments.at(first + 3), QStringLiteral("96"));
-        const auto found = arguments.indexOf(QStringLiteral("--agent-stream-away"));
-        QVERIFY(found >= 0);
-        QCOMPARE(arguments.at(found + 1), QStringLiteral("opus 96"));
-        QCOMPARE(arguments.at(arguments.indexOf(QStringLiteral("--agent-stream-home")) + 1),
-                 QStringLiteral("original"));
-        settings.remove(QLatin1String(SettingsDialog::engine_stream_away_key));
+        changes = sharingChanges(localEngineSharing(), before);
+        QCOMPARE(change(changes, "address", "10.8.0.9")->at("value"),
+                 protocol::Json("10.8.0.9:6603"));
+        QCOMPARE(change(changes, "music-root", "10.8.0.9")->at("value"),
+                 protocol::Json("/media/other"));
+        QCOMPARE(change(changes, "password", "10.8.0.9")->at("value"), protocol::Json("another"));
+        QCOMPARE(change(changes, "stream-home", "10.8.0.9")->at("value"),
+                 protocol::Json("opus 64"));
+        QCOMPARE(change(changes, "stream-away", "10.8.0.9")->at("value"),
+                 protocol::Json("opus 64"));
+        QCOMPARE(change(changes, "agent-stream-away")->at("value"), protocol::Json("opus 96"));
+        QVERIFY(change(changes, "agent-stream-home")->at("value").is_null());
+
+        // Removed again: its section's keys taken out.
+        const auto with = localEngineSharing();
         engines.pop_back();
         saveRemoteEngines(engines);
+        changes = sharingChanges(localEngineSharing(), with);
+        QVERIFY(change(changes, "address", "10.8.0.9")->at("value").is_null());
+        settings.remove(QLatin1String(SettingsDialog::engine_stream_away_key));
     }
 
-    // Turned off: the engine starts without it.
+    // Turned off: plays for no one, and the sections go.
+    const auto on = localEngineSharing();
     settings.setValue(QLatin1String(SettingsDialog::engine_play_for_remote_key), false);
     settings.sync();
-    QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
-                 .contains(QStringLiteral("--play-for")));
-    QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
-                 .contains(QStringLiteral("--agent")));
-    // Said, for the engine would play for others by itself (ADR-0286).
-    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
-                .contains(QStringLiteral("--no-agent")));
+    changes = sharingChanges(localEngineSharing(), on);
+    QCOMPARE(change(changes, "agent")->at("value"), protocol::Json("no"));
+    QVERIFY(change(changes, "address", "127.0.0.1")->at("value").is_null());
     settings.clear();
     stop(scratch.engine);
     remote.terminate();
     remote.waitForFinished(5'000);
+}
+
+// ADR-0286: this user's engine on Linux is systemd's: Trackknife does not
+// start it, and says how to.
+void EngineLauncherTest::thisUsersEngineIsNotStartedHere() {
+#ifdef __APPLE__
+    QSKIP("on macOS Trackknife starts it");
+#else
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const LocalEngine engine{.state = directory.filePath(QStringLiteral("state")).toStdString(),
+                             .socket = directory.filePath(QStringLiteral("s.sock")).toStdString(),
+                             .standard = true};
+    QVERIFY(qEnvironmentVariableIsSet("TRACKKNIFE_NO_SYSTEMD"));
+    const auto result = connectLocalEngine(engine, std::chrono::seconds{2});
+    QVERIFY(!result.has_value());
+    QCOMPARE(result.error().code, core::ErrorCode::not_found);
+    QVERIFY(result.error().message.find("systemctl --user enable --now melodyd.socket") !=
+            std::string::npos);
+    QVERIFY(lockHolders(engine.state / "engine.lock").empty());
+    QVERIFY(!localEngineWantsService(engine));
+#endif
 }
 
 // ADR-0226: this computer's engine outlives the window, so after a rebuild it

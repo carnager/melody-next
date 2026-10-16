@@ -1379,6 +1379,66 @@ void BenchMainWindowTest::quittingStopsTheEngineForGood() {
              "quitting must not leave anything that starts the engine again");
 }
 
+// ADR-0286: how this computer's engine is shared was kept in Settings and
+// given as flags at every start; it is the engine's melodyd.conf now, handed
+// over the first time the window meets the engine, and not again.
+void BenchMainWindowTest::sharingSettingsAreHandedToTheEngineOnce() {
+    engine_.stop();
+    QSettings settings;
+    settings.remove(QLatin1String(SettingsDialog::library_local_engine_socket_key));
+    settings.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
+    settings.remove(QLatin1String(SettingsDialog::engine_settings_in_config_key));
+    settings.setValue(QLatin1String(SettingsDialog::engine_music_root_key),
+                      QStringLiteral("/srv/handed-over"));
+    settings.sync();
+    const auto program = qgetenv("TRACKKNIFE_ENGINE");
+    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+    allowLocalEngine(true);
+    const auto engine = localEngine();
+    QVERIFY(engine.has_value());
+    // A test's folder: started here, with its own melodyd.conf.
+    QVERIFY(!engine->standard);
+    const auto restore = qScopeGuard([&] {
+        static_cast<void>(stopLocalEngine(*engine));
+        allowLocalEngine(false);
+        qputenv("TRACKKNIFE_ENGINE", program);
+        QFile::remove(QString::fromStdString((engine->state / "melodyd.conf").string()));
+    });
+    const auto config = [&engine] {
+        QFile file{QString::fromStdString((engine->state / "melodyd.conf").string())};
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString{};
+    };
+    pid_t handed_to = 0;
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            settings.value(QLatin1String(SettingsDialog::engine_settings_in_config_key), false)
+                .toBool(),
+            20'000);
+        QVERIFY(config().contains(QStringLiteral("\nmusic-root = /srv/handed-over\n")));
+        // Restarted to use it, and answering again.
+        QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback() != nullptr &&
+                                     window.localPlayback()->active(),
+                                 15'000);
+        const auto holders = lockHolders(engine->state / "engine.lock");
+        QCOMPARE(holders.size(), std::size_t{1U});
+        handed_to = holders.front();
+    }
+    // Once: the next window finds it handed over, and leaves the engine be.
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+        QTest::qWait(1'000);
+        const auto holders = lockHolders(engine->state / "engine.lock");
+        QVERIFY(holders.size() == 1U && holders.front() == handed_to);
+    }
+    settings.remove(QLatin1String(SettingsDialog::engine_music_root_key));
+}
+
 // ADR-0233: the window's lists are on the engine that owns their files, so
 // the phone and the CLI see them. A working list follows its tab -- changed as
 // it changes, gone when it closes; a saved one is written when saved, not

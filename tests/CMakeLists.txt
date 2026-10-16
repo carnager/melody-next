@@ -1152,4 +1152,5 @@ get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
 set_property(
     TEST ${trackknife_all_tests}
     APPEND PROPERTY ENVIRONMENT "MELODYD_CONFIG=${CMAKE_CURRENT_BINARY_DIR}/test-melodyd.conf"
+                                "TRACKKNIFE_NO_SYSTEMD=1"
 )

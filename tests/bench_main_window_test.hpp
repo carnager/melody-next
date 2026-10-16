@@ -294,6 +294,7 @@ class BenchMainWindowTest final : public QObject {
     void shortcutSettingsValidateSaveAndCancel();
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void quittingStopsTheEngineForGood();
+    void sharingSettingsAreHandedToTheEngineOnce();
     void theWindowsListsAreOnItsEngine();
     void listsTravelAsEdits();
     void anotherClientsListChangesReachTheWindow();

@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -84,12 +85,14 @@ std::optional<LocalEngine> localEngine() {
         return std::nullopt;
     }
     LocalEngine engine{.state = std::filesystem::path{QFile::encodeName(data).toStdString()},
-                       .socket = {}};
+                       .socket = {},
+                       .standard = false};
     // Another database gets another socket, or its engine would be asked
     // about a library it does not have.
     if (std::filesystem::weakly_canonical(engine.state) ==
         std::filesystem::weakly_canonical(standard_state())) {
         engine.socket = runtime_directory() / "melodyd.sock";
+        engine.standard = true;
     } else {
         const auto digest =
             QCryptographicHash::hash(QFile::encodeName(data), QCryptographicHash::Sha256)
@@ -185,120 +188,230 @@ LocalEngineSharing localEngineSharing() {
     };
 }
 
-QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSharing& sharing) {
-    QStringList arguments;
-    if (sharing.upnp) {
-        arguments << QStringLiteral("--upnp");
-    }
-    const auto password_file = engine.state / "engine.password";
-    std::error_code ignored;
-    if (!sharing.music_root.isEmpty()) {
-        arguments << QStringLiteral("--music-root") << sharing.music_root;
-    }
-    // Any engine found on the network may play here -- and the configured
-    // remote by name as well, for one multicast does not reach (WireGuard).
-    // Off is said: with a password the engine plays for others by itself
-    // (ADR-0286).
-    if (sharing.play_for_found) {
-        const auto stream = [](const int kbps) {
-            return kbps == 0 ? QStringLiteral("original")
-                             : QStringLiteral("opus %1").arg(kbps);
-        };
-        arguments << QStringLiteral("--agent") << QStringLiteral("--agent-stream-home")
-                  << stream(sharing.found_nearby_kbps) << QStringLiteral("--agent-stream-away")
-                  << stream(sharing.found_away_kbps);
-    } else {
-        arguments << QStringLiteral("--no-agent");
-    }
-    // Each engine elsewhere on the network, by name -- for one multicast does
-    // not reach (WireGuard). One on this computer's own socket plays here
-    // already. Its options follow its --play-for, which makes them its own.
-    for (const auto& stale : std::filesystem::directory_iterator{engine.state, ignored}) {
-        if (stale.path().filename().string().starts_with("play-for")) {
-            std::filesystem::remove(stale.path(), ignored);
-        }
-    }
-    for (std::size_t index = 0; const auto& target : sharing.play_for) {
-        if (!target.address.contains(QLatin1Char(':'))) {
-            continue;
-        }
-        arguments << QStringLiteral("--play-for") << target.address;
-        if (!target.music_root.isEmpty()) {
-            arguments << QStringLiteral("--play-for-music-root") << target.music_root;
-        }
-        if (!target.password.isEmpty()) {
-            const auto guest_password =
-                engine.state / ("play-for-" + std::to_string(index) + ".password");
-            QFile file{path_text(guest_password)};
-            if (file.open(QIODevice::WriteOnly | QIODevice::Truncate,
-                          QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
-                file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-                file.write(target.password.toUtf8() + '\n');
-                file.close();
-                arguments << QStringLiteral("--play-for-password-file")
-                          << path_text(guest_password);
-            }
-        }
-        arguments << QStringLiteral("--play-for-bitrate-nearby")
-                  << QString::number(target.nearby_kbps)
-                  << QStringLiteral("--play-for-bitrate-away") << QString::number(target.away_kbps);
-        ++index;
-    }
-    // Not shared: this computer only, not melodyd's default network ports.
-    // Shared without a password is not shared either: every TCP connection
-    // must give one (ADR-0223), and Settings will not save sharing without.
-    if (!sharing.share || sharing.listen.isEmpty() || sharing.password.isEmpty()) {
-        arguments << QStringLiteral("--local-only");
-        std::filesystem::remove(password_file, ignored);
-        if (sharing.upnp) {
-            arguments << QStringLiteral("--http")
-                      << QStringLiteral("0.0.0.0:%1").arg(sharing.stream_port);
-        }
-        return arguments;
-    }
-    arguments << QStringLiteral("--listen") << sharing.listen;
-    // Streams on the same address as the engine, on their own port.
-    const auto colon = sharing.listen.lastIndexOf(QLatin1Char(':'));
-    if (colon > 0 && sharing.stream_port > 0) {
-        arguments
-            << QStringLiteral("--http")
-            << QStringLiteral("%1:%2").arg(sharing.listen.left(colon)).arg(sharing.stream_port);
-    }
-    QFile file{path_text(password_file)};
-    // Owner-only from the moment it exists, not after.
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate,
-                  QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
-        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-        file.write(sharing.password.toUtf8() + '\n');
-        file.close();
-        arguments << QStringLiteral("--password-file") << path_text(password_file);
-    }
-    return arguments;
+namespace {
+
+// ADR-0286: a section for an engine played for, by its address's host --
+// matched by the engine played for as by name (Guests' address match).
+[[nodiscard]] std::string section_name(const QString& address) {
+    const auto colon = address.lastIndexOf(QLatin1Char(':'));
+    return (colon > 0 ? address.left(colon) : address).toStdString();
 }
 
-core::Result<void> stopLocalEngine(const LocalEngine& engine) {
-    // The engine is whoever holds its lock. Found through /proc, as fuser
-    // does, because flock(2) does not say who holds it -- and signalled,
-    // because an engine older than this workspace knows no request for it.
-    const auto holders = lockHolders(engine.state / "engine.lock");
-    for (const auto pid : holders) {
-        ::kill(pid, SIGTERM);
+[[nodiscard]] std::string stream_text(const int kbps) {
+    return kbps == 0 ? std::string{"original"} : "opus " + std::to_string(kbps);
+}
+
+// One request to this computer's engine, on a connection of its own.
+[[nodiscard]] core::Result<protocol::Json> ask(const LocalEngine& engine, const std::string& method,
+                                               const protocol::Json& params = protocol::Json::object()) {
+    auto client = protocol::Client::connect(
+        protocol::Endpoint{.socket = engine.socket, .host = {}, .port = 0, .token = {}});
+    if (!client) {
+        return std::unexpected(std::move(client.error()));
     }
-    // SIGTERM saves the queue first; it comes back paused.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    auto answer = (*client)->call(method, params);
+    (*client)->close();
+    return answer;
+}
+
+// `systemctl --user ARGUMENTS`: its exit status and what it printed; -1 when
+// there is no systemctl.
+struct Ran final {
+    int status{-1};
+    QString output;
+};
+[[nodiscard]] Ran systemctl(const QStringList& arguments) {
+    QProcess process;
+    process.start(QStringLiteral("systemctl"), QStringList{QStringLiteral("--user")} + arguments);
+    if (!process.waitForStarted(3'000) || !process.waitForFinished(15'000)) {
+        process.kill();
+        return {};
+    }
+    return Ran{.status = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1,
+               .output = QString::fromUtf8(process.readAllStandardOutput()).trimmed()};
+}
+
+// melodyd.socket is installed and enabled for this user: the package enables
+// it for everyone; one disabled or masked is left alone.
+[[nodiscard]] bool socket_unit_enabled() {
+#ifdef __APPLE__
+    return false;
+#else
+    // Tests never touch the systemd of whoever runs them.
+    if (!qEnvironmentVariableIsEmpty("TRACKKNIFE_NO_SYSTEMD")) {
+        return false;
+    }
+    const auto enabled = systemctl({QStringLiteral("is-enabled"), QStringLiteral("melodyd.socket")});
+    return enabled.status == 0 &&
+           (enabled.output == QStringLiteral("enabled") || enabled.output == QStringLiteral("static") ||
+            enabled.output == QStringLiteral("enabled-runtime"));
+#endif
+}
+
+[[nodiscard]] bool wait_until_gone(const std::vector<pid_t>& holders,
+                                   const std::chrono::milliseconds limit) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
     const auto alive = [&holders] { return std::ranges::any_of(holders, processRunning); };
     while (alive() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
-    if (alive()) {
+    return !alive();
+}
+
+} // namespace
+
+protocol::Json sharingChanges(const LocalEngineSharing& now, const LocalEngineSharing& before) {
+    using protocol::Json;
+    auto changes = Json::array();
+    const auto put = [&changes](const std::string& key, const std::optional<std::string>& value,
+                                const std::string& engine = {}) {
+        auto change = Json{{"key", key}, {"value", value ? Json(*value) : Json(nullptr)}};
+        if (!engine.empty()) {
+            change["engine"] = engine;
+        }
+        changes.push_back(std::move(change));
+    };
+    // Shared only with a password: every TCP connection must give one
+    // (ADR-0223), and Settings will not save sharing without.
+    const bool shared = now.share && !now.listen.isEmpty() && !now.password.isEmpty();
+    put("password", shared ? std::optional{now.password.toStdString()} : std::nullopt);
+    put("password-file", std::nullopt);
+    put("local-only", shared ? std::nullopt : std::optional<std::string>{"yes"});
+    put("listen", shared ? std::optional{now.listen.toStdString()} : std::nullopt);
+    std::optional<std::string> http;
+    if (shared) {
+        if (const auto colon = now.listen.lastIndexOf(QLatin1Char(':'));
+            colon > 0 && now.stream_port > 0) {
+            http = QStringLiteral("%1:%2").arg(now.listen.left(colon)).arg(now.stream_port).toStdString();
+        }
+    } else if (now.upnp) {
+        // UPnP renderers fetch from the stream port, shared or not.
+        http = QStringLiteral("0.0.0.0:%1").arg(now.stream_port).toStdString();
+    }
+    put("http", http);
+    put("music-root", now.music_root.isEmpty() ? std::nullopt
+                                               : std::optional{now.music_root.toStdString()});
+    put("upnp", now.upnp ? std::optional<std::string>{"yes"} : std::nullopt);
+    // Played for: every engine found, unless turned off; with a password
+    // the engine does so by itself.
+    put("agent", now.play_for_found ? std::nullopt : std::optional<std::string>{"no"});
+    put("agent-stream-home",
+        now.found_nearby_kbps == SettingsKeys::engine_stream_nearby_default
+            ? std::nullopt
+            : std::optional{stream_text(now.found_nearby_kbps)});
+    put("agent-stream-away",
+        now.found_away_kbps == SettingsKeys::engine_stream_away_default
+            ? std::nullopt
+            : std::optional{stream_text(now.found_away_kbps)});
+    // Each engine elsewhere: an [engine HOST] with its address, used while
+    // the network does not find it, its mount, its own password and streams.
+    std::vector<std::string> kept;
+    for (const auto& target : now.play_for) {
+        const auto name = section_name(target.address);
+        kept.push_back(name);
+        put("address", target.address.toStdString(), name);
+        put("music-root",
+            target.music_root.isEmpty() ? std::nullopt
+                                        : std::optional{target.music_root.toStdString()},
+            name);
+        // Its own password, unless it is the one this engine has: one not
+        // shared has none, and gives the remote's as that engine's own.
+        put("password",
+            target.password.isEmpty() || (shared && target.password == now.password)
+                ? std::nullopt
+                : std::optional{target.password.toStdString()},
+            name);
+        put("stream-home",
+            target.nearby_kbps == now.found_nearby_kbps ? std::nullopt
+                                                        : std::optional{stream_text(target.nearby_kbps)},
+            name);
+        put("stream-away",
+            target.away_kbps == now.found_away_kbps ? std::nullopt
+                                                    : std::optional{stream_text(target.away_kbps)},
+            name);
+    }
+    for (const auto& target : before.play_for) {
+        const auto name = section_name(target.address);
+        if (std::ranges::contains(kept, name)) {
+            continue;
+        }
+        for (const auto* key : {"address", "music-root", "password", "stream-home", "stream-away"}) {
+            put(key, std::nullopt, name);
+        }
+    }
+    return changes;
+}
+
+core::Result<void> stopLocalEngine(const LocalEngine& engine) {
+    // The engine is whoever holds its lock. Asked to stop for good -- under
+    // systemd, not restarted after (ADR-0286) -- else, an engine older than
+    // engine.stop, signalled: found through /proc, as fuser does, because
+    // flock(2) does not say who holds it.
+    const auto holders = lockHolders(engine.state / "engine.lock");
+    if (holders.empty()) {
+        return {};
+    }
+    if (!ask(engine, "engine.stop")) {
+        for (const auto pid : holders) {
+            ::kill(pid, SIGTERM);
+        }
+    }
+    // Either way the queue is saved first; it comes back paused.
+    if (!wait_until_gone(holders, std::chrono::seconds{10})) {
         return std::unexpected(launch_error("the running engine did not stop"));
     }
     return {};
 }
 
 core::Result<void> restartLocalEngine(const LocalEngine& engine) {
+    const auto holders = lockHolders(engine.state / "engine.lock");
+    // A service's engine is started again by its service manager; one this
+    // computer started (macOS, a test's) is stopped and started here.
+    if (localEngineIsService(engine) && ask(engine, "engine.restart")) {
+        if (!wait_until_gone(holders, std::chrono::seconds{10})) {
+            return std::unexpected(launch_error("the running engine did not restart"));
+        }
+    } else if (auto stopped = stopLocalEngine(engine); !stopped) {
+        return stopped;
+    }
+    auto started = connectLocalEngine(engine);
+    if (!started) {
+        return std::unexpected(std::move(started.error()));
+    }
+    (*started)->close();
+    return {};
+}
+
+core::Result<void> configureLocalEngine(const LocalEngine& engine, const protocol::Json& changes) {
+    if (auto set = ask(engine, "config.set", protocol::Json{{"changes", changes}}); !set) {
+        return std::unexpected(std::move(set.error()));
+    }
+    return restartLocalEngine(engine);
+}
+
+bool localEngineIsService(const LocalEngine& engine) {
+    const auto info = ask(engine, "engine.info");
+    return info && info->value("service", false);
+}
+
+bool localEngineWantsService(const LocalEngine& engine) {
+#ifdef __APPLE__
+    static_cast<void>(engine);
+    return false;
+#else
+    // Cheapest first: under systemd, as it usually is, one question answers.
+    return engine.standard && !localEngineIsService(engine) &&
+           !lockHolders(engine.state / "engine.lock").empty() && socket_unit_enabled();
+#endif
+}
+
+core::Result<void> handOverToService(const LocalEngine& engine) {
     if (auto stopped = stopLocalEngine(engine); !stopped) {
         return stopped;
+    }
+    if (systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status != 0) {
+        return std::unexpected(
+            launch_error("could not start melodyd.socket: systemctl --user start melodyd.socket"));
     }
     auto started = connectLocalEngine(engine);
     if (!started) {
@@ -450,6 +563,31 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
     if (auto running = protocol::Client::connect(endpoint)) {
         return running;
     }
+#ifndef __APPLE__
+    // ADR-0286: this user's engine is systemd's, started on the socket's
+    // first connection. The socket itself is started if it is enabled and
+    // not running yet -- just installed, say -- and otherwise what to do is
+    // said.
+    if (engine.standard) {
+        if (socket_unit_enabled() &&
+            systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status == 0) {
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            while (std::chrono::steady_clock::now() < deadline) {
+                if (auto started = protocol::Client::connect(endpoint)) {
+                    return started;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            }
+        }
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::not_found,
+            .message = "no engine runs on this computer; start it with: systemctl --user "
+                       "enable --now melodyd.socket",
+            .context = {}});
+    }
+#endif
+    // Started here: on macOS, and an engine of another folder -- a test's,
+    // a second workspace's -- with a melodyd.conf of its own beside it.
     const auto program = engineProgram();
     if (program.isEmpty()) {
         return std::unexpected(launch_error("melodyd is not installed"));
@@ -459,9 +597,20 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
     const auto log = path_text(engine.state / "melodyd.log");
     QProcess process;
     process.setProgram(program);
-    process.setArguments(QStringList{QStringLiteral("--socket"), path_text(engine.socket),
-                                     QStringLiteral("--state"), path_text(engine.state)} +
-                         localEngineArguments(engine, localEngineSharing()));
+    QStringList arguments{QStringLiteral("--socket"), path_text(engine.socket),
+                          QStringLiteral("--state"), path_text(engine.state)};
+    if (!engine.standard) {
+        arguments << QStringLiteral("--config") << path_text(engine.state / "melodyd.conf");
+    }
+    process.setArguments(arguments);
+    // Started here, not by a service manager: what this process inherited
+    // from one -- a desktop that runs apps as units -- is not the engine's.
+    auto environment = QProcessEnvironment::systemEnvironment();
+    for (const auto* name : {"INVOCATION_ID", "JOURNAL_STREAM", "LISTEN_PID", "LISTEN_FDS",
+                             "LISTEN_FDNAMES", "NOTIFY_SOCKET"}) {
+        environment.remove(QString::fromLatin1(name));
+    }
+    process.setProcessEnvironment(environment);
     process.setWorkingDirectory(path_text(engine.state));
     process.setStandardInputFile(QProcess::nullDevice());
     process.setStandardOutputFile(log, QIODevice::Append);

@@ -415,6 +415,24 @@ bool CatalogueSource::localEngineOutdated() const {
     return local_engine_ && bench::localEngineOutdated(*local_engine_);
 }
 
+bool CatalogueSource::localEngineWantsService() const {
+    return local_engine_ && bench::localEngineWantsService(*local_engine_);
+}
+
+bool CatalogueSource::handOverToService() const {
+    return local_engine_ && bench::handOverToService(*local_engine_).has_value();
+}
+
+core::Result<void> CatalogueSource::configureLocalEngine(const protocol::Json& changes) const {
+    if (!local_engine_) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
+                                           .message = "this computer's engine is not this "
+                                                      "window's to configure",
+                                           .context = {}});
+    }
+    return bench::configureLocalEngine(*local_engine_, changes);
+}
+
 bool CatalogueSource::reachable() const {
     const std::lock_guard guard{link_->mutex};
     return link_->client && link_->client->connected();

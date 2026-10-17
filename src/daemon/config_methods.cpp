@@ -19,8 +19,7 @@ using core::ConfigFile;
 using protocol::Json;
 
 // Never sent back: that one is set is all a client is told.
-constexpr std::array secret_keys{std::string_view{"password"},
-                                 std::string_view{"agent-password"}};
+constexpr std::array secret_keys{std::string_view{"password"}, std::string_view{"agent-password"}};
 
 [[nodiscard]] bool secret(const std::string_view key) {
     return std::ranges::contains(secret_keys, key);
@@ -84,8 +83,7 @@ void register_config_methods(protocol::Dispatcher& dispatcher, const Settings& s
             return std::unexpected(invalid("config.set wants changes: [{key, value, engine?}]"));
         }
         const auto text = read_text(path);
-        auto file = ConfigFile::parse(text ? *text : std::string{config_skeleton()},
-                                      path.string());
+        auto file = ConfigFile::parse(text ? *text : std::string{config_skeleton()}, path.string());
         if (!file) {
             return std::unexpected(file.error());
         }

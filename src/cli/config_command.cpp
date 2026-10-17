@@ -57,8 +57,8 @@ int write_checked(const std::filesystem::path& path, const std::string& text) {
     }
     if (child == 0) {
         // Through the shell, for an editor given with its options ("code -w").
-        ::execl("/bin/sh", "sh", "-c", "exec ${VISUAL:-${EDITOR:-vi}} \"$1\"", "sh",
-                file.c_str(), static_cast<char*>(nullptr));
+        ::execl("/bin/sh", "sh", "-c", "exec ${VISUAL:-${EDITOR:-vi}} \"$1\"", "sh", file.c_str(),
+                static_cast<char*>(nullptr));
         ::_exit(127);
     }
     int status = 0;
@@ -86,8 +86,8 @@ int edit_command(const std::filesystem::path& path) {
         std::cerr << "No " << path.string() << " yet; starting from the skeleton.\n";
     }
     std::error_code error;
-    const auto folder = path.parent_path().empty() ? std::filesystem::path{"."}
-                                                   : path.parent_path();
+    const auto folder =
+        path.parent_path().empty() ? std::filesystem::path{"."} : path.parent_path();
     if (!std::filesystem::exists(folder, error)) {
         std::filesystem::create_directories(folder, error);
         std::filesystem::permissions(folder, std::filesystem::perms::owner_all,
@@ -197,13 +197,12 @@ int config_command(const std::vector<std::string>& words) {
 
     const auto& key = rest.front();
     const std::string_view kind = section.empty() ? "" : "engine";
-    auto parsed = ConfigFile::parse(text ? *text : std::string{daemon::config_skeleton()},
-                                    path.string());
+    auto parsed =
+        ConfigFile::parse(text ? *text : std::string{daemon::config_skeleton()}, path.string());
     if (!parsed) {
         return refuse(parsed.error().message + "\n(melody-cli config --edit to mend it)");
     }
-    const auto described =
-        section.empty() ? key : "[engine " + section + "] " + key;
+    const auto described = section.empty() ? key : "[engine " + section + "] " + key;
 
     if (unset) {
         if (rest.size() != 1U) {

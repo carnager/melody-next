@@ -62,10 +62,11 @@ QString libraryEngine() {
     const auto chosen = settings.value(QLatin1String(SettingsKeys::library_engine_key)).toString();
     const auto engines = loadRemoteEngines();
     const auto known = [&engines](const QString& address) {
-        return std::ranges::any_of(engines,
-                                   [&address](const auto& engine) { return engine.address == address; });
+        return std::ranges::any_of(
+            engines, [&address](const auto& engine) { return engine.address == address; });
     };
-    if (chosen == QLatin1String(SettingsKeys::library_engine_local) || (!chosen.isEmpty() && known(chosen))) {
+    if (chosen == QLatin1String(SettingsKeys::library_engine_local) ||
+        (!chosen.isEmpty() && known(chosen))) {
         return chosen;
     }
     // Not chosen yet, or an engine since removed: as Show this computer's
@@ -77,7 +78,9 @@ QString libraryEngine() {
     return QLatin1String(SettingsKeys::library_engine_local);
 }
 
-bool localLibraryShown() { return libraryEngine() == QLatin1String(SettingsKeys::library_engine_local); }
+bool localLibraryShown() {
+    return libraryEngine() == QLatin1String(SettingsKeys::library_engine_local);
+}
 
 QString preferredSource() {
     auto wanted = QSettings{}.value(QStringLiteral("local-library/view")).toString();

@@ -857,9 +857,9 @@ EnginePlayback::queueCalls(const std::vector<LocalTrackRow>& rows,
             first = false;
         } else if (!part.empty()) {
             protocol::Json insert{{"insert", std::move(part)}, {"after", after}};
-            calls.emplace_back(QStringLiteral("playback.edit_queue"),
-                               with_list(protocol::Json{
-                                   {"edits", protocol::Json::array({std::move(insert)})}}));
+            calls.emplace_back(
+                QStringLiteral("playback.edit_queue"),
+                with_list(protocol::Json{{"edits", protocol::Json::array({std::move(insert)})}}));
         }
         part = protocol::Json::array();
         bytes = 0U;
@@ -893,10 +893,11 @@ std::size_t EnginePlayback::queuePrint(const LocalTrackRow& row) {
     return std::hash<std::string>{}(print);
 }
 
-std::vector<std::pair<QString, protocol::Json>> EnginePlayback::editQueueCalls(
-    const std::vector<persistence::ListEntryPrint>& before, const std::vector<LocalTrackRow>& rows,
-    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
-    const QString& list) const {
+std::vector<std::pair<QString, protocol::Json>>
+EnginePlayback::editQueueCalls(const std::vector<persistence::ListEntryPrint>& before,
+                               const std::vector<LocalTrackRow>& rows,
+                               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                               const QString& list) const {
     using persistence::ListEdit;
     std::vector<persistence::ListEntryPrint> wanted;
     wanted.reserve(rows.size());
@@ -965,8 +966,8 @@ std::vector<std::pair<QString, protocol::Json>> EnginePlayback::editQueueCalls(
             add(entry.to_string(), entry);
         }
         for (const auto index : planned.rows) {
-            add(listItemOf(entryJson(rows[index], index < overrides.size() ? overrides[index]
-                                                                           : std::nullopt)),
+            add(listItemOf(entryJson(rows[index],
+                                     index < overrides.size() ? overrides[index] : std::nullopt)),
                 rows[index].entry_id);
         }
         close_part();

@@ -634,8 +634,7 @@ class MetadataTransformationDialog final : public QDialog {
             return;
         }
         session_->exportNative(QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export Melody tagging script"),
-            session_->suggestedExportName(),
+            this, QStringLiteral("Export Melody tagging script"), session_->suggestedExportName(),
             QStringLiteral("Melody tagging scripts (*.tbtags.json);;JSON files (*.json);;All "
                            "files (*)")));
     }

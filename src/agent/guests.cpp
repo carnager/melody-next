@@ -52,22 +52,21 @@ namespace {
 
 [[nodiscard]] AgentConfig agent_for(const GuestsConfig& config, const ListedEngine* listed,
                                     protocol::Endpoint server) {
-    auto music_root = listed != nullptr && listed->music_root ? listed->music_root
-                                                              : config.music_root;
+    auto music_root =
+        listed != nullptr && listed->music_root ? listed->music_root : config.music_root;
     const bool stream_only = !music_root.has_value();
     return AgentConfig{.server = std::move(server),
                        .name = config.name,
                        .music_root = std::move(music_root),
                        .stream_only = stream_only,
-                       .stream = listed != nullptr && listed->stream ? *listed->stream
-                                                                     : config.stream};
+                       .stream =
+                           listed != nullptr && listed->stream ? *listed->stream : config.stream};
 }
 
 } // namespace
 
 std::vector<Wanted> plan_guests(const GuestsConfig& config,
-                                const std::vector<discovery::Found>& found,
-                                const bool grace_over) {
+                                const std::vector<discovery::Found>& found, const bool grace_over) {
     std::vector<Wanted> wanted;
     std::set<std::string> identities;
     // Found under their name, whether played for or not: a listed engine
@@ -106,12 +105,12 @@ std::vector<Wanted> plan_guests(const GuestsConfig& config,
             .identity = identity,
             .name = engine.instance,
             .where = where,
-            .agent = agent_for(config, listed,
-                               protocol::Endpoint{.socket = {},
-                                                  .host = engine.address,
-                                                  .port = engine.port,
-                                                  .token = wants_password ? password
-                                                                          : std::string{}})});
+            .agent =
+                agent_for(config, listed,
+                          protocol::Endpoint{.socket = {},
+                                             .host = engine.address,
+                                             .port = engine.port,
+                                             .token = wants_password ? password : std::string{}})});
     }
     if (!grace_over) {
         return wanted;
@@ -230,16 +229,16 @@ void Guests::settle_locked() {
         static_cast<void>((*audition)->refresh_output_devices());
         auto agent = Agent::create(std::move(wanted.agent), std::move(*audition));
         if (!agent) {
-            std::cerr << "melody: cannot play for " << wanted.name << ": "
-                      << agent.error().message << "\n";
+            std::cerr << "melody: cannot play for " << wanted.name << ": " << agent.error().message
+                      << "\n";
             continue;
         }
         (*agent)->start();
         arbiter_->add_guest(wanted.name, **agent);
         std::cerr << "melody: playing for " << wanted.name << " at " << wanted.where << "\n";
-        guests_.emplace(wanted.identity, Guest{.name = wanted.name,
-                                               .where = wanted.where,
-                                               .agent = std::move(*agent)});
+        guests_.emplace(
+            wanted.identity,
+            Guest{.name = wanted.name, .where = wanted.where, .agent = std::move(*agent)});
     }
 }
 

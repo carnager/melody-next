@@ -217,9 +217,9 @@ std::vector<QString> TabStore::takeUnreadable() {
 }
 
 void TabStore::setAside(const QString& path) const {
-    const auto aside = path + QStringLiteral(".unreadable-%1").arg(
-                                  QDateTime::currentDateTime().toString(
-                                      QStringLiteral("yyyyMMdd-hhmmss")));
+    const auto aside =
+        path + QStringLiteral(".unreadable-%1")
+                   .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss")));
     if (QFile::rename(path, aside)) {
         const std::lock_guard guard{unreadable_mutex_};
         unreadable_.push_back(aside);
@@ -249,9 +249,10 @@ bool TabStore::restoreFrom(const QString& source) {
     }
     const auto live = defaultDirectory();
     if (QDir{live}.exists()) {
-        const auto before = live + QStringLiteral("-before-restore-%1").arg(
-                                       QDateTime::currentDateTime().toString(
-                                           QStringLiteral("yyyyMMdd-hhmmss")));
+        const auto before =
+            live +
+            QStringLiteral("-before-restore-%1")
+                .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss")));
         if (!QDir{}.rename(live, before)) {
             return false;
         }
@@ -395,42 +396,42 @@ std::optional<persistence::ListDocument> TabStore::readRows(const core::StableId
     }
     // Read, or set aside and said -- never taken for an empty tab.
     auto read_rows = [&]() -> std::optional<persistence::ListDocument> {
-    QFile file{path};
-    if (!file.open(QIODevice::ReadOnly)) {
-        return std::nullopt;
-    }
-    QDataStream in{&file};
-    in.setVersion(QDataStream::Qt_6_0);
-    quint32 magic = 0;
-    quint32 version = 0;
-    in >> magic >> version;
-    if (magic != cache_magic || version != cache_version) {
-        return std::nullopt;
-    }
-    persistence::ListDocument document;
-    document.id = id;
-    read(in, document.engine);
-    read(in, document.name);
-    quint8 kind = 0;
-    in >> kind >> document.pinned >> document.dirty;
-    if (kind > static_cast<quint8>(persistence::ListKind::saved)) {
-        return std::nullopt;
-    }
-    document.kind = static_cast<persistence::ListKind>(kind);
-    quint32 count = 0;
-    in >> count;
-    document.items.reserve(std::min<quint32>(count, 1'000'000U));
-    for (quint32 index = 0; index < count; ++index) {
-        persistence::ListItem item;
-        if (!readItem(in, item)) {
+        QFile file{path};
+        if (!file.open(QIODevice::ReadOnly)) {
             return std::nullopt;
         }
-        document.items.push_back(std::move(item));
-    }
-    if (in.status() != QDataStream::Ok) {
-        return std::nullopt;
-    }
-    return document;
+        QDataStream in{&file};
+        in.setVersion(QDataStream::Qt_6_0);
+        quint32 magic = 0;
+        quint32 version = 0;
+        in >> magic >> version;
+        if (magic != cache_magic || version != cache_version) {
+            return std::nullopt;
+        }
+        persistence::ListDocument document;
+        document.id = id;
+        read(in, document.engine);
+        read(in, document.name);
+        quint8 kind = 0;
+        in >> kind >> document.pinned >> document.dirty;
+        if (kind > static_cast<quint8>(persistence::ListKind::saved)) {
+            return std::nullopt;
+        }
+        document.kind = static_cast<persistence::ListKind>(kind);
+        quint32 count = 0;
+        in >> count;
+        document.items.reserve(std::min<quint32>(count, 1'000'000U));
+        for (quint32 index = 0; index < count; ++index) {
+            persistence::ListItem item;
+            if (!readItem(in, item)) {
+                return std::nullopt;
+            }
+            document.items.push_back(std::move(item));
+        }
+        if (in.status() != QDataStream::Ok) {
+            return std::nullopt;
+        }
+        return document;
     };
     auto document = read_rows();
     if (!document) {

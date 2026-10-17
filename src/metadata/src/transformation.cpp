@@ -1102,8 +1102,7 @@ prepare_chain(const MetadataTransformationChain& chain,
             if (canonical != canonicalize_field_name(fmps_rating_field)) {
                 return std::unexpected(transformation_error(
                     core::ErrorCode::invalid_argument,
-                    "a rating is converted into FMPS_RATING, Melody's rating tag",
-                    action_index));
+                    "a rating is converted into FMPS_RATING, Melody's rating tag", action_index));
             }
             if (convert->scale == PlainRatingScale::off) {
                 return std::unexpected(transformation_error(

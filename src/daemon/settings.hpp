@@ -86,8 +86,7 @@ struct Settings {
 [[nodiscard]] std::filesystem::path default_config_path();
 
 // The file to read: --config, else $MELODYD_CONFIG, else the default.
-[[nodiscard]] std::filesystem::path
-config_path(std::span<const std::string_view> arguments);
+[[nodiscard]] std::filesystem::path config_path(std::span<const std::string_view> arguments);
 
 // Reads the config file, when there is one, then the arguments (without the
 // program's name) over it. `defaults` holds the socket and state folder used

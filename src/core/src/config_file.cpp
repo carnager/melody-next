@@ -37,12 +37,13 @@ namespace {
 [[nodiscard]] Error io_error(const std::filesystem::path& path, const std::string& what,
                              const int error) {
     return Error{.code = ErrorCode::io,
-                 .message = what + " " + path.string() + ": " + std::strerror(error),
+                 // strerror is not thread-safe; the category says the same.
+                 .message =
+                     what + " " + path.string() + ": " + std::generic_category().message(error),
                  .context = {{"path", path.string()}}};
 }
 
-[[nodiscard]] std::string section_title(const std::string_view kind,
-                                        const std::string_view name) {
+[[nodiscard]] std::string section_title(const std::string_view kind, const std::string_view name) {
     std::string title{kind};
     if (!name.empty()) {
         title += ' ';
@@ -71,8 +72,8 @@ Result<ConfigFile> ConfigFile::parse(const std::string_view text, std::string or
     std::size_t start = 0;
     while (start < text.size()) {
         const auto end = text.find('\n', start);
-        auto line = text.substr(start, end == std::string_view::npos ? text.size() - start
-                                                                     : end - start);
+        auto line =
+            text.substr(start, end == std::string_view::npos ? text.size() - start : end - start);
         if (!line.empty() && line.back() == '\r') {
             line.remove_suffix(1);
         }
@@ -129,8 +130,8 @@ Result<void> ConfigFile::reparse() {
             const auto inside = trimmed(line.substr(1, line.size() - 2));
             const auto split = inside.find_first_of(" \t");
             const auto kind = inside.substr(0, split);
-            const auto name =
-                split == std::string_view::npos ? std::string_view{} : trimmed(inside.substr(split));
+            const auto name = split == std::string_view::npos ? std::string_view{}
+                                                              : trimmed(inside.substr(split));
             if (!valid_key(kind)) {
                 return std::unexpected(refused(origin_, number,
                                                "[" + std::string{inside} +
@@ -139,10 +140,10 @@ Result<void> ConfigFile::reparse() {
             }
             for (const auto& earlier : sections_) {
                 if (earlier.kind == kind && earlier.name == name) {
-                    return std::unexpected(refused(
-                        origin_, number,
-                        "[" + section_title(kind, name) + "] is given twice (first on line " +
-                            std::to_string(earlier.line) + ")"));
+                    return std::unexpected(refused(origin_, number,
+                                                   "[" + section_title(kind, name) +
+                                                       "] is given twice (first on line " +
+                                                       std::to_string(earlier.line) + ")"));
                 }
             }
             sections_.push_back(Section{.kind = std::string{kind},
@@ -223,18 +224,19 @@ Result<void> ConfigFile::set(const std::string_view kind, const std::string_view
                                                 "digits and dashes",
                                      .context = {}});
     }
-    if (value.empty() || trimmed(value) != value || value.find_first_of("\r\n") != std::string_view::npos) {
-        return std::unexpected(Error{
-            .code = ErrorCode::invalid_argument,
-            .message = std::string{key} +
-                       ": a value is one line, not empty, without spaces at either end",
-            .context = {}});
+    if (value.empty() || trimmed(value) != value ||
+        value.find_first_of("\r\n") != std::string_view::npos) {
+        return std::unexpected(
+            Error{.code = ErrorCode::invalid_argument,
+                  .message = std::string{key} +
+                             ": a value is one line, not empty, without spaces at either end",
+                  .context = {}});
     }
     if (name.find_first_of("]\r\n") != std::string_view::npos || trimmed(name) != name) {
-        return std::unexpected(Error{.code = ErrorCode::invalid_argument,
-                                     .message = "\"" + std::string{name} +
-                                                "\" cannot name a section",
-                                     .context = {}});
+        return std::unexpected(
+            Error{.code = ErrorCode::invalid_argument,
+                  .message = "\"" + std::string{name} + "\" cannot name a section",
+                  .context = {}});
     }
     const auto line = std::string{key} + " = " + std::string{value};
     if (const auto* existing = find(kind, name, key)) {
@@ -341,8 +343,8 @@ Result<void> write_config_file(const std::filesystem::path& path, const std::str
             return std::unexpected(io_error(path, "cannot follow", error.value()));
         }
     }
-    const auto folder = target.parent_path().empty() ? std::filesystem::path{"."}
-                                                     : target.parent_path();
+    const auto folder =
+        target.parent_path().empty() ? std::filesystem::path{"."} : target.parent_path();
     if (!std::filesystem::exists(folder, error)) {
         std::filesystem::create_directories(folder, error);
         if (error) {

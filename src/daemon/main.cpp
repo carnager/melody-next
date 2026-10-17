@@ -104,9 +104,11 @@ void request_stop(int) {
             socket = first;
         }
     }
-    ::unsetenv("LISTEN_PID");
-    ::unsetenv("LISTEN_FDS");
-    ::unsetenv("LISTEN_FDNAMES");
+    // Read at start, before any thread runs, so none reads the environment
+    // while it changes.
+    ::unsetenv("LISTEN_PID");     // NOLINT(concurrency-mt-unsafe)
+    ::unsetenv("LISTEN_FDS");     // NOLINT(concurrency-mt-unsafe)
+    ::unsetenv("LISTEN_FDNAMES"); // NOLINT(concurrency-mt-unsafe)
     return socket;
 }
 
@@ -974,7 +976,7 @@ int main(int argc, char** argv) {
             .name = engine.name,
             .address = std::move(address),
             .music_root = engine.music_root,
-            .stream = std::move(stream),
+            .stream = stream,
             .password = engine.password,
             // An engine listed with its address is one to play for; one
             // without is played for as every other is, unless it says.

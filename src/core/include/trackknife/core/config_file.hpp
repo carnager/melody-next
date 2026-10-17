@@ -23,7 +23,7 @@ namespace trackknife::core {
 // Edits change only the line they are about. Every other line -- comments,
 // blank lines, order -- is kept as it was.
 class ConfigFile {
-public:
+  public:
     struct Entry {
         std::string key;
         std::string value;
@@ -72,7 +72,7 @@ public:
     // letters, digits and inner dashes.
     [[nodiscard]] static bool valid_key(std::string_view key) noexcept;
 
-private:
+  private:
     [[nodiscard]] Result<void> reparse();
 
     std::string origin_;

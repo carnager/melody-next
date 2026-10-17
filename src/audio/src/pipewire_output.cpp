@@ -332,8 +332,8 @@ core::Result<DeviceOutput> DeviceOutput::connect(LocalPlayback& source,
     }
 
     auto* properties = pw_properties_new(
-        PW_KEY_APP_NAME, "Melody", PW_KEY_APP_ID, "io.melody.Melody", PW_KEY_MEDIA_TYPE,
-        "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Music", PW_KEY_MEDIA_NAME,
+        PW_KEY_APP_NAME, "Melody", PW_KEY_APP_ID, "io.melody.Melody", PW_KEY_MEDIA_TYPE, "Audio",
+        PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Music", PW_KEY_MEDIA_NAME,
         output->config.stream_name.c_str(), nullptr);
     if (properties == nullptr) {
         return std::unexpected(core::Error{

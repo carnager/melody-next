@@ -4,10 +4,10 @@
 // melodyd, registers under a name, and plays what the engine asks on this
 // machine's audio. The engine's player decides what plays; this makes sound.
 
-#include "settings.hpp"
 #include "agent/agent.hpp"
 #include "agent/guests.hpp"
 #include "agent/speaker_arbiter.hpp"
+#include "settings.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <unistd.h>

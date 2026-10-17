@@ -440,7 +440,8 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
     const auto index = tabs_->insertTab(insert_at, view, displayText(document.name));
     if (!EngineKey::of(document).isLocal()) {
         // ADR-0227: which engine a tab plays on is visible, not remembered.
-        tabs_->setTabIcon(index, QIcon::fromTheme(QStringLiteral("network-server")));
+        tabs_->setTabIcon(index, QIcon::fromTheme(QStringLiteral("network-server"),
+                                                  style()->standardIcon(QStyle::SP_DriveNetIcon)));
         tabs_->setTabToolTip(index, tr("Plays on the remote engine"));
     }
     added.view = view;
@@ -793,10 +794,14 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, chrome.playing);
     tabs_->setTabText(index, chrome.text);
+    // Qt's own where there is no icon theme -- macOS, a bare desktop -- or
+    // the mark would be nothing at all there.
     tabs_->setTabIcon(index, chrome.mark == Workspace::TabChrome::Mark::this_computer
-                                 ? QIcon::fromTheme(QStringLiteral("computer"))
+                                 ? QIcon::fromTheme(QStringLiteral("computer"),
+                                                    style()->standardIcon(QStyle::SP_ComputerIcon))
                              : chrome.mark == Workspace::TabChrome::Mark::elsewhere
-                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                 ? QIcon::fromTheme(QStringLiteral("network-server"),
+                                                    style()->standardIcon(QStyle::SP_DriveNetIcon))
                                  : QIcon{});
     tabs_->setTabToolTip(index, chrome.tooltip);
     tab.view->setAccessibleName(chrome.accessible_name);

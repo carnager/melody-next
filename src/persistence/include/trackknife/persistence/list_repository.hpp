@@ -397,7 +397,8 @@ class ListRepository final {
     // ADR-0286: where each file now is, by the move journal -- a file moved
     // by this engine since a client saw it at that path and revision; empty
     // for one not moved. What a tab kept in a client follows a move by.
-    [[nodiscard]] core::Result<std::vector<std::optional<std::pair<std::string, core::LocalSourceRevision>>>>
+    [[nodiscard]] core::Result<
+        std::vector<std::optional<std::pair<std::string, core::LocalSourceRevision>>>>
     resolve_local_source_moves(
         const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources) const;
     // Empty when there is no such list.

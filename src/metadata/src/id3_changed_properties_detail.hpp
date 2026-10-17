@@ -18,7 +18,8 @@ namespace trackknife::metadata::id3_detail {
 // What one frame reads as among the properties. TagLib declares it protected
 // on the frame base and public on each frame type; a pointer to it taken
 // through a derived class reaches every frame's own.
-struct FrameProperties final : TagLib::ID3v2::Frame {
+// Not final: it is abstract, as the frame base is, and never made.
+struct FrameProperties : TagLib::ID3v2::Frame {
     [[nodiscard]] static TagLib::PropertyMap of(const TagLib::ID3v2::Frame& frame) {
         return (frame.*(&FrameProperties::asProperties))();
     }

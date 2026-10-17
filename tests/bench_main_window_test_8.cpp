@@ -2221,8 +2221,8 @@ void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {
 // moved there once from the cache they were kept in, and a file that cannot
 // be read set aside and said -- never taken for an empty tab.
 void BenchMainWindowTest::theTabStoreKeepsWhatItCannotRead() {
-    const auto cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
-                       QStringLiteral("/tabs");
+    const auto cache =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/tabs");
     QDir{TabStore::defaultDirectory()}.removeRecursively();
     QDir{cache}.removeRecursively();
     QVERIFY(TabStore::defaultDirectory() != cache);

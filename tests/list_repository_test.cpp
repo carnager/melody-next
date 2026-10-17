@@ -2461,8 +2461,9 @@ void working_lists_are_retired_and_come_back() {
     {
         auto repository = persistence::ListRepository::open(path);
         require(repository.has_value(), "the repository opens");
-        require(repository->save_engine_list(working, "Scratch", persistence::EngineListKind::working,
-                                             working_items, 0U, 1)
+        require(repository
+                    ->save_engine_list(working, "Scratch", persistence::EngineListKind::working,
+                                       working_items, 0U, 1)
                     .has_value(),
                 "a working list is stored, as an older engine did");
         require(repository
@@ -2472,8 +2473,7 @@ void working_lists_are_retired_and_come_back() {
                 "a saved list is stored");
     }
     const auto run = [&path](const char* file) {
-        std::ifstream stream{std::string{MELODY_MIGRATION_DIR} + "/" + file,
-                             std::ios::binary};
+        std::ifstream stream{std::string{MELODY_MIGRATION_DIR} + "/" + file, std::ios::binary};
         const std::string sql{std::istreambuf_iterator<char>{stream},
                               std::istreambuf_iterator<char>{}};
         sqlite3* raw = nullptr;
@@ -2496,8 +2496,7 @@ void working_lists_are_retired_and_come_back() {
                     retired->front().tracks == 2U,
                 "the working list is set aside, with its tracks");
         const auto read = repository->load_retired_engine_list(working);
-        require(read && *read && (*read)->items == working_items,
-                "and read back whole, in order");
+        require(read && *read && (*read)->items == working_items, "and read back whole, in order");
         require(repository->load_engine_list(working) && !*repository->load_engine_list(working),
                 "it is no list of the engine's any more");
     }

@@ -227,8 +227,7 @@ void send_to_group(const int socket, const Message& message) {
 // their engines are neither found by nor find the real ones on the network.
 [[nodiscard]] std::string resolved_service(std::string service) {
     if (service == engine_service) {
-        if (const char* other =
-                trackknife::core::environment_variable("MELODY_DISCOVERY_SERVICE");
+        if (const char* other = trackknife::core::environment_variable("MELODY_DISCOVERY_SERVICE");
             other != nullptr && *other != '\0') {
             return other;
         }

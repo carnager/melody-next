@@ -108,8 +108,8 @@ void refusesWhatItIsNot() {
           "melodyd.conf:3: name is given twice (first on line 1)");
     // The same key in two sections is two keys.
     CHECK(refusal("[engine a]\naddress = x\n[engine b]\naddress = y\n") == "<parsed>");
-    CHECK(refusal("[engine a]\naddress = x\naddress = y\n").starts_with(
-        "melodyd.conf:3: address is given twice"));
+    CHECK(refusal("[engine a]\naddress = x\naddress = y\n")
+              .starts_with("melodyd.conf:3: address is given twice"));
     CHECK(refusal("[engine a]\n[engine b]\n[engine a]\n") ==
           "melodyd.conf:3: [engine a] is given twice (first on line 1)");
     CHECK(refusal("[engine a\n").starts_with("melodyd.conf:1: a section header ends with ]"));
@@ -117,8 +117,7 @@ void refusesWhatItIsNot() {
     CHECK(refusal("[Engine a]\n").starts_with("melodyd.conf:1:"));
     // The error says where, for a reader that shows it as it is.
     const auto parsed = ConfigFile::parse("x\n", "/etc/x.conf");
-    CHECK(!parsed && parsed.error().context.size() == 2U &&
-          parsed.error().context[1].value == "1");
+    CHECK(!parsed && parsed.error().context.size() == 2U && parsed.error().context[1].value == "1");
 }
 
 void setsWithoutTouchingTheRest() {
@@ -177,7 +176,8 @@ void setsIntoFilesWithoutTopLevelKeys() {
     // section's own comments, apart from them.
     auto file = *ConfigFile::parse("# caprica\n\n# The NAS.\n[engine gemenon]\naddress = a\n", "f");
     CHECK(file.set("", "", "name", "caprica").has_value());
-    CHECK(file.text() == "# caprica\nname = caprica\n\n# The NAS.\n[engine gemenon]\naddress = a\n");
+    CHECK(file.text() ==
+          "# caprica\nname = caprica\n\n# The NAS.\n[engine gemenon]\naddress = a\n");
 
     // Comments only: at the end, unless the key has a commented example,
     // which it goes below.
@@ -249,7 +249,8 @@ void writesInOneStep() {
 
     // No prepared copy is left behind.
     std::size_t files = 0;
-    for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator{root / "melody"}) {
+    for ([[maybe_unused]] const auto& entry :
+         std::filesystem::directory_iterator{root / "melody"}) {
         ++files;
     }
     CHECK(files == 1U);

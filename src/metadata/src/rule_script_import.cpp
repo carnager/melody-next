@@ -317,9 +317,8 @@ class Translator final {
         }
         if (ascii_lower(value) == "comment:") {
             if (!warned_default_comment_) {
-                warning(offset,
-                        "Translated Picard's default comment target 'comment:' to Melody's "
-                        "COMMENT field");
+                warning(offset, "Translated Picard's default comment target 'comment:' to Melody's "
+                                "COMMENT field");
                 warned_default_comment_ = true;
             }
             value = "comment";

@@ -568,10 +568,10 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
     for (int row = 0; row < pages->count(); ++row) {
         titles << pages->item(row)->text();
     }
-    QCOMPARE(titles.mid(0, 6), (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
-                                            QStringLiteral("Engines"),
-                                            QStringLiteral("File operations"),
-                                            QStringLiteral("Ratings"), QStringLiteral("Covers")}));
+    QCOMPARE(titles.mid(0, 6),
+             (QStringList{QStringLiteral("General"), QStringLiteral("Playback"),
+                          QStringLiteral("Engines"), QStringLiteral("File operations"),
+                          QStringLiteral("Ratings"), QStringLiteral("Covers")}));
     QCOMPARE(titles, SettingsSession::pageTitles().mid(0, titles.size()));
     // A tab of File operations opens that page at the tab.
     auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("bench-settings-file-operations"));
@@ -1427,9 +1427,8 @@ void BenchMainWindowTest::sharingSettingsAreHandedToTheEngineOnce() {
             20'000);
         QVERIFY(config().contains(QStringLiteral("\nmusic-root = /srv/handed-over\n")));
         // Restarted to use it, and answering again.
-        QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback() != nullptr &&
-                                     window.localPlayback()->active(),
-                                 15'000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            window.localPlayback() != nullptr && window.localPlayback()->active(), 15'000);
         const auto holders = lockHolders(engine->state / "engine.lock");
         QCOMPARE(holders.size(), std::size_t{1U});
         handed_to = holders.front();
@@ -1670,14 +1669,14 @@ void BenchMainWindowTest::listsTravelAsEdits() {
 
     // ADR-0286: a tab that is no saved playlist plays as long as it is: its
     // queue sent in parts, each within a line, and never a list.
-    auto* scratch = window.addListTab(persistence::ListDocument{
-                                          .id = core::StableId::random(),
-                                          .kind = persistence::ListKind::scratch,
-                                          .name = "Long scratch",
-                                          .pinned = false,
-                                          .dirty = false,
-                                          .items = {}},
-                                      true);
+    auto* scratch =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Long scratch",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
     std::vector<LocalTrackRow> copied = tab->model->rows();
     for (auto& row : copied) {
         row.entry_id = core::StableId::random();
@@ -1686,11 +1685,11 @@ void BenchMainWindowTest::listsTravelAsEdits() {
     window.markTabDirty(*scratch);
     window.persistNow(false);
     window.playRow(*scratch, 7'000);
-    QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback()->state().queue_size == 7'999U &&
-                                 window.localPlayback()->state().entry ==
-                                     QString::fromStdString(
-                                         scratch->model->rows()[7'000].entry_id.to_string()),
-                             10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        window.localPlayback()->state().queue_size == 7'999U &&
+            window.localPlayback()->state().entry ==
+                QString::fromStdString(scratch->model->rows()[7'000].entry_id.to_string()),
+        10'000);
     queue = (*engine)->call("playback.queue");
     QVERIFY(queue.has_value());
     QCOMPARE(queue->at("entries").size(), std::size_t{7'999});
@@ -2307,8 +2306,7 @@ void BenchMainWindowTest::aScratchTabNeverReachesItsEngine() {
     window.persistNow(false);
     QTRY_VERIFY(!window.list_sync_->busy());
     QVERIFY(!listed(id));
-    QVERIFY(
-        QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    QVERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
 

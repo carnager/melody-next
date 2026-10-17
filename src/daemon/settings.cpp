@@ -78,10 +78,11 @@ constexpr std::array known_keys{
     Known{"config", Shape::value, false},
 };
 
-constexpr std::array section_keys{std::string_view{"address"},     std::string_view{"music-root"},
-                                  std::string_view{"stream-home"}, std::string_view{"stream-away"},
-                                  std::string_view{"password"},    std::string_view{"password-file"},
-                                  std::string_view{"agent"}};
+constexpr std::array section_keys{
+    std::string_view{"address"},     std::string_view{"music-root"},
+    std::string_view{"stream-home"}, std::string_view{"stream-away"},
+    std::string_view{"password"},    std::string_view{"password-file"},
+    std::string_view{"agent"}};
 
 [[nodiscard]] const Known* known(const std::string_view key) {
     const auto* found = std::ranges::find(known_keys, key, &Known::key);
@@ -206,7 +207,8 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
         if (!kbps) {
             return std::unexpected(kbps.error());
         }
-        (key == "agent-stream-home" ? settings.agent_nearby_kbps : settings.agent_away_kbps) = *kbps;
+        (key == "agent-stream-home" ? settings.agent_nearby_kbps : settings.agent_away_kbps) =
+            *kbps;
     } else if (key == "play-for") {
         settings.play_fors.push_back(PlayFor{.address = value,
                                              .name = {},
@@ -229,8 +231,7 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
             return std::unexpected(
                 refused(where + " wants 0 (the original files) or 16 to 512 kbps, got " + value));
         }
-        (key == "play-for-bitrate-nearby" ? play_for().nearby_kbps : play_for().away_kbps) =
-            *kbps;
+        (key == "play-for-bitrate-nearby" ? play_for().nearby_kbps : play_for().away_kbps) = *kbps;
     }
     return {};
 }
@@ -306,9 +307,8 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
         const auto at = origin + ":" + std::to_string(entry.line);
         const auto* key = known(entry.key);
         if (key == nullptr || !key->in_file) {
-            return std::unexpected(refused(at + ": " + entry.key +
-                                           " is not a setting melodyd.conf has" +
-                                           renamed(entry.key)));
+            return std::unexpected(refused(
+                at + ": " + entry.key + " is not a setting melodyd.conf has" + renamed(entry.key)));
         }
         if (entry.key == "password") {
             password_line = entry.line;
@@ -316,9 +316,8 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
             password_file_line = entry.line;
         }
         if (password_line && password_file_line) {
-            return std::unexpected(refused(at +
-                                           ": password and password-file both given; one is "
-                                           "enough"));
+            return std::unexpected(refused(at + ": password and password-file both given; one is "
+                                                "enough"));
         }
         if (auto applied = apply(settings, entry.key, entry.value, at + ": " + entry.key);
             !applied) {
@@ -347,8 +346,7 @@ constexpr std::array section_keys{std::string_view{"address"},     std::string_v
     while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
         text.remove_prefix(1);
     }
-    while (!text.empty() &&
-           (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
         text.remove_suffix(1);
     }
     return text;
@@ -454,7 +452,7 @@ bool is_options_file(const std::string_view text) {
     while (start <= text.size()) {
         const auto end = text.find('\n', start);
         if (options_value(text.substr(start, end == std::string_view::npos ? std::string_view::npos
-                                                                            : end - start))) {
+                                                                           : end - start))) {
             return true;
         }
         if (end == std::string_view::npos) {
@@ -471,8 +469,8 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
     std::size_t start = 0;
     while (start < text.size()) {
         const auto end = text.find('\n', start);
-        const auto line = text.substr(start, end == std::string_view::npos ? text.size() - start
-                                                                            : end - start);
+        const auto line =
+            text.substr(start, end == std::string_view::npos ? text.size() - start : end - start);
         if (auto value = options_value(line)) {
             // As systemd reads an environment file: quotes around the value
             // are the value's bounds, and $MELODYD_OPTIONS is then split.
@@ -506,8 +504,8 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
     for (std::size_t index = 0; index < flags.size(); ++index) {
         const std::string_view flag = flags[index];
         if (!flag.starts_with("--")) {
-            return std::unexpected(refused("MELODYD_OPTIONS has " + std::string{flag} +
-                                           ", which is not an option"));
+            return std::unexpected(
+                refused("MELODYD_OPTIONS has " + std::string{flag} + ", which is not an option"));
         }
         const auto key = flag.substr(2);
         const auto next = [&]() -> core::Result<std::string> {
@@ -533,9 +531,8 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
             if (!rate) {
                 return std::unexpected(rate.error());
             }
-            top.emplace_back(key == "agent-bitrate-nearby" ? "agent-stream-home"
-                                                           : "agent-stream-away",
-                             *rate);
+            top.emplace_back(
+                key == "agent-bitrate-nearby" ? "agent-stream-home" : "agent-stream-away", *rate);
         } else if (key == "play-for") {
             auto value = next();
             if (!value) {
@@ -566,8 +563,7 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
             group_keys().emplace_back(
                 key == "play-for-bitrate-nearby" ? "stream-home" : "stream-away", *rate);
         } else if (const auto* known_key = known(key);
-                   known_key != nullptr && known_key->in_file &&
-                   known_key->shape == Shape::value) {
+                   known_key != nullptr && known_key->in_file && known_key->shape == Shape::value) {
             auto value = next();
             if (!value) {
                 return std::unexpected(value.error());
@@ -593,19 +589,24 @@ core::Result<std::string> convert_options_file(const std::string_view text) {
     if (!unique.empty()) {
         converted += '\n';
     }
+    const auto line = [&converted](const std::string& key, const std::string& value) {
+        converted.append(key).append(" = ").append(value).append("\n");
+    };
     for (const auto& [key, value] : unique) {
-        converted += key + " = " + value + "\n";
+        line(key, value);
     }
     for (const auto& group : groups) {
-        converted += "\n[engine " + (group.name.empty() ? group.address : group.name) + "]\n";
-        converted += "address = " + group.address + "\n";
+        converted.append("\n[engine ")
+            .append(group.name.empty() ? group.address : group.name)
+            .append("]\n");
+        line("address", group.address);
         std::vector<std::pair<std::string, std::string>> keys = every_group;
         for (const auto& [key, value] : group.keys) {
             std::erase_if(keys, [&key](const auto& earlier) { return earlier.first == key; });
             keys.emplace_back(key, value);
         }
         for (const auto& [key, value] : keys) {
-            converted += key + " = " + value + "\n";
+            line(key, value);
         }
     }
     if (auto check = ConfigFile::parse(converted, "melodyd.conf"); !check) {
@@ -665,11 +666,11 @@ core::Result<Settings> read_settings(const std::span<const std::string_view> arg
             return std::unexpected(applied.error());
         }
         settings.config_file = path;
-        if (struct stat info{};
-            ::stat(path.c_str(), &info) == 0 && (info.st_mode & 077) != 0 &&
-            (file->find("", "", "password") != nullptr ||
-             std::ranges::any_of(settings.engines,
-                                 [](const auto& engine) { return !engine.password.empty(); }))) {
+        if (struct stat info{}; ::stat(path.c_str(), &info) == 0 && (info.st_mode & 077) != 0 &&
+                                (file->find("", "", "password") != nullptr ||
+                                 std::ranges::any_of(settings.engines, [](const auto& engine) {
+                                     return !engine.password.empty();
+                                 }))) {
             settings.notes.push_back(path.string() +
                                      " holds a password and others can read it: chmod 600 " +
                                      path.string());

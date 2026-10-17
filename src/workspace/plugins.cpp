@@ -249,6 +249,7 @@ std::vector<PluginAlbum> pluginAlbums(std::vector<PluginTrack> tracks,
     }
     for (auto& album : albums) {
         std::vector<std::string> folders;
+        folders.reserve(album.tracks.size());
         for (const auto& track : album.tracks) {
             folders.push_back(parentOf(track.path));
         }

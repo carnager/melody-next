@@ -54,8 +54,8 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QSysInfo>
 #include <QStatusBar>
+#include <QSysInfo>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
@@ -154,7 +154,8 @@ void BenchMainWindow::buildWorkspace() {
                                           QStringLiteral("Local music source"));
     // ADR-0286: "This computer" -- its folders, not an engine's -- and the
     // library, named by the engine holding it.
-    local_source_tabs_->addTab(QIcon::fromTheme(QStringLiteral("computer")),
+    local_source_tabs_->addTab(QIcon::fromTheme(QStringLiteral("computer"),
+                                                style()->standardIcon(QStyle::SP_ComputerIcon)),
                                QStringLiteral("This computer"));
     local_source_tabs_->setTabToolTip(
         0, QStringLiteral("Folders on this computer, %1").arg(QSysInfo::machineHostName()));
@@ -974,13 +975,13 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
                 }
                 auto* folders = engine->library->createFoldersWidget(pages);
                 folders->setProperty("engine-address",
-                                  engine->key.isLocal()
-                                      ? QString::fromLatin1(SettingsKeys::library_engine_local)
-                                      : engine->setting.address);
+                                     engine->key.isLocal()
+                                         ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                         : engine->setting.address);
                 folders->setProperty("engine-state",
-                                  engine->catalogue != nullptr && engine->catalogue->reachable()
-                                      ? tr("connected")
-                                      : tr("not reached"));
+                                     engine->catalogue != nullptr && engine->catalogue->reachable()
+                                         ? tr("connected")
+                                         : tr("not reached"));
             }
             return pages;
         };

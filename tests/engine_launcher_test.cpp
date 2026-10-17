@@ -328,8 +328,7 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     // is no switch of its own -- and the password is gone from the file.
     settings.remove(QLatin1String(SettingsDialog::engine_password_key));
     settings.sync();
-    configured =
-        configureLocalEngine(scratch.engine, sharingChanges(localEngineSharing(), shared));
+    configured = configureLocalEngine(scratch.engine, sharingChanges(localEngineSharing(), shared));
     QVERIFY2(configured.has_value(), configured ? "" : configured.error().message.c_str());
     QVERIFY(enginePid(scratch.engine) != first);
     QVERIFY(!tcp("correct horse").has_value());

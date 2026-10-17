@@ -48,12 +48,8 @@ void check(const bool condition, const std::string_view expression, const int li
 }
 
 [[nodiscard]] ListedEngine listed(const std::string& name) {
-    return ListedEngine{.name = name,
-                        .address = {},
-                        .music_root = {},
-                        .stream = {},
-                        .password = {},
-                        .play = true};
+    return ListedEngine{
+        .name = name, .address = {}, .music_root = {}, .stream = {}, .password = {}, .play = true};
 }
 
 [[nodiscard]] const Wanted* named(const std::vector<Wanted>& plan, const std::string& name) {
@@ -127,8 +123,8 @@ void listedEnginesAreTheirOwn() {
 void anAddressIsTheFallback() {
     auto with = config();
     auto gemenon = listed("gemenon");
-    gemenon.address = trackknife::protocol::Endpoint{
-        .socket = {}, .host = "10.8.0.1", .port = 6603, .token = {}};
+    gemenon.address =
+        trackknife::protocol::Endpoint{.socket = {}, .host = "10.8.0.1", .port = 6603, .token = {}};
     with.listed = {gemenon};
 
     // Not found, and the network has had its time: reached by address, with
@@ -165,8 +161,7 @@ void aSectionNamedAfterItsAddress() {
     host.where = "192.168.0.200:6603";
     host.music_root = std::filesystem::path{"/mnt/gemenon"};
     with.listed = {host};
-    const auto plan =
-        plan_guests(with, {engine("gemenon", "gemenon-id", "192.168.0.200")}, true);
+    const auto plan = plan_guests(with, {engine("gemenon", "gemenon-id", "192.168.0.200")}, true);
     CHECK(plan.size() == 1U);
     if (plan.size() == 1U) {
         CHECK(plan[0].identity == "gemenon-id");

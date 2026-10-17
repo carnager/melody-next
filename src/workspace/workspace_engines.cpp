@@ -150,11 +150,11 @@ void Workspace::renewOutdatedLocalEngine() {
     const bool outdated = !hand_over && local->localEngineOutdated();
     QSettings settings;
     const auto sharing = localEngineSharing();
-    const bool nothing_shared = !sharing.share && !sharing.upnp && sharing.music_root.isEmpty() &&
-                                sharing.play_for.empty() && sharing.play_for_found &&
-                                sharing.found_nearby_kbps ==
-                                    SettingsKeys::engine_stream_nearby_default &&
-                                sharing.found_away_kbps == SettingsKeys::engine_stream_away_default;
+    const bool nothing_shared =
+        !sharing.share && !sharing.upnp && sharing.music_root.isEmpty() &&
+        sharing.play_for.empty() && sharing.play_for_found &&
+        sharing.found_nearby_kbps == SettingsKeys::engine_stream_nearby_default &&
+        sharing.found_away_kbps == SettingsKeys::engine_stream_away_default;
     if (nothing_shared) {
         settings.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key), true);
     }
@@ -267,14 +267,13 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
     syncRemoteEngines();
     // ADR-0286: how this computer's engine is shared is its melodyd.conf;
     // a change is handed to it, and it restarts to use it.
-    if (const auto now = localEngineSharing(); now != before && localCatalogue() &&
-                                                 localCatalogue()->startsOwnEngine()) {
+    if (const auto now = localEngineSharing();
+        now != before && localCatalogue() && localCatalogue()->startsOwnEngine()) {
         QGuiApplication::setOverrideCursor(QCursor{Qt::WaitCursor});
         auto configured = localCatalogue()->configureLocalEngine(sharingChanges(now, before));
         QGuiApplication::restoreOverrideCursor();
         if (configured) {
-            QSettings{}.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key),
-                                 true);
+            QSettings{}.setValue(QLatin1String(SettingsKeys::engine_settings_in_config_key), true);
         }
         view_->showMessage(configured
                                ? QStringLiteral("This computer's engine restarted with its new "

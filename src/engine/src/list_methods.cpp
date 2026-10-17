@@ -742,9 +742,9 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
                     items.push_back(item_of_track(std::move(*track)));
                 }
             }
-            auto made = workspace.save_engine_list(core::StableId::random(), *name,
-                                                   persistence::EngineListKind::saved, items, 0U,
-                                                   now_ms());
+            auto made =
+                workspace.save_engine_list(core::StableId::random(), *name,
+                                           persistence::EngineListKind::saved, items, 0U, now_ms());
             if (!made) {
                 return std::unexpected(std::move(made.error()));
             }
@@ -795,8 +795,9 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         }
         std::vector<core::StableId> parsed;
         for (const auto& value : *ids) {
-            auto id = value.is_string() ? core::StableId::parse(value.get<std::string>())
-                                        : core::Result<core::StableId>{std::unexpected(core::Error{})};
+            auto id = value.is_string()
+                          ? core::StableId::parse(value.get<std::string>())
+                          : core::Result<core::StableId>{std::unexpected(core::Error{})};
             if (!id) {
                 return std::unexpected(bad_params("a list is named by its identity", "ids"));
             }
@@ -906,40 +907,41 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
             }
             edits.push_back(std::move(*parsed));
         }
-        auto edited = player.edit_queue(list, [&edits](std::vector<QueueEntry>& queue)
-                                                  -> core::Result<void> {
-            std::set<core::StableId> held;
-            for (const auto& entry : queue) {
-                held.insert(entry.entry_id);
-            }
-            std::optional<core::StableId> last =
-                queue.empty() ? std::nullopt : std::optional{queue.back().entry_id};
-            for (auto& edit : edits) {
-                std::erase_if(edit.entries,
-                              [&held](const core::StableId& entry) { return !held.contains(entry); });
-                if (edit.kind == persistence::ListEdit::Kind::update) {
-                    std::erase_if(edit.items, [&held](const persistence::EngineListItem& item) {
-                        return !held.contains(item.entry_id);
+        auto edited =
+            player.edit_queue(list, [&edits](std::vector<QueueEntry>& queue) -> core::Result<void> {
+                std::set<core::StableId> held;
+                for (const auto& entry : queue) {
+                    held.insert(entry.entry_id);
+                }
+                std::optional<core::StableId> last =
+                    queue.empty() ? std::nullopt : std::optional{queue.back().entry_id};
+                for (auto& edit : edits) {
+                    std::erase_if(edit.entries, [&held](const core::StableId& entry) {
+                        return !held.contains(entry);
                     });
-                }
-                if (edit.after && !held.contains(*edit.after)) {
-                    edit.after = last;
-                }
-                if (edit.kind == persistence::ListEdit::Kind::insert) {
-                    for (const auto& item : edit.items) {
-                        held.insert(item.entry_id);
-                        last = item.entry_id;
+                    if (edit.kind == persistence::ListEdit::Kind::update) {
+                        std::erase_if(edit.items, [&held](const persistence::EngineListItem& item) {
+                            return !held.contains(item.entry_id);
+                        });
                     }
-                } else if (edit.kind == persistence::ListEdit::Kind::remove) {
-                    for (const auto& entry : edit.entries) {
-                        held.erase(entry);
+                    if (edit.after && !held.contains(*edit.after)) {
+                        edit.after = last;
+                    }
+                    if (edit.kind == persistence::ListEdit::Kind::insert) {
+                        for (const auto& item : edit.items) {
+                            held.insert(item.entry_id);
+                            last = item.entry_id;
+                        }
+                    } else if (edit.kind == persistence::ListEdit::Kind::remove) {
+                        for (const auto& entry : edit.entries) {
+                            held.erase(entry);
+                        }
                     }
                 }
-            }
-            return persistence::apply_list_edits(
-                queue, edits, [](const QueueEntry& entry) { return entry.entry_id; },
-                [](const persistence::EngineListItem& item) { return queue_entry(item); });
-        });
+                return persistence::apply_list_edits(
+                    queue, edits, [](const QueueEntry& entry) { return entry.entry_id; },
+                    [](const persistence::EngineListItem& item) { return queue_entry(item); });
+            });
         if (!edited) {
             return std::unexpected(std::move(edited.error()));
         }

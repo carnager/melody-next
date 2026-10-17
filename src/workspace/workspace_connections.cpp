@@ -493,52 +493,51 @@ void Workspace::checkMissing(const QString& document_id, std::vector<std::string
     const bool resolves = playbackOf(EngineKey::of(tab->document)) != nullptr &&
                           playbackOf(EngineKey::of(tab->document))->engineLevel() >= 15;
     const QPointer self{this};
-    static_cast<void>(QtConcurrent::run([self, work, document_id, paths = std::move(paths),
-                                         seen = std::move(seen), resolves] {
-        auto missing = work->missing(paths);
-        std::vector<std::pair<std::string, core::LocalSourceRevision>> asked;
-        std::vector<std::optional<engine::RemoteFileWork::Moved>> moved;
-        if (missing && resolves) {
-            for (const auto& gone : *missing) {
-                if (const auto at = seen.find(gone); at != seen.end()) {
-                    asked.emplace_back(gone, at->second);
+    static_cast<void>(QtConcurrent::run(
+        [self, work, document_id, paths = std::move(paths), seen = std::move(seen), resolves] {
+            auto missing = work->missing(paths);
+            std::vector<std::pair<std::string, core::LocalSourceRevision>> asked;
+            std::vector<std::optional<engine::RemoteFileWork::Moved>> moved;
+            if (missing && resolves) {
+                for (const auto& gone : *missing) {
+                    if (const auto at = seen.find(gone); at != seen.end()) {
+                        asked.emplace_back(gone, at->second);
+                    }
+                }
+                if (!asked.empty()) {
+                    if (auto resolved = work->resolve_moves(asked)) {
+                        moved = std::move(*resolved);
+                    }
                 }
             }
-            if (!asked.empty()) {
-                if (auto resolved = work->resolve_moves(asked)) {
-                    moved = std::move(*resolved);
+            postBack(self, [self, document_id, paths, missing = std::move(missing),
+                            asked = std::move(asked), moved = std::move(moved)] {
+                if (!missing) {
+                    return;
                 }
-            }
-        }
-        postBack(self, [self, document_id, paths, missing = std::move(missing),
-                        asked = std::move(asked), moved = std::move(moved)] {
-            if (!missing) {
-                return;
-            }
-            auto* found = self->tabForDocument(document_id);
-            if (found == nullptr) {
-                return;
-            }
-            std::vector<std::string> still_missing = *missing;
-            bool followed = false;
-            for (std::size_t index = 0; index < moved.size() && index < asked.size(); ++index) {
-                if (!moved[index]) {
-                    continue;
+                auto* found = self->tabForDocument(document_id);
+                if (found == nullptr) {
+                    return;
                 }
-                if (found->model->applyCommittedRelocation(asked[index].first,
-                                                           moved[index]->raw_path,
-                                                           asked[index].second,
-                                                           moved[index]->revision)) {
-                    std::erase(still_missing, asked[index].first);
-                    followed = true;
+                std::vector<std::string> still_missing = *missing;
+                bool followed = false;
+                for (std::size_t index = 0; index < moved.size() && index < asked.size(); ++index) {
+                    if (!moved[index]) {
+                        continue;
+                    }
+                    if (found->model->applyCommittedRelocation(
+                            asked[index].first, moved[index]->raw_path, asked[index].second,
+                            moved[index]->revision)) {
+                        std::erase(still_missing, asked[index].first);
+                        followed = true;
+                    }
                 }
-            }
-            found->model->setMissing(paths, still_missing);
-            if (followed) {
-                self->schedulePersist();
-            }
-        });
-    }));
+                found->model->setMissing(paths, still_missing);
+                if (followed) {
+                    self->schedulePersist();
+                }
+            });
+        }));
 }
 
 void Workspace::adoptEngineRating(const EngineKey& engine, const QString& hash,
@@ -889,30 +888,29 @@ void Workspace::offerRetiredLists(const EngineKey& key) {
         return;
     }
     retired_offered_.insert(key.text());
-    engine->request(
-        QStringLiteral("list.retired"), protocol::Json::object(),
-        [this, key](const core::Result<protocol::Json>& answer) {
-            if (!answer) {
-                return;
-            }
-            QStringList names;
-            QStringList ids;
-            for (const auto& list : answer->value("lists", protocol::Json::array())) {
-                ids << QString::fromStdString(list.value("id", std::string{}));
-                names << QString::fromUtf8(list.value("name", std::string{}));
-            }
-            if (ids.isEmpty()) {
-                return;
-            }
-            view_->offerRetiredLists(
-                engineName(key), names, [this, key, ids](const RetiredChoice choice) {
-                    if (choice == RetiredChoice::open) {
-                        openRetiredLists(key, ids, 0);
-                    } else if (choice == RetiredChoice::discard) {
-                        dropRetiredLists(key, ids);
-                    }
-                });
-        });
+    engine->request(QStringLiteral("list.retired"), protocol::Json::object(),
+                    [this, key](const core::Result<protocol::Json>& answer) {
+                        if (!answer) {
+                            return;
+                        }
+                        QStringList names;
+                        QStringList ids;
+                        for (const auto& list : answer->value("lists", protocol::Json::array())) {
+                            ids << QString::fromStdString(list.value("id", std::string{}));
+                            names << QString::fromUtf8(list.value("name", std::string{}));
+                        }
+                        if (ids.isEmpty()) {
+                            return;
+                        }
+                        view_->offerRetiredLists(engineName(key), names,
+                                                 [this, key, ids](const RetiredChoice choice) {
+                                                     if (choice == RetiredChoice::open) {
+                                                         openRetiredLists(key, ids, 0);
+                                                     } else if (choice == RetiredChoice::discard) {
+                                                         dropRetiredLists(key, ids);
+                                                     }
+                                                 });
+                    });
 }
 
 void Workspace::openRetiredLists(const EngineKey& key, const QStringList& ids,

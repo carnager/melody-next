@@ -9,8 +9,8 @@
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/protocol/client.hpp"
 
-#include <QHash>
 #include "trackknife/persistence/list_edits.hpp"
+#include <QHash>
 
 #include <QObject>
 #include <QString>

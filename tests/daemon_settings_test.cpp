@@ -46,8 +46,8 @@ std::filesystem::path root;
     return {std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
 }
 
-[[nodiscard]] trackknife::core::Result<Settings>
-settings_of(const std::filesystem::path& config, std::vector<std::string> flags = {}) {
+[[nodiscard]] trackknife::core::Result<Settings> settings_of(const std::filesystem::path& config,
+                                                             std::vector<std::string> flags = {}) {
     std::vector<std::string> owned{"--config", config.string()};
     owned.insert(owned.end(), flags.begin(), flags.end());
     std::vector<std::string_view> arguments{owned.begin(), owned.end()};
@@ -127,40 +127,43 @@ void theFileAndFlagsOverIt() {
 
     // A flag wins; a password from a flag puts the file's password-file away
     // and the other way round.
-    const auto over = settings_of(config, {"--name", "laptop", "--agent", "--password-file",
-                                           "/run/secret"});
-    CHECK(over && over->engine_name == "laptop" && over->agent == true &&
-          over->password.empty() && over->password_file == "/run/secret");
+    const auto over =
+        settings_of(config, {"--name", "laptop", "--agent", "--password-file", "/run/secret"});
+    CHECK(over && over->engine_name == "laptop" && over->agent == true && over->password.empty() &&
+          over->password_file == "/run/secret");
 }
 
 void refusesWithTheLine() {
-    CHECK(refusal("name = a\nbitrate = 3\n").ends_with(
-        "refused.conf:2: bitrate is not a setting melodyd.conf has"));
-    CHECK(refusal("agent-bitrate-away = 96\n").ends_with(
-        ":1: agent-bitrate-away is not a setting melodyd.conf has; it is agent-stream-away now "
-        "(original, or opus 128)"));
+    CHECK(refusal("name = a\nbitrate = 3\n")
+              .ends_with("refused.conf:2: bitrate is not a setting melodyd.conf has"));
+    CHECK(refusal("agent-bitrate-away = 96\n")
+              .ends_with(":1: agent-bitrate-away is not a setting melodyd.conf has; it is "
+                         "agent-stream-away now "
+                         "(original, or opus 128)"));
     CHECK(refusal("play-for = a:1\n").find("[engine NAME] section now") != std::string::npos);
     CHECK(refusal("config = x\n").ends_with(":1: config is not a setting melodyd.conf has"));
     CHECK(refusal("agent = maybe\n").ends_with(":1: agent is yes or no, got maybe"));
-    CHECK(refusal("agent-stream-home = flac\n").ends_with(
-        ":1: agent-stream-home is original, or opus and a bit rate from 16 to 512 (opus 128), got "
-        "flac"));
+    CHECK(refusal("agent-stream-home = flac\n")
+              .ends_with(":1: agent-stream-home is original, or opus and a bit rate from 16 to 512 "
+                         "(opus 128), got "
+                         "flac"));
     CHECK(refusal("agent-stream-home = opus 8\n").find(":1: agent-stream-home is") !=
           std::string::npos);
-    CHECK(refusal("transcode-cache = lots\n").ends_with(
-        ":1: transcode-cache wants megabytes, got lots"));
-    CHECK(refusal("password = a\npassword-file = b\n").ends_with(
-        ":2: password and password-file both given; one is enough"));
-    CHECK(refusal("[speaker kitchen]\n").ends_with(
-        ":1: [speaker] is not a section melodyd.conf has; [engine NAME] is"));
+    CHECK(refusal("transcode-cache = lots\n")
+              .ends_with(":1: transcode-cache wants megabytes, got lots"));
+    CHECK(refusal("password = a\npassword-file = b\n")
+              .ends_with(":2: password and password-file both given; one is enough"));
+    CHECK(refusal("[speaker kitchen]\n")
+              .ends_with(":1: [speaker] is not a section melodyd.conf has; [engine NAME] is"));
     CHECK(refusal("[engine]\n").ends_with(":1: [engine] wants the name the engine goes by"));
-    CHECK(refusal("[engine a]\nname = b\n").ends_with(
-        ":2: name is not a setting of an [engine]; those are address, music-root, stream-home, "
-        "stream-away, password, password-file, agent"));
+    CHECK(refusal("[engine a]\nname = b\n")
+              .ends_with(":2: name is not a setting of an [engine]; those are address, music-root, "
+                         "stream-home, "
+                         "stream-away, password, password-file, agent"));
     CHECK(refusal("[engine a]\nstream-away = opus 600\n").find(":2: stream-away is") !=
           std::string::npos);
-    CHECK(refusal("[engine a]\npassword = x\npassword-file = y\n").ends_with(
-        ":3: password and password-file both given; one is enough"));
+    CHECK(refusal("[engine a]\npassword = x\npassword-file = y\n")
+              .ends_with(":3: password and password-file both given; one is enough"));
     // The format itself: refused by the parser, with its line too.
     CHECK(refusal("name\n").ends_with(":1: not a setting: settings read key = value, comments "
                                       "start with #"));
@@ -204,7 +207,8 @@ void saysWhenOthersCanReadThePassword() {
 void convertsTheOldFile() {
     const auto old = std::string{
         "# melodyd on gemenon\n"
-        "MELODYD_OPTIONS=\"--name gemenon --agent --password-file /home/you/.config/melody/password "
+        "MELODYD_OPTIONS=\"--name gemenon --agent --password-file "
+        "/home/you/.config/melody/password "
         "--upnp --agent-bitrate-nearby 0 --agent-bitrate-away 96 "
         "--play-for-music-root /mnt/all --play-for 10.8.0.1:6603 --play-for-name caprica "
         "--play-for-bitrate-away 64 --play-for nas:6603\"\n"

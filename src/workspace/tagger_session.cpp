@@ -2234,6 +2234,7 @@ std::vector<TaggerSession::Choice> TaggerSession::layouts() const {
 
 std::vector<TaggerSession::DestinationRow> TaggerSession::destinationRows() const {
     std::vector<DestinationRow> rows;
+    rows.reserve(destination_catalog_.size() + 1U);
     for (std::size_t index = 0U; index < destination_catalog_.size(); ++index) {
         rows.push_back({.target = MoveTarget::saved, .index = index});
     }

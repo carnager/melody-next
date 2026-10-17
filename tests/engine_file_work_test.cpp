@@ -937,8 +937,7 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
             "the first visit writes the rating and its copy");
     // And the library holds it under the name a visit asks for, so the next
     // one knows the file without opening it.
-    const auto known =
-        catalogue.rated_tracks(engine::RatingTags::marked_field("MELODY_RATING"));
+    const auto known = catalogue.rated_tracks(engine::RatingTags::marked_field("MELODY_RATING"));
     require(known && known->size() == 1U && known->front().indexed == std::vector<std::string>{"6"},
             "the library knows what the file holds");
     const auto without = catalogue.rated_tracks(engine::RatingTags::marked_field(""));
@@ -957,10 +956,10 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
 
     // Its tags taken away (the library reads it again): written again.
     require(tags.set_enabled(false).has_value(), "off");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
-                    .has_value() &&
-                in_file("MELODY_RATING").empty(),
-            "the tags taken out of the file");
+    require(
+        engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING").has_value() &&
+            in_file("MELODY_RATING").empty(),
+        "the tags taken out of the file");
     require(tags.set_enabled(true).has_value(), "on");
     tags.wait_idle();
     require(in_file("MELODY_RATING") == std::vector<std::string>{"6"},
@@ -969,9 +968,9 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
     // Rated as a visit starts: the file ends with that rating, not the one
     // the visit found.
     require(tags.set_enabled(false).has_value(), "off again");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
-                .has_value(),
-            "taken out again");
+    require(
+        engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING").has_value(),
+        "taken out again");
     require(tags.set_enabled(true).has_value(), "on again");
     require(catalogue.set_rating(hash, false, 9).has_value(), "rated anew");
     tags.rated(hash, false, 9);
@@ -983,9 +982,9 @@ void ratings_visit_only_what_lacks_them(const std::filesystem::path& directory,
 
     // A visit cut short by a stop is finished at the next start.
     require(tags.set_enabled(false).has_value(), "off once more");
-    require(engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING")
-                .has_value(),
-            "taken out once more");
+    require(
+        engine::RatingTags::write(database, catalogue, flac, 0U, {}, "MELODY_RATING").has_value(),
+        "taken out once more");
     // Left on as a stop would leave it, without this one visiting.
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::system_clock::now().time_since_epoch())

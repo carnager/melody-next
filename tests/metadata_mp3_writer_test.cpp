@@ -20,6 +20,7 @@
 #include <taglib/mp4file.h>
 #include <taglib/mpegfile.h>
 #include <taglib/textidentificationframe.h>
+#include <taglib/tpropertymap.h>
 #include <taglib/unsynchronizedlyricsframe.h>
 
 #include <algorithm>
@@ -659,7 +660,13 @@ void writesOnlyTheFramesThatChange(const std::filesystem::path& fixture_director
         CHECK((comments == std::vector<std::string>{std::string{"\0\0\0|first", 9}, "eng|second"}));
     }
 
-    if (const auto arranged = write("ARRANGER", "New", "arranged.mp3"); !arranged.empty()) {
+    // A TagLib that does not read an involved-people frame's roles as
+    // properties (CI's) leaves nothing to change in it: that half is for one
+    // that does.
+    const bool roles_read = TagLib::MPEG::File{source.c_str()}.properties().contains("ARRANGER");
+    if (!roles_read) {
+        std::cerr << "skipped: this TagLib reads no ARRANGER from TIPL\n";
+    } else if (const auto arranged = write("ARRANGER", "New", "arranged.mp3"); !arranged.empty()) {
         TagLib::MPEG::File file{arranged.c_str()};
         std::vector<std::string> credits;
         for (const auto* frame : file.ID3v2Tag()->frameList("TIPL")) {

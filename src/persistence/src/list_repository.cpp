@@ -5764,7 +5764,8 @@ select_engine_list_summaries(sqlite3* database, const std::optional<core::Stable
 // A list's entries in order; with `positions`, where each is stored too.
 [[nodiscard]] core::Result<std::vector<EngineListItem>>
 select_engine_list_items(sqlite3* database, const core::StableId& id,
-                         std::vector<std::int64_t>* positions = nullptr, const bool retired = false) {
+                         std::vector<std::int64_t>* positions = nullptr,
+                         const bool retired = false) {
     std::vector<EngineListItem> items;
     const auto sql = std::string{"SELECT entry_id, raw_path, logical_reference, "
                                  "segment_start_sample, segment_end_sample, audio_stream_index, "

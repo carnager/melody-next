@@ -19,6 +19,7 @@
 #endif
 #include "trackknife/core/engine_state.hpp"
 #include "trackknife/core/environment.hpp"
+#include "trackknife/engine/album_arrivals.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -628,8 +629,24 @@ int main(int argc, char** argv) {
 
     // What changed in the library, told to every client so that what shows
     // it follows: the paths, the albums they touched, or everything.
-    catalogue.observe([sink](const trackknife::engine::LocalCatalogue::Change& change) {
+    // New albums, said once each when whole -- for a script to act on
+    // (melody-cli watch albums). $MELODY_ALBUM_SETTLE_SECONDS: how long no
+    // track of one may come before it counts as whole (default 30).
+    const auto settle = [] {
+        const auto* named =
+            std::getenv("MELODY_ALBUM_SETTLE_SECONDS"); // NOLINT(concurrency-mt-unsafe)
+        const auto seconds = named != nullptr ? std::atoi(named) : 30;
+        return std::chrono::seconds{std::clamp(seconds, 0, 3'600)};
+    }();
+    // Held weakly by the catalogue, which may say a change while the engine
+    // stops, after this has gone.
+    auto arrivals = std::make_shared<trackknife::engine::AlbumArrivals>(catalogue, sink, settle);
+    catalogue.observe([sink, weak = std::weak_ptr{arrivals}](
+                          const trackknife::engine::LocalCatalogue::Change& change) {
         sink(trackknife::engine::catalogue_change_event(change));
+        if (const auto alive = weak.lock()) {
+            alive->changed();
+        }
     });
 
     // Jobs report through the sockets, so the registry is given its sink and

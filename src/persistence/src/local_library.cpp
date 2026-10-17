@@ -2573,6 +2573,24 @@ class PreparationPipeline {
 
 } // namespace
 
+core::Result<std::vector<AlbumArrival>>
+LocalLibrary::albums_arrived_since(const std::int64_t since) const {
+    return checked([&] {
+        Statement select{implementation_->db,
+                         "SELECT album_key,min(added),max(added) FROM local_library_tracks "
+                         "WHERE album_key<>'' GROUP BY album_key HAVING min(added)>=? "
+                         "ORDER BY min(added)"};
+        select.number(1, std::max<std::int64_t>(since, 1));
+        std::vector<AlbumArrival> arrived;
+        while (select.next()) {
+            arrived.push_back(AlbumArrival{.album_key = select.bytes(0),
+                                           .first_added = select.number(1),
+                                           .last_added = select.number(2)});
+        }
+        return arrived;
+    });
+}
+
 core::Result<std::vector<std::string>>
 LocalLibrary::albums_touching(const std::vector<std::string>& raw_paths) const {
     return checked([&] {

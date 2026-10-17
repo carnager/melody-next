@@ -7,6 +7,16 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 18 (2026-10-17)
+
+- `catalogue.albums_added {albums: [{key, artist, album, date, folder,
+  paths}]}`, an event: albums new to the library -- every track of each came
+  after the engine started -- said once each when whole, no track of it
+  having come for 30 seconds (`$MELODY_ALBUM_SETTLE_SECONDS`). An album that
+  only grew is not new. A library's first scan dates its tracks by their
+  files, so a library being made is not said album by album. Keys and paths
+  are encoded raw paths. `melody-cli watch albums` follows it.
+
 ### Level 17 (2026-10-17)
 
 Conversion where the files are, as `melody-cli convert` asks it.

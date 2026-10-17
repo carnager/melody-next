@@ -221,6 +221,9 @@ class LocalCatalogue final : public Catalogue {
          persistence::LibraryScanProgress& progress) override;
 
     [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const override;
+    // See LocalLibrary::albums_arrived_since.
+    [[nodiscard]] core::Result<std::vector<persistence::AlbumArrival>>
+    albums_arrived_since(std::int64_t since) const;
     [[nodiscard]] core::Result<void> add_root(const std::string& raw_path) override;
     [[nodiscard]] core::Result<void> remove_root(const std::string& raw_path) override;
     [[nodiscard]] core::Result<persistence::LibraryPage>

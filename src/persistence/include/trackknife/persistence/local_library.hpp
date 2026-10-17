@@ -53,6 +53,16 @@ struct LibraryViewLevel {
     friend bool operator==(const LibraryViewLevel&, const LibraryViewLevel&) = default;
 };
 
+// An album that came into the library whole: when its first track came and
+// when its last did, as Unix seconds.
+struct AlbumArrival {
+    std::string album_key;
+    std::int64_t first_added{0};
+    std::int64_t last_added{0};
+
+    friend bool operator==(const AlbumArrival&, const AlbumArrival&) = default;
+};
+
 struct LibraryQuery {
     LibraryEntryKind kind{LibraryEntryKind::artist};
     std::string text;
@@ -287,6 +297,10 @@ class LocalLibrary final {
     // access.
     [[nodiscard]] core::Result<std::vector<std::string>>
     albums_touching(const std::vector<std::string>& raw_paths) const;
+    // The albums every track of which came into the library at or after
+    // `since` (Unix seconds): albums new since then, not ones that grew.
+    [[nodiscard]] core::Result<std::vector<AlbumArrival>>
+    albums_arrived_since(std::int64_t since) const;
     // See LibraryFolder. A trailing slash names the same folder.
     [[nodiscard]] core::Result<LibraryFolder>
     folder(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const;

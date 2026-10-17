@@ -43,16 +43,23 @@ mkdir -p "${work}/music/first" "${work}/music/second"
 python3 - "${work}/music" <<'PY'
 import sys, wave
 root = sys.argv[1]
+import os, time
 for path in ("first/alpha.wav", "first/beta.wav", "second/gamma.wav"):
     with wave.open(f"{root}/{path}", "wb") as out:
         out.setnchannels(2)
         out.setsampwidth(2)
         out.setframerate(44100)
         out.writeframes(b"\0" * 44100 * 4 * 30)
+    # Made long ago: a library's first scan dates its tracks by their files,
+    # and these are not new to it.
+    old = time.time() - 30 * 86400
+    os.utime(f"{root}/{path}", (old, old))
 PY
 
 socket="${work}/melodyd.sock"
-"${melodyd}" --socket "${socket}" --state "${work}/state" --local-only 2>"${work}/engine.log" &
+# A new album is said once no track of it has come for a second, not thirty.
+MELODY_ALBUM_SETTLE_SECONDS=1 "${melodyd}" --socket "${socket}" --state "${work}/state" \
+    --local-only 2>"${work}/engine.log" &
 daemon_pid=$!
 for _ in $(seq 1 100); do
     [ -S "${socket}" ] && break
@@ -138,8 +145,8 @@ if cli find nothing-like-this > /dev/null 2>&1; then
 fi
 [ "$(cli latest 5 | wc -l)" -ge 1 ] || fail "the newest albums are listed"
 # What came in since a moment, as a cron job asks it: names, or folders.
-[ "$(cli latest --since 1h | wc -l)" -ge 1 ] || fail "latest --since lists what came in"
-cli latest --since 1h --folders > "${work}/folders.txt" || fail "latest --since --folders answers"
+[ "$(cli latest --since 60d | wc -l)" -ge 1 ] || fail "latest --since lists what came in"
+cli latest --since 60d --folders > "${work}/folders.txt" || fail "latest --since --folders answers"
 while IFS= read -r folder; do
     case "${folder}" in
         "${work}/music/"*) [ -d "${folder}" ] || fail "an album's folder is a folder: ${folder}" ;;
@@ -147,7 +154,7 @@ while IFS= read -r folder; do
     esac
 done < "${work}/folders.txt"
 [ -s "${work}/folders.txt" ] || fail "and there is one"
-cli --json latest --since 1h --folders | python3 -c '
+cli --json latest --since 60d --folders | python3 -c '
 import json, sys
 albums = json.load(sys.stdin)
 assert albums and all(a["folder"] for a in albums)' || fail "--json gives each album its folder"
@@ -160,7 +167,7 @@ fi
 # Converted here with Melody's converter: what came in, kept below the
 # music folder; again, nothing done twice.
 cli convert --presets | matches "^flac" || fail "convert lists its presets"
-cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain --dry-run \
+cli convert --to "${work}/converted" --preset flac --since 60d --no-replaygain --dry-run \
     > "${work}/plan.txt" \
     || fail "convert --dry-run plans"
 [ "$(wc -l < "${work}/plan.txt")" -ge 1 ] || fail "and plans something"
@@ -168,7 +175,7 @@ matches -P "^${work}/music/.+\t${work}/converted/.+\.flac$" "${work}/plan.txt" \
     || fail "each line the source and its target, below the destination"
 [ ! -d "${work}/converted" ] || [ -z "$(find "${work}/converted" -type f)" ] \
     || fail "a dry run converts nothing"
-cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain \
+cli convert --to "${work}/converted" --preset flac --since 60d --no-replaygain \
     > "${work}/made.txt" \
     || fail "convert converts"
 [ "$(wc -l < "${work}/made.txt")" = "$(wc -l < "${work}/plan.txt")" ] \
@@ -176,14 +183,14 @@ cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain \
 while IFS= read -r made; do
     [ -s "${made}" ] || fail "a converted file is there: ${made}"
 done < "${work}/made.txt"
-cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain \
+cli convert --to "${work}/converted" --preset flac --since 60d --no-replaygain \
     > "${work}/again.txt" 2>&1 \
     || fail "converting again succeeds"
 matches "converted before, passed over" "${work}/again.txt" || fail "and passes over what is there"
-if cli convert --to "${work}/converted" --layout "No such layout" --since 1h > /dev/null 2>&1; then
+if cli convert --to "${work}/converted" --layout "No such layout" --since 60d > /dev/null 2>&1; then
     fail "a layout the engine does not have is refused"
 fi
-if cli convert --since 1h > /dev/null 2>&1; then
+if cli convert --since 60d > /dev/null 2>&1; then
     fail "convert wants a destination"
 fi
 # ReplayGain measured afresh on what was made, by the engine: a tone long
@@ -211,6 +218,38 @@ data = open(sys.argv[1], "rb").read().upper()
 assert b"REPLAYGAIN_TRACK_GAIN=" in data, "no REPLAYGAIN_TRACK_GAIN"
 PY
 rm -rf "${work}/music/zz-gain"
+
+# A watcher: each album new to the library, once whole, its command run with
+# the folder -- and an album that only grew is not new.
+cli watch albums --run 'printf "%s|%s\n" {} "${MELODY_ALBUM_TITLE}" >> '"${work}/arrived.txt" &
+watcher=$!
+sleep 1
+mkdir -p "${work}/music/third"
+python3 - "${work}/music" <<'PY'
+import sys, wave
+for path in ("third/delta.wav", "third/epsilon.wav", "first/zeta.wav"):
+    with wave.open(f"{sys.argv[1]}/{path}", "wb") as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(44100)
+        out.writeframes(b"\0" * 44100 * 4)
+PY
+engine '{"id":30,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+for _ in $(seq 1 100); do
+    [ -s "${work}/arrived.txt" ] && break
+    sleep 0.1
+done
+sleep 2
+kill "${watcher}" 2>/dev/null
+wait "${watcher}" 2>/dev/null || true
+[ "$(grep -c -F "${work}/music/third|" "${work}/arrived.txt" 2>/dev/null)" = "1" ] \
+    || { cat "${work}/arrived.txt" >&2; fail "the new album, said once, with its folder"; }
+if matches -F "${work}/music/first|" "${work}/arrived.txt"; then
+    fail "an album that only grew is not new"
+fi
+matches -F "${work}/music/third|Unknown album" "${work}/arrived.txt" || fail "its title set"
+rm -rf "${work}/music/third" "${work}/music/first/zeta.wav"
+engine '{"id":31,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
 cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) == 2' \
     || fail "--json answers in JSON, every album"
 

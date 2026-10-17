@@ -277,6 +277,15 @@ core::Result<void> LocalCatalogue::remove_root(const std::string& raw_path) {
     return removed;
 }
 
+core::Result<std::vector<persistence::AlbumArrival>>
+LocalCatalogue::albums_arrived_since(const std::int64_t since) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->albums_arrived_since(since);
+}
+
 core::Result<persistence::LibraryPage>
 LocalCatalogue::query(const persistence::LibraryQuery& request,
                       const core::CancellationToken& cancellation) const {

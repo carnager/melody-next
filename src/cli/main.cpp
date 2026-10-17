@@ -138,6 +138,12 @@ void usage(std::ostream& out) {
            "  config --edit               open it in $EDITOR, and take it only when\n"
            "                              melodyd would\n"
            "\n"
+           "  watch albums [--folders | --run CMD]\n"
+           "                              each album new to the library, once it is\n"
+           "                              whole: a line, its folder, or CMD run for it --\n"
+           "                              {} its folder, quoted; MELODY_ALBUM_FOLDER,\n"
+           "                              _ARTIST, _TITLE and _DATE set. Runs until the\n"
+           "                              engine goes, then fails\n"
            "  watch [--all]               print the state each time it changes; with\n"
            "                              --all, of whichever engine here or nearby plays\n"
            "                              (only those named, with --server given for each)\n"
@@ -348,6 +354,105 @@ look_around(const std::string& wanted = {}) {
         common = shared;
     }
     return common ? common->string() : std::string{};
+}
+
+[[nodiscard]] std::string describe_found(const Json& entry, bool album);
+
+// The shell's quoting of one word.
+[[nodiscard]] std::string shell_quoted(const std::string& word) {
+    std::string quoted{"'"};
+    for (const auto character : word) {
+        if (character == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted.push_back(character);
+        }
+    }
+    quoted.push_back('\'');
+    return quoted;
+}
+
+// Each album new to the library, as the engine says it once it is whole:
+// a line, its folder, or a command run for it.
+int watch_albums(Client& client, const Options& options, const std::vector<std::string>& words) {
+    bool folders = false;
+    std::string run;
+    for (std::size_t at = 2; at < words.size(); ++at) {
+        if (words[at] == "--folders") {
+            folders = true;
+        } else if (words[at] == "--run" && at + 1 < words.size()) {
+            run = words[++at];
+        } else {
+            fail("watch albums takes --folders or --run CMD, not " + words[at]);
+        }
+    }
+    std::mutex lock;
+    std::condition_variable woken;
+    std::vector<Json> arrived;
+    bool gone = false;
+    client.on_event([&](const trackknife::protocol::Event& event) {
+        if (event.name != "catalogue.albums_added") {
+            return;
+        }
+        const std::scoped_lock held{lock};
+        for (const auto& album : event.data.value("albums", Json::array())) {
+            arrived.push_back(album);
+        }
+        woken.notify_one();
+    });
+    client.on_closed([&] {
+        const std::scoped_lock held{lock};
+        gone = true;
+        woken.notify_one();
+    });
+    const auto decoded = [](const Json& album, const char* key) {
+        auto raw = trackknife::protocol::decode_raw_path(text_of(album, key));
+        return raw ? *raw : std::string{};
+    };
+    while (true) {
+        std::vector<Json> now;
+        {
+            std::unique_lock held{lock};
+            woken.wait(held, [&] { return gone || !arrived.empty(); });
+            if (arrived.empty() && gone) {
+                fail("the engine went away");
+            }
+            now.swap(arrived);
+        }
+        for (const auto& album : now) {
+            const auto folder = decoded(album, "folder");
+            if (!run.empty()) {
+                auto command = run;
+                const auto quoted = shell_quoted(folder);
+                if (const auto at = command.find("{}"); at != std::string::npos) {
+                    for (auto place = at; place != std::string::npos;
+                         place = command.find("{}", place + quoted.size())) {
+                        command.replace(place, 2, quoted);
+                    }
+                } else {
+                    command += " " + quoted;
+                }
+                // One at a time, on this thread, the only one that runs
+                // commands: what the environment says is this album's.
+                // NOLINTBEGIN(concurrency-mt-unsafe,cert-env33-c)
+                ::setenv("MELODY_ALBUM_FOLDER", folder.c_str(), 1);
+                ::setenv("MELODY_ALBUM_ARTIST", text_of(album, "artist").c_str(), 1);
+                ::setenv("MELODY_ALBUM_TITLE", text_of(album, "album").c_str(), 1);
+                ::setenv("MELODY_ALBUM_DATE", text_of(album, "date").c_str(), 1);
+                const auto status = std::system(command.c_str());
+                // NOLINTEND(concurrency-mt-unsafe,cert-env33-c)
+                if (status != 0) {
+                    std::cerr << "melody-cli: " << command << " ended with " << status << "\n";
+                }
+            } else if (options.json) {
+                std::cout << album.dump() << std::endl;
+            } else if (folders) {
+                std::cout << folder << std::endl;
+            } else {
+                std::cout << describe_found(album, true) << std::endl;
+            }
+        }
+    }
 }
 
 // The library's albums or tracks for these words -- every one, page by
@@ -1230,6 +1335,8 @@ int run(const Options& options) {
         }
         static_cast<void>(call(*client, "outputs.select", Json{{"id", text_of(*found, "id")}}));
         show(state());
+    } else if (command == "watch" && words.size() >= 2U && words[1] == "albums") {
+        return watch_albums(*client, options, words);
     } else if (command == "watch") {
         // A line per change, for a status bar: the engine tells every
         // client when the state changes (not as the position moves). The

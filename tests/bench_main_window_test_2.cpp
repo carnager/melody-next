@@ -2641,7 +2641,8 @@ echo "shared:${relative:-$album}"
     auto* rows = list_window->findChild<QListWidget*>(QStringLiteral("bench-plugin-list-rows"));
     QVERIFY(rows != nullptr);
     QCOMPARE(rows->count(), 2);
-    QCOMPARE(rows->item(0)->text(), QStringLiteral("First\n1987"));
+    QCOMPARE(rows->item(0)->text(), QStringLiteral("First"));
+    QCOMPARE(rows->item(0)->data(Qt::UserRole + 1).toString(), QStringLiteral("1987"));
     QCOMPARE(rows->item(0)->toolTip(), QStringLiteral("https://example.org/1"));
     list_window->findChild<QPushButton*>(QStringLiteral("bench-plugin-list-copy"))->click();
     QCOMPARE(QGuiApplication::clipboard()->text(),

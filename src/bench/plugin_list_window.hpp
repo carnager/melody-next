@@ -12,8 +12,8 @@ namespace trackknife::bench {
 
 // ADR-0288: what a `list` action answered, in a window of its own -- a
 // heading, a row for each item with its detail beneath, opened in the
-// browser by a double click where it has a link. It does not hold the
-// window up.
+// browser by a double click, or a click on its arrow, where it has a
+// link. It does not hold the window up.
 class PluginListWindow final : public QDialog {
     Q_OBJECT
 

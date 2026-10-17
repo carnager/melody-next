@@ -234,6 +234,10 @@ void PluginsTest::pluginsAreFoundAndStayOffUntilEnabled() {
     QTemporaryDir data;
     QVERIFY(data.isValid());
     qputenv("XDG_DATA_HOME", QFile::encodeName(data.path()));
+    // None of the system's, such as an installed Melody's official ones.
+    QTemporaryDir system;
+    QVERIFY(system.isValid());
+    qputenv("XDG_DATA_DIRS", QFile::encodeName(system.path()));
     const auto base = data.filePath(QStringLiteral("melody/plugins"));
     writeFile(base + QStringLiteral("/albumshare/plugin.json"),
               manifest(R"({"id": "share", "label": "Share album", "run": ["./share"]})"));

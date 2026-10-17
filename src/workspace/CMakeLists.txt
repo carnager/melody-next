@@ -75,8 +75,6 @@ qt_add_library(
     lastfm_settings_session.hpp
     open_list_session.cpp
     open_list_session.hpp
-    panel_arrangement.cpp
-    panel_arrangement.hpp
     playlist_transfer.cpp
     playlist_transfer.hpp
     profiles_session.cpp
@@ -165,8 +163,6 @@ qt_add_library(
     ../uicommon/local_folder_tree_model.hpp
     ../uicommon/metadata_transformation_interchange.cpp
     ../uicommon/metadata_transformation_interchange.hpp
-    ../uicommon/panel_layout.cpp
-    ../uicommon/panel_layout.hpp
     ../uicommon/rating_color.hpp
     ../uicommon/track_grouping.cpp
     ../uicommon/track_grouping.hpp

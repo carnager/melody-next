@@ -26,6 +26,10 @@ void BenchMainWindow::buildLyrics() {
     });
     panel->setPanelContent(lyrics_panel_);
     addDockWidget(Qt::RightDockWidgetArea, lyrics_dock_);
+    // ADR-0292: the side panels share their room as tabs, not one above
+    // another.
+    setTabPosition(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea, QTabWidget::North);
+
     lyrics_dock_->setVisible(QSettings{}.value(QStringLiteral("lyrics/visible"), false).toBool());
     auto* toggle = panel->panelToggleAction();
     toggle->setObjectName(QStringLiteral("action-show-lyrics"));

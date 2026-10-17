@@ -209,21 +209,12 @@ expansion clear affected history in this first slice.
 
 ## Panel and layout system
 
-Use `QMainWindow`, toolbars, tab containers, and model/view track tables. The
-Melody client retains native dock panels and versioned window/dock/toolbar
-state. Trackbench uses ADR-0026's versioned declarative composition tree below
-its player chrome: registered panel instances may be nested in
-horizontal/vertical splitters or tab stacks, with bounded validation before
-rendering. Its shipped default remains Folders left and Track Lists right.
-Layout editing is explicit customization layered over that default, not
-required setup.
-
-Trackbench schema version 1 persists stable panel instance IDs, split
-orientation/weights, child order, and active panel tabs. A malformed current
-layout falls back visibly to the shipped default. A newer layout also falls
-back, but its stored bytes are not replaced until the user explicitly edits or
-resets the layout. New functional panels arrive with their owning milestones;
-do not ship empty placeholders merely to make the layout editor look powerful.
+Use `QMainWindow`, toolbars, tab containers, and model/view track tables.
+**Melody decision** (ADR-0292): one layout -- the sources left, the lists
+right, the divider kept where it was left. The side panels -- Up Next,
+Lyrics, a plugin's -- are docks beside it; open together on one side they
+share it as tabs, the last opened in front. There is no layout editor:
+ADR-0026's composed layouts are gone.
 
 Every panel has:
 

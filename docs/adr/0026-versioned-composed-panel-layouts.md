@@ -1,6 +1,6 @@
 # ADR-0026: Versioned composed panel layouts
 
-- Status: accepted
+- Status: replaced by ADR-0292 (2026-10-17): one layout, side panels as tabs
 - Date: 2026-08-29
 - Owners: Trackknife project
 - Amends: ADR-0003's native-dock-only workspace composition for Trackbench

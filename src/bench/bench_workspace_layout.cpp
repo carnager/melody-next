@@ -15,7 +15,6 @@
 #include "bench/track_list_find_bar.hpp"
 #include "bench/trackknife_style.hpp"
 #include "trackknife/audio/local_audition.hpp"
-#include "workspace/panel_arrangement.hpp"
 #include "workspace/sources.hpp"
 #include <QRandomGenerator>
 #include <QStyle>
@@ -24,7 +23,6 @@
 #include "uicommon/command_palette.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
-#include "uicommon/panel_layout.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_view_layout.hpp"
@@ -77,11 +75,8 @@ namespace {} // namespace
 
 namespace {
 
-constexpr auto folders_panel_id = PanelArrangement::sources_panel;
-constexpr auto track_lists_panel_id = PanelArrangement::tracks_panel;
-constexpr auto layout_panel_id_property = "trackknife-layout-panel-id";
-constexpr auto layout_panel_title_property = "trackknife-layout-panel-title";
-constexpr auto layout_container_kind_property = "trackknife-layout-container-kind";
+// ADR-0292: how wide the sources were left, in pixels.
+constexpr auto sources_width_key = "workspace/sources-width";
 
 } // namespace
 
@@ -115,9 +110,6 @@ void BenchMainWindow::buildWorkspace() {
     track_area_ = new QSplitter(Qt::Horizontal, this);
     track_area_->setObjectName(QStringLiteral("bench-track-area"));
     track_area_->setChildrenCollapsible(false);
-    track_area_->setProperty(layout_panel_id_property, QString::fromLatin1(track_lists_panel_id));
-    track_area_->setProperty(layout_panel_title_property, QStringLiteral("Track Lists"));
-    track_area_->setProperty("trackknifeLayoutPanel", true);
     track_area_->addWidget(tabs_);
     buildListsPanel();
 
@@ -125,9 +117,6 @@ void BenchMainWindow::buildWorkspace() {
     folder_model_ = folder_browser_->model();
     folders_panel_ = new QWidget(this);
     folders_panel_->setObjectName(QStringLiteral("bench-panel-folders"));
-    folders_panel_->setProperty(layout_panel_id_property, QString::fromLatin1(folders_panel_id));
-    folders_panel_->setProperty(layout_panel_title_property, QStringLiteral("Sources"));
-    folders_panel_->setProperty("trackknifeLayoutPanel", true);
     folders_panel_->setMinimumWidth(160);
     auto* folders_layout = new QVBoxLayout(folders_panel_);
     folders_layout->setContentsMargins(0, 0, 0, 0);
@@ -241,15 +230,25 @@ void BenchMainWindow::buildWorkspace() {
     source_stack_->addWidget(folder_view_);
     folders_layout->addWidget(source_stack_, 1);
 
-    panel_widgets_.insert(QString::fromLatin1(folders_panel_id), folders_panel_);
-    panel_widgets_.insert(QString::fromLatin1(track_lists_panel_id), track_area_);
-    layout_host_ = new QWidget(this);
-    layout_host_->setObjectName(QStringLiteral("bench-panel-layout-host"));
-    layout_host_layout_ = new QVBoxLayout(layout_host_);
-    layout_host_layout_->setContentsMargins(0, 0, 0, 0);
-    layout_host_layout_->setSpacing(0);
-    setCentralWidget(layout_host_);
-    loadPanelLayout();
+    // ADR-0292: one layout -- the sources left, the lists right -- and the
+    // divider where it was left.
+    auto* split = new QSplitter(Qt::Horizontal, this);
+    split->setObjectName(QStringLiteral("bench-panel-split"));
+    split->setChildrenCollapsible(false);
+    split->addWidget(folders_panel_);
+    split->addWidget(track_area_);
+    split->setStretchFactor(0, 1);
+    split->setStretchFactor(1, 3);
+    setCentralWidget(split);
+    QTimer::singleShot(0, split, [split] {
+        const auto kept = QSettings{}.value(QLatin1String(sources_width_key), 0).toInt();
+        const auto extent = split->width();
+        const auto sources = kept > 0 ? std::min(kept, extent * 2 / 3) : extent / 4;
+        split->setSizes({sources, std::max(1, extent - sources)});
+    });
+    connect(split, &QSplitter::splitterMoved, this, [split](const int, const int) {
+        QSettings{}.setValue(QLatin1String(sources_width_key), split->sizes().value(0));
+    });
 
     selection_status_ = new QLabel(statusBar());
     selection_status_->setObjectName(QStringLiteral("bench-selection-status"));
@@ -592,41 +591,6 @@ void BenchMainWindow::buildWorkspace() {
     connect(track_layout_copy_action_, &QAction::triggered, this,
             &BenchMainWindow::copyTrackViewLayoutToAllTabs);
 
-    workspace_menu->addSeparator();
-    layout_edit_action_ = workspace_menu->addAction(QStringLiteral("Edit panel layout"));
-    layout_edit_action_->setObjectName(QStringLiteral("action-edit-panel-layout"));
-    layout_edit_action_->setCheckable(true);
-    layout_edit_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+L")));
-    connect(layout_edit_action_, &QAction::toggled, this, &BenchMainWindow::setLayoutEditMode);
-    auto* arrangement_menu = workspace_menu->addMenu(QStringLiteral("Panel arrangement"));
-    arrangement_menu->setObjectName(QStringLiteral("menu-panel-arrangement"));
-    layout_arrangement_group_ = new QActionGroup(arrangement_menu);
-    layout_arrangement_group_->setExclusive(true);
-    layout_side_by_side_action_ = arrangement_menu->addAction(QStringLiteral("Side by side"));
-    layout_side_by_side_action_->setObjectName(QStringLiteral("action-layout-side-by-side"));
-    layout_side_by_side_action_->setCheckable(true);
-    layout_arrangement_group_->addAction(layout_side_by_side_action_);
-    connect(layout_side_by_side_action_, &QAction::triggered, this,
-            [this] { arrangePanelLayout(ui::PanelLayoutNodeKind::split, Qt::Horizontal); });
-    layout_top_bottom_action_ = arrangement_menu->addAction(QStringLiteral("Top and bottom"));
-    layout_top_bottom_action_->setObjectName(QStringLiteral("action-layout-top-bottom"));
-    layout_top_bottom_action_->setCheckable(true);
-    layout_arrangement_group_->addAction(layout_top_bottom_action_);
-    connect(layout_top_bottom_action_, &QAction::triggered, this,
-            [this] { arrangePanelLayout(ui::PanelLayoutNodeKind::split, Qt::Vertical); });
-    layout_tabbed_action_ = arrangement_menu->addAction(QStringLiteral("Tabbed stack"));
-    layout_tabbed_action_->setObjectName(QStringLiteral("action-layout-tabbed"));
-    layout_tabbed_action_->setCheckable(true);
-    layout_arrangement_group_->addAction(layout_tabbed_action_);
-    connect(layout_tabbed_action_, &QAction::triggered, this,
-            [this] { arrangePanelLayout(ui::PanelLayoutNodeKind::tabs, Qt::Horizontal); });
-    layout_swap_action_ = workspace_menu->addAction(QStringLiteral("Swap panels"));
-    layout_swap_action_->setObjectName(QStringLiteral("action-layout-swap-panels"));
-    connect(layout_swap_action_, &QAction::triggered, this, &BenchMainWindow::swapPanelLayout);
-    layout_reset_action_ = workspace_menu->addAction(QStringLiteral("Reset panel layout"));
-    layout_reset_action_->setObjectName(QStringLiteral("action-reset-panel-layout"));
-    connect(layout_reset_action_, &QAction::triggered, this, &BenchMainWindow::resetPanelLayout);
-
     tab_context_menu_ = new QMenu(tabs_);
     tab_context_menu_->setObjectName(QStringLiteral("bench-tab-context-menu"));
     tab_context_menu_->addAction(rename_tab_action_);
@@ -649,237 +613,6 @@ void BenchMainWindow::buildWorkspace() {
     folder_context_menu_->setObjectName(QStringLiteral("bench-folder-context-menu"));
     refreshTabActions();
     refreshTrackViewActions();
-    refreshPanelLayoutActions();
-}
-
-ui::PanelLayout BenchMainWindow::defaultPanelLayout() const {
-    return PanelArrangement::defaultLayout();
-}
-
-void BenchMainWindow::loadPanelLayout() {
-    if (panel_arrangement_ == nullptr) {
-        panel_arrangement_ = new PanelArrangement(this);
-    }
-    const auto error = panel_arrangement_->load();
-    applyPanelLayout(panel_arrangement_->layout());
-    if (!error.isEmpty()) {
-        statusBar()->showMessage(
-            QStringLiteral("Panel layout was not loaded (%1); the saved value was preserved")
-                .arg(error),
-            7'000);
-    }
-}
-
-void BenchMainWindow::applyPanelLayout(const ui::PanelLayout& layout) {
-    applying_panel_layout_ = true;
-    auto* previous_root = layout_root_;
-    for (auto* panel : panel_widgets_) {
-        panel->hide();
-        panel->setParent(layout_host_);
-    }
-    if (previous_root != nullptr) {
-        layout_host_layout_->removeWidget(previous_root);
-    }
-    layout_root_ = renderPanelLayoutNode(layout.root, layout_host_);
-    layout_host_layout_->addWidget(layout_root_);
-    layout_root_->show();
-    for (auto* panel : panel_widgets_) {
-        panel->show();
-    }
-    if (previous_root != nullptr && !panel_widgets_.values().contains(previous_root)) {
-        previous_root->deleteLater();
-    }
-    applying_panel_layout_ = false;
-    refreshPanelLayoutActions();
-}
-
-QWidget* BenchMainWindow::renderPanelLayoutNode(const ui::PanelLayoutNode& node, QWidget* parent) {
-    if (node.kind == ui::PanelLayoutNodeKind::panel) {
-        auto* panel = panel_widgets_.value(node.panel_id, nullptr);
-        Q_ASSERT(panel != nullptr);
-        panel->setParent(parent);
-        return panel;
-    }
-    if (node.kind == ui::PanelLayoutNodeKind::split) {
-        auto* splitter = new QSplitter(node.orientation, parent);
-        splitter->setObjectName(QStringLiteral("bench-panel-layout-split"));
-        splitter->setProperty(layout_container_kind_property, QStringLiteral("split"));
-        splitter->setChildrenCollapsible(false);
-        for (const auto& child : node.children) {
-            splitter->addWidget(renderPanelLayoutNode(child, splitter));
-        }
-        QList<int> sizes;
-        sizes.reserve(static_cast<qsizetype>(node.weights.size()));
-        for (int index = 0; const auto weight : node.weights) {
-            sizes.push_back(weight);
-            splitter->setStretchFactor(index++, weight);
-        }
-        splitter->setSizes(sizes);
-        QTimer::singleShot(0, splitter, [splitter, weights = node.weights] {
-            const auto extent =
-                splitter->orientation() == Qt::Horizontal ? splitter->width() : splitter->height();
-            int total = 0;
-            for (const auto weight : weights) {
-                total += weight;
-            }
-            total = std::max(1, total);
-            QList<int> scaled;
-            scaled.reserve(static_cast<qsizetype>(weights.size()));
-            for (const auto weight : weights) {
-                scaled.push_back(std::max(1, extent * weight / total));
-            }
-            splitter->setSizes(scaled);
-        });
-        connect(splitter, &QSplitter::splitterMoved, this, [this](const int, const int) {
-            if (!applying_panel_layout_) {
-                persistPanelLayout(true);
-            }
-        });
-        return splitter;
-    }
-
-    auto* stack = new QTabWidget(parent);
-    stack->setObjectName(QStringLiteral("bench-panel-layout-tabs"));
-    stack->setProperty(layout_container_kind_property, QStringLiteral("tabs"));
-    stack->setDocumentMode(true);
-    stack->setMovable(true);
-    for (const auto& child : node.children) {
-        auto* child_widget = renderPanelLayoutNode(child, stack);
-        auto title = child_widget->property(layout_panel_title_property).toString();
-        if (title.isEmpty()) {
-            title = QStringLiteral("Panel group");
-        }
-        stack->addTab(child_widget, title);
-    }
-    stack->setCurrentIndex(node.active_child);
-    connect(stack, &QTabWidget::currentChanged, this, [this](const int) {
-        if (!applying_panel_layout_) {
-            persistPanelLayout(false);
-        }
-    });
-    connect(stack->tabBar(), &QTabBar::tabMoved, this, [this](const int, const int) {
-        if (!applying_panel_layout_) {
-            persistPanelLayout(true);
-        }
-    });
-    return stack;
-}
-
-ui::PanelLayoutNode BenchMainWindow::capturePanelLayoutNode(QWidget* widget) const {
-    const auto panel_id = widget->property(layout_panel_id_property).toString();
-    if (!panel_id.isEmpty()) {
-        return ui::panelLayoutPanel(panel_id);
-    }
-    const auto container_kind = widget->property(layout_container_kind_property).toString();
-    if (container_kind == QStringLiteral("split")) {
-        auto* splitter = qobject_cast<QSplitter*>(widget);
-        Q_ASSERT(splitter != nullptr);
-        std::vector<ui::PanelLayoutNode> children;
-        children.reserve(static_cast<std::size_t>(splitter->count()));
-        for (int index = 0; index < splitter->count(); ++index) {
-            children.push_back(capturePanelLayoutNode(splitter->widget(index)));
-        }
-        std::vector<int> weights;
-        const auto sizes = splitter->sizes();
-        weights.reserve(static_cast<std::size_t>(sizes.size()));
-        for (const auto size : sizes) {
-            weights.push_back(std::max(size, 1));
-        }
-        return ui::panelLayoutSplit(splitter->orientation(), std::move(children),
-                                    std::move(weights));
-    }
-    if (container_kind == QStringLiteral("tabs")) {
-        auto* stack = qobject_cast<QTabWidget*>(widget);
-        Q_ASSERT(stack != nullptr);
-        std::vector<ui::PanelLayoutNode> children;
-        children.reserve(static_cast<std::size_t>(stack->count()));
-        for (int index = 0; index < stack->count(); ++index) {
-            children.push_back(capturePanelLayoutNode(stack->widget(index)));
-        }
-        return ui::panelLayoutTabs(std::move(children), stack->currentIndex());
-    }
-    Q_ASSERT_X(false, "BenchMainWindow::capturePanelLayoutNode",
-               "panel-layout renderer produced an unknown widget");
-    return ui::panelLayoutPanel(QStringLiteral("invalid"));
-}
-
-void BenchMainWindow::persistPanelLayout(const bool by_hand) {
-    if (layout_root_ == nullptr || applying_panel_layout_ || panel_arrangement_ == nullptr) {
-        return;
-    }
-    panel_arrangement_->adopt(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                                              .root = capturePanelLayoutNode(layout_root_)},
-                              by_hand);
-}
-
-void BenchMainWindow::setLayoutEditMode(const bool editing) {
-    if (panel_arrangement_ != nullptr) {
-        panel_arrangement_->setEditing(editing);
-    }
-    layout_host_->setProperty("trackknifeLayoutEditing", editing);
-    layout_host_->setStyleSheet(editing
-                                    ? QStringLiteral("QWidget[trackknifeLayoutPanel=\"true\"] {"
-                                                     " border: 1px dashed palette(highlight); }")
-                                    : QString{});
-    if (editing) {
-        statusBar()->showMessage(
-            QStringLiteral("Panel layout editing: choose an arrangement or swap panels"));
-    } else {
-        statusBar()->clearMessage();
-    }
-    refreshPanelLayoutActions();
-}
-
-void BenchMainWindow::arrangePanelLayout(const ui::PanelLayoutNodeKind kind,
-                                         const Qt::Orientation orientation) {
-    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
-        return;
-    }
-    // As it is now, sizes included, then arranged anew.
-    persistPanelLayout(false);
-    panel_arrangement_->arrange(kind, orientation);
-    applyPanelLayout(panel_arrangement_->layout());
-}
-
-void BenchMainWindow::swapPanelLayout() {
-    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
-        return;
-    }
-    persistPanelLayout(false);
-    panel_arrangement_->swap();
-    applyPanelLayout(panel_arrangement_->layout());
-}
-
-void BenchMainWindow::resetPanelLayout() {
-    if (panel_arrangement_ == nullptr) {
-        return;
-    }
-    panel_arrangement_->reset();
-    applyPanelLayout(panel_arrangement_->layout());
-}
-
-void BenchMainWindow::refreshPanelLayoutActions() {
-    if (layout_edit_action_ == nullptr) {
-        return;
-    }
-    const bool editing = layout_edit_action_->isChecked();
-    for (auto* action : {layout_side_by_side_action_, layout_top_bottom_action_,
-                         layout_tabbed_action_, layout_swap_action_}) {
-        action->setEnabled(editing && layout_root_ != nullptr);
-    }
-    layout_reset_action_->setEnabled(layout_root_ != nullptr);
-    if (layout_root_ == nullptr) {
-        return;
-    }
-    const auto root = capturePanelLayoutNode(layout_root_);
-    const QSignalBlocker horizontal_blocker{layout_side_by_side_action_};
-    const QSignalBlocker vertical_blocker{layout_top_bottom_action_};
-    const QSignalBlocker tabbed_blocker{layout_tabbed_action_};
-    layout_side_by_side_action_->setChecked(root.kind == ui::PanelLayoutNodeKind::split &&
-                                            root.orientation == Qt::Horizontal);
-    layout_top_bottom_action_->setChecked(root.kind == ui::PanelLayoutNodeKind::split &&
-                                          root.orientation == Qt::Vertical);
-    layout_tabbed_action_->setChecked(root.kind == ui::PanelLayoutNodeKind::tabs);
 }
 
 void BenchMainWindow::loadFolderBookmarks() {

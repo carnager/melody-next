@@ -589,110 +589,83 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
     QTRY_COMPARE(source->model()->rowCount(), 6);
 }
 
-void BenchMainWindowTest::panelLayoutPersistsAndPreservesFutureState() {
-    constexpr auto layout_key = "workspace/panel-layout-v1";
-    const auto root_widget = [](BenchMainWindow& window) {
-        auto* host = window.findChild<QWidget*>(QStringLiteral("bench-panel-layout-host"));
-        return host != nullptr && host->layout() != nullptr && host->layout()->count() == 1
-                   ? host->layout()->itemAt(0)->widget()
-                   : nullptr;
+// ADR-0292: side panels open together share their room as tabs, and one
+// closed leaves the others as they were.
+void BenchMainWindowTest::sidePanelsShareTheirRoomAsTabs() {
+    BenchMainWindow window;
+    window.resize(1200, 700);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* lyrics = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
+    auto* up_next = window.findChild<QDockWidget*>(QStringLiteral("bench-up-next"));
+    QVERIFY(lyrics != nullptr && up_next != nullptr);
+    auto* show_lyrics = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
+    QVERIFY(show_lyrics != nullptr);
+    if (!up_next->isVisible()) {
+        up_next->setVisible(true);
+    }
+    QTRY_VERIFY(up_next->isVisible() && up_next->width() >= 260);
+    show_lyrics->trigger();
+    QTRY_VERIFY(lyrics->isVisible());
+    QVERIFY(window.tabifiedDockWidgets(lyrics).contains(up_next));
+    // One area, two tabs, the one just opened in front.
+    const auto tab_bar = [&window, lyrics]() -> QTabBar* {
+        for (auto* bar : window.findChildren<QTabBar*>()) {
+            if (bar->count() == 2 && bar->isVisible() &&
+                (bar->tabText(0) == lyrics->windowTitle() ||
+                 bar->tabText(1) == lyrics->windowTitle())) {
+                return bar;
+            }
+        }
+        return nullptr;
     };
+    QTRY_VERIFY(tab_bar() != nullptr);
+    auto* tabs = tab_bar();
+    QCOMPARE(tabs->tabText(tabs->currentIndex()), lyrics->windowTitle());
+    const auto width = lyrics->width();
+    // Closed, the other is there as it was.
+    show_lyrics->trigger();
+    QTRY_VERIFY(!lyrics->isVisible());
+    QVERIFY(up_next->isVisible());
+    QCOMPARE(up_next->width(), width);
+    up_next->setVisible(false);
+}
 
+// ADR-0292: one layout -- the sources left, the lists right -- nothing to
+// edit or rearrange, and the divider kept where it was left.
+void BenchMainWindowTest::theSourcesKeepTheirWidth() {
+    QSettings{}.remove(QStringLiteral("workspace/sources-width"));
     {
         BenchMainWindow window;
+        window.resize(1200, 700);
         window.show();
-        auto* edit = window.findChild<QAction*>(QStringLiteral("action-edit-panel-layout"));
-        auto* vertical = window.findChild<QAction*>(QStringLiteral("action-layout-top-bottom"));
-        auto* tabbed = window.findChild<QAction*>(QStringLiteral("action-layout-tabbed"));
-        auto* swap = window.findChild<QAction*>(QStringLiteral("action-layout-swap-panels"));
-        auto* track_tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QVERIFY(edit != nullptr);
-        QVERIFY(vertical != nullptr);
-        QVERIFY(tabbed != nullptr);
-        QVERIFY(swap != nullptr);
-        QVERIFY(track_tabs != nullptr);
-        QTRY_COMPARE(track_tabs->count(), 1);
-        QCOMPARE(edit->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+L")));
-
-        auto* initial_split = qobject_cast<QSplitter*>(root_widget(window));
-        QVERIFY(initial_split != nullptr);
-        QCOMPARE(initial_split->orientation(), Qt::Horizontal);
-        QCOMPARE(initial_split->widget(0)->objectName(), QStringLiteral("bench-panel-folders"));
-        QCOMPARE(initial_split->widget(1)->objectName(), QStringLiteral("bench-track-area"));
-        QTRY_VERIFY(initial_split->sizes().at(0) < initial_split->sizes().at(1));
-        QVERIFY(!vertical->isEnabled());
-
-        edit->trigger();
-        QVERIFY(edit->isChecked());
-        QVERIFY(vertical->isEnabled());
-        vertical->trigger();
-        auto* vertical_split = qobject_cast<QSplitter*>(root_widget(window));
-        QVERIFY(vertical_split != nullptr);
-        QCOMPARE(vertical_split->orientation(), Qt::Vertical);
-
-        tabbed->trigger();
-        auto* panel_tabs = qobject_cast<QTabWidget*>(root_widget(window));
-        QVERIFY(panel_tabs != nullptr);
-        QCOMPARE(panel_tabs->objectName(), QStringLiteral("bench-panel-layout-tabs"));
-        QCOMPARE(panel_tabs->count(), 2);
-        QCOMPARE(panel_tabs->tabText(0), QStringLiteral("Sources"));
-        QCOMPARE(panel_tabs->tabText(1), QStringLiteral("Track Lists"));
-        QCOMPARE(panel_tabs->currentIndex(), 1);
-
-        swap->trigger();
-        panel_tabs = qobject_cast<QTabWidget*>(root_widget(window));
-        QVERIFY(panel_tabs != nullptr);
-        QCOMPARE(panel_tabs->tabText(0), QStringLiteral("Track Lists"));
-        QCOMPARE(panel_tabs->tabText(1), QStringLiteral("Sources"));
-        QCOMPARE(panel_tabs->currentIndex(), 0);
-        QVERIFY(window.close());
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto* split = qobject_cast<QSplitter*>(window.centralWidget());
+        QVERIFY(split != nullptr);
+        QCOMPARE(split->objectName(), QStringLiteral("bench-panel-split"));
+        QCOMPARE(split->count(), 2);
+        QCOMPARE(split->widget(0)->objectName(), QStringLiteral("bench-panel-folders"));
+        QCOMPARE(split->widget(1)->objectName(), QStringLiteral("bench-track-area"));
+        for (const auto* gone :
+             {"action-edit-panel-layout", "action-layout-side-by-side", "action-layout-top-bottom",
+              "action-layout-tabbed", "action-layout-swap-panels", "action-reset-panel-layout"}) {
+            QVERIFY2(window.findChild<QAction*>(QString::fromLatin1(gone)) == nullptr, gone);
+        }
+        // A quarter for the sources at first.
+        QTRY_VERIFY(split->sizes().value(0) > 0);
+        QVERIFY(std::abs(split->sizes().value(0) - split->width() / 4) < 40);
+        // Moved by hand, kept.
+        split->setSizes({360, split->width() - 360});
+        emit split->splitterMoved(360, 1);
     }
-
-    {
-        BenchMainWindow restored;
-        restored.show();
-        auto* panel_tabs = qobject_cast<QTabWidget*>(root_widget(restored));
-        QVERIFY(panel_tabs != nullptr);
-        QCOMPARE(panel_tabs->tabText(0), QStringLiteral("Track Lists"));
-        QCOMPARE(panel_tabs->tabText(1), QStringLiteral("Sources"));
-        QCOMPARE(panel_tabs->currentIndex(), 0);
-
-        QSettings settings;
-        QString error;
-        const auto decoded = ui::deserializePanelLayout(
-            settings.value(QString::fromLatin1(layout_key)).toByteArray(),
-            {QStringLiteral("folders"), QStringLiteral("track-lists")}, &error);
-        QVERIFY2(decoded.has_value(), qPrintable(error));
-        QCOMPARE(decoded->root.kind, ui::PanelLayoutNodeKind::tabs);
-
-        auto* reset = restored.findChild<QAction*>(QStringLiteral("action-reset-panel-layout"));
-        QVERIFY(reset != nullptr);
-        reset->trigger();
-        auto* reset_split = qobject_cast<QSplitter*>(root_widget(restored));
-        QVERIFY(reset_split != nullptr);
-        QCOMPARE(reset_split->orientation(), Qt::Horizontal);
-        QCOMPARE(reset_split->widget(0)->objectName(), QStringLiteral("bench-panel-folders"));
-        QVERIFY(restored.close());
-    }
-
-    const QByteArray future_layout{
-        R"({"schema":99,"root":{"kind":"panel","panel":"future"},"future":{"keep":true}})"};
-    {
-        QSettings settings;
-        settings.setValue(QString::fromLatin1(layout_key), future_layout);
-        settings.sync();
-    }
-    {
-        BenchMainWindow fallback;
-        fallback.show();
-        auto* fallback_split = qobject_cast<QSplitter*>(root_widget(fallback));
-        QVERIFY(fallback_split != nullptr);
-        QCOMPARE(fallback_split->orientation(), Qt::Horizontal);
-        QVERIFY(fallback.statusBar()->currentMessage().contains(QStringLiteral("preserved")));
-        QVERIFY(fallback.close());
-    }
-    QSettings settings;
-    QCOMPARE(settings.value(QString::fromLatin1(layout_key)).toByteArray(), future_layout);
+    BenchMainWindow again;
+    again.resize(1200, 700);
+    again.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&again));
+    auto* split = qobject_cast<QSplitter*>(again.centralWidget());
+    QVERIFY(split != nullptr);
+    QTRY_VERIFY(std::abs(split->sizes().value(0) - 360) < 4);
+    QSettings{}.remove(QStringLiteral("workspace/sources-width"));
 }
 
 void BenchMainWindowTest::localReorderPreservesVisibleRowGeometry() {

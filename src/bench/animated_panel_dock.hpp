@@ -64,6 +64,22 @@ class AnimatedPanelDock final : public QDockWidget {
             return;
         if (visible == wanted_ && animation_.state() == QAbstractAnimation::Running)
             return;
+        // ADR-0292: opened beside another side panel, it joins it as a tab;
+        // tabbed with another open, it is a tab coming or going -- the room
+        // the others have stays as it is.
+        const bool joined = visible && !isVisible() && joinAnOpenPanel();
+        if (joined || sharesItsTabs()) {
+            animation_.stop();
+            wanted_ = visible;
+            QSettings{}.setValue(key_ + "/visible", visible);
+            QDockWidget::setVisible(visible);
+            // In front, once the tab bar it joined is there.
+            if (visible)
+                QTimer::singleShot(0, this, [this] { raise(); });
+            const QSignalBlocker blocker(panelToggleAction());
+            panelToggleAction()->setChecked(visible);
+            return;
+        }
         if (!visible && isVisible() && animation_.state() != QAbstractAnimation::Running)
             savedWidth_ = width();
         const auto currentWidth = isVisible() ? width() : 1;
@@ -109,6 +125,29 @@ class AnimatedPanelDock final : public QDockWidget {
     }
 
   private:
+    bool joinAnOpenPanel() {
+        auto* window = qobject_cast<QMainWindow*>(parentWidget());
+        if (window == nullptr)
+            return false;
+        for (auto* other : window->findChildren<QDockWidget*>()) {
+            if (other != this && dynamic_cast<AnimatedPanelDock*>(other) != nullptr &&
+                other->isVisible() &&
+                window->dockWidgetArea(other) == window->dockWidgetArea(this)) {
+                window->tabifyDockWidget(other, this);
+                return true;
+            }
+        }
+        return false;
+    }
+    [[nodiscard]] bool sharesItsTabs() const {
+        const auto* window = qobject_cast<const QMainWindow*>(parentWidget());
+        if (window == nullptr)
+            return false;
+        for (const auto* other : window->tabifiedDockWidgets(const_cast<AnimatedPanelDock*>(this)))
+            if (other != this && other->isVisible())
+                return true;
+        return false;
+    }
     void finish() {
         if (!wanted_)
             QDockWidget::setVisible(false);

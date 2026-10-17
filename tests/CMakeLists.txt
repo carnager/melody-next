@@ -842,14 +842,6 @@ if(MELODY_BUILD_UI)
         COMMAND trackknife_metadata_transformation_interchange_tests
     )
 
-    qt_add_executable(trackknife_panel_layout_tests panel_layout_test.cpp)
-    target_link_libraries(
-        trackknife_panel_layout_tests
-        PRIVATE Trackknife::UiCommon Qt6::Test trackknife_project_options
-                trackknife_project_warnings
-    )
-    add_test(NAME panel-layout COMMAND trackknife_panel_layout_tests)
-
     qt_add_executable(trackknife_album_lookup_queue_tests album_lookup_queue_test.cpp)
     target_link_libraries(
         trackknife_album_lookup_queue_tests

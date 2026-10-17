@@ -25,7 +25,6 @@
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/persistence/list_repository.hpp"
-#include "uicommon/panel_layout.hpp"
 #include "uicommon/track_view_layout.hpp"
 #include "workspace/folder_browser.hpp"
 #include "workspace/plugins.hpp"
@@ -100,7 +99,6 @@ class LocalFilesMimeData;
 namespace trackknife::bench {
 enum class QuickPickKind;
 class ListsCatalog;
-class PanelArrangement;
 class ListsPanel;
 
 class LocalLibraryPanel;
@@ -280,17 +278,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void persistUpNext() { workspace_.persistUpNext(); }
     void restoreUpNext() { workspace_.restoreUpNext(); }
 
-    [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
-    void loadPanelLayout();
-    void applyPanelLayout(const ui::PanelLayout& layout);
-    [[nodiscard]] QWidget* renderPanelLayoutNode(const ui::PanelLayoutNode& node, QWidget* parent);
-    [[nodiscard]] ui::PanelLayoutNode capturePanelLayoutNode(QWidget* widget) const;
-    void persistPanelLayout(bool by_hand);
-    void setLayoutEditMode(bool editing);
-    void arrangePanelLayout(ui::PanelLayoutNodeKind kind, Qt::Orientation orientation);
-    void swapPanelLayout();
-    void resetPanelLayout();
-    void refreshPanelLayoutActions();
     void initializePersistence();
     void schedulePersist() { workspace_.schedulePersist(); }
     void persistNow(bool wait) { workspace_.persistNow(wait); }
@@ -736,12 +723,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* find_previous_action_{nullptr};
     QAction* folder_add_to_list_action_{nullptr};
     QAction* folder_toggle_expanded_action_{nullptr};
-    QAction* layout_edit_action_{nullptr};
-    QAction* layout_side_by_side_action_{nullptr};
-    QAction* layout_top_bottom_action_{nullptr};
-    QAction* layout_tabbed_action_{nullptr};
-    QAction* layout_swap_action_{nullptr};
-    QAction* layout_reset_action_{nullptr};
     QAction* track_albums_side_action_{nullptr};
     QAction* track_plain_columns_action_{nullptr};
     QAction* track_layout_reset_action_{nullptr};
@@ -776,14 +757,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void fillContinueMenu();
     QMenu* track_context_menu_{nullptr};
     QMenu* folder_context_menu_{nullptr};
-    QActionGroup* layout_arrangement_group_{nullptr};
     QActionGroup* track_presentation_group_{nullptr};
     QMenu* track_columns_menu_{nullptr};
     QHash<QString, QAction*> track_column_actions_;
 
-    QWidget* layout_host_{nullptr};
-    QVBoxLayout* layout_host_layout_{nullptr};
-    QWidget* layout_root_{nullptr};
     QWidget* folders_panel_{nullptr};
     QListWidget* folder_bookmarks_{nullptr};
     QLabel* folder_bookmarks_heading_{nullptr};
@@ -791,9 +768,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* folder_bookmark_add_action_{nullptr};
     QAction* folder_bookmark_remove_action_{nullptr};
     QStackedWidget* source_stack_{nullptr};
-    QHash<QString, QWidget*> panel_widgets_;
-    bool applying_panel_layout_{false};
-    PanelArrangement* panel_arrangement_{nullptr};
     bool applying_track_view_layout_{false};
 
     QAction* notifications_action_{nullptr};

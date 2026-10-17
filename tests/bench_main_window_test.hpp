@@ -78,7 +78,6 @@
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
-#include "uicommon/panel_layout.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
@@ -458,7 +457,8 @@ class BenchMainWindowTest final : public QObject {
     void contextTransfersCreateTabs();
     void tabBarDropsTransferLocalRows();
     void filesDroppedOnTheTabBarMakeATab();
-    void panelLayoutPersistsAndPreservesFutureState();
+    void theSourcesKeepTheirWidth();
+    void sidePanelsShareTheirRoomAsTabs();
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void listViewsShowExpressionsGroupAndSort();
     void listViewEditorChecksAndSavesACopy();

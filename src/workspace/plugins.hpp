@@ -35,6 +35,15 @@ struct PluginAction {
     int timeout_seconds{120};
 };
 
+// ADR-0291: a side panel the plugin fills for what is playing -- run when
+// the track changes and the panel is open, its answer drawn by Melody.
+struct PluginPanel {
+    QString id;
+    QString label;
+    QStringList run;
+    int timeout_seconds{30};
+};
+
 // What a plugin asks to be set, shown under it in Settings › Plugins and
 // handed to it with every run: an address, an account's token.
 struct PluginSetting {
@@ -56,6 +65,7 @@ struct Plugin {
     QString description;
     QString folder;
     std::vector<PluginAction> actions;
+    std::vector<PluginPanel> panels;
     std::vector<PluginSetting> settings;
 };
 
@@ -150,6 +160,34 @@ struct PluginList {
 // Its output read, or why it cannot be.
 [[nodiscard]] std::optional<PluginList> parsePluginList(const QByteArray& json, QString* problem);
 
+// ADR-0291: what a panel answers -- a heading and parts, each Melody's to
+// draw: a heading, a paragraph, an item (text, detail beneath, a link) or an
+// image (a file the plugin keeps, a link on it).
+struct PluginPanelContent {
+    struct Part {
+        enum class Kind : std::uint8_t { heading, paragraph, item, image };
+        Kind kind{Kind::item};
+        QString text;
+        QString detail;
+        // http or https only.
+        QString url;
+        // An image's, an absolute path on this computer.
+        QString image;
+    };
+    QString title;
+    std::vector<Part> parts;
+};
+[[nodiscard]] std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json,
+                                                                 QString* problem);
+
+// The JSON a panel's run is given: what plays -- null when nothing does --
+// the engine it plays on and the plugin's settings.
+[[nodiscard]] QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
+                                          const std::optional<PluginTrack>& playing,
+                                          std::optional<std::int64_t> duration_ms,
+                                          const std::vector<std::string>& music_folders,
+                                          const QJsonObject& settings);
+
 struct PluginOutcome {
     bool succeeded{false};
     // What it printed, trimmed; or, when it failed, why.
@@ -162,5 +200,8 @@ struct PluginOutcome {
 // `context` goes.
 void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArray input,
                      QObject* context, std::function<void(PluginOutcome)> done);
+// The same for a panel. Deleting `context` stops it.
+void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray input,
+                    QObject* context, std::function<void(PluginOutcome)> done);
 
 } // namespace trackknife::bench

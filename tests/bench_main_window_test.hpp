@@ -329,6 +329,7 @@ class BenchMainWindowTest final : public QObject {
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void aTaggerUndoesItsWriteUntilClosed();
+    void aPluginPanelShowsWhatItSaysAboutThePlayingTrack();
     void metadataRenameMovesTheFileAndItsRow();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();

@@ -166,6 +166,49 @@ list on the clipboard.
 -- text, detail, link -- and none of a plugin's own, so a list looks like the
 rest of Melody; the same parts will fill a side panel later.
 
+## Panels
+
+A plugin can also keep a side panel current with what plays -- the artist's
+missing albums, a biography, credits ([ADR-0291](adr/0291-plugin-panels.md)):
+
+```json
+"panels": [{"id": "artist", "label": "About the artist", "run": ["./about"]}]
+```
+
+A plugin needs actions, panels, or both. Each panel is toggled under
+**Playback**, after Lyrics, and asks only while it is open: when the track
+changes, when it is opened, and on its refresh button. Its program is given
+
+```json
+{"schema": 1, "panel": "artist", "engine": {…}, "settings": {…},
+ "playing": {"path": "…", "relative_path": "…", "title": "…", "artist": "…",
+             "album": "…", "album_artist": "…", "date": "…",
+             "track_number": "…", "duration_ms": 250000}}
+```
+
+and answers what to show, in parts Melody draws:
+
+```json
+{"title": "Testament",
+ "parts": [
+   {"heading": "Missing albums"},
+   {"text": "The Legacy", "detail": "1987 · Album", "url": "https://musicbrainz.org/…"},
+   {"paragraph": "Thrash metal from Berkeley, California."},
+   {"image": "/home/you/.cache/about/testament.jpg", "caption": "Live, 1988"}
+ ]}
+```
+
+| Part | Keys |
+| --- | --- |
+| Heading | `heading` |
+| Paragraph | `paragraph` |
+| Item | `text`, and `detail` beneath, a `url` it opens |
+| Image | `image` -- an absolute path of a file the plugin keeps -- and `caption`, `url` |
+
+Links are `http` or `https`. Melody fetches nothing for a panel: an image is
+the plugin's to download and keep. `timeout` is 1 to 300 seconds, 30 by
+default.
+
 ## Example
 
 [`examples/plugins/copy-folder`](../examples/plugins/copy-folder) is a whole
@@ -202,4 +245,4 @@ still read.
 ## Later
 
 Plugins that stay running and answer Melody's questions -- lyrics from the
-web, a side panel of information -- are designed in ADR-0288, not built yet.
+web when a file has none -- are designed in ADR-0288, not built yet.

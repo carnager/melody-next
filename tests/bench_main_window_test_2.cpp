@@ -2781,6 +2781,101 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0291: a plugin's panel, toggled in the Playback menu beside Lyrics,
+// asked about what plays while open and drawn as the parts it answers.
+void BenchMainWindowTest::aPluginPanelShowsWhatItSaysAboutThePlayingTrack() {
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/about");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "About", "panels": [{"id": "artist",
+                          "label": "About the artist", "run": ["./about"]}],
+                          "settings": [{"key": "greeting", "label": "Greeting",
+                                        "default": "Hello"}]})");
+        QFile script{folder + QStringLiteral("/about")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"sh(#!/bin/sh
+input=$(cat)
+artist=$(printf '%s' "$input" | grep -o '"artist":"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+greeting=$(printf '%s' "$input" | grep -o '"greeting":"[^"]*"' | cut -d '"' -f 4)
+path=$(printf '%s' "$input" | grep -o '"path":"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s from %s."}, {"text": "Site", "detail": "official", "url": "https://example.org"}]}' "$artist" "$greeting" "$path"
+)sh");
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("about")), true);
+
+    BenchMainWindow window;
+    window.show();
+    auto* toggle =
+        window.findChild<QAction*>(QStringLiteral("action-show-plugin-panel-about-artist"));
+    QVERIFY(toggle != nullptr);
+    QCOMPARE(toggle->text(), QStringLiteral("About the artist"));
+    // In the Playback menu, after Lyrics.
+    auto* lyrics = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
+    QMenu* playback = nullptr;
+    for (auto* menu : window.menuBar()->findChildren<QMenu*>()) {
+        if (menu->actions().contains(lyrics)) {
+            playback = menu;
+        }
+    }
+    QVERIFY(playback != nullptr);
+    QCOMPARE(playback->actions().indexOf(toggle), playback->actions().indexOf(lyrics) + 1);
+
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-about-artist"));
+    QVERIFY(dock != nullptr && dock->isHidden());
+    toggle->trigger();
+    QTRY_VERIFY(dock->isVisible());
+    auto* message = dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-message"));
+    QVERIFY(message != nullptr);
+    QCOMPARE(message->text(), QStringLiteral("Nothing is playing"));
+
+    // A track plays -- told here, not by the engine, which plays nothing in
+    // this test: asked about it, the answer drawn as its parts.
+    // Once the engine has said what it has, it says nothing more here.
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    EnginePlayback::State state;
+    state.status = QStringLiteral("playing");
+    state.entry = QStringLiteral("e1");
+    state.path = QStringLiteral("/srv/music/Testament/01.flac");
+    window.refreshPluginPanels(state);
+    QLabel* title = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (title = dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title"))) != nullptr,
+        10'000);
+    QStringList parts;
+    for (const auto* part :
+         dock->findChildren<QLabel*>(QStringLiteral("bench-plugin-panel-part"))) {
+        parts << part->property("part").toString();
+    }
+    QVERIFY2(parts.contains(QStringLiteral("heading")) &&
+                 parts.contains(QStringLiteral("paragraph")) &&
+                 parts.contains(QStringLiteral("item")),
+             qPrintable(parts.join(QLatin1Char(','))));
+    const auto paragraphs = dock->findChildren<QLabel*>(QStringLiteral("bench-plugin-panel-part"));
+    QVERIFY(std::ranges::any_of(paragraphs, [](const QLabel* label) {
+        return label->property("part").toString() == QStringLiteral("paragraph") &&
+               label->text() == QStringLiteral("Hello from /srv/music/Testament/01.flac.");
+    }));
+    QCOMPARE(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-detail"))->text(),
+             QStringLiteral("official"));
+
+    // Turned off and saved, its panel goes.
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("about")), false);
+    window.buildPluginPanels();
+    QVERIFY(window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-about-artist")) ==
+            nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-show-plugin-panel-about-artist")) ==
+            nullptr);
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QSettings{}.remove(QStringLiteral("plugin-panels"));
+    QDir{folder}.removeRecursively();
+}
+
 // ADR-0288: more than a few plugin entries go in a submenu for each plugin,
 // under its name; a few stand in the menu itself (above).
 void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {

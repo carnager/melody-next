@@ -29,6 +29,7 @@ class PluginsTest final : public QObject {
     void theExamplePluginReads();
     void aListIsReadOrRefused();
     void settingsAreReadKeptAndHandedOn();
+    void panelsAreReadAndTheirAnswersToo();
 
   private:
     // Settings of this test's own, not in the config folder of whoever runs it.
@@ -196,6 +197,7 @@ printf '%s\n' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/https:\/\/e
                   .description = {},
                   .folder = folder.path(),
                   .actions = {},
+                  .panels = {},
                   .settings = {}};
     PluginAction action{.id = QStringLiteral("share"),
                         .label = QStringLiteral("Share"),
@@ -440,6 +442,86 @@ void PluginsTest::settingsAreReadKeptAndHandedOn() {
     savePluginSecret(secret_key, {});
     QCOMPARE(pluginSettings(*plugin).value(QStringLiteral("token")).toString(), QString{});
     QSettings{}.remove(QStringLiteral("plugins"));
+}
+
+// ADR-0291: a panel in a manifest, the answer it gives, and what it is told.
+void PluginsTest::panelsAreReadAndTheirAnswersToo() {
+    QString problem;
+    const auto plugin = parsePluginManifest(
+        R"({"schema": 1, "name": "About", "panels": [{"id": "artist", "label": "Artist",
+            "run": ["./about"], "timeout": 20}]})",
+        QStringLiteral("/plugins/about"), &problem);
+    QVERIFY2(plugin.has_value(), qPrintable(problem));
+    QVERIFY(plugin->actions.empty());
+    QCOMPARE(plugin->panels.size(), 1U);
+    QCOMPARE(plugin->panels.front().label, QStringLiteral("Artist"));
+    QCOMPARE(plugin->panels.front().timeout_seconds, 20);
+    for (const auto* broken :
+         {R"({"schema": 1, "name": "A"})", R"({"schema": 1, "name": "A", "panels": []})",
+          R"({"schema": 1, "name": "A", "panels": [{"id": "p", "label": "P"}]})",
+          R"({"schema": 1, "name": "A", "panels": [{"id": "p", "label": "P", "run": ["x"],
+              "for": "selection"}]})",
+          R"({"schema": 1, "name": "A", "panels": [{"id": "p", "label": "P", "run": ["x"]},
+              {"id": "p", "label": "Q", "run": ["x"]}]})",
+          R"({"schema": 1, "name": "A", "panels": [{"id": "p", "label": "P", "run": ["x"],
+              "timeout": 900}]})"}) {
+        problem.clear();
+        QVERIFY2(!parsePluginManifest(broken, QStringLiteral("/p"), &problem), broken);
+        QVERIFY(!problem.isEmpty());
+    }
+
+    // Its answer: parts Melody draws, each named by its one key.
+    const auto content = parsePluginPanel(
+        R"({"title": "Testament", "parts": [{"heading": "About"},
+            {"paragraph": "Thrash from Berkeley."},
+            {"text": "The Legacy", "detail": "1987", "url": "https://example.org/1"},
+            {"image": "/tmp/cover.jpg", "caption": "Live", "url": "https://example.org/2"}]})",
+        &problem);
+    QVERIFY2(content.has_value(), qPrintable(problem));
+    using Kind = PluginPanelContent::Part::Kind;
+    QCOMPARE(content->title, QStringLiteral("Testament"));
+    QCOMPARE(content->parts.size(), 4U);
+    QCOMPARE(content->parts[0].kind, Kind::heading);
+    QCOMPARE(content->parts[1].kind, Kind::paragraph);
+    QCOMPARE(content->parts[2].kind, Kind::item);
+    QCOMPARE(content->parts[2].detail, QStringLiteral("1987"));
+    QCOMPARE(content->parts[3].kind, Kind::image);
+    QCOMPARE(content->parts[3].text, QStringLiteral("Live"));
+    QVERIFY(parsePluginPanel(R"({"parts": []})", &problem).has_value());
+    for (const auto* broken :
+         {R"({"title": "x"})", R"({"parts": [{"heading": "a", "url": "https://x"}]})",
+          R"({"parts": [{"quote": "a"}]})", R"({"parts": [{"image": "cover.jpg"}]})",
+          R"({"parts": [{"text": "a", "url": "file:///etc/passwd"}]})",
+          R"({"parts": [], "html": "<b>"})", "["}) {
+        problem.clear();
+        QVERIFY2(!parsePluginPanel(broken, &problem), broken);
+        QVERIFY(!problem.isEmpty());
+    }
+
+    // What it is told: what plays, within its music folder, and its settings.
+    const auto told = QJsonDocument::fromJson(pluginPanelInput(
+        plugin->panels.front(),
+        PluginEngine{.name = QStringLiteral("gemenon"), .address = {}, .here = true},
+        PluginTrack{.path = "/srv/music/Testament/1987 The Legacy/01.flac",
+                    .title = "Over the Wall",
+                    .artist = "Testament",
+                    .album = "The Legacy",
+                    .album_artist = "Testament",
+                    .date = "1987",
+                    .track_number = "1"},
+        250'000, {"/srv/music"}, QJsonObject{{QStringLiteral("lang"), QStringLiteral("en")}}));
+    const auto root = told.object();
+    QCOMPARE(root.value(QStringLiteral("panel")).toString(), QStringLiteral("artist"));
+    const auto playing = root.value(QStringLiteral("playing")).toObject();
+    QCOMPARE(playing.value(QStringLiteral("artist")).toString(), QStringLiteral("Testament"));
+    QCOMPARE(playing.value(QStringLiteral("relative_path")).toString(),
+             QStringLiteral("Testament/1987 The Legacy/01.flac"));
+    QCOMPARE(playing.value(QStringLiteral("duration_ms")).toInteger(), 250'000);
+    QCOMPARE(root.value(QStringLiteral("settings")).toObject().value(QStringLiteral("lang")),
+             QJsonValue{QStringLiteral("en")});
+    const auto nothing = QJsonDocument::fromJson(pluginPanelInput(
+        plugin->panels.front(), PluginEngine{}, std::nullopt, std::nullopt, {}, {}));
+    QVERIFY(nothing.object().value(QStringLiteral("playing")).isNull());
 }
 
 } // namespace trackknife::bench

@@ -77,6 +77,7 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 
     buildWorkspace();
     buildTransport();
+    buildPluginPanels();
     buildLastFm();
     buildHelpMenu();
     buildShortcuts();
@@ -483,6 +484,7 @@ void BenchMainWindow::buildTransport() {
     buildLocalPlaybackControls(playback_menu);
     playback_menu->addSeparator();
     playback_menu->addAction(findChild<QAction*>(QStringLiteral("action-show-lyrics")));
+    playback_menu->addSeparator();
 
     // ADR-0144: quiet, opt-in track-change notifications while the
     // window is in the background.
@@ -1005,6 +1007,7 @@ void BenchMainWindow::refreshEngineTransport() {
     refreshMuteButton();
 
     refreshLyrics(state);
+    refreshPluginPanels(state);
     const auto shown = workspace_.nowPlaying(state);
     now_playing_->setText(shown.title);
     setWindowTitle(shown.window_title);

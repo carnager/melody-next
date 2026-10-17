@@ -170,9 +170,9 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             QStringLiteral("plugin.json is not a JSON object: %1").arg(error.errorString()));
     }
     const auto object = document.object();
-    static const QStringList known{QStringLiteral("schema"), QStringLiteral("name"),
+    static const QStringList known{QStringLiteral("schema"),      QStringLiteral("name"),
                                    QStringLiteral("description"), QStringLiteral("actions"),
-                                   QStringLiteral("settings")};
+                                   QStringLiteral("panels"),      QStringLiteral("settings")};
     for (const auto& key : object.keys()) {
         if (!known.contains(key)) {
             return fail(QStringLiteral("plugin.json has an unknown key \"%1\"").arg(key));
@@ -190,8 +190,55 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
         return fail(QStringLiteral("plugin.json has no name"));
     }
     const auto actions = object.value(QStringLiteral("actions"));
-    if (!actions.isArray() || actions.toArray().isEmpty()) {
-        return fail(QStringLiteral("plugin.json has no actions"));
+    const auto panels = object.value(QStringLiteral("panels"));
+    if ((!actions.isUndefined() && !actions.isArray()) ||
+        (!panels.isUndefined() && !panels.isArray())) {
+        return fail(QStringLiteral("\"actions\" and \"panels\" are lists"));
+    }
+    if (actions.toArray().isEmpty() && panels.toArray().isEmpty()) {
+        return fail(QStringLiteral("plugin.json has no actions and no panels"));
+    }
+    static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
+                                        QStringLiteral("run"), QStringLiteral("timeout")};
+    for (const auto& value : panels.toArray()) {
+        if (!value.isObject()) {
+            return fail(QStringLiteral("a panel is not an object"));
+        }
+        const auto entry = value.toObject();
+        for (const auto& key : entry.keys()) {
+            if (!panel_keys.contains(key)) {
+                return fail(QStringLiteral("a panel has an unknown key \"%1\"").arg(key));
+            }
+        }
+        PluginPanel panel;
+        panel.id = entry.value(QStringLiteral("id")).toString().trimmed();
+        panel.label = entry.value(QStringLiteral("label")).toString().trimmed();
+        if (panel.id.isEmpty() || panel.label.isEmpty()) {
+            return fail(QStringLiteral("a panel needs an id and a label"));
+        }
+        if (std::ranges::any_of(plugin.panels,
+                                [&panel](const auto& other) { return other.id == panel.id; })) {
+            return fail(QStringLiteral("panel \"%1\" is there twice").arg(panel.id));
+        }
+        for (const auto& word : entry.value(QStringLiteral("run")).toArray()) {
+            if (!word.isString() || word.toString().isEmpty()) {
+                return fail(
+                    QStringLiteral("panel \"%1\": \"run\" is a list of words").arg(panel.id));
+            }
+            panel.run.push_back(word.toString());
+        }
+        if (panel.run.isEmpty()) {
+            return fail(QStringLiteral("panel \"%1\" has nothing to run").arg(panel.id));
+        }
+        if (entry.contains(QStringLiteral("timeout"))) {
+            const auto seconds = entry.value(QStringLiteral("timeout")).toInt(0);
+            if (seconds < 1 || seconds > 300) {
+                return fail(
+                    QStringLiteral("panel \"%1\": \"timeout\" is 1 to 300 seconds").arg(panel.id));
+            }
+            panel.timeout_seconds = seconds;
+        }
+        plugin.panels.push_back(std::move(panel));
     }
     static const QStringList action_keys{QStringLiteral("id"),     QStringLiteral("label"),
                                          QStringLiteral("for"),    QStringLiteral("run"),
@@ -317,6 +364,81 @@ std::optional<PluginList> parsePluginList(const QByteArray& json, QString* probl
         list.items.push_back(std::move(read));
     }
     return list;
+}
+
+std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QString* problem) {
+    const auto fail = [problem](QString why) -> std::optional<PluginPanelContent> {
+        if (problem != nullptr) {
+            *problem = std::move(why);
+        }
+        return std::nullopt;
+    };
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(json, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return fail(QStringLiteral("its answer is not a JSON object: %1").arg(error.errorString()));
+    }
+    const auto object = document.object();
+    for (const auto& key : object.keys()) {
+        if (key != QStringLiteral("title") && key != QStringLiteral("parts")) {
+            return fail(QStringLiteral("its answer has an unknown key \"%1\"").arg(key));
+        }
+    }
+    const auto parts = object.value(QStringLiteral("parts"));
+    if (!parts.isArray()) {
+        return fail(QStringLiteral("its answer has no parts"));
+    }
+    PluginPanelContent content;
+    content.title = object.value(QStringLiteral("title")).toString().trimmed();
+    using Kind = PluginPanelContent::Part::Kind;
+    for (const auto& value : parts.toArray()) {
+        if (!value.isObject()) {
+            return fail(QStringLiteral("a part is not an object"));
+        }
+        const auto part = value.toObject();
+        // What a part is, by the one key that names it.
+        PluginPanelContent::Part read;
+        QStringList allowed;
+        if (part.contains(QStringLiteral("heading"))) {
+            read.kind = Kind::heading;
+            read.text = part.value(QStringLiteral("heading")).toString();
+            allowed = {QStringLiteral("heading")};
+        } else if (part.contains(QStringLiteral("paragraph"))) {
+            read.kind = Kind::paragraph;
+            read.text = part.value(QStringLiteral("paragraph")).toString();
+            allowed = {QStringLiteral("paragraph")};
+        } else if (part.contains(QStringLiteral("image"))) {
+            read.kind = Kind::image;
+            read.image = part.value(QStringLiteral("image")).toString();
+            read.text = part.value(QStringLiteral("caption")).toString();
+            read.url = part.value(QStringLiteral("url")).toString();
+            allowed = {QStringLiteral("image"), QStringLiteral("caption"), QStringLiteral("url")};
+            if (!QDir::isAbsolutePath(read.image)) {
+                return fail(
+                    QStringLiteral("an image is a file's absolute path: %1").arg(read.image));
+            }
+        } else if (part.contains(QStringLiteral("text"))) {
+            read.kind = Kind::item;
+            read.text = part.value(QStringLiteral("text")).toString();
+            read.detail = part.value(QStringLiteral("detail")).toString();
+            read.url = part.value(QStringLiteral("url")).toString();
+            allowed = {QStringLiteral("text"), QStringLiteral("detail"), QStringLiteral("url")};
+        } else {
+            return fail(QStringLiteral("a part is a heading, paragraph, text or image"));
+        }
+        for (const auto& key : part.keys()) {
+            if (!allowed.contains(key)) {
+                return fail(QStringLiteral("a part has an unknown key \"%1\"").arg(key));
+            }
+        }
+        // A link is a web page's: nothing else is opened from a plugin.
+        if (!read.url.isEmpty() && !read.url.startsWith(QStringLiteral("https://")) &&
+            !read.url.startsWith(QStringLiteral("http://"))) {
+            return fail(QStringLiteral("a link is not http or https: %1").arg(read.url));
+        }
+        content.parts.push_back(std::move(read));
+    }
+    return content;
 }
 
 QStringList pluginFolders() {
@@ -531,16 +653,69 @@ QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
 }
 
+QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
+                            const std::optional<PluginTrack>& playing,
+                            const std::optional<std::int64_t> duration_ms,
+                            const std::vector<std::string>& music_folders,
+                            const QJsonObject& settings) {
+    QJsonValue track{QJsonValue::Null};
+    if (playing) {
+        const auto root = musicFolderOf(playing->path, music_folders);
+        track = QJsonObject{
+            {QStringLiteral("path"), text(playing->path)},
+            {QStringLiteral("music_folder"), text(root)},
+            {QStringLiteral("relative_path"), text(relativeTo(playing->path, root))},
+            {QStringLiteral("title"), text(playing->title)},
+            {QStringLiteral("artist"), text(playing->artist)},
+            {QStringLiteral("album"), text(playing->album)},
+            {QStringLiteral("album_artist"), text(playing->album_artist)},
+            {QStringLiteral("date"), text(playing->date)},
+            {QStringLiteral("track_number"), text(playing->track_number)},
+            {QStringLiteral("duration_ms"),
+             duration_ms ? QJsonValue{static_cast<double>(*duration_ms)} : QJsonValue{}}};
+    }
+    const QJsonObject input{
+        {QStringLiteral("schema"), input_schema},
+        {QStringLiteral("panel"), panel.id},
+        {QStringLiteral("engine"), QJsonObject{{QStringLiteral("name"), engine.name},
+                                               {QStringLiteral("address"), engine.address},
+                                               {QStringLiteral("here"), engine.here}}},
+        {QStringLiteral("playing"), track},
+        {QStringLiteral("settings"), settings}};
+    return QJsonDocument{input}.toJson(QJsonDocument::Compact);
+}
+
+namespace {
+
+void runPluginProgram(const Plugin& plugin, const QStringList& run, const int timeout_seconds,
+                      QByteArray input, QObject* context, std::function<void(PluginOutcome)> done);
+
+} // namespace
+
 void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArray input,
                      QObject* context, std::function<void(PluginOutcome)> done) {
+    runPluginProgram(plugin, action.run, action.timeout_seconds, std::move(input), context,
+                     std::move(done));
+}
+
+void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray input,
+                    QObject* context, std::function<void(PluginOutcome)> done) {
+    runPluginProgram(plugin, panel.run, panel.timeout_seconds, std::move(input), context,
+                     std::move(done));
+}
+
+namespace {
+
+void runPluginProgram(const Plugin& plugin, const QStringList& run, const int timeout_seconds,
+                      QByteArray input, QObject* context, std::function<void(PluginOutcome)> done) {
     auto* process = new QProcess(context);
     process->setWorkingDirectory(plugin.folder);
-    auto program = action.run.front();
+    auto program = run.front();
     if (program.startsWith(QStringLiteral("./"))) {
         program = QDir{plugin.folder}.filePath(program.mid(2));
     }
     process->setProgram(program);
-    process->setArguments(action.run.mid(1));
+    process->setArguments(run.mid(1));
     auto finished = std::make_shared<bool>(false);
     auto finish = [process, finished, done = std::move(done)](PluginOutcome outcome) {
         if (*finished) {
@@ -553,7 +728,7 @@ void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArra
     auto* timer = new QTimer(process);
     timer->setSingleShot(true);
     QObject::connect(
-        timer, &QTimer::timeout, process, [process, finish, seconds = action.timeout_seconds] {
+        timer, &QTimer::timeout, process, [process, finish, seconds = timeout_seconds] {
             process->kill();
             finish(PluginOutcome{.succeeded = false,
                                  .text = QStringLiteral("stopped after %1 seconds").arg(seconds)});
@@ -585,7 +760,9 @@ void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArra
     process->start();
     process->write(input);
     process->closeWriteChannel();
-    timer->start(action.timeout_seconds * 1000);
+    timer->start(timeout_seconds * 1000);
 }
+
+} // namespace
 
 } // namespace trackknife::bench

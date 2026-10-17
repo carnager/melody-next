@@ -5,15 +5,19 @@
 
 #include "bench/bench_main_window.hpp"
 
+#include "bench/animated_panel_dock.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/plugin_list_window.hpp"
+#include "bench/plugin_panel_view.hpp"
 #include "workspace/library_browser.hpp"
 #include "workspace/plugins.hpp"
 
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMenu>
+#include <QMenuBar>
 #include <QPointer>
+#include <QSettings>
 #include <QStatusBar>
 
 #include <memory>
@@ -168,6 +172,170 @@ void BenchMainWindow::addLibraryPluginActions(LocalLibraryPanel* panel, const En
             }
         });
     });
+}
+
+void BenchMainWindow::buildPluginPanels() {
+    for (auto& slot : plugin_panels_) {
+        // Stopped first, so nothing answers into what goes.
+        auto* run = slot->run.data();
+        slot->run = nullptr;
+        delete run;
+        removeDockWidget(slot->dock);
+        delete slot->dock;
+    }
+    plugin_panels_.clear();
+    QAction* lyrics = findChild<QAction*>(QStringLiteral("action-show-lyrics"));
+    QMenu* menu = nullptr;
+    QAction* after_lyrics = nullptr;
+    for (auto* candidate : menuBar()->findChildren<QMenu*>()) {
+        const auto actions = candidate->actions();
+        if (const auto at = actions.indexOf(lyrics); lyrics != nullptr && at >= 0) {
+            menu = candidate;
+            after_lyrics = actions.value(at + 1);
+            break;
+        }
+    }
+    for (const auto& plugin : enabledPlugins()) {
+        for (const auto& panel : plugin.panels) {
+            auto slot = std::make_unique<PluginPanelDock>();
+            slot->plugin = plugin;
+            slot->panel = panel;
+            const auto id = QStringLiteral("%1-%2").arg(plugin.name, panel.id);
+            auto* dock = new AnimatedPanelDock(panel.label,
+                                               QStringLiteral("plugin-panels/%1").arg(id), this);
+            dock->setObjectName(QStringLiteral("bench-plugin-panel-%1").arg(id));
+            dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+            auto* view = new PluginPanelView(panel.label, dock);
+            dock->setPanelContent(view);
+            addDockWidget(Qt::RightDockWidgetArea, dock);
+            slot->dock = dock;
+            slot->view = view;
+            auto* raw = slot.get();
+            connect(view, &PluginPanelView::closeRequested, dock,
+                    [dock] { dock->setVisible(false); });
+            connect(view, &PluginPanelView::refreshRequested, this,
+                    [this, raw] { askPluginPanel(*raw); });
+            auto* toggle = dock->panelToggleAction();
+            toggle->setObjectName(QStringLiteral("action-show-plugin-panel-%1").arg(id));
+            toggle->setToolTip(plugin.description.isEmpty() ? plugin.title : plugin.description);
+            // Opened, it asks about what plays now.
+            connect(toggle, &QAction::triggered, this, [this, raw](const bool shown) {
+                if (shown) {
+                    askPluginPanel(*raw);
+                } else {
+                    raw->asked.reset();
+                }
+            });
+            if (menu != nullptr) {
+                menu->insertAction(after_lyrics, toggle);
+            }
+            dock->setVisible(QSettings{}
+                                 .value(QStringLiteral("plugin-panels/%1/visible").arg(id), false)
+                                 .toBool());
+            plugin_panels_.push_back(std::move(slot));
+        }
+    }
+    refreshPluginPanels(plugin_panel_state_);
+}
+
+void BenchMainWindow::refreshPluginPanels(const EnginePlayback::State& state) {
+    plugin_panel_state_ = state;
+    const auto stopped = state.status == QStringLiteral("stopped") || state.entry.isEmpty();
+    const auto entry = stopped ? QString{} : state.entry;
+    for (auto& slot : plugin_panels_) {
+        // Hidden, it asks nothing; shown again, it asks for what plays then.
+        if (slot->dock->isHidden()) {
+            slot->asked.reset();
+            continue;
+        }
+        if (slot->asked != entry) {
+            askPluginPanel(*slot);
+        }
+    }
+}
+
+void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
+    const auto& state = plugin_panel_state_;
+    const auto stopped = state.status == QStringLiteral("stopped") || state.entry.isEmpty();
+    const auto entry = stopped ? QString{} : state.entry;
+    slot.asked = entry;
+    // A newer question: the one on its way is stopped.
+    auto* previous = slot.run.data();
+    slot.run = nullptr;
+    delete previous;
+    if (entry.isEmpty()) {
+        slot.view->setSubject({});
+        slot.view->showMessage(QStringLiteral("Nothing is playing"));
+        return;
+    }
+    PluginTrack playing{.path = state.path.toStdString(),
+                        .title = {},
+                        .artist = {},
+                        .album = {},
+                        .album_artist = {},
+                        .date = {},
+                        .track_number = {}};
+    std::optional<std::int64_t> duration;
+    if (state.duration_ms > 0) {
+        duration = state.duration_ms;
+    }
+    if (const auto* row = playingRow(entry)) {
+        playing.path = row->raw_path;
+        playing.title = row->title;
+        playing.artist = row->artist;
+        playing.album = row->album;
+        playing.album_artist = row->album_artist;
+        playing.date = row->date;
+        playing.track_number = row->track_number;
+        if (row->duration_ms) {
+            duration = row->duration_ms;
+        }
+    }
+    const auto artist = QString::fromStdString(playing.album_artist.empty() ? playing.artist
+                                                                            : playing.album_artist);
+    slot.view->setSubject(
+        artist.isEmpty()
+            ? QString::fromStdString(playing.title)
+            : QStringLiteral("%1 \u2014 %2").arg(artist, QString::fromStdString(playing.title)));
+    slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
+    std::vector<std::string> music_folders;
+    PluginEngine told{.name = {}, .address = {}, .here = true};
+    if (const auto* link = linkOf(transport_)) {
+        told.name = workspace_.engineName(link->key);
+        told.here = link->key.isLocal();
+        told.address = told.here ? QString{} : link->setting.address;
+        if (link->browser) {
+            music_folders = link->browser->rootPaths();
+        }
+    }
+    auto* context = new QObject(this);
+    slot.run = context;
+    auto* raw = &slot;
+    runPluginPanel(
+        slot.plugin, slot.panel,
+        pluginPanelInput(slot.panel, told, playing, duration, music_folders,
+                         pluginSettings(slot.plugin)),
+        context, [raw, context](const PluginOutcome& outcome) {
+            // Asked again since, or gone: this answer is not wanted.
+            if (raw->run != context) {
+                return;
+            }
+            raw->run = nullptr;
+            context->deleteLater();
+            if (!outcome.succeeded) {
+                raw->view->showMessage(
+                    QStringLiteral("%1 failed: %2").arg(raw->plugin.title, outcome.text));
+                return;
+            }
+            QString problem;
+            const auto content = parsePluginPanel(outcome.text.toUtf8(), &problem);
+            if (!content) {
+                raw->view->showMessage(QStringLiteral("%1 answered what cannot be shown: %2")
+                                           .arg(raw->plugin.title, problem));
+                return;
+            }
+            raw->view->showContent(*content);
+        });
 }
 
 } // namespace trackknife::bench

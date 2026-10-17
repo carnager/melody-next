@@ -14,7 +14,9 @@ qt_add_library(
     bench_playlists.cpp
     bench_plugins.cpp
     plugin_list_window.cpp
+    plugin_panel_view.cpp
     plugin_list_window.hpp
+    plugin_panel_view.hpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
     themed_icon.cpp

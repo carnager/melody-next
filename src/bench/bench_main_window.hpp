@@ -104,6 +104,8 @@ class PanelArrangement;
 class ListsPanel;
 
 class LocalLibraryPanel;
+class AnimatedPanelDock;
+class PluginPanelView;
 class MetadataPropertiesDialog;
 class SearchDialog;
 class DesktopNotifier;
@@ -440,6 +442,24 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // The plugin actions of a library's context menu: its entries resolved
     // to their tracks first.
     void addLibraryPluginActions(LocalLibraryPanel* panel, const EngineKey& engine);
+    // ADR-0291: each enabled plugin's panels, docks beside Lyrics, toggled
+    // in the Playback menu, asked about what plays while open. Built again
+    // when Settings are saved.
+    struct PluginPanelDock {
+        Plugin plugin;
+        PluginPanel panel;
+        AnimatedPanelDock* dock{nullptr};
+        PluginPanelView* view{nullptr};
+        // The entry last asked about; none, nothing current.
+        std::optional<QString> asked;
+        // Its run on the way: deleted, it stops.
+        QPointer<QObject> run;
+    };
+    std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
+    EnginePlayback::State plugin_panel_state_;
+    void buildPluginPanels();
+    void refreshPluginPanels(const EnginePlayback::State& state);
+    void askPluginPanel(PluginPanelDock& slot);
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();

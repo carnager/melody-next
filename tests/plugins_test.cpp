@@ -31,6 +31,7 @@ class PluginsTest final : public QObject {
     void aListIsReadOrRefused();
     void settingsAreReadKeptAndHandedOn();
     void panelsAreReadAndTheirAnswersToo();
+    void providersAreReadAndTheirLyricsToo();
 
   private:
     // Settings of this test's own, not in the config folder of whoever runs it.
@@ -199,6 +200,7 @@ printf '%s\n' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/https:\/\/e
                   .folder = folder.path(),
                   .actions = {},
                   .panels = {},
+                  .providers = {},
                   .settings = {}};
     PluginAction action{.id = QStringLiteral("share"),
                         .label = QStringLiteral("Share"),
@@ -581,6 +583,105 @@ void PluginsTest::panelsAreReadAndTheirAnswersToo() {
     const auto nothing = QJsonDocument::fromJson(pluginPanelInput(
         plugin->panels.front(), PluginEngine{}, std::nullopt, std::nullopt, {}, {}));
     QVERIFY(nothing.object().value(QStringLiteral("playing")).isNull());
+}
+
+// ADR-0293: a lyrics provider in a manifest, what it is told and what it
+// answers -- and the official one, answering from what it keeps.
+void PluginsTest::providersAreReadAndTheirLyricsToo() {
+    QString problem;
+    const auto plugin = parsePluginManifest(
+        R"({"schema": 1, "name": "Words", "providers": [{"id": "lyrics", "provides": "lyrics",
+            "run": ["./words"], "timeout": 20}]})",
+        QStringLiteral("/plugins/words"), &problem);
+    QVERIFY2(plugin.has_value(), qPrintable(problem));
+    QCOMPARE(plugin->providers.size(), 1U);
+    QCOMPARE(plugin->providers.front().provides, QStringLiteral("lyrics"));
+    QCOMPARE(plugin->providers.front().timeout_seconds, 20);
+    for (const auto* broken :
+         {R"({"schema": 1, "name": "W", "providers": [{"id": "l", "provides": "covers",
+             "run": ["x"]}]})",
+          R"({"schema": 1, "name": "W", "providers": [{"id": "l", "provides": "lyrics"}]})",
+          R"({"schema": 1, "name": "W", "providers": [{"id": "l", "provides": "lyrics",
+              "run": ["x"], "timeout": 500}]})",
+          R"({"schema": 1, "name": "W", "providers": [{"id": "l", "provides": "lyrics",
+              "run": ["x"], "when": "always"}]})"}) {
+        problem.clear();
+        QVERIFY2(!parsePluginManifest(broken, QStringLiteral("/p"), &problem), broken);
+        QVERIFY(!problem.isEmpty());
+    }
+
+    const auto found =
+        parsePluginLyrics(R"({"lyrics": "[00:01.00]One", "source": "LRCLIB"})", &problem);
+    QVERIFY(found && *found);
+    QCOMPARE((*found)->text, QStringLiteral("[00:01.00]One"));
+    QCOMPARE((*found)->source, QStringLiteral("LRCLIB"));
+    const auto none = parsePluginLyrics(R"({"lyrics": null})", &problem);
+    QVERIFY(none && !*none);
+    QVERIFY(parsePluginLyrics(R"({"lyrics": "  "})", &problem).value_or(std::nullopt) ==
+            std::nullopt);
+    for (const auto* broken :
+         {R"({})", R"({"lyrics": 3})", R"({"lyrics": null, "html": 1})", "x"}) {
+        problem.clear();
+        QVERIFY2(!parsePluginLyrics(broken, &problem), broken);
+        QVERIFY(!problem.isEmpty());
+    }
+    const auto told =
+        QJsonDocument::fromJson(pluginProviderInput(plugin->providers.front(), PluginEngine{},
+                                                    PluginTrack{.path = "/srv/music/A/01.flac",
+                                                                .title = "Samson",
+                                                                .artist = "Regina Spektor",
+                                                                .album = "Begin to Hope",
+                                                                .album_artist = {},
+                                                                .date = {},
+                                                                .track_number = {}},
+                                                    190'000, {"/srv/music"}, {}));
+    QCOMPARE(told.object().value(QStringLiteral("provide")).toString(), QStringLiteral("lyrics"));
+    QCOMPARE(
+        told.object().value(QStringLiteral("playing")).toObject().value(QStringLiteral("title")),
+        QJsonValue{QStringLiteral("Samson")});
+
+    // The official LRCLIB provider reads, and answers from what it keeps.
+    const QString lrclib = QStringLiteral(MELODY_SOURCE_DIR "/plugins/lrclib");
+    QFile manifest{lrclib + QStringLiteral("/plugin.json")};
+    QVERIFY(manifest.open(QIODevice::ReadOnly));
+    const auto official = parsePluginManifest(manifest.readAll(), lrclib, &problem);
+    QVERIFY2(official.has_value(), qPrintable(problem));
+    QCOMPARE(official->providers.size(), 1U);
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const auto kept = QDir{cache.path()}.filePath(QStringLiteral("melody/plugins/lrclib"));
+    QVERIFY(QDir{}.mkpath(kept));
+    const auto key = QCryptographicHash::hash(
+                         QStringList{QStringLiteral("regina spektor"), QStringLiteral("samson"),
+                                     QStringLiteral("begin to hope"), QStringLiteral("190")}
+                             .join(QChar{0x1f})
+                             .toUtf8(),
+                         QCryptographicHash::Sha1)
+                         .toHex();
+    writeFile(kept + QLatin1Char('/') + QString::fromLatin1(key),
+              R"({"lyrics": "[00:12.00]You are my sweetest downfall"})");
+    qputenv("XDG_CACHE_HOME", QFile::encodeName(cache.path()));
+    const auto answered = run(*official,
+                              PluginAction{.id = QStringLiteral("lyrics"),
+                                           .label = QStringLiteral("Lyrics"),
+                                           .scope = PluginAction::Scope::tracks,
+                                           .run = official->providers.front().run,
+                                           .result = PluginAction::Result::none,
+                                           .timeout_seconds = 30},
+                              pluginProviderInput(official->providers.front(), PluginEngine{},
+                                                  PluginTrack{.path = "/srv/music/A/01.flac",
+                                                              .title = "Samson",
+                                                              .artist = "Regina Spektor",
+                                                              .album = "Begin to Hope",
+                                                              .album_artist = {},
+                                                              .date = {},
+                                                              .track_number = {}},
+                                                  190'000, {}, {}));
+    QVERIFY2(answered.succeeded, qPrintable(answered.text));
+    const auto lyrics = parsePluginLyrics(answered.text.toUtf8(), &problem);
+    QVERIFY2(lyrics && *lyrics, qPrintable(problem));
+    QCOMPARE((*lyrics)->text, QStringLiteral("[00:12.00]You are my sweetest downfall"));
+    QCOMPARE((*lyrics)->source, QStringLiteral("LRCLIB"));
 }
 
 } // namespace trackknife::bench

@@ -329,6 +329,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void aTaggerUndoesItsWriteUntilClosed();
     void aPluginPanelShowsWhatItSaysAboutThePlayingTrack();
+    void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();

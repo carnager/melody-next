@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "name": "LRCLIB lyrics",
+  "description": "Lyrics from lrclib.net, synced where it has them, when the files have none",
+  "providers": [
+    {
+      "id": "lyrics",
+      "provides": "lyrics",
+      "run": ["./lrclib"],
+      "timeout": 45
+    }
+  ]
+}

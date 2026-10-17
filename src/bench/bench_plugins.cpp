@@ -294,29 +294,8 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
         slot.view->showMessage(QStringLiteral("Nothing is playing"));
         return;
     }
-    PluginTrack playing{.path = state.path.toStdString(),
-                        .title = {},
-                        .artist = {},
-                        .album = {},
-                        .album_artist = {},
-                        .date = {},
-                        .track_number = {}};
-    std::optional<std::int64_t> duration;
-    if (state.duration_ms > 0) {
-        duration = state.duration_ms;
-    }
-    if (const auto* row = playingRow(entry)) {
-        playing.path = row->raw_path;
-        playing.title = row->title;
-        playing.artist = row->artist;
-        playing.album = row->album;
-        playing.album_artist = row->album_artist;
-        playing.date = row->date;
-        playing.track_number = row->track_number;
-        if (row->duration_ms) {
-            duration = row->duration_ms;
-        }
-    }
+    auto told = pluginPlaying(state);
+    const auto& playing = told.track;
     const auto artist = QString::fromStdString(playing.album_artist.empty() ? playing.artist
                                                                             : playing.album_artist);
     slot.view->setSubject(
@@ -324,22 +303,12 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
             ? QString::fromStdString(playing.title)
             : QStringLiteral("%1 \u2014 %2").arg(artist, QString::fromStdString(playing.title)));
     slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
-    std::vector<std::string> music_folders;
-    PluginEngine told{.name = {}, .address = {}, .here = true};
-    if (const auto* link = linkOf(transport_)) {
-        told.name = workspace_.engineName(link->key);
-        told.here = link->key.isLocal();
-        told.address = told.here ? QString{} : link->setting.address;
-        if (link->browser) {
-            music_folders = link->browser->rootPaths();
-        }
-    }
     auto* context = new QObject(this);
     slot.run = context;
     auto* raw = &slot;
     runPluginPanel(
         slot.plugin, slot.panel,
-        pluginPanelInput(slot.panel, told, playing, duration, music_folders,
+        pluginPanelInput(slot.panel, told.engine, told.track, told.duration_ms, told.music_folders,
                          pluginSettings(slot.plugin)),
         context, [raw, context](const PluginOutcome& outcome) {
             // Asked again since, or gone: this answer is not wanted.
@@ -362,6 +331,43 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
             }
             raw->view->showContent(*content);
         });
+}
+
+BenchMainWindow::PluginPlaying BenchMainWindow::pluginPlaying(const EnginePlayback::State& state) {
+    PluginPlaying told{.track = PluginTrack{.path = state.path.toStdString(),
+                                            .title = {},
+                                            .artist = {},
+                                            .album = {},
+                                            .album_artist = {},
+                                            .date = {},
+                                            .track_number = {}},
+                       .duration_ms = {},
+                       .engine = PluginEngine{.name = {}, .address = {}, .here = true},
+                       .music_folders = {}};
+    if (state.duration_ms > 0) {
+        told.duration_ms = state.duration_ms;
+    }
+    if (const auto* row = state.entry.isEmpty() ? nullptr : playingRow(state.entry)) {
+        told.track.path = row->raw_path;
+        told.track.title = row->title;
+        told.track.artist = row->artist;
+        told.track.album = row->album;
+        told.track.album_artist = row->album_artist;
+        told.track.date = row->date;
+        told.track.track_number = row->track_number;
+        if (row->duration_ms) {
+            told.duration_ms = row->duration_ms;
+        }
+    }
+    if (const auto* link = linkOf(transport_)) {
+        told.engine.name = workspace_.engineName(link->key);
+        told.engine.here = link->key.isLocal();
+        told.engine.address = told.engine.here ? QString{} : link->setting.address;
+        if (link->browser) {
+            told.music_folders = link->browser->rootPaths();
+        }
+    }
+    return told;
 }
 
 } // namespace trackknife::bench

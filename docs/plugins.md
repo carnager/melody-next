@@ -2,8 +2,8 @@
 
 A plugin adds an entry to the context menu of track lists and of the library:
 "Share album", "Send to …". A few official ones come with Melody
-([`plugins/`](../plugins): the web search, and a panel about the playing
-artist); everything else is written and published apart. A plugin is a program of its
+([`plugins/`](../plugins): the web search, a panel about the playing artist,
+and lyrics from LRCLIB); everything else is written and published apart. A plugin is a program of its
 own, in any language; Melody runs it, tells it what was chosen in JSON, and
 shows what it answers ([ADR-0288](adr/0288-plugin-actions.md)).
 
@@ -209,6 +209,28 @@ Links are `http` or `https`. Melody fetches nothing for a panel: an image is
 the plugin's to download and keep. `timeout` is 1 to 300 seconds, 30 by
 default.
 
+## Lyrics providers
+
+When the files have no lyrics for what plays, Melody asks the enabled
+lyrics providers in turn, and shows the first that finds them
+([ADR-0293](adr/0293-lyrics-providers.md)):
+
+```json
+"providers": [{"id": "lyrics", "provides": "lyrics", "run": ["./lrclib"]}]
+```
+
+It is told what a panel is -- `playing`, `engine`, `settings` -- with
+`"provide": "lyrics"`, and answers
+
+```json
+{"lyrics": "[00:12.00]You are my sweetest downfall\n[00:15.40]…", "source": "LRCLIB"}
+```
+
+or `{"lyrics": null}` when it has none. Timed lines (LRC) are synced and
+followed as the music plays; text without timings is shown as it is. What a
+provider finds is shown, never written into the files. `timeout` is 1 to 120
+seconds, 30 by default. The official one, `lrclib`, comes with Melody.
+
 ## Example
 
 [`examples/plugins/copy-folder`](../examples/plugins/copy-folder) is a whole
@@ -244,5 +266,5 @@ still read.
 
 ## Later
 
-Plugins that stay running and answer Melody's questions -- lyrics from the
-web when a file has none -- are designed in ADR-0288, not built yet.
+Providers of more than lyrics -- covers, biographies for the tagger -- are
+for later, in the same form.

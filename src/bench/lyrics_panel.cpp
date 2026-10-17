@@ -29,6 +29,10 @@ namespace {
     if (lyrics.source == "sylt") {
         return kind + QStringLiteral(" · ID3 SYLT");
     }
+    if (lyrics.source.starts_with("plugin:")) {
+        return kind +
+               QStringLiteral(" · from %1").arg(QString::fromStdString(lyrics.source.substr(7)));
+    }
     if (lyrics.source.starts_with("tag:")) {
         return kind +
                QStringLiteral(" · %1 tag").arg(QString::fromStdString(lyrics.source.substr(4)));

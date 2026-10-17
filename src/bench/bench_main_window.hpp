@@ -451,6 +451,20 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void tabOpenSidePanels();
     void refreshPluginPanels(const EnginePlayback::State& state);
     void askPluginPanel(PluginPanelDock& slot);
+    // What a plugin is told of what plays: the track, its length, the
+    // engine playing it and that engine's music folders.
+    struct PluginPlaying {
+        PluginTrack track;
+        std::optional<std::int64_t> duration_ms;
+        PluginEngine engine;
+        std::vector<std::string> music_folders;
+    };
+    [[nodiscard]] PluginPlaying pluginPlaying(const EnginePlayback::State& state);
+    // ADR-0293: no lyrics in the files -- the lyrics providers enabled, in
+    // turn, the first to find them shown. A newer track stops the asking.
+    void askLyricsProviders(const QString& entry, const EnginePlayback::State& state,
+                            const QString& otherwise);
+    QPointer<QObject> lyrics_provider_run_;
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();

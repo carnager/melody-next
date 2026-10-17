@@ -44,6 +44,17 @@ struct PluginPanel {
     int timeout_seconds{30};
 };
 
+// ADR-0293: something a plugin finds for Melody when Melody has none --
+// lyrics, first: asked about what plays when the engine finds no lyrics in
+// its files, a run for each question.
+struct PluginProvider {
+    QString id;
+    // What it finds: "lyrics".
+    QString provides;
+    QStringList run;
+    int timeout_seconds{30};
+};
+
 // What a plugin asks to be set, shown under it in Settings › Plugins and
 // handed to it with every run: an address, an account's token.
 struct PluginSetting {
@@ -66,6 +77,7 @@ struct Plugin {
     QString folder;
     std::vector<PluginAction> actions;
     std::vector<PluginPanel> panels;
+    std::vector<PluginProvider> providers;
     std::vector<PluginSetting> settings;
 };
 
@@ -188,6 +200,22 @@ struct PluginPanelContent {
                                           const std::vector<std::string>& music_folders,
                                           const QJsonObject& settings);
 
+// What a lyrics provider answers: the lyrics, as LRC or plain text, and
+// what it names their source; none found, nullopt. Its answer unread, why.
+struct PluginLyrics {
+    QString text;
+    QString source;
+};
+[[nodiscard]] std::optional<std::optional<PluginLyrics>> parsePluginLyrics(const QByteArray& json,
+                                                                           QString* problem);
+// The JSON a provider's run is given: what it is asked to find, about what
+// plays, the engine and its settings.
+[[nodiscard]] QByteArray pluginProviderInput(const PluginProvider& provider,
+                                             const PluginEngine& engine, const PluginTrack& playing,
+                                             std::optional<std::int64_t> duration_ms,
+                                             const std::vector<std::string>& music_folders,
+                                             const QJsonObject& settings);
+
 struct PluginOutcome {
     bool succeeded{false};
     // What it printed, trimmed; or, when it failed, why.
@@ -203,5 +231,8 @@ void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArra
 // The same for a panel. Deleting `context` stops it.
 void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray input,
                     QObject* context, std::function<void(PluginOutcome)> done);
+// And for a provider.
+void runPluginProvider(const Plugin& plugin, const PluginProvider& provider, QByteArray input,
+                       QObject* context, std::function<void(PluginOutcome)> done);
 
 } // namespace trackknife::bench

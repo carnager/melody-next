@@ -2876,6 +2876,65 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0293: no lyrics in the file -- the lyrics providers asked in turn,
+// the first to find them shown in the Lyrics panel, saying where from.
+void BenchMainWindowTest::lyricsProvidersAreAskedWhenTheFileHasNone() {
+    const auto provider = [](const QString& name, const QByteArray& answer) {
+        const auto folder = pluginFolders().value(0) + QLatin1Char('/') + name;
+        QVERIFY(QDir{}.mkpath(folder));
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QStringLiteral(R"({"schema": 1, "name": "%1", "providers": [{"id": "l",
+                                         "provides": "lyrics", "run": ["./words"]}]})")
+                           .arg(name)
+                           .toUtf8());
+        QFile script{folder + QStringLiteral("/words")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("#!/bin/sh\ncat > /dev/null\nprintf '%s' '" + answer + "'\n");
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QSettings{}.setValue(pluginEnabledKey(name), true);
+    };
+    provider(QStringLiteral("a-nothing"), R"({"lyrics": null})");
+    provider(
+        QStringLiteral("words"),
+        R"({"lyrics": "[00:01.00]First line\n[00:02.00]Second line", "source": "Words test"})");
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto file = media.filePath(QStringLiteral("no-lyrics.wav"));
+    write_wave(file, 44'100);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    auto* show_lyrics = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
+    QVERIFY(show_lyrics != nullptr);
+    if (!show_lyrics->isChecked()) {
+        show_lyrics->trigger();
+    }
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
+    QTRY_VERIFY(dock != nullptr && dock->isVisible());
+    EnginePlayback::State state;
+    state.status = QStringLiteral("playing");
+    state.entry = QStringLiteral("e1");
+    state.path = file;
+    window.refreshLyrics(state);
+    auto* lines = dock->findChild<QListWidget*>(QStringLiteral("lyrics-lines"));
+    QVERIFY(lines != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(lines->count(), 2, 15'000);
+    QCOMPARE(lines->item(0)->text(), QStringLiteral("First line"));
+    QCOMPARE(dock->findChild<QLabel*>(QStringLiteral("lyrics-source"))->text(),
+             QStringLiteral("Synced · from Words test"));
+    show_lyrics->trigger();
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QSettings{}.remove(QStringLiteral("lyrics"));
+    for (const auto* name : {"a-nothing", "words"}) {
+        QDir{pluginFolders().value(0) + QLatin1Char('/') + QLatin1String(name)}.removeRecursively();
+    }
+}
+
 // ADR-0288: more than a few plugin entries go in a submenu for each plugin,
 // under its name; a few stand in the menu itself (above).
 void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {

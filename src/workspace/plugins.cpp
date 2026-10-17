@@ -172,7 +172,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     const auto object = document.object();
     static const QStringList known{QStringLiteral("schema"),      QStringLiteral("name"),
                                    QStringLiteral("description"), QStringLiteral("actions"),
-                                   QStringLiteral("panels"),      QStringLiteral("settings")};
+                                   QStringLiteral("panels"),      QStringLiteral("providers"),
+                                   QStringLiteral("settings")};
     for (const auto& key : object.keys()) {
         if (!known.contains(key)) {
             return fail(QStringLiteral("plugin.json has an unknown key \"%1\"").arg(key));
@@ -191,12 +192,56 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     }
     const auto actions = object.value(QStringLiteral("actions"));
     const auto panels = object.value(QStringLiteral("panels"));
+    const auto providers = object.value(QStringLiteral("providers"));
     if ((!actions.isUndefined() && !actions.isArray()) ||
-        (!panels.isUndefined() && !panels.isArray())) {
-        return fail(QStringLiteral("\"actions\" and \"panels\" are lists"));
+        (!panels.isUndefined() && !panels.isArray()) ||
+        (!providers.isUndefined() && !providers.isArray())) {
+        return fail(QStringLiteral("\"actions\", \"panels\" and \"providers\" are lists"));
     }
-    if (actions.toArray().isEmpty() && panels.toArray().isEmpty()) {
-        return fail(QStringLiteral("plugin.json has no actions and no panels"));
+    if (actions.toArray().isEmpty() && panels.toArray().isEmpty() &&
+        providers.toArray().isEmpty()) {
+        return fail(QStringLiteral("plugin.json has no actions, panels or providers"));
+    }
+    static const QStringList provider_keys{QStringLiteral("id"), QStringLiteral("provides"),
+                                           QStringLiteral("run"), QStringLiteral("timeout")};
+    for (const auto& value : providers.toArray()) {
+        if (!value.isObject()) {
+            return fail(QStringLiteral("a provider is not an object"));
+        }
+        const auto entry = value.toObject();
+        for (const auto& key : entry.keys()) {
+            if (!provider_keys.contains(key)) {
+                return fail(QStringLiteral("a provider has an unknown key \"%1\"").arg(key));
+            }
+        }
+        PluginProvider provider;
+        provider.id = entry.value(QStringLiteral("id")).toString().trimmed();
+        provider.provides = entry.value(QStringLiteral("provides")).toString();
+        if (provider.id.isEmpty()) {
+            return fail(QStringLiteral("a provider needs an id"));
+        }
+        if (provider.provides != QStringLiteral("lyrics")) {
+            return fail(QStringLiteral("provider \"%1\": \"provides\" is lyrics").arg(provider.id));
+        }
+        for (const auto& word : entry.value(QStringLiteral("run")).toArray()) {
+            if (!word.isString() || word.toString().isEmpty()) {
+                return fail(
+                    QStringLiteral("provider \"%1\": \"run\" is a list of words").arg(provider.id));
+            }
+            provider.run.push_back(word.toString());
+        }
+        if (provider.run.isEmpty()) {
+            return fail(QStringLiteral("provider \"%1\" has nothing to run").arg(provider.id));
+        }
+        if (entry.contains(QStringLiteral("timeout"))) {
+            const auto seconds = entry.value(QStringLiteral("timeout")).toInt(0);
+            if (seconds < 1 || seconds > 120) {
+                return fail(QStringLiteral("provider \"%1\": \"timeout\" is 1 to 120 seconds")
+                                .arg(provider.id));
+            }
+            provider.timeout_seconds = seconds;
+        }
+        plugin.providers.push_back(std::move(provider));
     }
     static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
                                         QStringLiteral("run"), QStringLiteral("timeout")};
@@ -653,36 +698,95 @@ QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
 }
 
+namespace {
+
+[[nodiscard]] QJsonObject playingJson(const PluginTrack& playing,
+                                      const std::optional<std::int64_t> duration_ms,
+                                      const std::vector<std::string>& music_folders) {
+    const auto root = musicFolderOf(playing.path, music_folders);
+    return QJsonObject{
+        {QStringLiteral("path"), text(playing.path)},
+        {QStringLiteral("music_folder"), text(root)},
+        {QStringLiteral("relative_path"), text(relativeTo(playing.path, root))},
+        {QStringLiteral("title"), text(playing.title)},
+        {QStringLiteral("artist"), text(playing.artist)},
+        {QStringLiteral("album"), text(playing.album)},
+        {QStringLiteral("album_artist"), text(playing.album_artist)},
+        {QStringLiteral("date"), text(playing.date)},
+        {QStringLiteral("track_number"), text(playing.track_number)},
+        {QStringLiteral("duration_ms"),
+         duration_ms ? QJsonValue{static_cast<double>(*duration_ms)} : QJsonValue{}}};
+}
+
+[[nodiscard]] QJsonObject engineJson(const PluginEngine& engine) {
+    return QJsonObject{{QStringLiteral("name"), engine.name},
+                       {QStringLiteral("address"), engine.address},
+                       {QStringLiteral("here"), engine.here}};
+}
+
+} // namespace
+
 QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
                             const std::optional<PluginTrack>& playing,
                             const std::optional<std::int64_t> duration_ms,
                             const std::vector<std::string>& music_folders,
                             const QJsonObject& settings) {
-    QJsonValue track{QJsonValue::Null};
-    if (playing) {
-        const auto root = musicFolderOf(playing->path, music_folders);
-        track = QJsonObject{
-            {QStringLiteral("path"), text(playing->path)},
-            {QStringLiteral("music_folder"), text(root)},
-            {QStringLiteral("relative_path"), text(relativeTo(playing->path, root))},
-            {QStringLiteral("title"), text(playing->title)},
-            {QStringLiteral("artist"), text(playing->artist)},
-            {QStringLiteral("album"), text(playing->album)},
-            {QStringLiteral("album_artist"), text(playing->album_artist)},
-            {QStringLiteral("date"), text(playing->date)},
-            {QStringLiteral("track_number"), text(playing->track_number)},
-            {QStringLiteral("duration_ms"),
-             duration_ms ? QJsonValue{static_cast<double>(*duration_ms)} : QJsonValue{}}};
-    }
+    const QJsonObject input{{QStringLiteral("schema"), input_schema},
+                            {QStringLiteral("panel"), panel.id},
+                            {QStringLiteral("engine"), engineJson(engine)},
+                            {QStringLiteral("playing"),
+                             playing ? QJsonValue{playingJson(*playing, duration_ms, music_folders)}
+                                     : QJsonValue{QJsonValue::Null}},
+                            {QStringLiteral("settings"), settings}};
+    return QJsonDocument{input}.toJson(QJsonDocument::Compact);
+}
+
+QByteArray pluginProviderInput(const PluginProvider& provider, const PluginEngine& engine,
+                               const PluginTrack& playing,
+                               const std::optional<std::int64_t> duration_ms,
+                               const std::vector<std::string>& music_folders,
+                               const QJsonObject& settings) {
     const QJsonObject input{
         {QStringLiteral("schema"), input_schema},
-        {QStringLiteral("panel"), panel.id},
-        {QStringLiteral("engine"), QJsonObject{{QStringLiteral("name"), engine.name},
-                                               {QStringLiteral("address"), engine.address},
-                                               {QStringLiteral("here"), engine.here}}},
-        {QStringLiteral("playing"), track},
+        {QStringLiteral("provide"), provider.provides},
+        {QStringLiteral("provider"), provider.id},
+        {QStringLiteral("engine"), engineJson(engine)},
+        {QStringLiteral("playing"), playingJson(playing, duration_ms, music_folders)},
         {QStringLiteral("settings"), settings}};
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
+}
+
+std::optional<std::optional<PluginLyrics>> parsePluginLyrics(const QByteArray& json,
+                                                             QString* problem) {
+    const auto fail = [problem](QString why) -> std::optional<std::optional<PluginLyrics>> {
+        if (problem != nullptr) {
+            *problem = std::move(why);
+        }
+        return std::nullopt;
+    };
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(json, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return fail(QStringLiteral("its answer is not a JSON object: %1").arg(error.errorString()));
+    }
+    const auto object = document.object();
+    for (const auto& key : object.keys()) {
+        if (key != QStringLiteral("lyrics") && key != QStringLiteral("source")) {
+            return fail(QStringLiteral("its answer has an unknown key \"%1\"").arg(key));
+        }
+    }
+    if (!object.contains(QStringLiteral("lyrics"))) {
+        return fail(QStringLiteral("its answer has no lyrics, not even null"));
+    }
+    const auto lyrics = object.value(QStringLiteral("lyrics"));
+    if (lyrics.isNull() || (lyrics.isString() && lyrics.toString().trimmed().isEmpty())) {
+        return std::optional<PluginLyrics>{};
+    }
+    if (!lyrics.isString()) {
+        return fail(QStringLiteral("its lyrics are text, or null for none"));
+    }
+    return std::optional{PluginLyrics{.text = lyrics.toString(),
+                                      .source = object.value(QStringLiteral("source")).toString()}};
 }
 
 namespace {
@@ -701,6 +805,12 @@ void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArra
 void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray input,
                     QObject* context, std::function<void(PluginOutcome)> done) {
     runPluginProgram(plugin, panel.run, panel.timeout_seconds, std::move(input), context,
+                     std::move(done));
+}
+
+void runPluginProvider(const Plugin& plugin, const PluginProvider& provider, QByteArray input,
+                       QObject* context, std::function<void(PluginOutcome)> done) {
+    runPluginProgram(plugin, provider.run, provider.timeout_seconds, std::move(input), context,
                      std::move(done));
 }
 

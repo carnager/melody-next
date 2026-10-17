@@ -657,7 +657,7 @@ void BenchMainWindowTest::metadataRetrySkipsSavedFiles() {
         delete dialog;
     } else {
         QCOMPARE(outcomes.back().committed_source_count(), 1U);
-        QTRY_VERIFY(guard.isNull());
+        QVERIFY(window_test::closeTaggerAfterWrite(guard));
         const auto art = metadata::read_local_artwork_inventory(paths[1]);
         QVERIFY(art && art->items.empty());
         const auto tags = metadata::read_local_metadata(paths[1]);
@@ -1348,7 +1348,7 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
              qPrintable(observed->sources.front().issue
                             ? QString::fromStdString(observed->sources.front().issue->message)
                             : QString{}));
-    QTRY_VERIFY(guard.isNull());
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
     const auto after = metadata::read_local_metadata(raw);
     const auto artwork = metadata::read_local_artwork_inventory(raw);
     QVERIFY(after && artwork);
@@ -1459,7 +1459,7 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
              qPrintable(observed->sources.front().issue
                             ? QString::fromStdString(observed->sources.front().issue->message)
                             : QString{}));
-    QTRY_VERIFY(guard.isNull());
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
     const auto after = metadata::read_local_metadata(raw);
     const auto artwork = metadata::read_local_artwork_inventory(raw);
     QVERIFY(after && artwork);
@@ -1749,7 +1749,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTest::mouseClick(apply, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(tags_observed.has_value(), 5'000);
     QCOMPARE(tags_observed->committed_source_count(), 1U);
-    QTRY_VERIFY(guard.isNull());
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
     const auto tagged = metadata::read_local_metadata(raw_path);
     QVERIFY(tagged.has_value());
     QCOMPARE(tagged->document.effective_values("title"),

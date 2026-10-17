@@ -3214,46 +3214,6 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
     return mark_backup(journal, record.id, BackupState::retained, BackupState::released);
 }
 
-core::Result<std::vector<MetadataBackupMaintenanceResult>> maintain_publication_backups(
-    FilePublicationJournal& journal, const MetadataBackupRetentionPolicy& policy,
-    const std::int64_t now_unix_seconds, const core::CancellationToken& cancellation) {
-    auto backups = journal.load_backups();
-    if (!backups) {
-        return std::unexpected(std::move(backups.error()));
-    }
-    std::vector<MetadataBackupMaintenanceResult> results;
-    std::size_t kept = 0U;
-    std::uint64_t kept_bytes = 0U;
-    // Newest first: kept while within age, count and bytes.
-    for (const auto& backup : *backups) {
-        if (backup.state != BackupState::retained) {
-            continue;
-        }
-        if (cancellation.is_cancellation_requested()) {
-            return std::unexpected(cancelled({}));
-        }
-        const auto bytes = backup.publication.expected_source_revision.size;
-        const auto young =
-            now_unix_seconds - backup.completed_at_unix_seconds <= policy.maximum_age_seconds;
-        if (young && kept < policy.maximum_entries &&
-            kept_bytes + bytes <= policy.maximum_total_bytes) {
-            ++kept;
-            kept_bytes += bytes;
-            results.push_back({.journal_id = backup.publication.id,
-                               .outcome = MetadataBackupMaintenanceOutcome::retained,
-                               .issue = std::nullopt});
-            continue;
-        }
-        auto released = release_publication_backup(backup.publication.id, journal, cancellation);
-        results.push_back({.journal_id = backup.publication.id,
-                           .outcome = released
-                                          ? MetadataBackupMaintenanceOutcome::released
-                                          : MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                           .issue = released ? std::nullopt : std::optional{released.error()}});
-    }
-    return results;
-}
-
 core::Result<std::vector<FilePublicationRecoveryResult>>
 recover_publication_undos(FilePublicationJournal& journal,
                           const FilePublicationDependentStateCommitter& dependent_state_committer,

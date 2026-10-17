@@ -97,11 +97,23 @@ published_document(const operations::FilePublicationCommitResult& result) {
     return std::move(read->document);
 }
 
+// Every undo copy the journals know moved where they are kept now.
+[[nodiscard]] core::Result<std::size_t>
+relocate_undo_copies(const std::filesystem::path& database) {
+    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
+    if (!metadata_journal) {
+        return std::unexpected(std::move(metadata_journal.error()));
+    }
+    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
+    if (!file_journal) {
+        return std::unexpected(std::move(file_journal.error()));
+    }
+    return operations::keep_undo_copies_in_place(*metadata_journal, *file_journal);
+}
 } // namespace
 
 FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalogue,
-                                   const MoveFollower& follow,
-                                   const operations::MetadataBackupRetentionPolicy& retention) {
+                                   const MoveFollower& follow) {
     FileWorkRecovery recovery;
     const auto remember = [&recovery](core::Error error) {
         if (!recovery.error) {
@@ -126,14 +138,6 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
             if (result.outcome != operations::MetadataRecoveryOutcome::needs_reconciliation) {
                 ++recovery.recovered;
             }
-        }
-        // A finished write keeps the file it replaced, for undo (ADR-0263),
-        // within the retention policy: the newest first, by age, count and
-        // size.
-        if (auto maintained = operations::maintain_metadata_backups(
-                journal, retention, static_cast<std::int64_t>(std::time(nullptr)));
-            !maintained) {
-            remember(std::move(maintained.error()));
         }
     }
 
@@ -169,26 +173,106 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalC
     // ADR-0263: an undo a crash interrupted is finished; the sources
     // publications kept, retained as metadata backups are.
     count(operations::recover_publication_undos(file_journal, moved));
-    if (auto maintained = operations::maintain_publication_backups(
-            file_journal, retention, static_cast<std::int64_t>(std::time(nullptr)));
-        !maintained) {
-        remember(std::move(maintained.error()));
-    }
-    // ADR-0266: every undo copy where the engine keeps them -- those kept
-    // beside files before, and any a crash left half moved.
-    if (auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
-        metadata_journal) {
-        if (auto kept = operations::keep_undo_copies_in_place(*metadata_journal, file_journal);
-            !kept) {
-            remember(std::move(kept.error()));
+    return recovery;
+}
+
+std::vector<operations::UndoRequest> kept_undo_copies(const std::filesystem::path& database) {
+    std::vector<operations::UndoRequest> kept;
+    if (auto journal = persistence::SqliteMetadataOperationJournal::open(database)) {
+        if (auto backups = journal->load_backups()) {
+            for (const auto& backup : *backups) {
+                if (backup.state == operations::MetadataOperationBackupState::retained) {
+                    kept.push_back({.kind = operations::UndoKind::metadata,
+                                    .journal_id = backup.operation.id});
+                }
+            }
         }
     }
-    return recovery;
+    if (auto journal = persistence::SqliteFilePublicationJournal::open(database)) {
+        if (auto backups = journal->load_backups()) {
+            for (const auto& backup : *backups) {
+                if (backup.state == operations::MetadataOperationBackupState::retained) {
+                    kept.push_back({.kind = operations::UndoKind::publication,
+                                    .journal_id = backup.publication.id});
+                }
+            }
+        }
+    }
+    return kept;
+}
+
+UndoCopyRelease release_undo_copies(const std::filesystem::path& database,
+                                    const std::vector<operations::UndoRequest>& requests,
+                                    const core::CancellationToken& cancellation) {
+    UndoCopyRelease release;
+    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
+    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
+    // Only those still kept: one undone or let go of already, or a plain
+    // rename, which keeps nothing, has none to let go of.
+    const auto still_kept = [&](const operations::UndoRequest& request) {
+        if (request.kind == operations::UndoKind::metadata) {
+            const auto backup =
+                metadata_journal
+                    ? metadata_journal->load_backup(request.journal_id)
+                    : core::Result<std::optional<operations::MetadataOperationBackupRecord>>{
+                          std::nullopt};
+            return backup && *backup &&
+                   (**backup).state == operations::MetadataOperationBackupState::retained;
+        }
+        const auto backup =
+            file_journal ? file_journal->load_backup(request.journal_id)
+                         : core::Result<std::optional<operations::FilePublicationBackupRecord>>{
+                               std::nullopt};
+        return backup && *backup &&
+               (**backup).state == operations::MetadataOperationBackupState::retained;
+    };
+    for (const auto& request : requests) {
+        if (cancellation.is_cancellation_requested()) {
+            break;
+        }
+        if (!still_kept(request)) {
+            continue;
+        }
+        const auto released =
+            request.kind == operations::UndoKind::metadata
+                ? (metadata_journal ? operations::release_metadata_backup(
+                                          request.journal_id, *metadata_journal, cancellation)
+                                    : core::Result<void>{std::unexpected(metadata_journal.error())})
+                : (file_journal ? operations::release_publication_backup(
+                                      request.journal_id, *file_journal, cancellation)
+                                : core::Result<void>{std::unexpected(file_journal.error())});
+        if (released) {
+            ++release.released;
+        } else if (!release.error) {
+            release.error = released.error();
+        }
+    }
+    return release;
+}
+
+void tidy_undo_copies(const std::filesystem::path& database,
+                      const std::vector<operations::UndoRequest>& left,
+                      const core::CancellationToken& cancellation) {
+    if (!left.empty()) {
+        const auto released = release_undo_copies(database, left, cancellation);
+        std::cerr << "melodyd: let go of " << released.released << " of " << left.size()
+                  << " undo copies left from before\n";
+        if (released.error) {
+            std::cerr << "melodyd: an undo copy was not let go: " << released.error->message
+                      << "\n";
+        }
+    }
+    if (cancellation.is_cancellation_requested()) {
+        return;
+    }
+    // ADR-0266: any a crash left half moved, put where they are kept.
+    if (auto moved = relocate_undo_copies(database); !moved) {
+        std::cerr << "melodyd: undo copies not all moved: " << moved.error().message << "\n";
+    }
 }
 
 namespace {
 
-constexpr std::string_view retention_key = "backups.retention";
 constexpr std::string_view location_key = "backups.location";
 
 // The place a document names, checked: {place, folder?}.
@@ -242,105 +326,7 @@ constexpr std::string_view location_key = "backups.location";
     return database.parent_path() / "undo";
 }
 
-// Every undo copy the journals know moved where they are kept now.
-[[nodiscard]] core::Result<std::size_t>
-relocate_undo_copies(const std::filesystem::path& database) {
-    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
-    if (!metadata_journal) {
-        return std::unexpected(std::move(metadata_journal.error()));
-    }
-    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
-    if (!file_journal) {
-        return std::unexpected(std::move(file_journal.error()));
-    }
-    return operations::keep_undo_copies_in_place(*metadata_journal, *file_journal);
-}
-constexpr std::int64_t seconds_a_day = 24 * 60 * 60;
-constexpr std::uint64_t bytes_a_gigabyte = 1024ULL * 1024ULL * 1024ULL;
-
-[[nodiscard]] Json retention_document(const operations::MetadataBackupRetentionPolicy& policy) {
-    return Json{{"max_age_days", policy.maximum_age_seconds / seconds_a_day},
-                {"max_writes", policy.maximum_entries},
-                {"max_gigabytes", policy.maximum_total_bytes / bytes_a_gigabyte}};
-}
-
-// The limits a document names over `base`; an out-of-range one refused.
-[[nodiscard]] core::Result<operations::MetadataBackupRetentionPolicy>
-retention_of(const Json& document, operations::MetadataBackupRetentionPolicy base) {
-    const auto limit =
-        [&document](const char* name,
-                    const std::int64_t most) -> core::Result<std::optional<std::int64_t>> {
-        const auto found = document.find(name);
-        if (found == document.end()) {
-            return std::optional<std::int64_t>{};
-        }
-        if (!found->is_number_integer() || found->get<std::int64_t>() < 0 ||
-            found->get<std::int64_t>() > most) {
-            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                               .message = std::string{name} +
-                                                          " is a whole number from 0 to " +
-                                                          std::to_string(most),
-                                               .context = {{.key = "param", .value = name}}});
-        }
-        return std::optional{found->get<std::int64_t>()};
-    };
-    auto days = limit("max_age_days", 3'650);
-    auto writes = limit("max_writes", 100'000);
-    auto gigabytes = limit("max_gigabytes", 100'000);
-    for (auto* checked : {&days, &writes, &gigabytes}) {
-        if (!*checked) {
-            return std::unexpected(checked->error());
-        }
-    }
-    if (days->has_value()) {
-        base.maximum_age_seconds = **days * seconds_a_day;
-    }
-    if (writes->has_value()) {
-        base.maximum_entries = static_cast<std::size_t>(**writes);
-    }
-    if (gigabytes->has_value()) {
-        base.maximum_total_bytes = static_cast<std::uint64_t>(**gigabytes) * bytes_a_gigabyte;
-    }
-    return base;
-}
-
-// Both kinds of backup brought within the policy, now.
-[[nodiscard]] core::Result<void>
-apply_retention(const std::filesystem::path& database,
-                const operations::MetadataBackupRetentionPolicy& policy) {
-    const auto now = static_cast<std::int64_t>(std::time(nullptr));
-    auto metadata_journal = persistence::SqliteMetadataOperationJournal::open(database);
-    if (!metadata_journal) {
-        return std::unexpected(std::move(metadata_journal.error()));
-    }
-    if (auto kept = operations::maintain_metadata_backups(*metadata_journal, policy, now); !kept) {
-        return std::unexpected(std::move(kept.error()));
-    }
-    auto file_journal = persistence::SqliteFilePublicationJournal::open(database);
-    if (!file_journal) {
-        return std::unexpected(std::move(file_journal.error()));
-    }
-    if (auto kept = operations::maintain_publication_backups(*file_journal, policy, now); !kept) {
-        return std::unexpected(std::move(kept.error()));
-    }
-    return {};
-}
-
 } // namespace
-
-operations::MetadataBackupRetentionPolicy backup_retention(const Workspace& workspace) {
-    const operations::MetadataBackupRetentionPolicy defaults{};
-    auto stored = workspace.load_engine_state(retention_key);
-    if (!stored || !*stored) {
-        return defaults;
-    }
-    auto document = Json::parse(**stored, nullptr, false);
-    if (document.is_discarded() || !document.is_object()) {
-        return defaults;
-    }
-    auto policy = retention_of(document, defaults);
-    return policy ? *policy : defaults;
-}
 
 std::filesystem::path undo_copy_folder(const Workspace& workspace,
                                        const std::filesystem::path& database) {
@@ -378,30 +364,23 @@ void register_backup_methods(protocol::Dispatcher& dispatcher, std::filesystem::
             }
             return described(*location);
         });
-    dispatcher.on("backups.retention", [&workspace](const Json&) -> core::Result<Json> {
-        return retention_document(backup_retention(workspace));
+    // ADR-0289: the undo copies a tagger kept, let go of when it closes.
+    dispatcher.on("backups.release", [database](const Json& params) -> core::Result<Json> {
+        const auto given = params.find("operations");
+        if (given == params.end()) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::invalid_argument,
+                            .message = "the writes whose undo copies go are required",
+                            .context = {{.key = "param", .value = "operations"}}});
+        }
+        auto requests = wire::decode_undo_requests(*given);
+        if (!requests) {
+            return std::unexpected(std::move(requests.error()));
+        }
+        const auto released = release_undo_copies(database, *requests, {});
+        return Json{{"released", released.released},
+                    {"error", released.error ? wire::encode(*released.error) : Json()}};
     });
-    dispatcher.on(
-        "backups.set_retention", [&workspace, database](const Json& params) -> core::Result<Json> {
-            auto policy = retention_of(params, backup_retention(workspace));
-            if (!policy) {
-                return std::unexpected(std::move(policy.error()));
-            }
-            const auto document = retention_document(*policy);
-            const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    std::chrono::system_clock::now().time_since_epoch())
-                                    .count();
-            if (auto saved = workspace.save_engine_state(retention_key, document.dump(), now_ms);
-                !saved) {
-                return std::unexpected(std::move(saved.error()));
-            }
-            // Applied at once: a lower limit frees its space now.
-            if (auto applied = apply_retention(database, *policy); !applied) {
-                std::cerr << "melodyd: backups not brought within the new limits: "
-                          << applied.error().message << "\n";
-            }
-            return document;
-        });
 }
 
 void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,

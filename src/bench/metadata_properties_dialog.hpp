@@ -171,6 +171,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QPushButton* apply_plan_button_{nullptr};
     QProgressBar* apply_progress_bar_{nullptr};
     QPushButton* apply_stop_button_{nullptr};
+    QPushButton* undo_write_button_{nullptr};
     QTableView* fields_{nullptr};
     MetadataFieldReviewBar* field_review_bar_{nullptr};
     QPointer<QTableView> file_list_;

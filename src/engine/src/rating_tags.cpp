@@ -401,6 +401,12 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
     if (!committed) {
         return std::unexpected(std::move(committed.error()));
     }
+    // ADR-0289: nothing to undo -- the rating is the library's, written
+    // again at will -- so the file it replaced is let go of at once.
+    if (auto released = operations::release_metadata_backup(committed->journal_id, journal);
+        !released) {
+        std::cerr << "melodyd: an undo copy was not let go: " << released.error().message << "\n";
+    }
     return true;
 }
 

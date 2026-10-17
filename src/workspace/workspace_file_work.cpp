@@ -173,7 +173,9 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
     const auto unavailable = QStringLiteral("Melody persistence is unavailable");
     TaggerOpening opening{
         .services = TaggerServices{
-            .plan_applier_factory = engineMetadataPlanApplierFactory(work),
+            // ADR-0289: the tagger keeps what its writes replace, to undo
+            // them while it is open.
+            .plan_applier_factory = engineMetadataPlanApplierFactory(work, true),
             .apply_observer = metadataApplyObserver(),
             .transformation_store =
                 MetadataTransformationStore{
@@ -211,7 +213,7 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                 },
             .output_profile_store = buildOutputProfileStore(work_engine),
             .file_plan_applier_factory =
-                enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted),
+                enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted, true),
             .file_apply_observer =
                 [this, elsewhere, work_engine,
                  mounted](const operations::FilePublicationApplyResult& result) {
@@ -315,8 +317,19 @@ Workspace::TaggerOpening Workspace::taggerServices(std::shared_ptr<engine::Remot
                 }
                 return work->undo(requests, {}, cancellation);
             },
+            .release_undo =
+                [work](std::vector<operations::UndoRequest> requests) {
+                    if (!work || requests.empty()) {
+                        return;
+                    }
+                    // Off the window's thread, and whether or not it is
+                    // still there: the engine is told when it can be.
+                    static_cast<void>(QtConcurrent::run([work, requests = std::move(requests)] {
+                        static_cast<void>(work->release_undo_copies(requests));
+                    }));
+                },
         },
-        .artwork_applier = engineArtworkPlanApplierFactory(work),
+        .artwork_applier = engineArtworkPlanApplierFactory(work, true),
         .artwork_observer =
             [this](const operations::ArtworkApplyResult& result) {
                 auto committed = false;
@@ -534,32 +547,34 @@ MetadataApplyObserver Workspace::metadataApplyObserver() {
 }
 
 ArtworkWritePlanApplierFactory
-Workspace::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
-    return [work = std::move(work)] {
+Workspace::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                           const bool keep_undo) {
+    return [work = std::move(work), keep_undo] {
         return ArtworkWritePlanApplier{
-            [work](const metadata::ArtworkWritePlan& plan,
-                   const operations::ArtworkApplyProgressCallback& progress,
-                   const core::CancellationToken& cancellation)
+            [work, keep_undo](const metadata::ArtworkWritePlan& plan,
+                              const operations::ArtworkApplyProgressCallback& progress,
+                              const core::CancellationToken& cancellation)
                 -> core::Result<operations::ArtworkApplyResult> {
                 // ADR-0237: the engine writes the pictures and journals them; the
                 // open tabs follow from what it answers (ADR-0259: there is no
                 // copy of the lists here to follow too).
-                return work->artwork_apply(plan, progress, cancellation);
+                return work->artwork_apply(plan, progress, cancellation, keep_undo);
             }};
     };
 }
 
 MetadataWritePlanApplierFactory
-Workspace::engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
-    return [work = std::move(work)] {
+Workspace::engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                            const bool keep_undo) {
+    return [work = std::move(work), keep_undo] {
         return MetadataWritePlanApplier{
-            [work](const metadata::MetadataWritePlan& plan,
-                   const operations::MetadataApplyProgressCallback& progress,
-                   const core::CancellationToken& cancellation)
+            [work, keep_undo](const metadata::MetadataWritePlan& plan,
+                              const operations::MetadataApplyProgressCallback& progress,
+                              const core::CancellationToken& cancellation)
                 -> core::Result<operations::MetadataApplyResult> {
                 // ADR-0237: the engine writes, journals, and refreshes its
                 // library in the same commit.
-                return work->apply(plan, progress, cancellation);
+                return work->apply(plan, progress, cancellation, keep_undo);
             }};
     };
 }
@@ -573,12 +588,11 @@ const Workspace::EngineLink* Workspace::linkOfWork(const engine::RemoteFileWork*
     return nullptr;
 }
 
-FilePublicationPlanApplierFactory
-Workspace::enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
-                                               const bool elsewhere, RemoteMount mount,
-                                               std::shared_ptr<MountedMoves> mounted) {
+FilePublicationPlanApplierFactory Workspace::enginePublicationPlanApplierFactory(
+    std::shared_ptr<engine::RemoteFileWork> work, const bool elsewhere, RemoteMount mount,
+    std::shared_ptr<MountedMoves> mounted, const bool keep_undo) {
     return [this, work = std::move(work), elsewhere, mount = std::move(mount),
-            mounted = std::move(mounted)] {
+            mounted = std::move(mounted), keep_undo] {
         // What this computer's lists last saw of each file, for a move
         // elsewhere to be followed here under its own revision: read from
         // the lists themselves, not from a copy of every one.
@@ -593,7 +607,7 @@ Workspace::enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFil
             }
         }
         return FilePublicationPlanApplier{
-            [work, elsewhere, mount, mounted, seen_here = std::move(seen_here)](
+            [work, elsewhere, mount, mounted, keep_undo, seen_here = std::move(seen_here)](
                 const operations::PreparationPlan& plan,
                 const operations::FilePublicationApplyProgressCallback& progress,
                 const core::CancellationToken& cancellation) mutable
@@ -602,7 +616,7 @@ Workspace::enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFil
                 // and library follow in the same commit; the open tabs follow
                 // from what it answers (ADR-0259: there is no copy of the
                 // lists here to follow too).
-                auto applied = work->publish(plan, progress, cancellation);
+                auto applied = work->publish(plan, progress, cancellation, keep_undo);
                 if (!applied) {
                     return applied;
                 }

@@ -115,31 +115,4 @@ undo_metadata_operation(const core::StableId& journal_id, MetadataOperationJourn
 release_metadata_backup(const core::StableId& journal_id, MetadataOperationJournal& journal,
                         const core::CancellationToken& cancellation = {});
 
-struct MetadataBackupRetentionPolicy {
-    // Backups are considered only during explicit maintenance (normally
-    // startup), so a commit remains undoable for the rest of its first session.
-    std::int64_t maximum_age_seconds{7 * 24 * 60 * 60};
-    std::size_t maximum_entries{256U};
-    std::uint64_t maximum_total_bytes{10ULL * 1024ULL * 1024ULL * 1024ULL};
-};
-
-enum class MetadataBackupMaintenanceOutcome : std::uint8_t {
-    retained,
-    released,
-    needs_reconciliation,
-};
-
-struct MetadataBackupMaintenanceResult {
-    core::StableId journal_id;
-    MetadataBackupMaintenanceOutcome outcome{MetadataBackupMaintenanceOutcome::retained};
-    std::optional<core::Error> issue;
-};
-
-// Retains only the newest undo for one raw source, then applies age, operation
-// count, and old-inode byte budgets newest-first. Cleanup is identity-checked
-// and reports per-record failures without deleting ambiguous evidence.
-[[nodiscard]] core::Result<std::vector<MetadataBackupMaintenanceResult>> maintain_metadata_backups(
-    MetadataOperationJournal& journal, const MetadataBackupRetentionPolicy& policy,
-    std::int64_t now_unix_seconds, const core::CancellationToken& cancellation = {});
-
 } // namespace trackknife::operations

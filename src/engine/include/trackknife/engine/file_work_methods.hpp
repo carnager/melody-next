@@ -8,12 +8,14 @@
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/operations/undo.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace trackknife::engine {
 
@@ -59,17 +61,33 @@ using MoveFollower =
 // Recovers the engine's journals, as Trackknife recovers its own: tag writes
 // and moves finished or rolled back where that is safe, left for the user
 // otherwise. A move finished here is followed by `follow`; an undo a crash
-// interrupted is finished. The files writes replaced are kept for undo within
-// `retention` (ADR-0263). Run once, at startup, before clients connect.
-[[nodiscard]] FileWorkRecovery
-recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalogue,
-                  const MoveFollower& follow,
-                  const operations::MetadataBackupRetentionPolicy& retention = {});
+// interrupted is finished. Run once, at startup, before clients connect.
+[[nodiscard]] FileWorkRecovery recover_file_work(const std::filesystem::path& database,
+                                                 LocalCatalogue& catalogue,
+                                                 const MoveFollower& follow);
 
-// ADR-0263: how long the files a write replaced are kept for undo -- the
-// engine_state document "backups.retention", else the policy's defaults.
-[[nodiscard]] operations::MetadataBackupRetentionPolicy
-backup_retention(const Workspace& workspace);
+// ADR-0289: the writes whose undo copies are kept -- a tagger's, until it
+// closes, else left by one that never said it had.
+[[nodiscard]] std::vector<operations::UndoRequest>
+kept_undo_copies(const std::filesystem::path& database);
+
+struct UndoCopyRelease {
+    std::size_t released{0U};
+    // The first that could not be, if any.
+    std::optional<core::Error> error;
+};
+// Their undo copies deleted, each checked to be the copy the write kept.
+// A write with none kept -- undone, let go of already, a plain rename -- is
+// passed over.
+UndoCopyRelease release_undo_copies(const std::filesystem::path& database,
+                                    const std::vector<operations::UndoRequest>& requests,
+                                    const core::CancellationToken& cancellation);
+
+// At startup, off the way of clients: the copies `left` from before let go
+// of, and any a crash left half moved put where they are kept (ADR-0266).
+void tidy_undo_copies(const std::filesystem::path& database,
+                      const std::vector<operations::UndoRequest>& left,
+                      const core::CancellationToken& cancellation);
 
 // ADR-0266: where this engine keeps the files writes replace -- the
 // engine_state document "backups.location": its own folder (`undo` beside
@@ -77,9 +95,8 @@ backup_retention(const Workspace& workspace);
 [[nodiscard]] std::filesystem::path undo_copy_folder(const Workspace& workspace,
                                                      const std::filesystem::path& database);
 
-// backups.retention -> {max_age_days, max_writes, max_gigabytes};
-// backups.set_retention {any of them} -> the same, kept and applied at once
-// to the backups there are. 0 keeps none.
+// backups.release {operations: [{kind, id}]} -> {released, error}: the
+// undo copies of those writes let go of (ADR-0289).
 // backups.location -> {place: "engine" | "folder" | "beside", folder?, kept_in};
 // backups.set_location {place, folder?} -> the same: kept, and every undo
 // copy there is moved there at once. Paths are encoded raw paths.

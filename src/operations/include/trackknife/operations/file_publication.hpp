@@ -143,14 +143,6 @@ undo_file_publication(const core::StableId& journal_id, FilePublicationJournal& 
 release_publication_backup(const core::StableId& journal_id, FilePublicationJournal& journal,
                            const core::CancellationToken& cancellation = {});
 
-// Keeps the newest retained sources within the policy's age, count and
-// bytes and releases the rest, as maintain_metadata_backups does.
-[[nodiscard]] core::Result<std::vector<MetadataBackupMaintenanceResult>>
-maintain_publication_backups(FilePublicationJournal& journal,
-                             const MetadataBackupRetentionPolicy& policy,
-                             std::int64_t now_unix_seconds,
-                             const core::CancellationToken& cancellation = {});
-
 // Finishes every undo a crash interrupted, or leaves it for reconciliation.
 [[nodiscard]] core::Result<std::vector<FilePublicationRecoveryResult>>
 recover_publication_undos(FilePublicationJournal& journal,

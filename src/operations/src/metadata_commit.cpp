@@ -3176,6 +3176,7 @@ commit_cue_replay_gain_sheet(const metadata::MetadataWritePlanCueSheet& sheet_pl
         .published_revision = {},
         .album_fields = {},
         .tracks = {},
+        .journal_id = journal_id,
     };
     MetadataOperationJournalRecord record;
     record.id = journal_id;
@@ -3329,6 +3330,7 @@ commit_loudness_sidecar(const metadata::MetadataWritePlanSidecar& sidecar_plan,
         .audio_revision = *sidecar_plan.expected_revision,
         .sidecar_removed = false,
         .entries = {},
+        .journal_id = {},
     };
     auto sidecar_revision = optional_revision(result.sidecar_raw_path);
     if (!sidecar_revision) {
@@ -3387,6 +3389,7 @@ commit_loudness_sidecar(const metadata::MetadataWritePlanSidecar& sidecar_plan,
         sidecar_plan.expected_revision->modification_time_nanoseconds;
 
     const auto journal_id = core::StableId::random();
+    result.journal_id = journal_id;
     MetadataOperationJournalRecord record;
     record.id = journal_id;
     record.source_raw_path = result.sidecar_raw_path;
@@ -4087,161 +4090,6 @@ core::Result<void> release_metadata_backup(const core::StableId& journal_id,
         }
     }
     return transition_backup(journal, journal_id, BackupState::retained, BackupState::released);
-}
-
-core::Result<std::vector<MetadataBackupMaintenanceResult>> maintain_metadata_backups(
-    MetadataOperationJournal& journal, const MetadataBackupRetentionPolicy& policy,
-    const std::int64_t now_unix_seconds, const core::CancellationToken& cancellation) {
-    if (policy.maximum_age_seconds < 0 || now_unix_seconds <= 0) {
-        return std::unexpected(operation_error(core::ErrorCode::invalid_argument,
-                                               "metadata backup retention policy is invalid", {}));
-    }
-    auto backups = journal.load_backups();
-    if (!backups) {
-        return std::unexpected(std::move(backups.error()));
-    }
-    // load_backups() is newest-first. Validate the current source against the
-    // newest completed operation for each exact raw path once; only then is it
-    // safe to release older backups for that path.
-    std::unordered_map<std::string, bool> source_is_unambiguous;
-    source_is_unambiguous.reserve(backups->size());
-    std::size_t retained_count = 0U;
-    std::uint64_t retained_bytes = 0U;
-    std::vector<MetadataBackupMaintenanceResult> results;
-    results.reserve(backups->size());
-    for (const auto& backup : *backups) {
-        const auto [source_state, is_newest] =
-            source_is_unambiguous.emplace(backup.operation.source_raw_path, false);
-        if (is_newest) {
-            std::optional<core::LocalSourceRevision> expected_source;
-            if (backup.state == BackupState::retained || backup.state == BackupState::released) {
-                expected_source = backup.operation.published_revision;
-            } else if (backup.state == BackupState::undone) {
-                expected_source = backup_identity(backup.operation);
-            }
-            if (expected_source) {
-                auto locked =
-                    open_and_lock_file(backup.operation.source_raw_path, cancellation,
-                                       backup.operation.source_raw_path, backup.operation.id);
-                if (locked && verify_direct_single_link(backup.operation.source_raw_path, *locked,
-                                                        *expected_source, backup.operation,
-                                                        "published metadata source")) {
-                    source_state->second = true;
-                }
-            }
-        }
-        if (backup.state == BackupState::needs_reconciliation) {
-            results.push_back({.journal_id = backup.operation.id,
-                               .outcome = MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                               .issue = backup.failure});
-            continue;
-        }
-        if (backup.state != BackupState::retained) {
-            continue;
-        }
-        if (cancellation.is_cancellation_requested()) {
-            return std::unexpected(cancelled(backup.operation.source_raw_path));
-        }
-        if (!source_state->second) {
-            auto issue = operation_error(
-                core::ErrorCode::conflict,
-                "published metadata source changed while an undo backup is retained",
-                backup.operation.source_raw_path, backup.operation.id);
-            auto marked = transition_backup(journal, backup.operation.id, BackupState::retained,
-                                            BackupState::needs_reconciliation, std::nullopt, issue);
-            results.push_back({
-                .journal_id = backup.operation.id,
-                .outcome = MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                .issue = marked ? std::optional<core::Error>{std::move(issue)}
-                                : std::optional<core::Error>{std::move(marked.error())},
-            });
-            continue;
-        }
-        auto retained_revision = optional_revision(backup.operation.backup_raw_path);
-        if (!retained_revision) {
-            auto issue = std::move(retained_revision.error());
-            auto marked = transition_backup(journal, backup.operation.id, BackupState::retained,
-                                            BackupState::needs_reconciliation, std::nullopt, issue);
-            results.push_back({
-                .journal_id = backup.operation.id,
-                .outcome = MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                .issue = marked ? std::optional<core::Error>{std::move(issue)}
-                                : std::optional<core::Error>{std::move(marked.error())},
-            });
-            continue;
-        }
-        if (!*retained_revision || **retained_revision != backup_identity(backup.operation)) {
-            auto released = release_metadata_backup(backup.operation.id, journal, cancellation);
-            results.push_back({
-                .journal_id = backup.operation.id,
-                .outcome = released ? MetadataBackupMaintenanceOutcome::released
-                                    : MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                .issue = released ? std::nullopt
-                                  : std::optional<core::Error>{std::move(released.error())},
-            });
-            continue;
-        }
-        const bool expired =
-            now_unix_seconds > backup.completed_at_unix_seconds &&
-            now_unix_seconds - backup.completed_at_unix_seconds > policy.maximum_age_seconds;
-        const auto bytes = backup.operation.expected_revision.size;
-        const bool count_available = retained_count < policy.maximum_entries;
-        const bool bytes_available =
-            bytes <=
-            policy.maximum_total_bytes - std::min(retained_bytes, policy.maximum_total_bytes);
-        const bool keep = is_newest && expired == false && count_available && bytes_available;
-        if (keep) {
-            auto locked = open_and_lock_file(backup.operation.backup_raw_path, cancellation,
-                                             backup.operation.source_raw_path, backup.operation.id);
-            if (!locked) {
-                auto issue = std::move(locked.error());
-                if (issue.code == core::ErrorCode::cancelled) {
-                    return std::unexpected(std::move(issue));
-                }
-                auto marked =
-                    transition_backup(journal, backup.operation.id, BackupState::retained,
-                                      BackupState::needs_reconciliation, std::nullopt, issue);
-                results.push_back({
-                    .journal_id = backup.operation.id,
-                    .outcome = MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                    .issue = marked ? std::optional<core::Error>{std::move(issue)}
-                                    : std::optional<core::Error>{std::move(marked.error())},
-                });
-                continue;
-            }
-            if (auto verified = verify_direct_single_link(
-                    backup.operation.backup_raw_path, *locked, backup_identity(backup.operation),
-                    backup.operation, "retained metadata backup");
-                !verified) {
-                auto issue = std::move(verified.error());
-                auto marked =
-                    transition_backup(journal, backup.operation.id, BackupState::retained,
-                                      BackupState::needs_reconciliation, std::nullopt, issue);
-                results.push_back({
-                    .journal_id = backup.operation.id,
-                    .outcome = MetadataBackupMaintenanceOutcome::needs_reconciliation,
-                    .issue = marked ? std::optional<core::Error>{std::move(issue)}
-                                    : std::optional<core::Error>{std::move(marked.error())},
-                });
-                continue;
-            }
-            ++retained_count;
-            retained_bytes += bytes;
-            results.push_back({.journal_id = backup.operation.id,
-                               .outcome = MetadataBackupMaintenanceOutcome::retained,
-                               .issue = std::nullopt});
-            continue;
-        }
-        auto released = release_metadata_backup(backup.operation.id, journal, cancellation);
-        results.push_back({
-            .journal_id = backup.operation.id,
-            .outcome = released ? MetadataBackupMaintenanceOutcome::released
-                                : MetadataBackupMaintenanceOutcome::needs_reconciliation,
-            .issue =
-                released ? std::nullopt : std::optional<core::Error>{std::move(released.error())},
-        });
-    }
-    return results;
 }
 
 } // namespace trackknife::operations

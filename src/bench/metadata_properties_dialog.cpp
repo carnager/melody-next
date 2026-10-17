@@ -126,6 +126,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
               .tools = std::move(tools),
               .library_elsewhere = {},
               .undo = {},
+              .release_undo = {},
           },
           parent) {}
 
@@ -587,6 +588,17 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     apply_stop_button_->hide();
     connect(apply_stop_button_, &QPushButton::clicked, session_, &TaggerSession::requestApplyStop);
     footer_layout->addWidget(apply_stop_button_);
+    // ADR-0289: the last write undone, while this is open; closing lets
+    // what it kept go.
+    undo_write_button_ = new QPushButton(QStringLiteral("Undo write"), footer);
+    undo_write_button_->setObjectName(QStringLiteral("bench-metadata-undo-write"));
+    undo_write_button_->setToolTip(
+        QStringLiteral("Put the files back as they were before the last write. Possible until "
+                       "this window closes."));
+    undo_write_button_->setAutoDefault(false);
+    undo_write_button_->hide();
+    connect(undo_write_button_, &QPushButton::clicked, session_, &TaggerSession::undoWrite);
+    footer_layout->addWidget(undo_write_button_);
     footer_layout->addWidget(buttons_);
     footer_layout->addWidget(apply_plan_button_);
     root_layout_->addWidget(footer);
@@ -711,6 +723,8 @@ void MetadataPropertiesDialog::sync() {
     apply_plan_button_->setEnabled(session.canApply());
     apply_progress_bar_->setVisible(session.progressVisible());
     apply_stop_button_->setVisible(session.progressVisible());
+    undo_write_button_->setVisible(session.hasUndoableWrite() || session.undoingWrite());
+    undo_write_button_->setEnabled(session.canUndoWrite());
     apply_stop_button_->setEnabled(session.canStopApply());
     if (session.progressVisible()) {
         apply_progress_bar_->setRange(0, session.progressMaximum());

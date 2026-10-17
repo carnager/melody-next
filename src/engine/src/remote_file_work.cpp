@@ -388,7 +388,7 @@ core::Result<FileTechnicals> RemoteFileWork::probe(const std::string& raw_path,
 core::Result<operations::MetadataApplyResult>
 RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
                       const operations::MetadataApplyProgressCallback& progress,
-                      const core::CancellationToken& cancellation) {
+                      const core::CancellationToken& cancellation, const bool keep_undo) {
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
@@ -443,7 +443,7 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
         auto outcome =
             (*connection)
                 ->run_job(
-                    "metadata.apply", Json{{"plan", wire::encode(part)}},
+                    "metadata.apply", Json{{"plan", wire::encode(part)}, {"keep_undo", keep_undo}},
                     [&progress, sources_before, total = plan.sources.size()](const Json& reported) {
                         if (!progress) {
                             return;
@@ -719,23 +719,24 @@ RemoteFileWork::stage(const std::span<const unsigned char> bytes) {
 core::Result<operations::ArtworkApplyResult>
 RemoteFileWork::artwork_apply(const metadata::ArtworkWritePlan& plan,
                               const operations::ArtworkApplyProgressCallback& progress,
-                              const core::CancellationToken& cancellation) {
+                              const core::CancellationToken& cancellation, const bool keep_undo) {
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto outcome = (*connection)
-                       ->run_job(
-                           "artwork.apply", Json{{"plan", wire::encode(plan)}},
-                           [&progress](const Json& reported) {
-                               if (!progress) {
-                                   return;
-                               }
-                               if (auto step = wire::decode_artwork_apply_progress(reported)) {
-                                   progress(*step);
-                               }
-                           },
-                           cancellation);
+    auto outcome =
+        (*connection)
+            ->run_job(
+                "artwork.apply", Json{{"plan", wire::encode(plan)}, {"keep_undo", keep_undo}},
+                [&progress](const Json& reported) {
+                    if (!progress) {
+                        return;
+                    }
+                    if (auto step = wire::decode_artwork_apply_progress(reported)) {
+                        progress(*step);
+                    }
+                },
+                cancellation);
     if (!outcome) {
         return std::unexpected(std::move(outcome.error()));
     }
@@ -764,23 +765,24 @@ RemoteFileWork::preflight(const operations::OutputPathPlan& plan,
 core::Result<operations::FilePublicationApplyResult>
 RemoteFileWork::publish(const operations::PreparationPlan& plan,
                         const operations::FilePublicationApplyProgressCallback& progress,
-                        const core::CancellationToken& cancellation) {
+                        const core::CancellationToken& cancellation, const bool keep_undo) {
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto outcome = (*connection)
-                       ->run_job(
-                           "preparation.apply", Json{{"plan", wire::encode(plan)}},
-                           [&progress](const Json& reported) {
-                               if (!progress) {
-                                   return;
-                               }
-                               if (auto step = wire::decode_publication_apply_progress(reported)) {
-                                   progress(*step);
-                               }
-                           },
-                           cancellation);
+    auto outcome =
+        (*connection)
+            ->run_job(
+                "preparation.apply", Json{{"plan", wire::encode(plan)}, {"keep_undo", keep_undo}},
+                [&progress](const Json& reported) {
+                    if (!progress) {
+                        return;
+                    }
+                    if (auto step = wire::decode_publication_apply_progress(reported)) {
+                        progress(*step);
+                    }
+                },
+                cancellation);
     if (!outcome) {
         return std::unexpected(std::move(outcome.error()));
     }
@@ -980,16 +982,19 @@ RemoteFileWork::set_backup_location(const std::string& place, const std::string&
     return location_from(*answer);
 }
 
-core::Result<void> RemoteFileWork::set_backup_retention(const int days, const int writes,
-                                                        const int gigabytes) {
+core::Result<void>
+RemoteFileWork::release_undo_copies(const std::span<const operations::UndoRequest> requests) {
+    if (requests.empty()) {
+        return {};
+    }
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
+    // Each copy checked and deleted: on a NAS, a while for a big batch.
     auto answer = (*connection)
-                      ->call("backups.set_retention", Json{{"max_age_days", days},
-                                                           {"max_writes", writes},
-                                                           {"max_gigabytes", gigabytes}});
+                      ->call("backups.release", Json{{"operations", wire::encode(requests)}},
+                             std::chrono::minutes{10});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }

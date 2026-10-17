@@ -135,6 +135,9 @@ struct TaggerServices {
     std::function<core::Result<std::vector<operations::UndoOutcome>>(
         std::vector<operations::UndoRequest>, const core::CancellationToken&)>
         undo;
+    // ADR-0289: the undo copies of those writes let go of, when the tagger
+    // that kept them closes. Asynchronous; nothing to wait for.
+    std::function<void(std::vector<operations::UndoRequest>)> release_undo;
 };
 
 // The tagger's artwork, as the session needs it: its pending covers, whether
@@ -264,6 +267,7 @@ class TaggerSession final : public QObject {
     [[nodiscard]] bool canShowProvenance() const { return grid_model_ != nullptr; }
     [[nodiscard]] bool canApply() const;
     [[nodiscard]] bool applyRunning() const { return apply_running_; }
+    [[nodiscard]] bool writePlanRunning() const { return write_plan_running_; }
     [[nodiscard]] bool progressVisible() const { return apply_running_; }
     [[nodiscard]] int progressValue() const { return progress_value_; }
     [[nodiscard]] int progressMaximum() const { return progress_maximum_; }
@@ -424,14 +428,30 @@ class TaggerSession final : public QObject {
     void retryUnfinished();
     [[nodiscard]] bool applyCommitted() const { return apply_committed_; }
 
+    // ADR-0289: a write here keeps what it replaced while this is open, so
+    // it can be undone -- the newest first, one by one. The files written
+    // are read again at once; nothing closes by itself.
+    [[nodiscard]] bool canUndoWrite() const;
+    [[nodiscard]] bool hasUndoableWrite() const { return !writes_.empty() && services_.undo; }
+    [[nodiscard]] bool undoingWrite() const { return undoing_write_; }
+    // The files a write changed being read again.
+    [[nodiscard]] bool readingWritten() const {
+        return reading_written_ || !written_items_.empty();
+    }
+    void undoWrite();
+    // Writes Identify albums… made from here, kept until this closes too;
+    // forgotten once it undoes them itself.
+    void keepUndoCopies(const std::vector<operations::UndoRequest>& requests);
+    void forgetUndoCopies(const std::vector<operations::UndoRequest>& requests);
+
     // Closing: what it needs first. Waiting, it has asked the work in
     // flight to stop, and said so.
     [[nodiscard]] CloseAnswer requestClose();
     // It closes: the check in flight dropped, the draft thrown away when
-    // `discard`.
+    // `discard`, and what its writes kept to undo let go of.
     void closing(bool discard);
-    // A feedback window closed, not to retry: the editor closes when Apply
-    // already changed files.
+    // A feedback window closed, not to retry: the files Apply changed are
+    // read again.
     void feedbackFinished();
 
     // The window's own geometry and splitter, as stored; stored once.
@@ -647,6 +667,21 @@ class TaggerSession final : public QObject {
     // Reading again files Apply found changed: done, the person is told.
     bool reading_changed_{false};
     bool writing_elsewhere_{false};
+    // ADR-0289: what this tagger's writes kept to undo, oldest first, each
+    // write's newest first; and Identify albums'.
+    std::vector<std::vector<operations::UndoRequest>> writes_;
+    std::vector<operations::UndoRequest> kept_elsewhere_;
+    bool undoing_write_{false};
+    // The files the last Apply changed, to read again once it is told; and
+    // reading them, what the status says after.
+    std::vector<Rewritten> written_items_;
+    bool reading_written_{false};
+    QString written_status_;
+    void rememberWrite(std::vector<operations::UndoRequest> requests);
+    void readWrittenAgain();
+    void readAgain(std::vector<Rewritten> written, std::vector<std::size_t> stale);
+    void writeUndone(std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome);
+    void releaseUndoCopies();
     // Proposals waiting for the automatic scripts to finish staging, and
     // the set being staged, previewed again when the draft moved under it.
     std::optional<metadata::MetadataProposalSet> waiting_proposals_;

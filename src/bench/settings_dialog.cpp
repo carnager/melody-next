@@ -667,43 +667,20 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     replaygain_layout->addStretch(1);
     file_operations_->addTab(replaygain, QStringLiteral("ReplayGain"));
 
-    // ADR-0263: what each engine keeps of what its writes replaced, so the
-    // writes can be undone.
+    // ADR-0289: the tagger keeps what its writes replace while it is open,
+    // to undo them; where each engine keeps that is said here.
     auto* undo = new QWidget(file_operations_);
     undo_tab_ = undo;
     undo->setObjectName(QStringLiteral("bench-settings-undo"));
     auto* undo_layout = new QVBoxLayout(undo);
-    auto* undo_form = new QFormLayout;
-    undo_layout->addLayout(undo_form);
-    const auto keep_box = [&](const char* key, const int most, const QString& suffix,
-                              const QString& name) {
-        auto* box = new QSpinBox(undo);
-        box->setObjectName(name);
-        box->setRange(0, most);
-        box->setSuffix(suffix);
-        box->setSpecialValueText(QStringLiteral("Keep none"));
-        bind(box, key);
-        return box;
-    };
-    undo_form->addRow(QStringLiteral("Keep for:"),
-                      keep_box(SettingsKeys::undo_keep_days_key, 3'650, QStringLiteral(" days"),
-                               QStringLiteral("bench-settings-undo-days")));
-    undo_form->addRow(QStringLiteral("At most:"),
-                      keep_box(SettingsKeys::undo_keep_writes_key, 100'000,
-                               QStringLiteral(" writes"),
-                               QStringLiteral("bench-settings-undo-writes")));
-    undo_form->addRow(QStringLiteral("Using at most:"),
-                      keep_box(SettingsKeys::undo_keep_gigabytes_key, 100'000,
-                               QStringLiteral(" GB"),
-                               QStringLiteral("bench-settings-undo-gigabytes")));
     auto* undo_note = new QLabel(
-        QStringLiteral("Each engine keeps the files its writes replace -- tags rewritten, files "
-                       "moved -- so a write can be undone. The newest are kept within these "
-                       "limits; older ones are let go."),
+        QStringLiteral("The tagger keeps the files its writes replace -- tags rewritten, files "
+                       "moved -- so it can undo them while it is open. They are let go of when "
+                       "it closes. Nothing else keeps any."),
         undo);
     undo_note->setWordWrap(true);
     undo_note->setForegroundRole(QPalette::PlaceholderText);
-    undo_form->addRow(undo_note);
+    undo_layout->addWidget(undo_note);
     // ADR-0266: where each engine keeps them -- its own, said by it.
     if (undo_locations) {
         auto* where = new QGroupBox(QStringLiteral("Where undo copies are kept"), undo);

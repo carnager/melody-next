@@ -32,6 +32,8 @@ struct LoudnessSidecarCommitResult {
     // removed instead of rewritten.
     bool sidecar_removed{false};
     std::vector<LoudnessSidecarAppliedEntry> entries;
+    // The write's journal entry, whose backup is released by it.
+    core::StableId journal_id;
 
     friend bool operator==(const LoudnessSidecarCommitResult&,
                            const LoudnessSidecarCommitResult&) = default;

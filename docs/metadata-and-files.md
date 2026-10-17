@@ -421,7 +421,8 @@ all occurrences under a fresh idempotency identity before deleting the replaced
 publication. Interrupted undo is recoverable. The fixed initial retention policy
 runs at startup and keeps backups for up to seven days, only the newest per exact
 raw source, and at most 256 entries/10 GiB globally; ambiguous evidence is never
-deleted for a budget. Apply captures and persists the current workspace before
+deleted for a budget. (Since ADR-0289 no limits are kept: a write keeps what it
+replaced only for the tagger that made it, while it is open.) Apply captures and persists the current workspace before
 admitting file mutations, then feeds only a wholly ready plan through two
 bounded workers. Cancellation stops new admission while in-flight sources reach
 a safe boundary. The result keeps plan order and reports committed, failed, and

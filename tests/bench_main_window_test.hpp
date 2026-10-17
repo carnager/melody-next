@@ -40,6 +40,7 @@
 #include "drag_position.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
+#include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "uicommon/local_files_mime_data.hpp"
@@ -178,8 +179,8 @@
 // listen to count. A shared CI runner's null sink stalls now and then, so CI
 // skips them (MELODY_TEST_SKIP_REALTIME); where there is a sound server
 // they run.
-#define MELODY_REQUIRE_REALTIME_AUDIO()                                                        \
-    if (qEnvironmentVariableIsSet("MELODY_TEST_SKIP_REALTIME")) {                              \
+#define MELODY_REQUIRE_REALTIME_AUDIO()                                                            \
+    if (qEnvironmentVariableIsSet("MELODY_TEST_SKIP_REALTIME")) {                                  \
         QSKIP("needs audio to play in real time");                                                 \
     }
 
@@ -327,6 +328,7 @@ class BenchMainWindowTest final : public QObject {
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
     void metadataReadyPlanAppliesAndRefreshesHistory();
+    void aTaggerUndoesItsWriteUntilClosed();
     void metadataRenameMovesTheFileAndItsRow();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();
@@ -619,6 +621,41 @@ inline std::vector<std::string> rowPaths(const LocalListModel& model) {
         paths.push_back(row.raw_path);
     }
     return paths;
+}
+
+// ADR-0289: a tagger stays open after its write, the files read again and
+// Undo write offered where it can undo; closed by hand, as a person closes
+// it, it goes.
+[[nodiscard]] inline bool closeTaggerAfterWrite(QDialog* dialog, const int timeout_ms = 10'000) {
+    QPointer<QDialog> tagger{dialog};
+    if (tagger.isNull()) {
+        return false;
+    }
+    QPointer<TaggerSession> session = tagger->findChild<TaggerSession*>();
+    if (!QTest::qWaitFor(
+            [&] {
+                return !session.isNull() && session->applyCommitted() &&
+                       !session->writePlanRunning() && !session->applyRunning() &&
+                       !session->readingWritten() && !session->undoingWrite();
+            },
+            timeout_ms)) {
+        qWarning() << "the tagger did not settle after its write";
+        return false;
+    }
+    if (session->hasUndoableWrite()) {
+        const auto* undo =
+            tagger->findChild<QPushButton*>(QStringLiteral("bench-metadata-undo-write"));
+        if (undo == nullptr || !undo->isVisible() || !undo->isEnabled()) {
+            qWarning() << "a write to undo, and no Undo write";
+            return false;
+        }
+    }
+    tagger->close();
+    return QTest::qWaitFor([&] { return tagger.isNull() || !tagger->isVisible(); }, timeout_ms);
+}
+[[nodiscard]] inline bool closeTaggerAfterWrite(QWidget& window, const int timeout_ms = 10'000) {
+    return closeTaggerAfterWrite(
+        window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")), timeout_ms);
 }
 
 } // namespace window_test

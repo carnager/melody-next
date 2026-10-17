@@ -644,6 +644,7 @@ void AlbumBatchSession::undone(
         }
     }
     const auto albums = last_write_->albums;
+    tagger_->forgetUndoCopies(last_write_->requests);
     last_write_.reset();
     write_summary_ =
         refused == 0U
@@ -816,6 +817,10 @@ void AlbumBatchSession::startWriter(std::vector<std::size_t> albums) {
         if (!writer_->written().empty()) {
             LastWrite last;
             last.requests.assign(writer_->written().rbegin(), writer_->written().rend());
+            // ADR-0289: kept until the tagger it wrote from closes.
+            if (!tagger_.isNull()) {
+                tagger_->keepUndoCopies(last.requests);
+            }
             for (const auto& outcome : writer_->outcomes()) {
                 if (outcome.outcome == Outcome::written ||
                     outcome.outcome == Outcome::partly_written) {

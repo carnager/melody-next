@@ -205,6 +205,9 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
 }
 
 TaggerSession::~TaggerSession() {
+    // ADR-0289: closed without closing() -- Identify albums' own -- what it
+    // kept to undo goes all the same.
+    releaseUndoCopies();
     write_plan_cancellation_.request_cancellation();
     apply_cancellation_.request_cancellation();
     if (write_plan_running_) {
@@ -276,6 +279,17 @@ ArtworkApplyObserver TaggerSession::artworkAppliedObserver() {
 }
 
 void TaggerSession::artworkApplied(const operations::ArtworkApplyResult& result) {
+    // ADR-0289: kept to undo while this is open, as a tag write is.
+    std::vector<operations::UndoRequest> written;
+    for (const auto& source : result.sources) {
+        if (source.state == operations::ArtworkApplySourceState::committed && source.commit &&
+            !source.commit->journal_id.is_nil()) {
+            written.push_back(
+                {.kind = operations::UndoKind::metadata, .journal_id = source.commit->journal_id});
+        }
+    }
+    std::ranges::reverse(written);
+    rememberWrite(std::move(written));
     if (grid_model_ != nullptr) {
         for (const auto& source : result.sources) {
             if (source.state != operations::ArtworkApplySourceState::committed || !source.commit) {
@@ -644,6 +658,7 @@ void TaggerSession::finishSelection() {
                                  .arg(why);
             setStatus(sticky_status_);
             rewritten_items_.clear();
+            reading_written_ = false;
             const auto after_write = std::exchange(writing_elsewhere_, false);
             emit changed();
             if (after_write) {
@@ -652,6 +667,7 @@ void TaggerSession::finishSelection() {
             return;
         }
         const auto rewritten = std::exchange(rewritten_items_, {});
+        const auto after_own_write = std::exchange(reading_written_, false);
         const auto after_write = std::exchange(writing_elsewhere_, false);
         const auto changed_since = std::exchange(reading_changed_, false);
         auto adopted = grid_model_->adoptReadSelection(std::move(**result), rewritten);
@@ -666,6 +682,15 @@ void TaggerSession::finishSelection() {
             return;
         }
         provisional_ = false;
+        if (after_own_write) {
+            // ADR-0289: written here; what it said stays said.
+            sticky_status_.clear();
+            setStatus(std::exchange(written_status_, {}));
+            reportUnreadable();
+            updateTechnicalSummary();
+            emit changed();
+            return;
+        }
         if (changed_since) {
             // Its scripts ran when it was opened; the draft is the person's.
             describeSelection(grid_model_->selection());
@@ -1701,6 +1726,10 @@ void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written,
         emit writtenElsewhere();
         return;
     }
+    readAgain(std::move(written), std::move(stale));
+}
+
+void TaggerSession::readAgain(std::vector<Rewritten> written, std::vector<std::size_t> stale) {
     // Read again as when opened over cached tags (ADR-0257): nothing saved
     // until read, and the draft carried onto what the files now hold.
     const auto& selection = grid_model_->selection();
@@ -2822,8 +2851,9 @@ void TaggerSession::showFeedback(const QString& title, const QString& summary,
 }
 
 void TaggerSession::feedbackFinished() {
-    if (apply_committed_) {
-        QTimer::singleShot(0, this, &TaggerSession::closeRequested);
+    if (!written_items_.empty()) {
+        written_status_ = status_;
+        readWrittenAgain();
     } else {
         emit changed();
     }
@@ -3017,6 +3047,31 @@ void TaggerSession::finishMetadataApply() {
         return;
     }
     const auto& outcome = **result;
+    // ADR-0289: what it replaced kept to undo it, and the files written read
+    // again once said.
+    {
+        // Gathered until read: a retry adds to what the first try wrote.
+        std::vector<operations::UndoRequest> written;
+        for (const auto& source : outcome.sources) {
+            if (!source.commit) {
+                continue;
+            }
+            if (!source.commit->journal_id.is_nil()) {
+                written.push_back({.kind = operations::UndoKind::metadata,
+                                   .journal_id = source.commit->journal_id});
+            }
+            if (grid_model_ != nullptr) {
+                const auto& selection = grid_model_->selection();
+                for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+                    if (selection.source(item).raw_path == source.raw_path) {
+                        written_items_.push_back({.item = item, .raw_path = source.raw_path});
+                    }
+                }
+            }
+        }
+        std::ranges::reverse(written);
+        rememberWrite(std::move(written));
+    }
     // ADR-0139/0141: committed CUE sheets and loudness sidecars count as
     // saved files; any failure keeps the editor open with the problem listed.
     const auto saved_sheets = static_cast<std::size_t>(
@@ -3039,11 +3094,13 @@ void TaggerSession::finishMetadataApply() {
         if (artwork_ != nullptr) {
             artwork_->discardPendingChanges();
         }
-        setStatus(QStringLiteral("Saved %1 %2")
-                      .arg(saved)
-                      .arg(pluralized(saved, QStringLiteral("file"), QStringLiteral("files"))));
+        written_status_ =
+            QStringLiteral("Saved %1 %2")
+                .arg(saved)
+                .arg(pluralized(saved, QStringLiteral("file"), QStringLiteral("files")));
+        setStatus(written_status_);
         emit changed();
-        QTimer::singleShot(0, this, &TaggerSession::closeRequested);
+        readWrittenAgain();
         return;
     }
     std::vector<PreparationFeedbackRow> rows;
@@ -3138,6 +3195,36 @@ void TaggerSession::finishFileApply() {
         return;
     }
     const auto& outcome = **result;
+    {
+        // Gathered until read: a retry adds to what the first try wrote.
+        std::vector<operations::UndoRequest> written;
+        for (const auto& source : outcome.sources) {
+            if (source.state != operations::FilePublicationApplySourceState::committed) {
+                continue;
+            }
+            if (source.metadata_commit && !source.metadata_commit->journal_id.is_nil()) {
+                written.push_back({.kind = operations::UndoKind::metadata,
+                                   .journal_id = source.metadata_commit->journal_id});
+            }
+            if (source.commit && !source.commit->journal_id.is_nil()) {
+                written.push_back({.kind = operations::UndoKind::publication,
+                                   .journal_id = source.commit->journal_id});
+            }
+            if (grid_model_ != nullptr) {
+                const auto& selection = grid_model_->selection();
+                for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+                    if (selection.source(item).raw_path == source.source_raw_path) {
+                        written_items_.push_back({.item = item,
+                                                  .raw_path = source.target_raw_path.empty()
+                                                                  ? source.source_raw_path
+                                                                  : source.target_raw_path});
+                    }
+                }
+            }
+        }
+        std::ranges::reverse(written);
+        rememberWrite(std::move(written));
+    }
     const auto changed_count = outcome.committed_source_count();
     const auto unchanged = outcome.unchanged_source_count();
     // Limited destination filesystems publish successfully but may skip
@@ -3169,12 +3256,13 @@ void TaggerSession::finishFileApply() {
                 .arg(changed_count)
                 .arg(pluralized(changed_count, QStringLiteral("file"), QStringLiteral("files")));
         setStatus(updated);
+        written_status_ = updated;
         emit changed();
         if (!notes.isEmpty()) {
             emit statusMessage(updated + QStringLiteral(". ") + notes.join(QStringLiteral(". ")) +
                                QStringLiteral("."));
         }
-        QTimer::singleShot(0, this, &TaggerSession::closeRequested);
+        readWrittenAgain();
         return;
     }
     std::vector<PreparationFeedbackRow> rows;
@@ -3227,7 +3315,12 @@ TaggerSession::CloseAnswer TaggerSession::requestClose() {
         emit changed();
         return CloseAnswer::wait;
     }
-    if (apply_committed_ || draft_count_ == 0 || grid_model_ == nullptr) {
+    if (undoing_write_) {
+        setStatus(QStringLiteral("Undoing the write · closing when it is done…"));
+        emit changed();
+        return CloseAnswer::wait;
+    }
+    if (draft_count_ == 0 || grid_model_ == nullptr) {
         return CloseAnswer::close;
     }
     return CloseAnswer::confirm_drafts;
@@ -3238,6 +3331,145 @@ void TaggerSession::closing(const bool discard) {
     if (discard && grid_model_ != nullptr) {
         static_cast<void>(grid_model_->discardAll());
     }
+    releaseUndoCopies();
+}
+
+// ADR-0289: undo, while the tagger is open.
+
+void TaggerSession::rememberWrite(std::vector<operations::UndoRequest> requests) {
+    if (requests.empty()) {
+        return;
+    }
+    writes_.push_back(std::move(requests));
+    emit changed();
+}
+
+void TaggerSession::keepUndoCopies(const std::vector<operations::UndoRequest>& requests) {
+    kept_elsewhere_.insert(kept_elsewhere_.end(), requests.begin(), requests.end());
+}
+
+void TaggerSession::forgetUndoCopies(const std::vector<operations::UndoRequest>& requests) {
+    std::erase_if(kept_elsewhere_,
+                  [&requests](const auto& kept) { return std::ranges::contains(requests, kept); });
+}
+
+void TaggerSession::releaseUndoCopies() {
+    std::vector<operations::UndoRequest> kept;
+    for (auto& write : std::exchange(writes_, {})) {
+        kept.insert(kept.end(), write.begin(), write.end());
+    }
+    for (auto& request : std::exchange(kept_elsewhere_, {})) {
+        kept.push_back(request);
+    }
+    if (!kept.empty() && services_.release_undo) {
+        services_.release_undo(std::move(kept));
+    }
+}
+
+void TaggerSession::readWrittenAgain() {
+    auto written = std::exchange(written_items_, {});
+    if (written.empty() || grid_model_ == nullptr) {
+        emit changed();
+        return;
+    }
+    reading_written_ = true;
+    readAgain(std::move(written), {});
+}
+
+bool TaggerSession::canUndoWrite() const {
+    return !writes_.empty() && static_cast<bool>(services_.undo) && grid_model_ != nullptr &&
+           !undoing_write_ && !apply_running_ && !write_plan_running_ && !provisional_ &&
+           !writing_elsewhere_ && !artwork_operation_running_;
+}
+
+void TaggerSession::undoWrite() {
+    if (!canUndoWrite()) {
+        return;
+    }
+    undoing_write_ = true;
+    setStatus(QStringLiteral("Undoing the write…"));
+    emit changed();
+    const QPointer self{this};
+    static_cast<void>(QtConcurrent::run([requests = writes_.back(), undo = services_.undo, self] {
+        auto outcome = std::make_shared<core::Result<std::vector<operations::UndoOutcome>>>(
+            undo(requests, {}));
+        QMetaObject::invokeMethod(
+            self,
+            [self, outcome] {
+                if (self) {
+                    self->writeUndone(outcome);
+                }
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void TaggerSession::writeUndone(
+    std::shared_ptr<core::Result<std::vector<operations::UndoOutcome>>> outcome) {
+    undoing_write_ = false;
+    if (!*outcome) {
+        setStatus(
+            QStringLiteral("Nothing undone · %1").arg(display_utf8(outcome->error().message)));
+        emit changed();
+        return;
+    }
+    // Undone or refused, it is not offered again: a refused one changed
+    // since, and is the person's now.
+    writes_.pop_back();
+    // Followed as a write is: the lists, the library, Up Next.
+    operations::MetadataApplyResult restored;
+    operations::FilePublicationApplyResult moved_back;
+    std::size_t refused = 0U;
+    std::vector<Rewritten> rewritten;
+    const auto& selection = grid_model_->selection();
+    for (const auto& undone : **outcome) {
+        if (undone.issue) {
+            ++refused;
+            continue;
+        }
+        if (undone.restored) {
+            restored.sources.push_back(operations::MetadataApplySourceResult{
+                .source_index = restored.sources.size(),
+                .raw_path = undone.restored->source_raw_path,
+                .state = operations::MetadataApplySourceState::committed,
+                .commit = undone.restored,
+                .issue = std::nullopt});
+        }
+        if (undone.moved_back) {
+            moved_back.sources.push_back(operations::FilePublicationApplySourceResult{
+                .source_index = moved_back.sources.size(),
+                .source_raw_path = undone.from_raw_path,
+                .target_raw_path = undone.to_raw_path,
+                .publication = {},
+                .state = operations::FilePublicationApplySourceState::committed,
+                .commit = undone.moved_back,
+                .metadata_commit = std::nullopt,
+                .published_metadata = undone.published_metadata,
+                .issue = std::nullopt});
+        }
+        for (std::size_t item = 0U; item < selection.item_count(); ++item) {
+            if (selection.source(item).raw_path == undone.from_raw_path &&
+                std::ranges::none_of(rewritten, [item](const auto& r) { return r.item == item; })) {
+                rewritten.push_back({.item = item, .raw_path = undone.to_raw_path});
+            }
+        }
+    }
+    if (!restored.sources.empty() && services_.apply_observer) {
+        services_.apply_observer(restored);
+    }
+    if (!moved_back.sources.empty() && services_.file_apply_observer) {
+        services_.file_apply_observer(moved_back);
+    }
+    written_status_ =
+        refused == 0U
+            ? QStringLiteral("Write undone · the files are as they were")
+            : QStringLiteral("Undone in part · %1 %2 changed since, and kept")
+                  .arg(refused)
+                  .arg(pluralized(refused, QStringLiteral("file"), QStringLiteral("files")));
+    setStatus(written_status_);
+    emit changed();
+    written_items_ = std::move(rewritten);
+    readWrittenAgain();
 }
 
 // ADR-0152: the read-only technical summary, fed by a bounded background

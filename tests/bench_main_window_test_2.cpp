@@ -1131,7 +1131,7 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     QTest::mouseClick(preview, Qt::LeftButton);
 
     // Direct apply: a ready plan runs immediately with inline progress; no
-    // review or result dialog appears and the properties tab closes on success.
+    // review or result dialog appears; the tagger stays open to undo it, and is closed.
     QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().title,
                               std::string{"Applied from ready preview"}, 5'000);
     const auto reread = metadata::read_local_metadata(raw_path);
@@ -1139,10 +1139,92 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     QCOMPARE(reread->document.effective_values("title"),
              (std::vector<std::string>{"Applied from ready preview"}));
     QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
-    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QVERIFY(window_test::closeTaggerAfterWrite(window));
     QTRY_COMPARE(tabs->count(), 1);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
+}
+
+// ADR-0289: a write from the tagger is undone while it is open; closed, it
+// lets go of what it kept, and the engine keeps nothing.
+void BenchMainWindowTest::aTaggerUndoesItsWriteUntilClosed() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto source_path = media.filePath(QStringLiteral("undo-write.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), source_path));
+    const auto encoded = QFile::encodeName(source_path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    const auto before = metadata::read_local_metadata(raw_path);
+    QVERIFY(before.has_value());
+    const auto original_title = before->document.effective_values("title");
+    const auto database =
+        std::filesystem::path{qEnvironmentVariable("MELODY_STATE_DIR").toStdString()} /
+        "lists.sqlite";
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr && properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(list_model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QTRY_VERIFY(properties_action->isEnabled());
+    properties_action->trigger();
+    QPointer<QDialog> properties =
+        window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(!properties.isNull());
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    auto* undo = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-undo-write"));
+    QVERIFY(aggregate_model != nullptr && apply != nullptr && undo != nullptr);
+    QVERIFY(!undo->isVisible());
+    const auto write_title = [&](const QString& title) {
+        const auto row = aggregate_model->fieldRow(QStringLiteral("title"));
+        QVERIFY(row.has_value());
+        QVERIFY(aggregate_model->setData(aggregate_model->index(*row, 2), title, Qt::EditRole));
+        QTRY_VERIFY(apply->isEnabled());
+        QTest::mouseClick(apply, Qt::LeftButton);
+        QTRY_VERIFY_WITH_TIMEOUT(undo->isVisible() && undo->isEnabled(), 10'000);
+    };
+
+    // Written, and kept to undo: the window stays.
+    write_title(QStringLiteral("Written to be undone"));
+    QVERIFY(!properties.isNull() && properties->isVisible());
+    QCOMPARE(metadata::read_local_metadata(raw_path)->document.effective_values("title"),
+             (std::vector<std::string>{"Written to be undone"}));
+    QCOMPARE(engine::kept_undo_copies(database).size(), 1U);
+
+    // Undone: the file as it was, the row too, nothing more to undo.
+    QTest::mouseClick(undo, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(!undo->isVisible(), 10'000);
+    QCOMPARE(metadata::read_local_metadata(raw_path)->document.effective_values("title"),
+             original_title);
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().title,
+                              original_title.empty() ? std::string{} : original_title.front(),
+                              5'000);
+    QVERIFY(engine::kept_undo_copies(database).empty());
+
+    // Written again and closed: kept no longer.
+    write_title(QStringLiteral("Written and kept"));
+    QCOMPARE(engine::kept_undo_copies(database).size(), 1U);
+    properties->close();
+    QTRY_VERIFY(properties.isNull() || !properties->isVisible());
+    QTRY_VERIFY_WITH_TIMEOUT(engine::kept_undo_copies(database).empty(), 10'000);
+    QCOMPARE(metadata::read_local_metadata(raw_path)->document.effective_values("title"),
+             (std::vector<std::string>{"Written and kept"}));
 }
 
 void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
@@ -1227,7 +1309,7 @@ void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     QCOMPARE(reread->document.effective_values("title"),
              (std::vector<std::string>{"Renamed by title"}));
     QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
-    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QVERIFY(window_test::closeTaggerAfterWrite(window));
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
 }
@@ -1307,8 +1389,7 @@ void BenchMainWindowTest::applyReadsAgainAFileChangedElsewhere() {
     // Looked at again, applied again: written.
     QTRY_VERIFY(apply->isEnabled());
     QTest::mouseClick(apply, Qt::LeftButton);
-    QTRY_VERIFY_WITH_TIMEOUT(
-        window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr, 10'000);
+    QVERIFY(window_test::closeTaggerAfterWrite(window));
     const auto written = metadata::read_local_metadata(raw_path);
     QVERIFY(written.has_value());
     QCOMPARE(written->document.effective_values("title"),
@@ -2281,7 +2362,7 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QVERIFY(!expected_target.endsWith(QStringLiteral("/Synthetic path title.flac")));
     QCOMPARE(QString::fromStdString(reviewed_target), expected_target);
     // A note is a line in the status bar, not a window to close first.
-    QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
+    QVERIFY(window_test::closeTaggerAfterWrite(closed_guard));
     QCOMPARE(status.count(), 1);
     QVERIFY(
         status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));

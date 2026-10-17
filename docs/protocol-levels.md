@@ -7,6 +7,19 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 16 (2026-10-17)
+
+ADR-0289: undo copies only for a tagger, while it is open.
+
+- `metadata.apply`, `artwork.apply` and `preparation.apply` take `keep_undo`
+  (default false): kept, what the write replaced can be undone; without it,
+  it is let go of once written. An older engine keeps everything within
+  its limits.
+- `backups.release {operations: [{kind, id}]}` -> `{released, error}`: the
+  undo copies of those writes let go of; one with none kept is passed over.
+- `backups.retention` and `backups.set_retention` are gone; a write is no
+  longer kept within limits.
+
 ### Level 15 (2026-10-16)
 
 ADR-0286: tabs are Melody's; only saved playlists live on the engine.

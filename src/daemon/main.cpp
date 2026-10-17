@@ -648,8 +648,11 @@ int main(int argc, char** argv) {
     // written or recovered.
     trackknife::operations::set_undo_copy_folder(
         trackknife::engine::undo_copy_folder(*workspace, database));
-    auto file_work_recovery = trackknife::engine::recover_file_work(
-        database, catalogue, follow_moves, trackknife::engine::backup_retention(*workspace));
+    auto file_work_recovery =
+        trackknife::engine::recover_file_work(database, catalogue, follow_moves);
+    // ADR-0289: undo copies left from before -- by a tagger that never said
+    // it closed -- are let go of once clients are answered, not before.
+    const auto left_undo_copies = trackknife::engine::kept_undo_copies(database);
     // ADR-0263: how long the files writes replaced are kept, as clients set it.
     trackknife::engine::register_backup_methods(dispatcher, database, *workspace);
     if (file_work_recovery.error) {
@@ -1060,7 +1063,15 @@ int main(int argc, char** argv) {
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
 
+    trackknife::core::CancellationSource tidying_stopped;
+    std::thread tidying{[&database, &left_undo_copies, token = tidying_stopped.token()] {
+        trackknife::engine::tidy_undo_copies(database, left_undo_copies, token);
+    }};
+
     wait_for_stop();
+
+    tidying_stopped.request_cancellation();
+    tidying.join();
 
     std::cerr << "melodyd: stopping\n";
 #if MELODY_ENABLE_UPNP

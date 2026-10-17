@@ -49,7 +49,7 @@ constexpr auto progress_interval = std::chrono::milliseconds{200};
 apply_metadata_plan(const metadata::MetadataWritePlan& plan, const std::filesystem::path& database,
                     LocalCatalogue& catalogue,
                     const operations::MetadataApplyProgressCallback& progress,
-                    const core::CancellationToken& token) {
+                    const core::CancellationToken& token, const bool keep_undo = false) {
     auto opened = persistence::SqliteMetadataOperationJournal::open(database);
     if (!opened) {
         return std::unexpected(std::move(opened.error()));
@@ -62,19 +62,43 @@ apply_metadata_plan(const metadata::MetadataWritePlan& plan, const std::filesyst
         auto refreshed = catalogue.refresh({result.source_raw_path});
         return refreshed ? core::Result<void>{} : std::unexpected(std::move(refreshed.error()));
     };
+    // ADR-0289: the file a write replaced is let go of once it is written,
+    // unless a tagger keeps it to undo the write while it is open. A CUE
+    // sheet's and a sidecar's always are: no tagger writes them.
+    const auto let_go = [&journal](const core::StableId& id) {
+        if (auto released = operations::release_metadata_backup(id, journal); !released) {
+            std::cerr << "melodyd: an undo copy was not let go: " << released.error().message
+                      << "\n";
+        }
+    };
     return operations::apply_metadata_write_plan(
         plan,
-        [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
-                               const core::CancellationToken& source_token) {
-            return operations::commit_metadata_source(source, journal, dependent, source_token);
+        [&journal, &dependent, &let_go, keep_undo](const metadata::MetadataWritePlanSource& source,
+                                                   const core::CancellationToken& source_token) {
+            auto committed =
+                operations::commit_metadata_source(source, journal, dependent, source_token);
+            if (committed && !keep_undo) {
+                let_go(committed->journal_id);
+            }
+            return committed;
         },
-        [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
-                               const core::CancellationToken& sheet_token) {
-            return operations::commit_cue_replay_gain_sheet(sheet, journal, dependent, sheet_token);
+        [&journal, &dependent, &let_go](const metadata::MetadataWritePlanCueSheet& sheet,
+                                        const core::CancellationToken& sheet_token) {
+            auto committed =
+                operations::commit_cue_replay_gain_sheet(sheet, journal, dependent, sheet_token);
+            if (committed) {
+                let_go(committed->journal_id);
+            }
+            return committed;
         },
-        [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
-                               const core::CancellationToken& sidecar_token) {
-            return operations::commit_loudness_sidecar(sidecar, journal, dependent, sidecar_token);
+        [&journal, &dependent, &let_go](const metadata::MetadataWritePlanSidecar& sidecar,
+                                        const core::CancellationToken& sidecar_token) {
+            auto committed =
+                operations::commit_loudness_sidecar(sidecar, journal, dependent, sidecar_token);
+            if (committed) {
+                let_go(committed->journal_id);
+            }
+            return committed;
         },
         progress, token);
 }
@@ -251,14 +275,16 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                                 .message = "the plan has blocking issues; nothing was written",
                                 .context = {{.key = "param", .value = "plan"}}});
             }
-            return [plan = std::move(*plan), database, &catalogue](
+            // ADR-0289: a tagger keeps what the write replaced, to undo it.
+            const bool keep_undo = params.value("keep_undo", false);
+            return [plan = std::move(*plan), database, &catalogue, keep_undo](
                        const core::CancellationToken& token, const JobRegistry::Reporter& report) {
                 auto applied = apply_metadata_plan(
                     plan, database, catalogue,
                     [&report](const operations::MetadataApplyProgress& progress) {
                         report(wire::encode(progress));
                     },
-                    token);
+                    token, keep_undo);
                 if (!applied) {
                     return Json{{"error", wire::encode(applied.error())}};
                 }
@@ -298,7 +324,8 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                     .message = "the artwork plan has blocking issues; nothing was written",
                     .context = {{.key = "param", .value = "plan"}}});
             }
-            return [plan = std::move(*plan), database, &catalogue](
+            const bool keep_undo = params.value("keep_undo", false);
+            return [plan = std::move(*plan), database, &catalogue, keep_undo](
                        const core::CancellationToken& token, const JobRegistry::Reporter& report) {
                 auto opened = persistence::SqliteMetadataOperationJournal::open(database);
                 if (!opened) {
@@ -314,10 +341,16 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                 };
                 auto applied = operations::apply_artwork_write_plan(
                     plan,
-                    [&journal, &dependent](const metadata::ArtworkWritePlanSource& source,
-                                           const core::CancellationToken& source_token) {
-                        return operations::commit_artwork_source(source, journal, dependent,
-                                                                 source_token);
+                    [&journal, &dependent,
+                     keep_undo](const metadata::ArtworkWritePlanSource& source,
+                                const core::CancellationToken& source_token) {
+                        auto committed = operations::commit_artwork_source(source, journal,
+                                                                           dependent, source_token);
+                        if (committed && !keep_undo && !committed->journal_id.is_nil()) {
+                            static_cast<void>(operations::release_metadata_backup(
+                                committed->journal_id, journal));
+                        }
+                        return committed;
                     },
                     [&report](const operations::ArtworkApplyProgress& progress) {
                         report(wire::encode(progress));
@@ -366,7 +399,8 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                     .message = "the plan is not ready to move files; nothing was changed",
                     .context = {{.key = "param", .value = "plan"}}});
             }
-            return [plan = std::move(*plan), database, &catalogue, follow](
+            const bool keep_undo = params.value("keep_undo", false);
+            return [plan = std::move(*plan), database, &catalogue, follow, keep_undo](
                        const core::CancellationToken& token, const JobRegistry::Reporter& report) {
                 auto file_opened = persistence::SqliteFilePublicationJournal::open(database);
                 if (!file_opened) {
@@ -401,6 +435,21 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                         report(wire::encode(progress));
                     },
                     token, operations::FilePublicationApplyOptions{.maximum_parallelism = 2U});
+                // ADR-0289: what the moves replaced let go of, unless a
+                // tagger keeps it to undo them.
+                if (applied && !keep_undo) {
+                    for (const auto& source : applied->sources) {
+                        if (source.metadata_commit &&
+                            !source.metadata_commit->journal_id.is_nil()) {
+                            static_cast<void>(operations::release_metadata_backup(
+                                source.metadata_commit->journal_id, metadata_journal));
+                        }
+                        if (source.commit && !source.commit->journal_id.is_nil()) {
+                            static_cast<void>(operations::release_publication_backup(
+                                source.commit->journal_id, file_journal));
+                        }
+                    }
+                }
                 // ADR-0266: the sources moves retain, where undo copies are kept.
                 if (auto kept =
                         operations::keep_undo_copies_in_place(metadata_journal, file_journal);

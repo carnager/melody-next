@@ -1058,16 +1058,12 @@ void publicationsKeepTheirSourceForUndo() {
                 state_of(crash_id) == Backup::undone,
             "recovery must finish an interrupted undo");
 
-    // D: retention releases what it does not keep.
+    // D: a release lets go of the kept source, the move staying.
     const auto [old_source, old_target, old_id] = artifact("d");
-    const auto maintained = operations::maintain_publication_backups(
-        journal,
-        operations::MetadataBackupRetentionPolicy{
-            .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-        0);
-    require(maintained.has_value() && !std::filesystem::exists(kept_path(old_source, old_id)) &&
+    const auto released = operations::release_publication_backup(old_id, journal);
+    require(released.has_value() && !std::filesystem::exists(kept_path(old_source, old_id)) &&
                 read_file(old_target) == "changed d" && state_of(old_id) == Backup::released,
-            "retention must release a kept source it does not keep");
+            "a release must let go of the kept source");
 
     // A same-filesystem rename keeps the file itself: nothing retained.
     const auto renamed_source = directory.path() / "plain.flac";
@@ -1160,15 +1156,11 @@ void keptSourcesMoveWhereUndoCopiesAreKept() {
                     !std::filesystem::exists(folder / beside.filename()),
                 "undo must restore the source from the undo folder");
 
-        const auto maintained = operations::maintain_publication_backups(
-            journal,
-            operations::MetadataBackupRetentionPolicy{
-                .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-            0);
+        const auto let_go = operations::release_publication_backup(old_id, journal);
         const auto released = journal.load_backup(old_id);
-        require(maintained && released && *released && (**released).state == Backup::released &&
+        require(let_go && released && *released && (**released).state == Backup::released &&
                     std::filesystem::is_empty(folder) && read_file(old_target) == "changed b",
-                "retention must release a kept source from the undo folder");
+                "a release must let go of a kept source in the undo folder");
         operations::set_undo_copy_folder({});
     }
 }

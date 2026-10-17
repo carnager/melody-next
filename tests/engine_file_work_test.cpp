@@ -1520,7 +1520,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     const auto original_bytes = bytes_of(flac);
     const auto original = metadata::read_local_metadata(flac);
     require(original.has_value(), "the file is read first");
-    const auto applied = remote.apply(*plan, {}, {});
+    // ADR-0289: kept to undo, as a tagger asks.
+    const auto applied = remote.apply(*plan, {}, {}, true);
     require(applied && applied->committed_source_count() == 1U, "and written by it");
     const auto after = metadata::read_local_metadata(flac);
     require(after && after->document.first_effective_value("title") ==
@@ -1555,6 +1556,9 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
             patches, access);
         require(rewritten && rewritten->ready() && remote.apply(*rewritten, {}, {}),
                 "and written again");
+        // ADR-0289: not asked to, it keeps nothing to undo.
+        require(engine::kept_undo_copies(database).empty(),
+                "a write not kept to undo keeps no copy");
     }
 
     // A plan bigger than one job goes in parts, each file written once and
@@ -1906,13 +1910,13 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
 
 } // namespace
 
-// ADR-0263: how long backups are kept is the engine's, as clients set it;
-// a lower limit lets go of what it no longer keeps at once.
-void backups_are_kept_as_long_as_asked(const std::filesystem::path& directory,
-                                       const std::filesystem::path& fixtures) {
+// ADR-0289: an undo copy is kept until it is let go of -- by the tagger
+// that kept it, else at the engine's next start.
+void undo_copies_are_kept_until_let_go_of(const std::filesystem::path& directory,
+                                          const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
     namespace operations = trackknife::operations;
-    const auto database = directory / "retention.sqlite3";
+    const auto database = directory / "undo-copies.sqlite3";
     auto workspace = engine::Workspace::open(database);
     require(workspace.has_value(), "a workspace");
     protocol::Dispatcher dispatcher;
@@ -1921,42 +1925,59 @@ void backups_are_kept_as_long_as_asked(const std::filesystem::path& directory,
         return dispatcher.dispatch(protocol::Request{
             .id = 1, .method = std::move(method), .params = over_the_wire(params)});
     };
-    const auto first = ask("backups.retention", protocol::Json::object());
-    require(first.result && first.result->at("max_age_days") == 7 &&
-                first.result->at("max_writes") == 256 && first.result->at("max_gigabytes") == 10,
-            "the defaults to begin with");
-    require(ask("backups.set_retention", {{"max_writes", -1}}).error.has_value(),
-            "a limit below 0 is refused");
+    require(ask("backups.retention", protocol::Json::object()).error.has_value(),
+            "no limits to ask for any more");
 
-    // A write keeps the file it replaced...
     const auto flac =
-        materialize(fixtures, "tagged-tone-flac", directory / "retention.flac").string();
-    const auto read = metadata::read_local_metadata(flac);
-    require(read.has_value(), "the file is read");
-    auto selection = metadata::StagedMetadataSelection::create({metadata::StagedMetadataSource{
-        .raw_path = flac, .source_revision = read->source_revision, .baseline = read->document}});
-    require(selection.has_value(), "a selection");
-    const auto title = selection->field_index("title");
-    require(title.has_value(), "with a title");
-    metadata::StagedMetadataPatchSet patches;
-    require(patches.replace_values(*selection, 0U, *title, {"Kept"}).has_value(), "staged");
-    const auto plan = metadata::build_metadata_write_plan(*selection, patches,
-                                                          metadata::local_metadata_file_access());
-    require(plan && plan->ready(), "planned");
+        materialize(fixtures, "tagged-tone-flac", directory / "undo-copies.flac").string();
     auto journal = trackknife::persistence::SqliteMetadataOperationJournal::open(database);
     require(journal.has_value(), "the journal");
-    const auto committed = operations::commit_metadata_source(
-        plan->sources.front(), *journal,
-        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
-    require(committed && std::filesystem::exists(committed->backup_raw_path),
-            "a write keeps the file it replaced");
+    const auto write = [&](const std::string& value) {
+        const auto read = metadata::read_local_metadata(flac);
+        require(read.has_value(), "the file is read");
+        auto selection = metadata::StagedMetadataSelection::create(
+            {metadata::StagedMetadataSource{.raw_path = flac,
+                                            .source_revision = read->source_revision,
+                                            .baseline = read->document}});
+        require(selection.has_value(), "a selection");
+        const auto title = selection->field_index("title");
+        require(title.has_value(), "with a title");
+        metadata::StagedMetadataPatchSet patches;
+        require(patches.replace_values(*selection, 0U, *title, {value}).has_value(), "staged");
+        const auto plan = metadata::build_metadata_write_plan(
+            *selection, patches, metadata::local_metadata_file_access());
+        require(plan && plan->ready(), "planned");
+        auto committed = operations::commit_metadata_source(
+            plan->sources.front(), *journal,
+            [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+        require(committed && std::filesystem::exists(committed->backup_raw_path),
+                "a write keeps the file it replaced while it is written");
+        return *committed;
+    };
 
-    // ...until none are to be kept: let go at once, and remembered.
-    const auto set = ask("backups.set_retention", {{"max_writes", 0}});
-    require(set.result && set.result->at("max_writes") == 0 && set.result->at("max_age_days") == 7,
-            "the limit is set, the others kept");
-    require(!std::filesystem::exists(committed->backup_raw_path), "and the backup let go");
-    require(engine::backup_retention(*workspace).maximum_entries == 0U, "and remembered");
+    // A tagger's, let go of when it closes.
+    const auto first = write("Kept");
+    auto kept = engine::kept_undo_copies(database);
+    require(kept.size() == 1U && kept.front().kind == operations::UndoKind::metadata &&
+                kept.front().journal_id == first.journal_id,
+            "the write's undo copy is kept");
+    const auto released = ask(
+        "backups.release",
+        {{"operations",
+          protocol::Json::array({{{"kind", "metadata"}, {"id", first.journal_id.to_string()}}})}});
+    require(released.result && released.result->at("released") == 1 &&
+                released.result->at("error").is_null(),
+            "let go of when asked");
+    require(!std::filesystem::exists(first.backup_raw_path) &&
+                engine::kept_undo_copies(database).empty(),
+            "and gone");
+
+    // One never let go of, at the next start.
+    const auto second = write("Left");
+    engine::tidy_undo_copies(database, engine::kept_undo_copies(database), {});
+    require(!std::filesystem::exists(second.backup_raw_path) &&
+                engine::kept_undo_copies(database).empty(),
+            "one left is let go of at the next start");
 }
 
 int main(int argc, char** argv) {
@@ -1969,7 +1990,7 @@ int main(int argc, char** argv) {
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
     a_large_apply_answers_small(directory, argv[1]);
-    backups_are_kept_as_long_as_asked(directory, argv[1]);
+    undo_copies_are_kept_until_let_go_of(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_visit_only_what_lacks_them(directory, argv[1]);

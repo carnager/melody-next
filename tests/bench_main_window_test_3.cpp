@@ -574,7 +574,7 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
     QTRY_VERIFY_WITH_TIMEOUT(combined_applied, 5'000);
     QVERIFY(QString::fromStdString(reviewed_target)
                 .endsWith(QStringLiteral("/Combined UI title.flac")));
-    QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
+    QVERIFY(window_test::closeTaggerAfterWrite(closed_guard));
     if (through_engine) {
         // Written once, at its new place, by the engine.
         QVERIFY(published && published->committed_source_count() == 1U);
@@ -1620,7 +1620,7 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
                         [work](const operations::PreparationPlan& plan,
                                const operations::FilePublicationApplyProgressCallback& progress,
                                const core::CancellationToken& cancellation) {
-                            return work->publish(plan, progress, cancellation);
+                            return work->publish(plan, progress, cancellation, true);
                         }};
                 },
             .file_apply_observer = {},
@@ -1628,7 +1628,15 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_elsewhere = {},
-            .undo = {},
+            .undo =
+                [work](std::vector<operations::UndoRequest> requests,
+                       const core::CancellationToken& cancellation) {
+                    return work->undo(requests, {}, cancellation);
+                },
+            .release_undo =
+                [work](std::vector<operations::UndoRequest> requests) {
+                    static_cast<void>(work->release_undo_copies(requests));
+                },
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
     properties->setProperty("trackknife-move-folder",
@@ -1647,7 +1655,7 @@ void BenchMainWindowTest::applyMovesIntoAChosenFolder() {
     tagger->chooseMove(true);
     QTRY_VERIFY(tagger->moveFiles() && tagger->canApply());
     properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"))->click();
-    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 10'000);
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
     const auto moved =
         media.filePath(QStringLiteral("chosen/Trackknife Project/Fixture Tone.flac"));
     QVERIFY2(QFile::exists(moved), qPrintable(moved));
@@ -1741,7 +1749,7 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
                                         const operations::MetadataApplyProgressCallback& progress,
                                         const core::CancellationToken& cancellation) {
                             ++writes;
-                            return work->apply(plan, progress, cancellation);
+                            return work->apply(plan, progress, cancellation, true);
                         }};
                 },
             .apply_observer = {},
@@ -1757,7 +1765,15 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
             .musicbrainz = {},
             .tools = engineFileWorkTools(work),
             .library_elsewhere = {},
-            .undo = {},
+            .undo =
+                [work](std::vector<operations::UndoRequest> requests,
+                       const core::CancellationToken& cancellation) {
+                    return work->undo(requests, {}, cancellation);
+                },
+            .release_undo =
+                [work](std::vector<operations::UndoRequest> requests) {
+                    static_cast<void>(work->release_undo_copies(requests));
+                },
         });
     const QPointer<MetadataPropertiesDialog> guard{properties};
     properties->show();
@@ -1780,8 +1796,8 @@ void BenchMainWindowTest::applyMeasuresReplayGainAndWritesOnce() {
         properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
     QTRY_VERIFY(apply->isEnabled());
     apply->click();
-    // Written once, and the editor closes.
-    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 20'000);
+    // Written once; the editor stays open to undo it, and is closed.
+    QVERIFY(window_test::closeTaggerAfterWrite(guard, 20'000));
     QCOMPARE(writes, std::size_t{1U});
     const auto value_of = [&raw, &media](const char* name, std::string_view field) {
         const auto read = metadata::read_local_metadata(raw(media.filePath(QLatin1String(name))));
@@ -1967,7 +1983,7 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                         [work](const metadata::MetadataWritePlan& plan,
                                const operations::MetadataApplyProgressCallback& progress,
                                const core::CancellationToken& cancellation) {
-                            return work->apply(plan, progress, cancellation);
+                            return work->apply(plan, progress, cancellation, true);
                         }};
                 },
             .apply_observer = {},
@@ -1994,7 +2010,7 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                         [work](const operations::PreparationPlan& plan,
                                const operations::FilePublicationApplyProgressCallback& progress,
                                const core::CancellationToken& cancellation) {
-                            return work->publish(plan, progress, cancellation);
+                            return work->publish(plan, progress, cancellation, true);
                         }};
                 },
             .file_apply_observer = {},
@@ -2006,6 +2022,10 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
                 [work](std::vector<operations::UndoRequest> requests,
                        const core::CancellationToken& cancellation) {
                     return work->undo(requests, {}, cancellation);
+                },
+            .release_undo =
+                [work](std::vector<operations::UndoRequest> requests) {
+                    static_cast<void>(work->release_undo_copies(requests));
                 },
         });
     properties->show();

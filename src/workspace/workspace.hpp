@@ -404,18 +404,19 @@ class Workspace final : public QObject {
                           std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     [[nodiscard]] MetadataWritePlanApplierFactory
-    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                     bool keep_undo = false);
     [[nodiscard]] ArtworkWritePlanApplierFactory
-    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                    bool keep_undo = false);
     // Stage 5: moves and renames the engine makes. For an engine elsewhere,
     // `mounted` receives each move as this computer sees it through the
     // engine's mount -- this computer's paths and revisions -- for its own
     // lists to follow.
     using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
-    [[nodiscard]] FilePublicationPlanApplierFactory
-    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
-                                        bool elsewhere, RemoteMount mount,
-                                        std::shared_ptr<MountedMoves> mounted);
+    [[nodiscard]] FilePublicationPlanApplierFactory enginePublicationPlanApplierFactory(
+        std::shared_ptr<engine::RemoteFileWork> work, bool elsewhere, RemoteMount mount,
+        std::shared_ptr<MountedMoves> mounted, bool keep_undo = false);
     // Naming layouts, and the move destinations of `destinations_of`; with
     // every engine's destinations as places for the manager (ADR-0237).
     [[nodiscard]] OutputProfileStore

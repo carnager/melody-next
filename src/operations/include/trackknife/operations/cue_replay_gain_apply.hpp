@@ -5,6 +5,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
+#include "trackknife/core/stable_id.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
 
@@ -44,6 +45,8 @@ struct CueReplayGainCommitResult {
     // logical track of the sheet, not only the planned ones.
     std::vector<CueReplayGainAppliedField> album_fields;
     std::vector<CueReplayGainAppliedTrack> tracks;
+    // The write's journal entry, whose backup is released by it.
+    core::StableId journal_id;
 
     friend bool operator==(const CueReplayGainCommitResult&,
                            const CueReplayGainCommitResult&) = default;

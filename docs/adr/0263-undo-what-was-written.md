@@ -4,7 +4,9 @@
 
 Accepted, 2026-10-04. Completes ADR-0261's "Undo this batch"; changes the
 backup policy of ADR-0237's engine and the publication lifecycle of
-ADR-0111/0115.
+ADR-0111/0115. Its retention -- "Kept, within limits" and "Kept as long as
+asked" -- is replaced by ADR-0289 (2026-10-17): kept only for the tagger
+that wrote, while it is open.
 
 ## Context
 

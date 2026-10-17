@@ -806,22 +806,14 @@ void commits_with_copied_backup_where_links_are_refused(
         CHECK(restored.has_value() && *restored == *backup && *restored != original);
     }
 
-    // Retention releases a copied backup by its own identity.
+    // A copied backup is released by its own identity.
     plan = title_plan(source, "Released copy title");
     CHECK(plan.has_value());
     if (plan) {
         const auto again =
             operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
         CHECK(again.has_value());
-        const auto maintained = operations::maintain_metadata_backups(
-            *journal,
-            operations::MetadataBackupRetentionPolicy{
-                .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-            static_cast<std::int64_t>(std::time(nullptr)) + 1);
-        CHECK(maintained.has_value() && std::ranges::none_of(*maintained, [](const auto& result) {
-                  return result.outcome ==
-                         operations::MetadataBackupMaintenanceOutcome::needs_reconciliation;
-              }));
+        CHECK(again && operations::release_metadata_backup(again->journal_id, *journal));
         CHECK(again && !std::filesystem::exists(again->backup_raw_path));
     }
     operations::use_copied_metadata_backups_for_testing(false);
@@ -896,19 +888,14 @@ void commits_with_moved_backup_where_links_are_refused(
     CHECK(read_bytes(source) == original_bytes);
     static_cast<void>(original);
 
-    // Retention releases a moved backup like any other.
+    // A moved backup is released like any other.
     plan = title_plan(source, "Released moved title");
     CHECK(plan.has_value());
     if (plan) {
         const auto again =
             operations::commit_metadata_source(*plan, *journal, successful_dependent_commit);
         CHECK(again.has_value());
-        const auto maintained = operations::maintain_metadata_backups(
-            *journal,
-            operations::MetadataBackupRetentionPolicy{
-                .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-            static_cast<std::int64_t>(std::time(nullptr)) + 1);
-        CHECK(maintained.has_value());
+        CHECK(again && operations::release_metadata_backup(again->journal_id, *journal));
         CHECK(again && !std::filesystem::exists(again->backup_raw_path));
     }
     operations::use_moved_metadata_backups_for_testing(false);
@@ -2168,7 +2155,7 @@ void moves_backups_kept_beside_files(const std::filesystem::path& fixture_direct
     }
 }
 
-void retention_releases_only_verified_backups(const std::filesystem::path& fixture_directory) {
+void release_lets_go_of_a_backup(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source = materialize(fixture_directory, directory.path() / "retention.flac");
     auto plan = title_plan(source, "Retention title");
@@ -2183,13 +2170,7 @@ void retention_releases_only_verified_backups(const std::filesystem::path& fixtu
     if (!committed) {
         return;
     }
-    const auto maintained = operations::maintain_metadata_backups(
-        *journal,
-        operations::MetadataBackupRetentionPolicy{
-            .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-        static_cast<std::int64_t>(std::time(nullptr)) + 1);
-    CHECK(maintained.has_value() && maintained->size() == 1U &&
-          maintained->front().outcome == operations::MetadataBackupMaintenanceOutcome::released);
+    CHECK(operations::release_metadata_backup(committed->journal_id, *journal).has_value());
     CHECK(!std::filesystem::exists(committed->backup_raw_path));
     const auto lifecycle = journal->load_backup(committed->journal_id);
     CHECK(lifecycle && *lifecycle &&
@@ -2225,48 +2206,6 @@ void undo_conflicts_become_visible_reconciliation_evidence(
     CHECK(lifecycle && *lifecycle &&
           (**lifecycle).state == operations::MetadataOperationBackupState::needs_reconciliation &&
           (**lifecycle).failure.has_value());
-}
-
-void retention_releases_older_verified_backup_for_the_same_source(
-    const std::filesystem::path& fixture_directory) {
-    TemporaryDirectory directory;
-    const auto source = materialize(fixture_directory, directory.path() / "retention-chain.flac");
-    auto journal = open_journal(directory, "retention-chain.sqlite3");
-    auto first_plan = title_plan(source, "First retained title");
-    CHECK(first_plan.has_value() && journal.has_value());
-    if (!first_plan || !journal) {
-        return;
-    }
-    auto first =
-        operations::commit_metadata_source(*first_plan, *journal, successful_dependent_commit);
-    CHECK(first.has_value());
-    if (!first) {
-        return;
-    }
-    auto second_plan = title_plan(source, "Newest retained title");
-    CHECK(second_plan.has_value());
-    if (!second_plan) {
-        return;
-    }
-    auto second =
-        operations::commit_metadata_source(*second_plan, *journal, successful_dependent_commit);
-    CHECK(second.has_value());
-    if (!second) {
-        return;
-    }
-
-    const auto maintained =
-        operations::maintain_metadata_backups(*journal, operations::MetadataBackupRetentionPolicy{},
-                                              static_cast<std::int64_t>(std::time(nullptr)));
-    CHECK(maintained.has_value() && maintained->size() == 2U);
-    const auto first_lifecycle = journal->load_backup(first->journal_id);
-    const auto second_lifecycle = journal->load_backup(second->journal_id);
-    CHECK(first_lifecycle && *first_lifecycle &&
-          (**first_lifecycle).state == operations::MetadataOperationBackupState::released);
-    CHECK(second_lifecycle && *second_lifecycle &&
-          (**second_lifecycle).state == operations::MetadataOperationBackupState::retained);
-    CHECK(!std::filesystem::exists(first->backup_raw_path));
-    CHECK(std::filesystem::exists(second->backup_raw_path));
 }
 
 void batch_apply_commits_real_sources_and_reports_partial_results(
@@ -3784,28 +3723,17 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
                      item.content_fingerprint == image->content_fingerprint;
         CHECK(found);
     }
-    // Recovery reports the damaged record instead of failing, so the backup
-    // maintenance behind it runs: the new save's backup is released. This is
-    // what one damaged record had been preventing for every other backup.
+    // Recovery reports the damaged record instead of failing, so what
+    // follows it runs: the new save's backup is released. This is what one
+    // damaged record had been preventing for every other backup.
     const auto recovered =
         operations::recover_metadata_operations(*journal, successful_dependent_commit);
     CHECK(recovered && recovered->size() == 1U &&
           recovered->front().journal_id == damaged->front().id &&
           recovered->front().outcome == operations::MetadataRecoveryOutcome::needs_reconciliation);
-    const auto maintained = operations::maintain_metadata_backups(
-        *journal, {.maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
-        static_cast<std::int64_t>(std::time(nullptr)) + 1);
-    CHECK(maintained && std::ranges::any_of(*maintained, [&](const auto& result) {
-              return result.journal_id == saved->journal_id &&
-                     result.outcome == operations::MetadataBackupMaintenanceOutcome::released;
-          }));
+    CHECK(saved && operations::release_metadata_backup(saved->journal_id, *journal));
     CHECK(saved && !std::filesystem::exists(saved->backup_raw_path));
     // The damaged operation's own backup is kept for whoever reconciles it.
-    CHECK(maintained && std::ranges::any_of(*maintained, [&](const auto& result) {
-              return result.journal_id == damaged->front().id &&
-                     result.outcome ==
-                         operations::MetadataBackupMaintenanceOutcome::needs_reconciliation;
-          }));
     CHECK(std::filesystem::exists(damaged->front().backup_raw_path));
 }
 
@@ -4271,9 +4199,8 @@ int main(const int argc, char** argv) {
         undoes_text_edits_in_every_writable_container(fixture_directory);
         keeps_undo_copies_where_asked(fixture_directory);
         moves_backups_kept_beside_files(fixture_directory);
-        retention_releases_only_verified_backups(fixture_directory);
+        release_lets_go_of_a_backup(fixture_directory);
         undo_conflicts_become_visible_reconciliation_evidence(fixture_directory);
-        retention_releases_older_verified_backup_for_the_same_source(fixture_directory);
         batch_apply_commits_real_sources_and_reports_partial_results(fixture_directory);
         batch_apply_cancellation_stops_new_source_admission();
         artwork_batch_apply_reports_ordered_partial_results_and_cancellation();

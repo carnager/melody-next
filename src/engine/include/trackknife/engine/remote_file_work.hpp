@@ -78,10 +78,12 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<FileTechnicals> probe(const std::string& raw_path,
                                                      const core::CancellationToken& cancellation);
 
+    // ADR-0289: `keep_undo` keeps the files the write replaces, for a
+    // tagger to undo it while it is open; without, they go at once.
     [[nodiscard]] core::Result<operations::MetadataApplyResult>
     apply(const metadata::MetadataWritePlan& plan,
           const operations::MetadataApplyProgressCallback& progress,
-          const core::CancellationToken& cancellation);
+          const core::CancellationToken& cancellation, bool keep_undo = false);
 
     // Stage 4, artwork: the planner's reads (artwork.inventory, image_file,
     // image_bytes, destination), an image handed over to be written from
@@ -92,7 +94,7 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<operations::ArtworkApplyResult>
     artwork_apply(const metadata::ArtworkWritePlan& plan,
                   const operations::ArtworkApplyProgressCallback& progress,
-                  const core::CancellationToken& cancellation);
+                  const core::CancellationToken& cancellation, bool keep_undo = false);
 
     // Stage 5, moves and renames: a path plan built here, looked at on the
     // engine's filesystem (paths.preflight), and a reviewed preparation --
@@ -102,13 +104,17 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<operations::FilePublicationApplyResult>
     publish(const operations::PreparationPlan& plan,
             const operations::FilePublicationApplyProgressCallback& progress,
-            const core::CancellationToken& cancellation);
+            const core::CancellationToken& cancellation, bool keep_undo = false);
 
     // ADR-0263: writes undone there (operations.undo), newest first as given.
     [[nodiscard]] core::Result<std::vector<operations::UndoOutcome>>
     undo(std::span<const operations::UndoRequest> requests,
          const operations::UndoProgressCallback& progress,
          const core::CancellationToken& cancellation);
+    // ADR-0289: the undo copies of those writes let go of (backups.release),
+    // when the tagger that kept them closes.
+    [[nodiscard]] core::Result<void>
+    release_undo_copies(std::span<const operations::UndoRequest> requests);
 
     // Stage 6: a library file as it is, fetched into `to` on this computer
     // (streams.ticket, then the stream port) -- what the converter reads
@@ -135,9 +141,6 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<void> set_rating_scale(const std::string& scale);
     // ADR-0245: the tag ratings are copied into; empty for none.
     [[nodiscard]] core::Result<void> set_rating_backup_tag(const std::string& tag);
-    // ADR-0263: how long the files writes replace are kept there for undo
-    // (backups.set_retention); 0 keeps none.
-    [[nodiscard]] core::Result<void> set_backup_retention(int days, int writes, int gigabytes);
     // ADR-0266: where the engine keeps undo copies (backups.location):
     // "engine", "folder" or "beside", the folder when one was chosen, and
     // the folder they are kept in (empty: beside each file).

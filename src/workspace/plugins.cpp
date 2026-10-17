@@ -160,9 +160,11 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             action.result = PluginAction::Result::copy;
         } else if (result == QStringLiteral("notify-and-copy")) {
             action.result = PluginAction::Result::notify_and_copy;
+        } else if (result == QStringLiteral("list")) {
+            action.result = PluginAction::Result::list;
         } else {
-            return fail(QStringLiteral("action \"%1\": \"result\" is none, notify, copy or "
-                                       "notify-and-copy")
+            return fail(QStringLiteral("action \"%1\": \"result\" is none, notify, copy, "
+                                       "notify-and-copy or list")
                             .arg(action.id));
         }
         if (entry.contains(QStringLiteral("timeout"))) {
@@ -176,6 +178,54 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
         plugin.actions.push_back(std::move(action));
     }
     return plugin;
+}
+
+std::optional<PluginList> parsePluginList(const QByteArray& json, QString* problem) {
+    const auto fail = [problem](QString why) -> std::optional<PluginList> {
+        if (problem != nullptr) {
+            *problem = std::move(why);
+        }
+        return std::nullopt;
+    };
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(json, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return fail(QStringLiteral("its answer is not a JSON object: %1").arg(error.errorString()));
+    }
+    const auto object = document.object();
+    for (const auto& key : object.keys()) {
+        if (key != QStringLiteral("title") && key != QStringLiteral("items")) {
+            return fail(QStringLiteral("its answer has an unknown key \"%1\"").arg(key));
+        }
+    }
+    PluginList list;
+    list.title = object.value(QStringLiteral("title")).toString().trimmed();
+    const auto items = object.value(QStringLiteral("items"));
+    if (!items.isArray()) {
+        return fail(QStringLiteral("its answer has no items"));
+    }
+    for (const auto& value : items.toArray()) {
+        const auto item = value.toObject();
+        if (!value.isObject() || !item.value(QStringLiteral("text")).isString()) {
+            return fail(QStringLiteral("an item has no text"));
+        }
+        for (const auto& key : item.keys()) {
+            if (key != QStringLiteral("text") && key != QStringLiteral("detail") &&
+                key != QStringLiteral("url")) {
+                return fail(QStringLiteral("an item has an unknown key \"%1\"").arg(key));
+            }
+        }
+        PluginList::Item read{.text = item.value(QStringLiteral("text")).toString(),
+                              .detail = item.value(QStringLiteral("detail")).toString(),
+                              .url = item.value(QStringLiteral("url")).toString()};
+        // A link is a web page's: nothing else is opened from a plugin.
+        if (!read.url.isEmpty() && !read.url.startsWith(QStringLiteral("https://")) &&
+            !read.url.startsWith(QStringLiteral("http://"))) {
+            return fail(QStringLiteral("a link is not http or https: %1").arg(read.url));
+        }
+        list.items.push_back(std::move(read));
+    }
+    return list;
 }
 
 QStringList pluginFolders() {

@@ -19,7 +19,8 @@ namespace trackknife::bench {
 // the context menus of track lists and the library.
 struct PluginAction {
     enum class Scope : std::uint8_t { albums, tracks };
-    enum class Result : std::uint8_t { none, notify, copy, notify_and_copy };
+    // What the output is for; `list` is JSON for a window of rows.
+    enum class Result : std::uint8_t { none, notify, copy, notify_and_copy, list };
 
     QString id;
     QString label;
@@ -101,6 +102,21 @@ struct PluginAlbum {
 [[nodiscard]] QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
                                      const std::vector<PluginAlbum>& albums,
                                      const std::vector<std::string>& music_folders);
+
+// What a `list` action answers: a heading and rows, each of text, a detail
+// and a link -- the parts Melody draws, none of the plugin's own.
+struct PluginList {
+    struct Item {
+        QString text;
+        QString detail;
+        // http or https only; empty, none.
+        QString url;
+    };
+    QString title;
+    std::vector<Item> items;
+};
+// Its output read, or why it cannot be.
+[[nodiscard]] std::optional<PluginList> parsePluginList(const QByteArray& json, QString* problem);
 
 struct PluginOutcome {
     bool succeeded{false};

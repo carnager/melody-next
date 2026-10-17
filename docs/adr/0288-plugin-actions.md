@@ -53,8 +53,11 @@ Accepted, 2026-10-17.
      every track chosen).
    - `run`: the program and its arguments, without a shell; a first word
      starting with `./` is in the plugin's folder.
-   - `result`: what its output is for -- `notify`, `copy`, `notify-and-copy`
-     or `none`.
+   - `result`: what its output is for -- `notify`, `copy`, `notify-and-copy`,
+     `none`, or `list` (2026-10-17): JSON of a heading and items of text,
+     detail and an `http`/`https` link, shown in a window of its own -- a
+     notification is too small for a dozen missing albums. The parts are
+     Melody's, the ones a panel (5.) will draw.
    - `timeout`: seconds before it is stopped (default 120).
 
    The entries stand at the end of the menu; with more than three in all,
@@ -103,7 +106,8 @@ Accepted, 2026-10-17.
 - A plugin enabled runs with the user's rights, like any program they start;
   there is no sandbox.
 - Actions cannot change what Melody shows beyond a notification, the
-  clipboard and the status bar; that is what levels 2 and 3 are for.
+  clipboard, the status bar and a list window; that is what levels 2 and 3
+  are for.
 
 ## Verification
 
@@ -113,3 +117,5 @@ Accepted, 2026-10-17.
   artist, album, date, folders and relative ones, the engine.
 - A plugin's output becomes a notification and the clipboard; a failure and
   a time limit are said; nothing runs on the UI thread.
+- A list is read with its every key, a link other than a web page's refused,
+  and shown as rows that copy as text.

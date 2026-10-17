@@ -2520,11 +2520,18 @@ void BenchMainWindowTest::aPluginActionSharesWhatIsChosen() {
         QVERIFY(manifest.open(QIODevice::WriteOnly));
         manifest.write(R"({"schema": 1, "name": "Echo", "actions": [{"id": "share",
                           "label": "Share album", "run": ["./share"],
-                          "result": "notify-and-copy"}]})");
+                          "result": "notify-and-copy"},
+                          {"id": "artist", "label": "Artist", "for": "tracks",
+                           "run": ["./share", "artist"], "result": "copy"},
+                          {"id": "list", "label": "List", "for": "tracks",
+                           "run": ["./share", "list"], "result": "list"}]})");
         QFile script{folder + QStringLiteral("/share")};
         QVERIFY(script.open(QIODevice::WriteOnly));
         script.write(R"sh(#!/bin/sh
 input=$(cat)
+artist=$(printf '%s' "$input" | grep -o '"artist":"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+[ "$1" = artist ] && { echo "artist:$artist"; exit 0; }
+[ "$1" = list ] && { printf '{"title": "%s: 2 missing", "items": [{"text": "First", "detail": "1987", "url": "https://example.org/1"}, {"text": "Second"}]}' "$artist"; exit 0; }
 relative=$(printf '%s' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/\1/p')
 album=$(printf '%s' "$input" | sed -n 's/.*"album":"\([^"]*\)".*/\1/p')
 echo "shared:${relative:-$album}"
@@ -2597,6 +2604,49 @@ echo "shared:${relative:-$album}"
     from_library->trigger();
     QTRY_COMPARE_WITH_TIMEOUT(QGuiApplication::clipboard()->text(),
                               QStringLiteral("shared:Band/Record"), 10'000);
+
+    // From the artist's row too: the artist is said, as from an album.
+    const auto artist = QString::fromStdString(tab->model->rows().front().album_artist.empty()
+                                                   ? tab->model->rows().front().artist
+                                                   : tab->model->rows().front().album_artist);
+    QMetaObject::invokeMethod(tree, "customContextMenuRequested", Qt::DirectConnection,
+                              Q_ARG(QPoint, tree->visualRect(first).center()));
+    menu = panel->findChild<QMenu*>(QStringLiteral("local-library-context-menu"));
+    QVERIFY(menu != nullptr);
+    auto* of_artist = menu->findChild<QAction*>(QStringLiteral("action-plugin-echo-artist"));
+    QVERIFY(of_artist != nullptr);
+    menu->close();
+    QGuiApplication::clipboard()->clear();
+    of_artist->trigger();
+    QTRY_COMPARE_WITH_TIMEOUT(QGuiApplication::clipboard()->text(),
+                              QStringLiteral("artist:") + artist, 10'000);
+
+    // A list answered: a window of its own, its rows drawn by Melody. The
+    // menu again: one closed goes, and its entries with it.
+    QMetaObject::invokeMethod(tree, "customContextMenuRequested", Qt::DirectConnection,
+                              Q_ARG(QPoint, tree->visualRect(first).center()));
+    menu = panel->findChild<QMenu*>(QStringLiteral("local-library-context-menu"));
+    QVERIFY(menu != nullptr);
+    auto* as_list = menu->findChild<QAction*>(QStringLiteral("action-plugin-echo-list"));
+    QVERIFY(as_list != nullptr);
+    menu->close();
+    as_list->trigger();
+    QDialog* list_window = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (list_window = window.findChild<QDialog*>(QStringLiteral("bench-plugin-list"))) != nullptr,
+        10'000);
+    QCOMPARE(list_window->windowTitle(), QStringLiteral("Echo"));
+    QCOMPARE(list_window->findChild<QLabel*>(QStringLiteral("bench-plugin-list-title"))->text(),
+             artist + QStringLiteral(": 2 missing"));
+    auto* rows = list_window->findChild<QListWidget*>(QStringLiteral("bench-plugin-list-rows"));
+    QVERIFY(rows != nullptr);
+    QCOMPARE(rows->count(), 2);
+    QCOMPARE(rows->item(0)->text(), QStringLiteral("First\n1987"));
+    QCOMPARE(rows->item(0)->toolTip(), QStringLiteral("https://example.org/1"));
+    list_window->findChild<QPushButton*>(QStringLiteral("bench-plugin-list-copy"))->click();
+    QCOMPARE(QGuiApplication::clipboard()->text(),
+             artist + QStringLiteral(": 2 missing\nFirst -- 1987\nSecond"));
+    list_window->close();
 
     // Settings has a page of plugins, each enabled there; turned off and
     // saved, its action is gone.

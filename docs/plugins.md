@@ -51,7 +51,7 @@ any program you start: enable only those you trust.
 | `label` | The menu entry. |
 | `for` | `albums` (the default): run once for each album chosen. `tracks`: run once with everything chosen. |
 | `run` | The program and its arguments, without a shell. A first word starting with `./` is in the plugin's folder; any other is looked up in `PATH`. |
-| `result` | What the output is for: `notify` (the default), `copy` (to the clipboard), `notify-and-copy`, `none`. |
+| `result` | What the output is for: `notify` (the default), `copy` (to the clipboard), `notify-and-copy`, `none`, or `list` -- rows in a window of their own (below). |
 | `timeout` | Seconds before it is stopped, 1 to 3600 (default 120). |
 
 An unknown key, or a value out of place, makes the plugin unusable, and
@@ -107,6 +107,29 @@ It runs in its own folder and gets the choice on stdin, as one JSON object:
 - **Failure:** any other exit. What it printed on stderr is shown in the
   status bar.
 - It is stopped at its time limit, and when Melody closes.
+
+### A list
+
+An action with `"result": "list"` answers in JSON, and Melody shows it in a
+window of its own -- a heading, then a row for each item, its detail beneath.
+A row with a link opens in the browser on a double click; Copy puts the whole
+list on the clipboard.
+
+```json
+{
+  "title": "Testament: 12 missing",
+  "items": [
+    {"text": "The Legacy", "detail": "1987 · Album",
+     "url": "https://musicbrainz.org/release-group/…"},
+    {"text": "Souls of Black", "detail": "1990 · Album"}
+  ]
+}
+```
+
+`text` is the one key an item needs. A link is a web page's, `http` or
+`https`: nothing else is opened from a plugin. The parts are Melody's to draw
+-- text, detail, link -- and none of a plugin's own, so a list looks like the
+rest of Melody; the same parts will fill a side panel later.
 
 ## Example
 

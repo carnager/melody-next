@@ -6,6 +6,7 @@
 #include "bench/bench_main_window.hpp"
 
 #include "bench/local_library_panel.hpp"
+#include "bench/plugin_list_window.hpp"
 #include "workspace/library_browser.hpp"
 #include "workspace/plugins.hpp"
 
@@ -86,6 +87,20 @@ void BenchMainWindow::runPlugin(const Plugin& plugin, const PluginAction& action
                     showMessage(QStringLiteral("%1 failed: %2").arg(label, outcome.text), 10'000);
                     return;
                 }
+                // ADR-0288: rows in a window of their own.
+                if (result == PluginAction::Result::list) {
+                    QString problem;
+                    const auto list = parsePluginList(outcome.text.toUtf8(), &problem);
+                    if (!list) {
+                        showMessage(QStringLiteral("%1: %2").arg(label, problem), 10'000);
+                        return;
+                    }
+                    auto* window = new PluginListWindow(title, *list, this);
+                    window->setAttribute(Qt::WA_DeleteOnClose);
+                    window->show();
+                    showMessage(QStringLiteral("%1: done").arg(label), 4'000);
+                    return;
+                }
                 const bool notify = result == PluginAction::Result::notify ||
                                     result == PluginAction::Result::notify_and_copy;
                 const bool copy = result == PluginAction::Result::copy ||
@@ -127,17 +142,23 @@ void BenchMainWindow::addLibraryPluginActions(LocalLibraryPanel* panel, const En
                               engine](const std::vector<std::string>& paths) {
                         const bool album = entry.kind == persistence::LibraryEntryKind::album;
                         const bool track = entry.kind == persistence::LibraryEntryKind::track;
+                        const bool artist = entry.kind == persistence::LibraryEntryKind::artist;
+                        // What the entry says of its tracks: an artist its
+                        // name, an album its own, a track all of it.
+                        const auto artist_name = entry.artist.empty() ? entry.label : entry.artist;
+                        const auto album_name =
+                            album && entry.album.empty() ? entry.label : entry.album;
                         for (const auto& path : paths) {
-                            gathered->tracks.push_back(
-                                PluginTrack{.path = path,
-                                            .title = track ? entry.title : std::string{},
-                                            .artist = track ? entry.artist : std::string{},
-                                            .album = album && entry.album.empty() ? entry.label
-                                                     : album || track             ? entry.album
-                                                                                  : std::string{},
-                                            .album_artist = album ? entry.artist : std::string{},
-                                            .date = album || track ? entry.date : std::string{},
-                                            .track_number = {}});
+                            gathered->tracks.push_back(PluginTrack{
+                                .path = path,
+                                .title = track ? entry.title : std::string{},
+                                .artist = track    ? entry.artist
+                                          : artist ? artist_name
+                                                   : std::string{},
+                                .album = album || track ? album_name : std::string{},
+                                .album_artist = album || artist ? artist_name : std::string{},
+                                .date = album || track ? entry.date : std::string{},
+                                .track_number = {}});
                         }
                         if (--gathered->waiting == 0U) {
                             runPlugin(plugin, action, std::move(gathered->tracks), engine);

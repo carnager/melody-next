@@ -27,6 +27,7 @@ class PluginsTest final : public QObject {
     void anActionRunsAndSaysWhatItGot();
     void pluginsAreFoundAndStayOffUntilEnabled();
     void theExamplePluginReads();
+    void aListIsReadOrRefused();
 };
 
 namespace {
@@ -290,6 +291,41 @@ void PluginsTest::theExamplePluginReads() {
     QVERIFY2(sites.has_value(), qPrintable(problem));
     QCOMPARE(sites->actions.size(), std::size_t{5U});
     QCOMPARE(sites->actions.back().label, QStringLiteral("AllMusic"));
+}
+
+// What a `list` action answers: a heading and rows of text, detail and a
+// web link -- nothing else opened from a plugin.
+void PluginsTest::aListIsReadOrRefused() {
+    QString problem;
+    const auto list = parsePluginList(
+        R"({"title": "Testament: 2 missing", "items": [
+             {"text": "The Legacy", "detail": "1987 · Album",
+              "url": "https://musicbrainz.org/release-group/x"},
+             {"text": "Souls of Black"}]})",
+        &problem);
+    QVERIFY2(list.has_value(), qPrintable(problem));
+    QCOMPARE(list->title, QStringLiteral("Testament: 2 missing"));
+    QCOMPARE(list->items.size(), std::size_t{2U});
+    QCOMPARE(list->items[0].detail, QStringLiteral("1987 · Album"));
+    QCOMPARE(list->items[1].url, QString{});
+    QVERIFY(parsePluginList(R"({"items": []})", &problem).has_value());
+
+    const auto refused = [&problem](const QByteArray& json) {
+        problem.clear();
+        return !parsePluginList(json, &problem) && !problem.isEmpty();
+    };
+    QVERIFY(refused("no json"));
+    QVERIFY(refused(R"({"title": "x"})"));
+    QVERIFY(refused(R"({"items": [{"detail": "no text"}]})"));
+    QVERIFY(refused(R"({"items": [{"text": "a", "colour": "red"}]})"));
+    QVERIFY(refused(R"({"items": [{"text": "a", "url": "file:///etc/passwd"}]})"));
+    QVERIFY(problem.contains(QStringLiteral("http")));
+    // A manifest may ask for one.
+    QVERIFY(parsePluginManifest(R"({"schema": 1, "name": "A", "actions": [
+                                    {"id": "a", "label": "A", "run": ["a"], "result": "list"}]})",
+                                QStringLiteral("/p/x"), &problem)
+                ->actions.front()
+                .result == PluginAction::Result::list);
 }
 
 } // namespace trackknife::bench

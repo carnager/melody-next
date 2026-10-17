@@ -17,8 +17,11 @@ A folder per plugin, with a `plugin.json`:
     share            (the program, executable)
 ```
 
-Plugins under `$XDG_DATA_DIRS/melody/plugins` are found too; one of the same
-name in your own folder wins. A plugin found is **off** until you tick it
+On macOS your folder is `~/Library/Application Support/melody/plugins/`.
+Plugins under `$XDG_DATA_DIRS/melody/plugins` are found too, and the official
+ones installed beside Melody (`share/melody/plugins` next to its `bin`); one of
+the same name in your own folder wins. `MELODY_PLUGIN_PATH`, a list of folders
+like `PATH`, replaces all of these -- for working on a plugin elsewhere. A plugin found is **off** until you tick it
 under **Settings → Plugins**. A plugin runs with your rights, like
 any program you start: enable only those you trust.
 

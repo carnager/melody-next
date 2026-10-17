@@ -2512,8 +2512,7 @@ void BenchMainWindowTest::aPluginActionSharesWhatIsChosen() {
     };
     // A plugin answering with the album's folder within the music folder,
     // else with its name.
-    const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
-                        QStringLiteral("/melody/plugins/echo");
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/echo");
     QVERIFY(QDir{}.mkpath(folder));
     {
         QFile manifest{folder + QStringLiteral("/plugin.json")};
@@ -2680,8 +2679,7 @@ void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {
     QVERIFY(media.isValid());
     const auto file = media.filePath(QStringLiteral("01.flac"));
     QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
-    const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
-                        QStringLiteral("/melody/plugins/many");
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/many");
     QVERIFY(QDir{}.mkpath(folder));
     {
         QFile manifest{folder + QStringLiteral("/plugin.json")};

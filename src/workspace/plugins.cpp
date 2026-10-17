@@ -2,6 +2,7 @@
 
 #include "workspace/plugins.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -229,11 +230,25 @@ std::optional<PluginList> parsePluginList(const QByteArray& json, QString* probl
 }
 
 QStringList pluginFolders() {
+    // Named, these and no others: for writing a plugin elsewhere, and for
+    // tests, on every platform.
+    if (const auto named = qEnvironmentVariable("MELODY_PLUGIN_PATH"); !named.isEmpty()) {
+        return named.split(QDir::listSeparator(), Qt::SkipEmptyParts);
+    }
     QStringList folders;
+    const auto add = [&folders](const QString& folder) {
+        if (const auto clean = QDir::cleanPath(folder); !folders.contains(clean)) {
+            folders.push_back(clean);
+        }
+    };
     for (const auto& data :
          QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation)) {
-        folders.push_back(QDir{data}.filePath(QStringLiteral("melody/plugins")));
+        add(QDir{data}.filePath(QStringLiteral("melody/plugins")));
     }
+    // The official ones, installed beside the program: on macOS the data
+    // folders are not where it was installed.
+    add(QDir{QCoreApplication::applicationDirPath()}.filePath(
+        QStringLiteral("../share/melody/plugins")));
     return folders;
 }
 

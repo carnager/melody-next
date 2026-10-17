@@ -233,16 +233,22 @@ printf '%s\n' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/https:\/\/e
 void PluginsTest::pluginsAreFoundAndStayOffUntilEnabled() {
     QTemporaryDir data;
     QVERIFY(data.isValid());
+#ifndef __APPLE__
+    // The user's data folder first, where it is XDG's.
+    qunsetenv("MELODY_PLUGIN_PATH");
     qputenv("XDG_DATA_HOME", QFile::encodeName(data.path()));
-    // None of the system's, such as an installed Melody's official ones.
-    QTemporaryDir system;
-    QVERIFY(system.isValid());
-    qputenv("XDG_DATA_DIRS", QFile::encodeName(system.path()));
-    const auto base = data.filePath(QStringLiteral("melody/plugins"));
+    QCOMPARE(pluginFolders().value(0), data.filePath(QStringLiteral("melody/plugins")));
+#endif
+    // Named, those folders and no others -- none of the system's, such as an
+    // installed Melody's official ones. The first's of a name wins.
+    const auto base = data.filePath(QStringLiteral("mine"));
+    const auto other = data.filePath(QStringLiteral("other"));
+    qputenv("MELODY_PLUGIN_PATH", QFile::encodeName(base + QDir::listSeparator() + other));
+    QCOMPARE(pluginFolders(), (QStringList{base, other}));
     writeFile(base + QStringLiteral("/albumshare/plugin.json"),
               manifest(R"({"id": "share", "label": "Share album", "run": ["./share"]})"));
     writeFile(base + QStringLiteral("/broken/plugin.json"), "{");
-    QCOMPARE(pluginFolders().value(0), base);
+    writeFile(other + QStringLiteral("/albumshare/plugin.json"), "{");
 
     const auto found = discoverPlugins();
     QCOMPARE(found.size(), std::size_t{2U});

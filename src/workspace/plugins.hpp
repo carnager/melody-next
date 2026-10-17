@@ -47,7 +47,8 @@ struct Plugin {
                                                         const QString& folder, QString* problem);
 
 // The folders plugins are looked for in: melody/plugins under the user's
-// data folder first, then the system's ($XDG_DATA_DIRS).
+// data folder first, then the system's ($XDG_DATA_DIRS), then the one
+// installed beside the program. $MELODY_PLUGIN_PATH, set, names them instead.
 [[nodiscard]] QStringList pluginFolders();
 
 struct FoundPlugin {

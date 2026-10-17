@@ -1,6 +1,7 @@
 # Melody
 
 A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
+
 https://github.com/user-attachments/assets/b9a632b7-b762-4c15-878f-834c84856879
 
 ![A queue grouped by album, with the library beside it](Screenshots/queue.png)

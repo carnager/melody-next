@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "trackknife/discovery/upnp.hpp"
 #include "trackknife/output/upnp_audition.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -23,6 +24,8 @@ class Renderer final : public discovery::UpnpControl {
     std::string state{"STOPPED"}, uri, next, position{"0:00:00"};
     std::string sink{"http-get:*:audio/flac:*,http-get:*:audio/wav:*"};
     bool reject_next{false}, reject_seek_while_stopped{false}, ignore_play{false}, fail{false};
+    bool ignore_stop{false};
+    unsigned stuck_loads{0}, readiness_polls{0}, pending_polls{0}, reject_play{0};
     int volume{100};
     std::vector<std::string> actions;
     discovery::UpnpValues report;
@@ -47,6 +50,17 @@ class Renderer final : public discovery::UpnpControl {
         if (name == "SetAVTransportURI") {
             uri = args.at("CurrentURI");
             state = "STOPPED";
+            if (uri.empty()) {
+                state = "NO_MEDIA_PRESENT";
+                pending_polls = 0;
+            } else if (stuck_loads > 0) {
+                --stuck_loads;
+                state = "TRANSITIONING";
+                pending_polls = 0;
+            } else if (readiness_polls > 0) {
+                state = "TRANSITIONING";
+                pending_polls = readiness_polls;
+            }
         }
         if (name == "SetNextAVTransportURI") {
             if (reject_next) {
@@ -56,6 +70,15 @@ class Renderer final : public discovery::UpnpControl {
             next = args.at("NextURI");
         }
         if (name == "Play") {
+            require(state != "TRANSITIONING", "never send Play before transport readiness");
+            if (reject_play > 0) {
+                --reject_play;
+                state = "TRANSITIONING";
+                pending_polls = 2;
+                return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                                   .message = "Transition not available",
+                                                   .context = {{.key = "upnp", .value = "701"}}});
+            }
             if (!ignore_play) {
                 state = "PLAYING";
             }
@@ -63,7 +86,7 @@ class Renderer final : public discovery::UpnpControl {
         if (name == "Pause") {
             state = "PAUSED_PLAYBACK";
         }
-        if (name == "Stop") {
+        if (name == "Stop" && !ignore_stop) {
             state = "STOPPED";
         }
         if (name == "Seek") {
@@ -78,6 +101,9 @@ class Renderer final : public discovery::UpnpControl {
             volume = std::stoi(args.at("DesiredVolume"));
         }
         if (name == "GetTransportInfo") {
+            if (pending_polls > 0 && --pending_polls == 0) {
+                state = "STOPPED";
+            }
             return discovery::UpnpValues{{"CurrentTransportState", state}};
         }
         if (name == "GetPositionInfo") {
@@ -93,6 +119,181 @@ class Renderer final : public discovery::UpnpControl {
         return event;
     }
 };
+void kef_recovery_tests(discovery::UpnpRenderer device) {
+    device.manufacturer = "KEF";
+    device.model = "LS50 Wireless II";
+    const auto count = [](const Renderer& renderer, const std::string& name) {
+        return std::count(renderer.actions.begin(), renderer.actions.end(), name);
+    };
+    const auto make = [&device](const std::shared_ptr<Renderer>& renderer,
+                                std::chrono::steady_clock::time_point& now, unsigned& tickets) {
+        auto output = std::make_unique<output::UpnpAudition>(
+            device.udn, renderer,
+            [&tickets](const output::StreamRequest& source,
+                       const discovery::UpnpRenderer&) -> core::Result<output::RendererTrack> {
+                return output::RendererTrack{.source = source,
+                                             .url = "http://engine/stream?ticket=" +
+                                                    std::to_string(++tickets),
+                                             .metadata = "didl",
+                                             .duration_ms = 180000,
+                                             .expires = {}};
+            },
+            false, [&now] { return now; });
+        output->update(device);
+        return output;
+    };
+    {
+        auto renderer = std::make_shared<Renderer>();
+        renderer->readiness_polls = 2;
+        auto now = std::chrono::steady_clock::time_point{};
+        unsigned tickets = 0;
+        auto output = make(renderer, now, tickets);
+        require(output->load_selected_and_play("/track.flac", {}, {}).has_value(), "KEF load");
+        require(count(*renderer, "SetAVTransportURI") == 0, "Stop is confirmed before URI load");
+        output->poll();
+        require(count(*renderer, "Play") == 0, "URI readiness is confirmed before Play");
+        output->poll();
+        require(count(*renderer, "Play") == 0, "KEF loading may take several polls");
+        output->poll();
+        output->poll();
+        require(output->snapshot().state == audio::LocalAuditionState::playing, "KEF starts");
+        require(!output->queue_gapless_next_selected("/next.flac", {}, {}, 42),
+                "KEF declines gapless so the engine uses its normal queue progression");
+        require(output->clear_gapless_next().has_value(), "KEF clear is local");
+        output->update(device); // SSDP refresh must not restore gapless.
+        require(!output->queue_gapless_next_selected("/next.flac", {}, {}, 42),
+                "KEF rediscovery keeps compatibility mode");
+        require(count(*renderer, "SetNextAVTransportURI") == 0,
+                "KEF is never sent SetNext, including an empty URI");
+        require(output->seek_to_seconds(30).has_value(), "KEF seek while playing");
+        output->poll();
+        renderer->position = "0:00:31";
+        output->poll();
+        require(output->snapshot().position_sample == 31000,
+                "a seek's new generation still follows playback position");
+        renderer->state = "TRANSITIONING";
+        renderer->position = "0:00:00";
+        output->poll();
+        require(output->snapshot().position_sample == 31000,
+                "a transition's zero position does not erase the recovery point");
+        renderer->state = "PLAYING";
+        renderer->position = "0:00:32";
+        output->poll();
+        renderer->state = "STOPPED";
+        output->poll();
+        require(output->snapshot().state == audio::LocalAuditionState::ended,
+                "KEF normal completion still advances through the engine");
+    }
+    {
+        auto renderer = std::make_shared<Renderer>();
+        renderer->reject_play = 1;
+        auto now = std::chrono::steady_clock::time_point{};
+        unsigned tickets = 0;
+        auto output = make(renderer, now, tickets);
+        require(output->load_selected_and_play("/race.flac", {}, {}).has_value(),
+                "KEF readiness race");
+        output->poll();
+        output->poll(); // Reports STOPPED but Play races a transition (701).
+        output->poll();
+        require(count(*renderer, "Play") == 1 && output->wants_playing(),
+                "701 waits for readiness instead of retrying immediately or pausing");
+        output->poll();
+        output->poll();
+        require(count(*renderer, "Play") == 2 &&
+                    output->snapshot().state == audio::LocalAuditionState::playing,
+                "Play is retried after the renderer becomes ready");
+    }
+    {
+        auto renderer = std::make_shared<Renderer>();
+        renderer->stuck_loads = 1;
+        renderer->reject_seek_while_stopped = true;
+        auto now = std::chrono::steady_clock::time_point{};
+        unsigned tickets = 0;
+        auto output = make(renderer, now, tickets);
+        require(output->restore_paused("/track.flac", {}, {}, {}, 42000, {}).has_value(),
+                "KEF restore keeps position without sending a URI");
+        require(output->play().has_value(), "KEF resume starts a bounded attempt");
+        const auto instance = output->snapshot().playback_instance;
+        output->poll(); // Set original URI; it stays TRANSITIONING.
+        now += std::chrono::seconds{19};
+        output->poll();
+        require(tickets == 1, "no premature recovery");
+        now += std::chrono::seconds{1};
+        output->poll(); // Prepare fresh ticket and Stop.
+        require(tickets == 2 && count(*renderer, "Stop") == 2, "one recovery begins at 20 seconds");
+        output->poll(); // Confirm Stop and clear the URI.
+        require(renderer->uri.empty(), "clear only after Stop was confirmed");
+        output->poll(); // Confirm clear and load the fresh URI.
+        output->poll(); // Confirm load and Play, then restore the seek.
+        output->poll();
+        require(renderer->uri == "http://engine/stream?ticket=2" && renderer->position == "0:00:42",
+                "fresh ticket and saved position recovered");
+        require(output->snapshot().state == audio::LocalAuditionState::playing &&
+                    output->snapshot().raw_path == "/track.flac" &&
+                    output->snapshot().position_sample == 42000 &&
+                    output->snapshot().playback_instance == instance &&
+                    output->snapshot().chain_transitions == 0,
+                "recovery does not manufacture another occurrence or end-of-track");
+        renderer->position = "0:00:43";
+        output->poll();
+        now += std::chrono::seconds{40};
+        output->poll();
+        require(tickets == 2, "progress cancels the startup watchdog");
+        renderer->uri = "http://another-controller/music";
+        renderer->state = "TRANSITIONING";
+        now += std::chrono::seconds{40};
+        output->poll();
+        require(!output->wants_playing() && tickets == 2 && count(*renderer, "Stop") == 2,
+                "another controller is never stopped by automatic recovery");
+    }
+    {
+        auto renderer = std::make_shared<Renderer>();
+        renderer->state = "TRANSITIONING";
+        renderer->ignore_stop = true;
+        auto now = std::chrono::steady_clock::time_point{};
+        unsigned tickets = 0;
+        auto output = make(renderer, now, tickets);
+        require(output->load_selected_and_play("/track.flac", {}, {}).has_value(),
+                "wedged KEF load");
+        now += std::chrono::seconds{20};
+        output->poll();
+        now += std::chrono::seconds{20};
+        output->poll();
+        require(output->snapshot().state == audio::LocalAuditionState::paused &&
+                    output->snapshot().error && !output->wants_playing(),
+                "a fully wedged KEF ends with a visible error, not infinite buffering");
+        for (int i = 0; i < 10; ++i) {
+            now += std::chrono::seconds{20};
+            output->poll();
+        }
+        require(count(*renderer, "Stop") == 2 && count(*renderer, "Play") == 0 && tickets == 2 &&
+                    output->snapshot().state == audio::LocalAuditionState::paused &&
+                    output->snapshot().error,
+                "failed recovery never retries forever or clears its error");
+    }
+    {
+        auto renderer = std::make_shared<Renderer>();
+        renderer->stuck_loads = 1;
+        auto now = std::chrono::steady_clock::time_point{};
+        unsigned tickets = 0;
+        auto output = make(renderer, now, tickets);
+        require(output->load_selected_and_play("/old.flac", {}, {}).has_value(), "load to cancel");
+        require(output->pause().has_value(), "pause while waiting for Stop");
+        now += std::chrono::seconds{50};
+        output->poll();
+        require(tickets == 1 && count(*renderer, "Play") == 0, "pause cancels pending recovery");
+        require(output->play().has_value(), "resume the pending source");
+        output->poll();
+        require(output->load_selected_and_play("/new.flac", {}, {}).has_value(),
+                "replace a stalled track");
+        output->poll();
+        output->poll();
+        output->poll();
+        require(output->snapshot().state == audio::LocalAuditionState::playing &&
+                    output->snapshot().raw_path == "/new.flac",
+                "new track supersedes old recovery");
+    }
+}
 } // namespace
 int main() {
     const std::string description = R"(<root xmlns="urn:schemas-upnp-org:device-1-0"><device>
@@ -133,6 +334,7 @@ int main() {
             "control characters XML cannot carry are left out");
     require(parsed->manufacturer == "Sonos, Inc." && parsed->model == "Era 100",
             "description keeps renderer identity needed for compatibility limits");
+    kef_recovery_tests(*parsed);
     require(parsed->transport.control_url == "http://192.0.2.2/av/control" &&
                 parsed->transport.event_url == "http://192.0.2.2/events",
             "service URLs resolve against description location");

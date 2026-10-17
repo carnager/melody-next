@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <utility>
 
@@ -18,6 +19,13 @@ core::Error unsupported(std::string message) {
 std::string value(const Values& values, const std::string& key) {
     auto it = values.find(key);
     return it == values.end() ? std::string{} : it->second;
+}
+bool kef_renderer(const discovery::UpnpRenderer& renderer) {
+    return renderer.manufacturer == "KEF" && renderer.model == "LS50 Wireless II";
+}
+bool transition_unavailable(const core::Error& error) {
+    return std::ranges::any_of(
+        error.context, [](const auto& item) { return item.key == "upnp" && item.value == "701"; });
 }
 std::string time_text(std::int64_t ms) {
     const auto seconds = std::max<std::int64_t>(0, ms / 1000);
@@ -122,8 +130,9 @@ StreamRequest renderer_compatible_request(StreamRequest request,
     return request;
 }
 UpnpAudition::UpnpAudition(std::string udn, std::shared_ptr<discovery::UpnpControl> control,
-                           Prepare prepare, bool background)
-    : control_(std::move(control)), prepare_(std::move(prepare)), background_(background) {
+                           Prepare prepare, bool background, Clock clock)
+    : control_(std::move(control)), prepare_(std::move(prepare)), background_(background),
+      clock_(std::move(clock)) {
     renderer_.udn = std::move(udn);
     renderer_.name = renderer_.udn;
     renderer_.online = false;
@@ -182,7 +191,10 @@ void UpnpAudition::update(discovery::UpnpRenderer renderer) {
         [this, renderer = std::move(renderer)]() mutable {
             device_ = std::move(renderer);
             sink_.clear();
-            gapless_supported_ = true;
+            // ADR-0290: an experiment for the measured LS50 Wireless II,
+            // not an assumption about every speaker made by KEF.
+            kef_compatibility_ = kef_renderer(device_);
+            gapless_supported_ = !kef_compatibility_;
             return core::Result<void>{};
         },
         Topic::device));
@@ -230,6 +242,164 @@ core::Result<RendererTrack> UpnpAudition::prepare(StreamRequest request) {
     request.format = *format;
     return prepare_(request, device_);
 }
+bool UpnpAudition::current_generation(const std::uint64_t generation) const {
+    const std::lock_guard lock{state_mutex_};
+    return generation == generation_ && playing_requested_ && !stopping_;
+}
+void UpnpAudition::reset_kef_start() {
+    kef_stage_ = KefStage::idle;
+    kef_pending_.reset();
+    kef_deadline_.reset();
+}
+core::Result<void> UpnpAudition::begin_kef_load(RendererTrack track, const std::int64_t position_ms,
+                                                const std::uint64_t generation,
+                                                const bool recovering) {
+    if (!current_generation(generation)) {
+        return {};
+    }
+    kef_generation_ = generation;
+    kef_recovery_used_ = recovering;
+    kef_pending_ = std::move(track);
+    pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
+    saw_playing_ = false;
+    startup_rejected_ = false;
+    stopped_while_starting_ = 0;
+    kef_stage_ = KefStage::stopping;
+    kef_deadline_ = clock_() + std::chrono::seconds{20};
+    auto stopped = call("Stop");
+    if (!stopped) {
+        reset_kef_start();
+        failed(generation, stopped.error(), true);
+        return std::unexpected(stopped.error());
+    }
+    return {};
+}
+bool UpnpAudition::poll_kef(const Values& transport, const Values& position,
+                            const std::uint64_t generation) {
+    if (!kef_compatibility_) {
+        return false;
+    }
+    if (kef_generation_ != generation || !current_generation(generation)) {
+        reset_kef_start();
+        return true; // A pause, stop or newer request must stay in effect.
+    }
+    const auto status = value(transport, "CurrentTransportState");
+    const auto uri = value(position, "TrackURI");
+    // A control point taking over is not a stall to recover from.
+    if (current_ && !uri.empty() && uri != current_->url &&
+        (kef_stage_ == KefStage::idle || (kef_stage_ == KefStage::loading &&
+                                          (status == "PLAYING" || status == "PAUSED_PLAYBACK")))) {
+        reset_kef_start();
+        const std::lock_guard lock{state_mutex_};
+        if (generation == generation_) {
+            state_.state = State::paused;
+            playing_requested_ = false;
+        }
+        return true;
+    }
+    if (kef_stage_ == KefStage::idle && saw_playing_ &&
+        (status == "STOPPED" || status == "NO_MEDIA_PRESENT")) {
+        kef_deadline_.reset();
+        return false; // Normal end-of-track; the player advances its own queue.
+    }
+    if (status == "TRANSITIONING" && !kef_deadline_) {
+        kef_deadline_ = clock_() + std::chrono::seconds{20};
+    }
+    if (kef_stage_ == KefStage::idle && status == "PLAYING") {
+        const auto reported = renderer_time_ms(value(position, "RelTime"));
+        const std::lock_guard lock{state_mutex_};
+        if (reported && *reported > state_.position_sample) {
+            kef_deadline_.reset();
+        }
+    }
+    if (kef_deadline_ && clock_() >= *kef_deadline_) {
+        if (kef_recovery_used_) {
+            std::cerr << "melodyd: KEF transport recovery did not restore playback; paused\n";
+            reset_kef_start();
+            startup_rejected_ = true;
+            failed(generation,
+                   core::Error{.code = core::ErrorCode::backend,
+                               .message = "KEF did not start after one transport recovery; "
+                                          "playback paused without advancing the queue",
+                               .context = {}},
+                   true);
+            return true;
+        }
+        std::cerr << "melodyd: KEF transport stalled; attempting one stop/clear/reload\n";
+        const auto& source = kef_pending_ ? kef_pending_->source : current_->source;
+        auto track = prepare(source); // A fresh ticket; no queue or occurrence change.
+        if (!track) {
+            reset_kef_start();
+            failed(generation, track.error(), true);
+            return true;
+        }
+        std::int64_t resume = 0;
+        {
+            const std::lock_guard lock{state_mutex_};
+            resume = state_.position_sample;
+        }
+        static_cast<void>(begin_kef_load(std::move(*track), resume, generation, true));
+        return true;
+    }
+    if (kef_stage_ == KefStage::idle) {
+        if (!saw_playing_ && kef_deadline_ &&
+            (status == "STOPPED" || status == "NO_MEDIA_PRESENT")) {
+            return true; // The KEF's 20-second watchdog owns this startup.
+        }
+        return false;
+    }
+    if (kef_stage_ == KefStage::loading && status == "PLAYING" && current_ &&
+        uri == current_->url) {
+        kef_stage_ = KefStage::idle; // Some firmware starts the URI itself.
+        kef_deadline_.reset();
+        return false;
+    }
+    const bool ready = status == "STOPPED" || status == "NO_MEDIA_PRESENT" ||
+                       (kef_stage_ == KefStage::loading && status == "PAUSED_PLAYBACK");
+    if (!ready) {
+        return true; // Do not send Play while the KEF is TRANSITIONING.
+    }
+    core::Result<Values> action = Values{};
+    if (kef_stage_ == KefStage::stopping && kef_recovery_used_) {
+        action = call("SetAVTransportURI", {{"CurrentURI", ""}, {"CurrentURIMetaData", ""}});
+        kef_stage_ = KefStage::clearing;
+    } else if (kef_stage_ == KefStage::stopping || kef_stage_ == KefStage::clearing) {
+        action = call("SetAVTransportURI", {{"CurrentURI", kef_pending_->url},
+                                            {"CurrentURIMetaData", kef_pending_->metadata}});
+        if (action) {
+            current_ = std::move(kef_pending_);
+            kef_pending_.reset();
+            next_.reset();
+            deferred_.reset();
+            kef_stage_ = KefStage::loading;
+        }
+    } else if (kef_stage_ == KefStage::loading) {
+        if (current_ && !uri.empty() && uri != current_->url) {
+            reset_kef_start();
+            const std::lock_guard lock{state_mutex_};
+            if (generation == generation_) {
+                state_.state = State::paused;
+                playing_requested_ = false;
+            }
+            return true;
+        }
+        // The next poll has confirmed readiness after SetAVTransportURI.
+        auto started = start_now(generation);
+        if (!started && transition_unavailable(started.error()) && current_generation(generation)) {
+            return true; // Readiness raced Play; wait for a fresh poll, within the same deadline.
+        }
+        kef_stage_ = KefStage::idle;
+        if (!started) {
+            reset_kef_start();
+        }
+        return true;
+    }
+    if (!action) {
+        reset_kef_start();
+        failed(generation, action.error(), true);
+    }
+    return true;
+}
 bool UpnpAudition::expiring(const RendererTrack& track) const {
     // Ten minutes is a renderer's slowest re-fetch, with room to spare.
     return track.expires &&
@@ -267,6 +437,9 @@ core::Result<void> UpnpAudition::load_now(StreamRequest request, const bool play
         failed(generation, track.error(), true);
         return std::unexpected(track.error());
     }
+    if (kef_compatibility_ && playing) {
+        return begin_kef_load(std::move(*track), position_ms, generation, false);
+    }
     // Clear any continuation from a previous queue before replacing its URI.
     static_cast<void>(call("Stop"));
     if (gapless_supported_) {
@@ -300,7 +473,9 @@ core::Result<void> UpnpAudition::load_now(StreamRequest request, const bool play
 core::Result<void> UpnpAudition::start_now(const std::uint64_t generation) {
     auto started = call("Play", {{"Speed", "1"}});
     if (!started) {
-        failed(generation, started.error(), true);
+        if (!kef_compatibility_ || !transition_unavailable(started.error())) {
+            failed(generation, started.error(), true);
+        }
         return std::unexpected(started.error());
     }
     if (pending_seek_ms_) {
@@ -349,11 +524,11 @@ void UpnpAudition::poll() {
         const std::lock_guard lock{state_mutex_};
         generation = generation_;
     }
-    if (!current_ || !device_.online) {
+    if ((!current_ && !kef_pending_) || !device_.online) {
         return;
     }
     // A fetch that would fail soon is renewed where the renderer is.
-    if (expiring(*current_)) {
+    if (current_ && kef_stage_ == KefStage::idle && expiring(*current_)) {
         bool playing = false;
         std::int64_t position = 0;
         {
@@ -371,6 +546,9 @@ void UpnpAudition::poll() {
     const auto status = event_status.empty() && transport
                             ? value(*transport, "CurrentTransportState")
                             : event_status;
+    if (transport && position && poll_kef(*transport, *position, generation)) {
+        return;
+    }
     std::optional<core::Error> pending_seek_error;
     std::optional<std::int64_t> completed_seek;
     if (transport && position && status == "PLAYING" && pending_seek_ms_) {
@@ -436,7 +614,12 @@ void UpnpAudition::poll() {
         state_.position_sample = *completed_seek;
     } else if (auto position_ms = renderer_time_ms(value(*position, "RelTime"));
                !pending_seek_ms_ && position_ms) {
-        state_.position_sample = *position_ms;
+        // A wedged KEF may report 0:00 while TRANSITIONING. Keep the last
+        // useful position for recovery rather than restarting the song.
+        if (!kef_compatibility_ || status != "TRANSITIONING" ||
+            *position_ms >= state_.position_sample) {
+            state_.position_sample = *position_ms;
+        }
     }
     if (auto duration = renderer_time_ms(value(*position, "TrackDuration"));
         duration && *duration > 0) {
@@ -538,6 +721,7 @@ core::Result<void> UpnpAudition::restore_paused(std::string path, core::LocalSou
     // track goes to it when it is played here.
     return submit(
         [this, request = std::move(request), position_ms]() mutable {
+            reset_kef_start();
             current_.reset();
             next_.reset();
             deferred_ = std::move(request);
@@ -563,6 +747,9 @@ core::Result<void> UpnpAudition::queue_gapless_next_selected_segment(
 core::Result<void> UpnpAudition::queue_next(StreamRequest request, const std::uint64_t token) {
     {
         const std::lock_guard lock{state_mutex_};
+        if (kef_renderer(renderer_)) {
+            return std::unexpected(unsupported("KEF compatibility mode uses gapped track changes"));
+        }
         if (refused_next_ && refused_next_->first == request.raw_path &&
             refused_next_->second == request.segment) {
             return std::unexpected(unsupported("the renderer refused this continuation"));
@@ -586,6 +773,9 @@ core::Result<void> UpnpAudition::clear_gapless_next() {
     return submit([this] {
         const bool held = next_.has_value();
         next_.reset();
+        if (kef_compatibility_) {
+            return core::Result<void>{};
+        }
         auto cleared = call("SetNextAVTransportURI", {{"NextURI", ""}, {"NextURIMetaData", ""}});
         return cleared || !held ? core::Result<void>{} : std::unexpected(cleared.error());
     });
@@ -605,7 +795,7 @@ core::Result<void> UpnpAudition::play() {
         startup_rejected_ = false;
         // A restored track goes to the speaker now, or a stale ticket is
         // renewed, where it was left.
-        if (deferred_ || (current_ && expiring(*current_))) {
+        if (deferred_ || (current_ && (kef_compatibility_ || expiring(*current_)))) {
             auto source = deferred_ ? *deferred_ : current_->source;
             std::int64_t position = 0;
             {
@@ -627,8 +817,16 @@ core::Result<void> UpnpAudition::pause() {
     }
     return submit([this, generation]() -> core::Result<void> {
         if (!current_) {
+            if (kef_pending_) {
+                deferred_ = kef_pending_->source;
+            }
+            reset_kef_start();
             return {};
         }
+        if (kef_pending_) {
+            deferred_ = kef_pending_->source;
+        }
+        reset_kef_start();
         auto paused = call("Pause");
         if (!paused) {
             failed(generation, paused.error(), false);
@@ -649,6 +847,7 @@ core::Result<void> UpnpAudition::stop() {
     return submit(
         [this]() -> core::Result<void> {
             const bool sent = current_.has_value();
+            reset_kef_start();
             current_.reset();
             next_.reset();
             deferred_.reset();
@@ -675,6 +874,16 @@ core::Result<void> UpnpAudition::seek_to_seconds(double seconds) {
         playing = playing_requested_;
     }
     return submit([this, ms, generation, playing]() -> core::Result<void> {
+        if (kef_compatibility_) {
+            kef_generation_ = generation;
+            kef_recovery_used_ = false;
+            kef_deadline_ =
+                playing ? std::optional{clock_() + std::chrono::seconds{20}} : std::nullopt;
+        }
+        if (kef_compatibility_ && kef_stage_ != KefStage::idle) {
+            pending_seek_ms_ = ms;
+            return {};
+        }
         if (deferred_) {
             pending_seek_ms_ = ms;
             return {};

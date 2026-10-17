@@ -42,8 +42,10 @@ class UpnpAudition final : public audio::Audition {
   public:
     using Prepare = std::function<core::Result<RendererTrack>(const StreamRequest&,
                                                               const discovery::UpnpRenderer&)>;
-    UpnpAudition(std::string udn, std::shared_ptr<discovery::UpnpControl> control, Prepare prepare,
-                 bool background = true);
+    using Clock = std::function<std::chrono::steady_clock::time_point()>;
+    UpnpAudition(
+        std::string udn, std::shared_ptr<discovery::UpnpControl> control, Prepare prepare,
+        bool background = true, Clock clock = [] { return std::chrono::steady_clock::now(); });
     ~UpnpAudition() override;
     void update(discovery::UpnpRenderer renderer);
     [[nodiscard]] bool online() const;
@@ -115,9 +117,17 @@ class UpnpAudition final : public audio::Audition {
     void adopt_locked(const StreamRequest& source, std::optional<std::int64_t> duration_ms,
                       std::uint64_t token, bool transition);
     void run();
+    bool current_generation(std::uint64_t generation) const;
+    core::Result<void> begin_kef_load(RendererTrack track, std::int64_t position_ms,
+                                      std::uint64_t generation, bool recovering);
+    // Advances at most one transport stage per poll, on the output worker.
+    bool poll_kef(const discovery::UpnpValues& transport, const discovery::UpnpValues& position,
+                  std::uint64_t generation);
+    void reset_kef_start();
     std::shared_ptr<discovery::UpnpControl> control_;
     Prepare prepare_;
     const bool background_;
+    Clock clock_;
 
     // Held while a command or a poll talks to the renderer; only the worker
     // (or, without one, the caller) takes it. What it guards is the worker's.
@@ -137,6 +147,13 @@ class UpnpAudition final : public audio::Audition {
     bool saw_playing_{false};
     unsigned stopped_while_starting_{0};
     bool startup_rejected_{false};
+    enum class KefStage { idle, stopping, clearing, loading };
+    bool kef_compatibility_{false};
+    KefStage kef_stage_{KefStage::idle};
+    std::optional<RendererTrack> kef_pending_;
+    std::optional<std::chrono::steady_clock::time_point> kef_deadline_;
+    std::uint64_t kef_generation_{0};
+    bool kef_recovery_used_{false};
 
     // What the engine reads, and the queue; never held across the network.
     mutable std::mutex state_mutex_;

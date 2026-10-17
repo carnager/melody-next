@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "name": "Search the web",
+  "description": "Looks the album up on MusicBrainz, Discogs, Bandcamp, Rate Your Music or AllMusic, in the browser",
+  "actions": [
+    {"id": "musicbrainz", "label": "MusicBrainz", "run": ["./search", "musicbrainz"], "result": "none"},
+    {"id": "discogs", "label": "Discogs", "run": ["./search", "discogs"], "result": "none"},
+    {"id": "bandcamp", "label": "Bandcamp", "run": ["./search", "bandcamp"], "result": "none"},
+    {"id": "rateyourmusic", "label": "Rate Your Music", "run": ["./search", "rateyourmusic"], "result": "none"},
+    {"id": "allmusic", "label": "AllMusic", "run": ["./search", "allmusic"], "result": "none"}
+  ]
+}

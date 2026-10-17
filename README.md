@@ -53,7 +53,9 @@ A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 
 Melody can be extended with plugins: programs of your own, in any language,
 that add entries to the right-click menu -- "Share album" through your own
-server, say. Melody runs them and tells them in JSON what was chosen.
+server, say. Melody runs them and tells them in JSON what was chosen; one
+comes with it, a search of MusicBrainz, Discogs, Bandcamp, Rate Your Music
+and AllMusic.
 [Writing a plugin](docs/plugins.md) has all of it, and
 [`examples/plugins`](examples/plugins) a plugin to start from. Plugins live in
 repositories of their own; the GitHub topic

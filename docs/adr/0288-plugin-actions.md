@@ -20,9 +20,12 @@ Accepted, 2026-10-17.
 1. **A plugin is a program apart**, in any language, that Melody runs and
    talks to in JSON. Melody loads no code: no ABI to freeze, no language
    chosen for anyone, and a plugin that fails cannot take the window down.
-2. **Melody ships none.** A plugin is a folder,
-   `~/.local/share/melody/plugins/NAME/` (or under `$XDG_DATA_DIRS`), with a
-   `plugin.json` in it.
+2. **A plugin is a folder** with a `plugin.json` in it:
+   `~/.local/share/melody/plugins/NAME/`, or under `$XDG_DATA_DIRS`, where
+   one of the user's of the same name wins. Melody ships a few **official**
+   ones, under `/usr/share/melody/plugins/` -- only those that need nothing
+   of anyone's own, no server, no account: the web search (2026-10-17).
+   Everything else is written and published apart.
 3. **It runs only when enabled**, under Settings → Plugins. One put there is
    found but off: a folder appearing does not run anything.
 4. **Level 1, now: actions.** A plugin declares entries for the context menu

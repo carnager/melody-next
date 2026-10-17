@@ -281,6 +281,15 @@ void PluginsTest::theExamplePluginReads() {
             pluginInput(plugin->actions.front(), PluginEngine{}, albums, {"/srv/music"}));
     QVERIFY2(answered.succeeded, qPrintable(answered.text));
     QCOMPARE(answered.text, QStringLiteral("A/B"));
+
+    // The official web search reads too -- not run: it opens a browser.
+    const QString search = QStringLiteral(MELODY_SOURCE_DIR "/plugins/web-search");
+    QFile search_manifest{search + QStringLiteral("/plugin.json")};
+    QVERIFY(search_manifest.open(QIODevice::ReadOnly));
+    const auto sites = parsePluginManifest(search_manifest.readAll(), search, &problem);
+    QVERIFY2(sites.has_value(), qPrintable(problem));
+    QCOMPARE(sites->actions.size(), std::size_t{5U});
+    QCOMPARE(sites->actions.back().label, QStringLiteral("AllMusic"));
 }
 
 } // namespace trackknife::bench

@@ -135,6 +135,11 @@ set_target_properties(trackknife PROPERTIES OUTPUT_NAME melody)
 install(TARGETS trackknife RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/melody.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT app)
+# ADR-0288: the official plugins, found under the system's data folder and
+# off until enabled.
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/plugins/web-search
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/melody/plugins COMPONENT app
+        USE_SOURCE_PERMISSIONS)
 # ADR-0287: the vinyl bird, for the desktop entry and the window.
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/icons/melody.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps COMPONENT app)

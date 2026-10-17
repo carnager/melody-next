@@ -7,3 +7,7 @@ change it. How plugins work: [docs/plugins.md](../../docs/plugins.md).
 | Plugin | What |
 | --- | --- |
 | [`copy-folder`](copy-folder) | Copies an album's folder, within the music folder, to the clipboard. |
+
+The plugins that come with Melody, in [`plugins/`](../../plugins), are
+written the same way: [`web-search`](../../plugins/web-search) has five
+entries, and so a submenu of its own.

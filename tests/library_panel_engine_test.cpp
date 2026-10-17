@@ -694,7 +694,7 @@ void LibraryPanelEngineTest::theSearchDialogAsksTheEngineToo() {
 
     CatalogueSource catalogues{workspace, CatalogueSource::Role::remote};
     QVERIFY(catalogues.usingEngine());
-    SearchDialog dialog{catalogues, {}, {}};
+    SearchDialog dialog{catalogues, EngineKey::remote(), {}, {}};
     dialog.show();
 
     auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));

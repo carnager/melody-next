@@ -43,16 +43,9 @@ class SearchSession final : public QObject {
     using TabAccess = std::function<std::optional<TabSnapshot>()>;
     using TechnicalsSink = std::function<void(std::string, LocalTrackTechnicals)>;
 
-    // Another engine's library, offered as a scope of its own (ADR-0227,
-    // ADR-0234) under its name.
-    struct OtherLibrary {
-        EngineKey engine;
-        const CatalogueSource* catalogues{nullptr};
-        QString name;
-    };
     struct Scope {
         QString label;
-        // "local", "tab", or an engine's key.
+        // The library's engine's key, or "tab".
         QString value;
     };
     // A line of the results: a heading, or an artist, album or track found.
@@ -84,9 +77,10 @@ class SearchSession final : public QObject {
         std::vector<Preset> presets;
     };
 
-    SearchSession(const CatalogueSource& catalogues, TabAccess tab_access,
-                  TechnicalsSink technicals_sink, std::vector<OtherLibrary> others = {},
-                  QObject* parent = nullptr);
+    // ADR-0286: the one library, on the engine holding it, and the current
+    // tab.
+    SearchSession(const CatalogueSource& library, EngineKey library_engine, TabAccess tab_access,
+                  TechnicalsSink technicals_sink, QObject* parent = nullptr);
     ~SearchSession() override;
 
     // The draft.
@@ -97,9 +91,6 @@ class SearchSession final : public QObject {
     void setScope(int index);
     void setText(const QString& text);
     void setQueryMode(bool on);
-    // The library of the tab it was opened from: its engine's. "Current
-    // tab" is kept.
-    void followLibrary(const EngineKey& engine);
     // The current tab's model, whose edits rerun a current-tab search.
     void watchCurrentModel(QAbstractItemModel* model);
 
@@ -188,7 +179,7 @@ class SearchSession final : public QObject {
                        std::vector<LocalTrackRow> picked, LocalLibraryAction action);
 
     const CatalogueSource* catalogues_{nullptr};
-    std::vector<OtherLibrary> others_;
+    EngineKey library_engine_;
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
     std::vector<Scope> scopes_;

@@ -72,21 +72,16 @@ constexpr auto result_format = "$if2($getmulti(artist,0),Unknown artist) — "
 
 } // namespace
 
-SearchSession::SearchSession(const CatalogueSource& catalogues, TabAccess tab_access,
-                             TechnicalsSink technicals_sink, std::vector<OtherLibrary> others,
-                             QObject* parent)
-    : QObject(parent), catalogues_(&catalogues), others_(std::move(others)),
+SearchSession::SearchSession(const CatalogueSource& library, EngineKey library_engine,
+                             TabAccess tab_access, TechnicalsSink technicals_sink, QObject* parent)
+    : QObject(parent), catalogues_(&library), library_engine_(std::move(library_engine)),
       tab_access_(std::move(tab_access)), technicals_sink_(std::move(technicals_sink)),
       query_mode_(QSettings{}.value(QStringLiteral("search/query-mode"), false).toBool()),
       saved_status_(QStringLiteral("Loading saved searches…")) {
-    scopes_.push_back({QStringLiteral("This computer"), QStringLiteral("local")});
+    // ADR-0286: one library, searched on the engine holding it -- whichever
+    // tab Search is opened from -- and what is found opens in a tab of it.
+    scopes_.push_back({QStringLiteral("Library"), library_engine_.text()});
     scopes_.push_back({QStringLiteral("Current tab"), QStringLiteral("tab")});
-    // ADR-0227: another engine's library is searched there, and what is
-    // found opens in a tab of that engine.
-    for (const auto& other : others_) {
-        scopes_.push_back({other.name.isEmpty() ? QStringLiteral("Remote library") : other.name,
-                           other.engine.text()});
-    }
     debounce_.setSingleShot(true);
     debounce_.setInterval(200);
     connect(&debounce_, &QTimer::timeout, this, &SearchSession::startSearch);
@@ -129,16 +124,6 @@ void SearchSession::setQueryMode(const bool on) {
     scheduleSearch();
 }
 
-void SearchSession::followLibrary(const EngineKey& engine) {
-    if (!databaseScope()) {
-        return;
-    }
-    const auto wanted = std::ranges::find(scopes_, engine.text(), &Scope::value);
-    if (wanted != scopes_.end()) {
-        setScope(static_cast<int>(wanted - scopes_.begin()));
-    }
-}
-
 void SearchSession::watchCurrentModel(QAbstractItemModel* model) {
     for (const auto& connection : current_model_connections_)
         disconnect(connection);
@@ -179,9 +164,7 @@ EngineKey SearchSession::scopeEngine() const {
 }
 
 std::shared_ptr<engine::Catalogue> SearchSession::scopeCatalogue() const {
-    const auto engine = scopeEngine();
-    const auto other = std::ranges::find(others_, engine, &OtherLibrary::engine);
-    return (other != others_.end() ? other->catalogues : catalogues_)->openDeferred();
+    return catalogues_->openDeferred();
 }
 
 QStringList SearchSession::savedNames() const {

@@ -847,6 +847,9 @@ class Workspace final : public QObject {
     // ADR-0286: the engine holding the library when it is not this
     // computer's; nothing otherwise.
     [[nodiscard]] const EngineLink* libraryElsewhere() const;
+    // The engine holding the library, this computer's or another: what
+    // Search and the dynamic playlists search.
+    [[nodiscard]] EngineKey libraryKey() const;
     // Files this computer's engine moved: those now in the library's
     // folders, through its engine's mount, are taken into its library.
     void libraryTakes(const std::vector<std::string>& moved_here);

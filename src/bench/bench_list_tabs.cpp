@@ -516,11 +516,19 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
 }
 
 void BenchMainWindow::openSearchDialog() {
-    // Opened from a tab of another engine, it searches that engine's library.
-    const auto* current = currentListTab();
-    const auto from = current != nullptr ? EngineKey::of(current->document) : EngineKey::local();
+    // ADR-0286: the library, on the engine holding it, whichever tab it is
+    // opened from. One open on a library since moved is made anew.
+    const auto library = workspace_.libraryKey();
+    const auto* catalogues = catalogueOf(library);
+    if (catalogues == nullptr) {
+        showMessage(QStringLiteral("The library's engine is not connected"), 4'000);
+        return;
+    }
+    if (search_dialog_ != nullptr && search_dialog_->libraryEngine() != library) {
+        search_dialog_->close();
+        search_dialog_ = nullptr;
+    }
     if (search_dialog_ != nullptr) {
-        search_dialog_->followLibrary(from);
         search_dialog_->show();
         search_dialog_->raise();
         search_dialog_->activateWindow();
@@ -531,7 +539,7 @@ void BenchMainWindow::openSearchDialog() {
     // snapshots the current local tab's rows and reports on-demand
     // technicals back onto every tab holding the probed file.
     search_dialog_ = new SearchDialog(
-        *localCatalogue(),
+        *catalogues, library,
         [this]() -> std::optional<SearchDialog::TabSnapshot> {
             auto* tab = currentListTab();
             if (tab == nullptr) {
@@ -545,18 +553,7 @@ void BenchMainWindow::openSearchDialog() {
                 tab->model->applyTechnicals(raw_path, technicals);
             }
         },
-        this,
-        [this] {
-            std::vector<SearchDialog::OtherLibrary> others;
-            for (const auto& engine : engines_) {
-                if (!engine->key.isLocal() && engine->catalogue != nullptr) {
-                    others.push_back({.engine = engine->key,
-                                      .catalogues = engine->catalogue.get(),
-                                      .name = engine->catalogue->name()});
-                }
-            }
-            return others;
-        }());
+        this);
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
     const auto watch_tab = [this, dialog = search_dialog_] {
         if (!dialog)
@@ -571,7 +568,6 @@ void BenchMainWindow::openSearchDialog() {
                    const LocalLibraryAction action, const EngineKey& engine) {
                 workspace_.placeFoundRows(name, std::move(rows), action, engine);
             });
-    search_dialog_->followLibrary(from);
     search_dialog_->show();
     search_dialog_->focusInput();
 }

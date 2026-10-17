@@ -30,12 +30,11 @@
 
 namespace trackknife::bench {
 
-SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
-                           TechnicalsSink technicals_sink, QWidget* parent,
-                           std::vector<OtherLibrary> others)
-    : QDialog(parent),
-      session_(new SearchSession(catalogues, std::move(tab_access), std::move(technicals_sink),
-                                 std::move(others), this)) {
+SearchDialog::SearchDialog(const CatalogueSource& library, EngineKey library_engine,
+                           TabAccess tab_access, TechnicalsSink technicals_sink, QWidget* parent)
+    : QDialog(parent), library_engine_(library_engine),
+      session_(new SearchSession(library, std::move(library_engine), std::move(tab_access),
+                                 std::move(technicals_sink), this)) {
     setWindowTitle(QStringLiteral("Search"));
     setObjectName(QStringLiteral("bench-search-dialog"));
     setModal(false);

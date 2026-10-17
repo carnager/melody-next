@@ -671,6 +671,8 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
                                       music + QStringLiteral("/art.flac")));
 
+    // ADR-0286: the remote holds the library.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
@@ -684,14 +686,22 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     auto* remote_tab = window.remoteQueueTab();
     QVERIFY(remote_tab != nullptr);
 
-    // Opened from a remote tab, it starts on the remote's library.
-    window.tabs_->setCurrentWidget(remote_tab->view);
+    // Opened from a tab of this computer's, it reads the library all the
+    // same: the one library, on the engine holding it.
+    if (!window.list_tabs_.empty()) {
+        for (auto& candidate : window.list_tabs_) {
+            if (EngineKey::of(candidate->document).isLocal()) {
+                window.tabs_->setCurrentWidget(candidate->view);
+                break;
+            }
+        }
+    }
     window.showDynamicPlaylists();
     auto* dialog = window.findChild<DynamicPlaylistDialog*>();
     QVERIFY(dialog != nullptr);
     auto* library = dialog->findChild<QComboBox*>(QStringLiteral("dynamic-library"));
     QVERIFY(library != nullptr);
-    QCOMPARE(library->count(), 2);
+    QCOMPARE(library->count(), 1);
     QVERIFY(!dialog->engine().isLocal());
     dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-query"))->setText(QStringLiteral("ALL"));
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
@@ -706,14 +716,8 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     QVERIFY(!EngineKey::of(window.list_tabs_.back()->document).isLocal());
     QCOMPARE(window.list_tabs_.back()->model->rows().front().raw_path, remote_path);
 
-    // This computer's library, which has no such track.
-    library->setCurrentIndex(library->findData(false));
-    QVERIFY(dialog->engine().isLocal());
-    dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
-    QTRY_VERIFY(dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->isEnabled());
-    QVERIFY(std::ranges::none_of(
-        dialog->tracks(), [&remote_path](const auto& row) { return row.raw_path == remote_path; }));
     dialog->close();
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
 void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
@@ -1006,11 +1010,10 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
 
-    // The search dialog searches the remote's library too, as you type, with
-    // artists, albums and tracks apart -- and what it finds goes to a remote
-    // tab.
-    // Opened from a remote tab, it searches the remote's library, ready to
-    // type into.
+    // ADR-0286: the search dialog searches the library on the engine holding
+    // it -- here the remote -- as you type, with artists, albums and tracks
+    // apart, and what it finds goes to a tab of it.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
     window.tabs_->setCurrentWidget(tab->view);
     window.openSearchDialog();
     auto* dialog = window.search_dialog_.data();
@@ -1022,11 +1025,14 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-search-status"));
     QVERIFY(scope && query_mode && input && results && status);
     QCOMPARE(scope->currentData().toString(), window.remoteEngine()->key.text());
+    // The library and the current tab, nothing else.
+    QCOMPARE(scope->count(), 2);
+    QCOMPARE(scope->itemText(0), QStringLiteral("Library"));
     QTRY_COMPARE(dialog->focusWidget(), static_cast<QWidget*>(input));
-    // From a local tab, this computer's; and back again, the remote's.
+    // Opened from a tab of this computer's files: still the library's.
     window.tabs_->setCurrentWidget(local->view);
     window.openSearchDialog();
-    QCOMPARE(scope->currentData().toString(), QStringLiteral("local"));
+    QCOMPARE(scope->currentData().toString(), window.remoteEngine()->key.text());
     window.tabs_->setCurrentWidget(tab->view);
     window.openSearchDialog();
     QCOMPARE(scope->currentData().toString(), window.remoteEngine()->key.text());
@@ -1055,6 +1061,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QTRY_COMPARE(tab->model->rowCount(), before + 1);
     QCOMPARE(tab->model->rows().back().title, std::string{"Fixture Tone"});
     dialog->close();
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 
     // Files opened from this computer go into a local list, never the remote
     // tab that happens to be on screen.
@@ -1987,7 +1994,7 @@ void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
     };
     {
         CatalogueSource catalogues{database};
-        SearchDialog dialog{catalogues, access, {}};
+        SearchDialog dialog{catalogues, EngineKey::local(), access, {}};
         dialog.show();
         auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
         auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
@@ -2037,7 +2044,7 @@ void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
     // A new dialog reruns the saved definition against the current tab, not old hits.
     current.push_back(second);
     CatalogueSource reopened_catalogues{database};
-    SearchDialog reopened{reopened_catalogues, access, {}};
+    SearchDialog reopened{reopened_catalogues, EngineKey::local(), access, {}};
     reopened.show();
     auto* saved = reopened.findChild<QComboBox*>(QStringLiteral("bench-search-saved"));
     auto* input = reopened.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
@@ -2241,7 +2248,7 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
 
     std::vector<std::pair<std::string, LocalTrackTechnicals>> reported;
     CatalogueSource catalogues{std::filesystem::path{}};
-    SearchDialog dialog{catalogues,
+    SearchDialog dialog{catalogues, EngineKey::local(),
                         [&row]() -> std::optional<SearchDialog::TabSnapshot> {
                             return SearchDialog::TabSnapshot{QStringLiteral("Fixture"), {row}};
                         },
@@ -2289,7 +2296,7 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
 // translator's message, and opens results through the window callback.
 void BenchMainWindowTest::searchPresetsAreGroupedAndPrompt() {
     CatalogueSource catalogues{std::filesystem::path{}};
-    SearchDialog dialog{catalogues, {}, {}};
+    SearchDialog dialog{catalogues, EngineKey::local(), {}, {}};
     dialog.show();
     auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
     auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));

@@ -46,18 +46,16 @@ class SearchDialog final : public QDialog {
     using TabSnapshot = SearchSession::TabSnapshot;
     using TabAccess = SearchSession::TabAccess;
     using TechnicalsSink = SearchSession::TechnicalsSink;
-    using OtherLibrary = SearchSession::OtherLibrary;
 
-    SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
-                 TechnicalsSink technicals_sink, QWidget* parent = nullptr,
-                 std::vector<OtherLibrary> others = {});
+    // ADR-0286: the library, on the engine holding it.
+    SearchDialog(const CatalogueSource& library, EngineKey library_engine, TabAccess tab_access,
+                 TechnicalsSink technicals_sink, QWidget* parent = nullptr);
     ~SearchDialog() override;
 
     void watchCurrentModel(QAbstractItemModel* model) { session_->watchCurrentModel(model); }
     void focusInput();
-    // The library of the tab it was opened from: its engine's. "Current tab"
-    // is kept.
-    void followLibrary(const EngineKey& engine) { session_->followLibrary(engine); }
+    // The engine whose library it searches.
+    [[nodiscard]] EngineKey libraryEngine() const { return library_engine_; }
 
   protected:
     void showEvent(QShowEvent* event) override;
@@ -70,6 +68,7 @@ class SearchDialog final : public QDialog {
                        const trackknife::ui::EngineKey& engine);
 
   private:
+    EngineKey library_engine_;
     void populatePresets(QMenu* menu);
     void usePreset(int preset);
     void sync();

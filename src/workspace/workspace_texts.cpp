@@ -48,6 +48,11 @@ const Workspace::EngineLink* Workspace::libraryElsewhere() const {
     return nullptr;
 }
 
+EngineKey Workspace::libraryKey() const {
+    const auto* library = libraryElsewhere();
+    return library != nullptr ? library->key : EngineKey::local();
+}
+
 QString Workspace::emptyListTitle(const EngineKey& engine) const {
     return !engine.isLocal() ? tr("Nothing from %1 here yet").arg(engineName(engine))
                              : tr("This list is empty");

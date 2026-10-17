@@ -1451,7 +1451,7 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     QVERIFY2(search_catalogues_engine.start(std::filesystem::path{database}.parent_path()),
              search_catalogues_engine.log().constData());
     CatalogueSource search_catalogues{database};
-    SearchDialog dialog{search_catalogues, {}, {}};
+    SearchDialog dialog{search_catalogues, EngineKey::local(), {}, {}};
     dialog.show();
     auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
     auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));

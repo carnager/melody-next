@@ -636,7 +636,7 @@ void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {
     source.source_revision = played.source_revision;
     QVERIFY(repository->record_local_listen(source, core::StableId::random(), 1000));
     CatalogueSource catalogues{database};
-    SearchDialog dialog(catalogues,
+    SearchDialog dialog(catalogues, EngineKey::local(),
                         [&]() -> std::optional<SearchDialog::TabSnapshot> {
                             return SearchDialog::TabSnapshot{QStringLiteral("Current"),
                                                              {played, unplayed, played}};

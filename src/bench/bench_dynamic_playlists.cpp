@@ -18,15 +18,11 @@
 
 namespace trackknife::bench {
 void BenchMainWindow::showDynamicPlaylists() {
-    // As Search does: opened from a remote tab, it starts on the remote's
-    // library; the dropdown switches.
-    const auto* current = currentListTab();
-    const auto from = current != nullptr && catalogueOf(EngineKey::of(current->document)) != nullptr
-                          ? EngineKey::of(current->document)
-                          : EngineKey::local();
+    // ADR-0286: as Search, the library, on the engine holding it.
+    const auto from = workspace_.libraryKey();
     if (auto* existing = findChild<DynamicPlaylistDialog*>()) {
-        if (existing->authorityValid()) {
-            existing->followLibrary(from);
+        // One open on a library since moved is made anew.
+        if (existing->authorityValid() && existing->engine() == from) {
             existing->show();
             existing->raise();
             existing->activateWindow();
@@ -65,12 +61,11 @@ void BenchMainWindow::showDynamicPlaylists() {
                 }));
         };
     std::vector<DynamicPlaylistDialog::Library> libraries;
-    for (const auto& engine : engines_) {
-        if (engine->catalogue != nullptr) {
-            libraries.push_back({engine->key, engine->key.isLocal()
-                                                  ? QStringLiteral("This computer")
-                                                  : engine->catalogue->name()});
-        }
+    if (const auto* holder = workspace_.link(from); holder != nullptr && holder->catalogue) {
+        libraries.push_back(
+            {from, from.isLocal()
+                       ? QStringLiteral("Library")
+                       : QStringLiteral("Library on %1").arg(holder->catalogue->name())});
     }
     auto* dialog =
         new DynamicPlaylistDialog(profile, std::move(libraries), std::move(search), this);

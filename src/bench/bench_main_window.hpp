@@ -445,6 +445,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
     EnginePlayback::State plugin_panel_state_;
     void buildPluginPanels();
+    // ADR-0292: the side panels open on a side as tabs of one group --
+    // after the window opens with those open before, and after the
+    // plugins' are made again.
+    void tabOpenSidePanels();
     void refreshPluginPanels(const EnginePlayback::State& state);
     void askPluginPanel(PluginPanelDock& slot);
     void showFolderContextMenu(const QPoint& position);

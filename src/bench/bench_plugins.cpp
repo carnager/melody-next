@@ -19,6 +19,7 @@
 #include <QPointer>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTimer>
 
 #include <memory>
 
@@ -175,12 +176,18 @@ void BenchMainWindow::addLibraryPluginActions(LocalLibraryPanel* panel, const En
 }
 
 void BenchMainWindow::buildPluginPanels() {
+    // Open before, open after: a panel made again is not one closed.
+    QSet<QString> open;
     for (auto& slot : plugin_panels_) {
+        if (slot->dock->isVisible()) {
+            open.insert(slot->dock->objectName());
+        }
         // Stopped first, so nothing answers into what goes.
         auto* run = slot->run.data();
         slot->run = nullptr;
         delete run;
-        removeDockWidget(slot->dock);
+        // Deleted, not removed first: removing closes it, and a panel
+        // closed says so in the settings.
         delete slot->dock;
     }
     plugin_panels_.clear();
@@ -229,13 +236,32 @@ void BenchMainWindow::buildPluginPanels() {
             if (menu != nullptr) {
                 menu->insertAction(after_lyrics, toggle);
             }
-            dock->setVisible(QSettings{}
+            dock->setVisible(open.contains(dock->objectName()) ||
+                             QSettings{}
                                  .value(QStringLiteral("plugin-panels/%1/visible").arg(id), false)
                                  .toBool());
             plugin_panels_.push_back(std::move(slot));
         }
     }
     refreshPluginPanels(plugin_panel_state_);
+    QTimer::singleShot(0, this, &BenchMainWindow::tabOpenSidePanels);
+}
+
+void BenchMainWindow::tabOpenSidePanels() {
+    for (const auto area : {Qt::LeftDockWidgetArea, Qt::RightDockWidgetArea}) {
+        QDockWidget* first = nullptr;
+        for (auto* dock : findChildren<QDockWidget*>()) {
+            if (dynamic_cast<AnimatedPanelDock*>(dock) == nullptr || !dock->isVisible() ||
+                dockWidgetArea(dock) != area) {
+                continue;
+            }
+            if (first == nullptr) {
+                first = dock;
+            } else if (!tabifiedDockWidgets(first).contains(dock)) {
+                tabifyDockWidget(first, dock);
+            }
+        }
+    }
 }
 
 void BenchMainWindow::refreshPluginPanels(const EnginePlayback::State& state) {

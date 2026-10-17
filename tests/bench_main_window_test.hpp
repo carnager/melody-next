@@ -459,6 +459,7 @@ class BenchMainWindowTest final : public QObject {
     void filesDroppedOnTheTabBarMakeATab();
     void theSourcesKeepTheirWidth();
     void sidePanelsShareTheirRoomAsTabs();
+    void sidePanelsOpenBeforeAreTabsAgain();
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void listViewsShowExpressionsGroupAndSort();
     void listViewEditorChecksAndSavesACopy();

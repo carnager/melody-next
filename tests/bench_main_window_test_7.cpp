@@ -631,6 +631,50 @@ void BenchMainWindowTest::sidePanelsShareTheirRoomAsTabs() {
     up_next->setVisible(false);
 }
 
+// ADR-0292: panels open before stay tabs when the window opens again, and
+// a plugin's made again when Settings are saved joins them.
+void BenchMainWindowTest::sidePanelsOpenBeforeAreTabsAgain() {
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/side");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Side", "panels": [{"id": "p",
+                          "label": "Side", "run": ["true"]}]})");
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("side")), true);
+    QSettings{}.setValue(QStringLiteral("lyrics/visible"), true);
+    QSettings{}.setValue(QStringLiteral("up-next/visible"), true);
+    QSettings{}.setValue(QStringLiteral("plugin-panels/side-p/visible"), true);
+    {
+        BenchMainWindow window;
+        window.resize(1200, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto* lyrics = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
+        auto* up_next = window.findChild<QDockWidget*>(QStringLiteral("bench-up-next"));
+        QVERIFY(lyrics != nullptr && up_next != nullptr);
+        const auto side = [&window] {
+            return window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-side-p"));
+        };
+        QVERIFY(side() != nullptr);
+        const auto tabbed = [&window, lyrics](QDockWidget* other) {
+            return window.tabifiedDockWidgets(lyrics).contains(other) ||
+                   window.tabifiedDockWidgets(other).contains(lyrics);
+        };
+        QTRY_VERIFY(lyrics->isVisible() && up_next->isVisible() && side()->isVisible());
+        QTRY_VERIFY(tabbed(up_next) && tabbed(side()));
+        // Made again, as when Settings are saved: a tab still.
+        window.buildPluginPanels();
+        QTRY_VERIFY(side() != nullptr && side()->isVisible() && tabbed(side()));
+    }
+    for (const auto* key : {"lyrics/visible", "up-next/visible", "plugin-panels"}) {
+        QSettings{}.remove(QString::fromLatin1(key));
+    }
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 // ADR-0292: one layout -- the sources left, the lists right -- nothing to
 // edit or rearrange, and the divider kept where it was left.
 void BenchMainWindowTest::theSourcesKeepTheirWidth() {

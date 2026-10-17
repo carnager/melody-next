@@ -217,12 +217,10 @@ struct Ran final {
                .output = QString::fromUtf8(process.readAllStandardOutput()).trimmed()};
 }
 
+#ifndef __APPLE__
 // melodyd.socket is installed and enabled for this user: the package enables
-// it for everyone; one disabled or masked is left alone.
+// it for everyone; one disabled or masked is left alone. Asked on Linux only.
 [[nodiscard]] bool socket_unit_enabled() {
-#ifdef __APPLE__
-    return false;
-#else
     // Tests never touch the systemd of whoever runs them.
     if (!qEnvironmentVariableIsEmpty("MELODY_NO_SYSTEMD")) {
         return false;
@@ -232,8 +230,8 @@ struct Ran final {
     return enabled.status == 0 && (enabled.output == QStringLiteral("enabled") ||
                                    enabled.output == QStringLiteral("static") ||
                                    enabled.output == QStringLiteral("enabled-runtime"));
-#endif
 }
+#endif
 
 [[nodiscard]] bool wait_until_gone(const std::vector<pid_t>& holders,
                                    const std::chrono::milliseconds limit) {

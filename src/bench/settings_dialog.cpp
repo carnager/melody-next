@@ -929,6 +929,60 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         about->setForegroundRole(QPalette::PlaceholderText);
         about->setTextInteractionFlags(Qt::TextSelectableByMouse);
         box_layout->addWidget(about);
+        // What it asks to be set, saved with the rest; a secret apart.
+        if (plugin.plugin && !plugin.plugin->settings.empty()) {
+            auto* form = new QFormLayout;
+            for (const auto& setting : plugin.plugin->settings) {
+                const auto current = pluginSettingValue(plugin.name, setting);
+                const auto name =
+                    QStringLiteral("bench-settings-plugin-%1-%2").arg(plugin.name, setting.key);
+                const auto setting_key = setting.kind == PluginSetting::Kind::secret
+                                             ? pluginSecretKey(plugin.name, setting.key)
+                                             : pluginSettingKey(plugin.name, setting.key);
+                QWidget* field = nullptr;
+                switch (setting.kind) {
+                case PluginSetting::Kind::text:
+                case PluginSetting::Kind::secret: {
+                    auto* edit = new QLineEdit(current.toString(), box);
+                    if (setting.kind == PluginSetting::Kind::secret) {
+                        edit->setEchoMode(QLineEdit::Password);
+                    } else {
+                        edit->setPlaceholderText(setting.fallback.toString());
+                    }
+                    connect(edit, &QLineEdit::textEdited, this,
+                            [this, setting_key](const QString& value) {
+                                session_->setValue(setting_key, value);
+                            });
+                    field = edit;
+                    break;
+                }
+                case PluginSetting::Kind::toggle: {
+                    auto* check = new QCheckBox(box);
+                    check->setChecked(current.toBool());
+                    connect(check, &QCheckBox::toggled, this, [this, setting_key](const bool on) {
+                        session_->setValue(setting_key, on);
+                    });
+                    field = check;
+                    break;
+                }
+                case PluginSetting::Kind::choice: {
+                    auto* combo = new QComboBox(box);
+                    combo->addItems(setting.choices);
+                    combo->setCurrentText(current.toString());
+                    connect(combo, &QComboBox::currentTextChanged, this,
+                            [this, setting_key](const QString& value) {
+                                session_->setValue(setting_key, value);
+                            });
+                    field = combo;
+                    break;
+                }
+                }
+                field->setObjectName(name);
+                field->setToolTip(setting.help);
+                form->addRow(setting.label + QLatin1Char(':'), field);
+            }
+            box_layout->addLayout(form);
+        }
         plugins_layout->addWidget(box);
     }
     const auto plugin_home = pluginFolders().value(0);

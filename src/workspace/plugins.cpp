@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
@@ -73,6 +74,85 @@ constexpr int input_schema = 1;
     return common;
 }
 
+// Each setting read with its every key, or why one cannot be.
+[[nodiscard]] std::optional<QString> readSettings(const QJsonArray& listed,
+                                                  std::vector<PluginSetting>& settings) {
+    static const QStringList setting_keys{QStringLiteral("key"),     QStringLiteral("label"),
+                                          QStringLiteral("kind"),    QStringLiteral("default"),
+                                          QStringLiteral("choices"), QStringLiteral("help")};
+    static const QRegularExpression key_shape{QStringLiteral("^[a-z0-9][a-z0-9_-]*$")};
+    for (const auto& value : listed) {
+        if (!value.isObject()) {
+            return QStringLiteral("a setting is not an object");
+        }
+        const auto entry = value.toObject();
+        for (const auto& key : entry.keys()) {
+            if (!setting_keys.contains(key)) {
+                return QStringLiteral("a setting has an unknown key \"%1\"").arg(key);
+            }
+        }
+        PluginSetting setting;
+        setting.key = entry.value(QStringLiteral("key")).toString();
+        setting.label = entry.value(QStringLiteral("label")).toString().trimmed();
+        setting.help = entry.value(QStringLiteral("help")).toString().trimmed();
+        if (!key_shape.match(setting.key).hasMatch() || setting.label.isEmpty()) {
+            return QStringLiteral("a setting needs a key of a-z, 0-9, - and _, and a label");
+        }
+        if (std::ranges::any_of(settings,
+                                [&](const auto& known) { return known.key == setting.key; })) {
+            return QStringLiteral("setting \"%1\" is there twice").arg(setting.key);
+        }
+        const auto kind = entry.value(QStringLiteral("kind")).toString(QStringLiteral("text"));
+        const auto given = entry.value(QStringLiteral("default"));
+        const bool has_default = entry.contains(QStringLiteral("default"));
+        const auto wrong = [&setting](const char* why) {
+            return QStringLiteral("setting \"%1\": %2").arg(setting.key, QLatin1String(why));
+        };
+        if (kind == QStringLiteral("text")) {
+            setting.kind = PluginSetting::Kind::text;
+            if (has_default && !given.isString()) {
+                return wrong("its default is text");
+            }
+            setting.fallback = given.toString();
+        } else if (kind == QStringLiteral("secret")) {
+            setting.kind = PluginSetting::Kind::secret;
+            if (has_default) {
+                return wrong("a secret has no default");
+            }
+            setting.fallback = QString{};
+        } else if (kind == QStringLiteral("toggle")) {
+            setting.kind = PluginSetting::Kind::toggle;
+            if (has_default && !given.isBool()) {
+                return wrong("its default is true or false");
+            }
+            setting.fallback = given.toBool(false);
+        } else if (kind == QStringLiteral("choice")) {
+            setting.kind = PluginSetting::Kind::choice;
+            for (const auto& choice : entry.value(QStringLiteral("choices")).toArray()) {
+                if (!choice.isString() || choice.toString().isEmpty()) {
+                    return wrong("its choices are text");
+                }
+                setting.choices.push_back(choice.toString());
+            }
+            if (setting.choices.isEmpty()) {
+                return wrong("a choice needs its choices");
+            }
+            if (has_default && !setting.choices.contains(given.toString())) {
+                return wrong("its default is one of its choices");
+            }
+            setting.fallback = has_default ? given.toString() : setting.choices.front();
+        } else {
+            return wrong("\"kind\" is text, secret, toggle or choice");
+        }
+        if (setting.kind != PluginSetting::Kind::choice &&
+            entry.contains(QStringLiteral("choices"))) {
+            return wrong("only a choice has choices");
+        }
+        settings.push_back(std::move(setting));
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString& folder,
@@ -91,7 +171,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     }
     const auto object = document.object();
     static const QStringList known{QStringLiteral("schema"), QStringLiteral("name"),
-                                   QStringLiteral("description"), QStringLiteral("actions")};
+                                   QStringLiteral("description"), QStringLiteral("actions"),
+                                   QStringLiteral("settings")};
     for (const auto& key : object.keys()) {
         if (!known.contains(key)) {
             return fail(QStringLiteral("plugin.json has an unknown key \"%1\"").arg(key));
@@ -177,6 +258,15 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             action.timeout_seconds = seconds;
         }
         plugin.actions.push_back(std::move(action));
+    }
+    if (object.contains(QStringLiteral("settings"))) {
+        const auto settings = object.value(QStringLiteral("settings"));
+        if (!settings.isArray()) {
+            return fail(QStringLiteral("\"settings\" is a list"));
+        }
+        if (auto why = readSettings(settings.toArray(), plugin.settings)) {
+            return fail(*why);
+        }
     }
     return plugin;
 }
@@ -291,6 +381,87 @@ std::vector<Plugin> enabledPlugins() {
     return plugins;
 }
 
+QString pluginSettingKey(const QString& plugin, const QString& key) {
+    return QStringLiteral("plugins/settings/%1/%2").arg(plugin, key);
+}
+
+QString pluginSecretKey(const QString& plugin, const QString& key) {
+    return QStringLiteral("plugins/secrets/%1/%2").arg(plugin, key);
+}
+
+bool isPluginSecretKey(const QString& settings_key) {
+    return settings_key.startsWith(QStringLiteral("plugins/secrets/"));
+}
+
+QString pluginSecretsFile() {
+    // Beside Melody's settings, wherever they are -- a test's own included.
+    return QFileInfo{QSettings{}.fileName()}.dir().filePath(QStringLiteral("plugin-secrets.conf"));
+}
+
+namespace {
+
+// The secrets file, made its owner's alone before anything is in it.
+[[nodiscard]] std::unique_ptr<QSettings> openSecrets(const bool writing) {
+    const auto path = pluginSecretsFile();
+    if (writing) {
+        QDir{}.mkpath(QFileInfo{path}.absolutePath());
+        QFile file{path};
+        if (!file.exists() && file.open(QIODevice::WriteOnly)) {
+            file.close();
+        }
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    }
+    return std::make_unique<QSettings>(path, QSettings::IniFormat);
+}
+
+} // namespace
+
+void savePluginSecret(const QString& settings_key, const QString& value) {
+    if (!isPluginSecretKey(settings_key)) {
+        return;
+    }
+    auto secrets = openSecrets(true);
+    const auto key = settings_key.mid(QStringLiteral("plugins/secrets/").size());
+    if (value.isEmpty()) {
+        secrets->remove(key);
+    } else {
+        secrets->setValue(key, value);
+    }
+    secrets->sync();
+    QFile::setPermissions(pluginSecretsFile(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+}
+
+QVariant pluginSettingValue(const QString& plugin, const PluginSetting& setting) {
+    if (setting.kind == PluginSetting::Kind::secret) {
+        return openSecrets(false)->value(QStringLiteral("%1/%2").arg(plugin, setting.key),
+                                         QString{});
+    }
+    const auto stored = QSettings{}.value(pluginSettingKey(plugin, setting.key));
+    if (!stored.isValid()) {
+        return setting.fallback;
+    }
+    if (setting.kind == PluginSetting::Kind::toggle) {
+        return stored.toBool();
+    }
+    // A choice no longer offered is the fallback's.
+    if (setting.kind == PluginSetting::Kind::choice &&
+        !setting.choices.contains(stored.toString())) {
+        return setting.fallback;
+    }
+    return stored.toString();
+}
+
+QJsonObject pluginSettings(const Plugin& plugin) {
+    QJsonObject settings;
+    for (const auto& setting : plugin.settings) {
+        const auto value = pluginSettingValue(plugin.name, setting);
+        settings.insert(setting.key, setting.kind == PluginSetting::Kind::toggle
+                                         ? QJsonValue{value.toBool()}
+                                         : QJsonValue{value.toString()});
+    }
+    return settings;
+}
+
 std::vector<PluginAlbum> pluginAlbums(std::vector<PluginTrack> tracks,
                                       const std::vector<std::string>& music_folders) {
     // In the order first met; an album without tags is its folder.
@@ -327,7 +498,7 @@ std::vector<PluginAlbum> pluginAlbums(std::vector<PluginTrack> tracks,
 
 QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
                        const std::vector<PluginAlbum>& albums,
-                       const std::vector<std::string>& music_folders) {
+                       const std::vector<std::string>& music_folders, const QJsonObject& settings) {
     QJsonArray listed;
     for (const auto& album : albums) {
         QJsonArray tracks;
@@ -355,7 +526,8 @@ QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
         {QStringLiteral("engine"), QJsonObject{{QStringLiteral("name"), engine.name},
                                                {QStringLiteral("address"), engine.address},
                                                {QStringLiteral("here"), engine.here}}},
-        {QStringLiteral("albums"), listed}};
+        {QStringLiteral("albums"), listed},
+        {QStringLiteral("settings"), settings}};
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
 }
 

@@ -3,9 +3,11 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
 
 #include <functional>
 #include <optional>
@@ -33,6 +35,20 @@ struct PluginAction {
     int timeout_seconds{120};
 };
 
+// What a plugin asks to be set, shown under it in Settings › Plugins and
+// handed to it with every run: an address, an account's token.
+struct PluginSetting {
+    enum class Kind : std::uint8_t { text, secret, toggle, choice };
+
+    QString key;
+    QString label;
+    QString help;
+    Kind kind{Kind::text};
+    // Its value until one is set: text, a choice, or on/off; a secret has none.
+    QVariant fallback;
+    QStringList choices;
+};
+
 struct Plugin {
     // The folder's name: what it is enabled by.
     QString name;
@@ -40,6 +56,7 @@ struct Plugin {
     QString description;
     QString folder;
     std::vector<PluginAction> actions;
+    std::vector<PluginSetting> settings;
 };
 
 // A manifest read, or why it cannot be: every key checked, none guessed.
@@ -66,6 +83,19 @@ struct FoundPlugin {
 [[nodiscard]] bool pluginEnabled(const QString& name);
 // The plugins found, read and enabled.
 [[nodiscard]] std::vector<Plugin> enabledPlugins();
+
+// A setting's place among Melody's settings. A secret's is a draft's only:
+// saved, it goes to pluginSecretsFile(), readable by its owner alone, never
+// with the other settings.
+[[nodiscard]] QString pluginSettingKey(const QString& plugin, const QString& key);
+[[nodiscard]] QString pluginSecretKey(const QString& plugin, const QString& key);
+[[nodiscard]] bool isPluginSecretKey(const QString& settings_key);
+[[nodiscard]] QString pluginSecretsFile();
+void savePluginSecret(const QString& settings_key, const QString& value);
+// What it is set to, else its fallback.
+[[nodiscard]] QVariant pluginSettingValue(const QString& plugin, const PluginSetting& setting);
+// Every one of the plugin's, by key, as a run is given them.
+[[nodiscard]] QJsonObject pluginSettings(const Plugin& plugin);
 
 // What a plugin is told about the tracks it is run for.
 struct PluginTrack {
@@ -99,10 +129,11 @@ struct PluginAlbum {
 [[nodiscard]] std::vector<PluginAlbum> pluginAlbums(std::vector<PluginTrack> tracks,
                                                     const std::vector<std::string>& music_folders);
 
-// The JSON a run is given on stdin.
+// The JSON a run is given on stdin, its settings among it.
 [[nodiscard]] QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
                                      const std::vector<PluginAlbum>& albums,
-                                     const std::vector<std::string>& music_folders);
+                                     const std::vector<std::string>& music_folders,
+                                     const QJsonObject& settings = {});
 
 // What a `list` action answers: a heading and rows, each of text, a detail
 // and a link -- the parts Melody draws, none of the plugin's own.

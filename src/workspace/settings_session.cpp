@@ -2,6 +2,8 @@
 
 #include "workspace/settings_session.hpp"
 
+#include "workspace/plugins.hpp"
+
 #include "workspace/interface_scale.hpp"
 
 #include "trackknife/audio/local_audition.hpp"
@@ -420,6 +422,12 @@ std::optional<SettingsSession::Page> SettingsSession::save() {
         return values_.value(key).toString().trimmed();
     };
     for (auto entry = values_.cbegin(); entry != values_.cend(); ++entry) {
+        // ADR-0288: a plugin's secret is kept apart, readable by its owner
+        // alone, never with the settings.
+        if (isPluginSecretKey(entry.key())) {
+            savePluginSecret(entry.key(), entry.value().toString());
+            continue;
+        }
         settings.setValue(entry.key(), entry.value());
     }
     for (const auto* key :

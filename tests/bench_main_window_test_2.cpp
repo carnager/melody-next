@@ -2604,7 +2604,10 @@ void BenchMainWindowTest::aPluginActionSharesWhatIsChosen() {
                           {"id": "artist", "label": "Artist", "for": "tracks",
                            "run": ["./share", "artist"], "result": "copy"},
                           {"id": "list", "label": "List", "for": "tracks",
-                           "run": ["./share", "list"], "result": "list"}]})");
+                           "run": ["./share", "list"], "result": "list"}],
+                          "settings": [{"key": "server", "label": "Server",
+                                        "default": "http://localhost"},
+                                       {"key": "token", "label": "Token", "kind": "secret"}]})");
         QFile script{folder + QStringLiteral("/share")};
         QVERIFY(script.open(QIODevice::WriteOnly));
         script.write(R"sh(#!/bin/sh
@@ -2740,6 +2743,17 @@ echo "shared:${relative:-$album}"
         auto* enabled = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-plugin-echo"));
         QVERIFY(enabled != nullptr && enabled->isChecked());
         QCOMPARE(enabled->text(), QStringLiteral("Echo"));
+        // ADR-0288: what it asks to be set, under it; a secret not shown.
+        auto* server =
+            dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server"));
+        auto* token =
+            dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-token"));
+        QVERIFY(server != nullptr && token != nullptr);
+        QCOMPARE(server->text(), QStringLiteral("http://localhost"));
+        QCOMPARE(token->echoMode(), QLineEdit::Password);
+        server->selectAll();
+        QTest::keyClicks(server, QStringLiteral("http://nas:6600"));
+        QTest::keyClicks(token, QStringLiteral("s3cret"));
         enabled->setChecked(false);
         QPointer<SettingsDialog> lifetime = dialog;
         dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
@@ -2749,7 +2763,21 @@ echo "shared:${relative:-$album}"
     }
     QVERIFY(!pluginEnabled(QStringLiteral("echo")));
     QVERIFY(enabledPlugins().empty());
+    // Saved: the address with the settings, the secret apart from them.
+    const auto echo = discoverPlugins();
+    const auto found = std::ranges::find(echo, QStringLiteral("echo"), &FoundPlugin::name);
+    QVERIFY(found != echo.end() && found->plugin);
+    const auto told = pluginSettings(*found->plugin);
+    QCOMPARE(told.value(QStringLiteral("server")).toString(), QStringLiteral("http://nas:6600"));
+    QCOMPARE(told.value(QStringLiteral("token")).toString(), QStringLiteral("s3cret"));
+    QSettings{}.sync();
+    {
+        QFile settings_file{QSettings{}.fileName()};
+        QVERIFY(settings_file.open(QIODevice::ReadOnly));
+        QVERIFY(!settings_file.readAll().contains("s3cret"));
+    }
     QSettings{}.remove(QStringLiteral("plugins"));
+    QFile::remove(pluginSecretsFile());
     QDir{folder}.removeRecursively();
 }
 

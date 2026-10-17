@@ -28,6 +28,11 @@ class PluginsTest final : public QObject {
     void pluginsAreFoundAndStayOffUntilEnabled();
     void theExamplePluginReads();
     void aListIsReadOrRefused();
+    void settingsAreReadKeptAndHandedOn();
+
+  private:
+    // Settings of this test's own, not in the config folder of whoever runs it.
+    QTemporaryDir settings_home_;
 };
 
 namespace {
@@ -68,6 +73,8 @@ void PluginsTest::initTestCase() {
     QCoreApplication::setOrganizationName(QStringLiteral("MelodyTests"));
     QCoreApplication::setApplicationName(QStringLiteral("plugins-test"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    QVERIFY(settings_home_.isValid());
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings_home_.path());
 }
 
 void PluginsTest::manifestsAreReadOrRefused() {
@@ -188,7 +195,8 @@ printf '%s\n' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/https:\/\/e
                   .title = QStringLiteral("Album share"),
                   .description = {},
                   .folder = folder.path(),
-                  .actions = {}};
+                  .actions = {},
+                  .settings = {}};
     PluginAction action{.id = QStringLiteral("share"),
                         .label = QStringLiteral("Share"),
                         .scope = PluginAction::Scope::albums,
@@ -336,6 +344,102 @@ void PluginsTest::aListIsReadOrRefused() {
                                 QStringLiteral("/p/x"), &problem)
                 ->actions.front()
                 .result == PluginAction::Result::list);
+}
+
+} // namespace trackknife::bench
+
+namespace trackknife::bench {
+
+void PluginsTest::settingsAreReadKeptAndHandedOn() {
+    const auto with = [](const QString& settings) {
+        return QStringLiteral(R"({"schema": 1, "name": "Watch", "actions": [{"id": "a",
+                                 "label": "A", "run": ["x"]}], "settings": [%1]})")
+            .arg(settings)
+            .toUtf8();
+    };
+    QString problem;
+    auto plugin = parsePluginManifest(
+        with(R"({"key": "url", "label": "Address", "default": "http://localhost:8080",
+                 "help": "Where it is"},
+                {"key": "token", "label": "API token", "kind": "secret"},
+                {"key": "verbose", "label": "Say more", "kind": "toggle", "default": true},
+                {"key": "mode", "label": "Mode", "kind": "choice", "choices": ["a", "b"],
+                 "default": "b"})"),
+        QStringLiteral("/plugins/watch"), &problem);
+    QVERIFY2(plugin.has_value(), qPrintable(problem));
+    QCOMPARE(plugin->settings.size(), 4U);
+    QCOMPARE(plugin->settings[0].kind, PluginSetting::Kind::text);
+    QCOMPARE(plugin->settings[0].help, QStringLiteral("Where it is"));
+    QCOMPARE(plugin->settings[1].kind, PluginSetting::Kind::secret);
+    QCOMPARE(plugin->settings[3].choices, (QStringList{QStringLiteral("a"), QStringLiteral("b")}));
+
+    // Each kept to its shape, or refused saying why.
+    for (const auto* broken :
+         {R"({"key": "URL", "label": "x"})", R"({"key": "a", "label": ""})",
+          R"({"key": "a", "label": "x"}, {"key": "a", "label": "y"})",
+          R"({"key": "a", "label": "x", "kind": "secret", "default": "s"})",
+          R"({"key": "a", "label": "x", "kind": "toggle", "default": "yes"})",
+          R"({"key": "a", "label": "x", "kind": "choice"})",
+          R"({"key": "a", "label": "x", "kind": "choice", "choices": ["b"], "default": "c"})",
+          R"({"key": "a", "label": "x", "choices": ["b"]})",
+          R"({"key": "a", "label": "x", "kind": "colour"})",
+          R"({"key": "a", "label": "x", "hidden": true})", R"("a")"}) {
+        problem.clear();
+        QVERIFY2(
+            !parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"), &problem),
+            broken);
+        QVERIFY(!problem.isEmpty());
+    }
+
+    // Unset, each is its fallback.
+    plugin->name = QStringLiteral("watch");
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QFile::remove(pluginSecretsFile());
+    auto told = pluginSettings(*plugin);
+    QCOMPARE(told.value(QStringLiteral("url")).toString(), QStringLiteral("http://localhost:8080"));
+    QCOMPARE(told.value(QStringLiteral("token")).toString(), QString{});
+    QCOMPARE(told.value(QStringLiteral("verbose")).toBool(false), true);
+    QCOMPARE(told.value(QStringLiteral("mode")).toString(), QStringLiteral("b"));
+
+    // Set: the secret apart, its owner's alone, never among the settings.
+    QSettings{}.setValue(pluginSettingKey(QStringLiteral("watch"), QStringLiteral("url")),
+                         QStringLiteral("http://nas:8080"));
+    QSettings{}.setValue(pluginSettingKey(QStringLiteral("watch"), QStringLiteral("verbose")),
+                         false);
+    QSettings{}.setValue(pluginSettingKey(QStringLiteral("watch"), QStringLiteral("mode")),
+                         QStringLiteral("gone"));
+    const auto secret_key = pluginSecretKey(QStringLiteral("watch"), QStringLiteral("token"));
+    QVERIFY(isPluginSecretKey(secret_key));
+    QVERIFY(!isPluginSecretKey(pluginSettingKey(QStringLiteral("watch"), QStringLiteral("url"))));
+    savePluginSecret(secret_key, QStringLiteral("s3cret"));
+    const auto mode = QFile::permissions(pluginSecretsFile());
+    QVERIFY(mode.testFlag(QFileDevice::ReadOwner) && mode.testFlag(QFileDevice::WriteOwner));
+    QVERIFY(!(mode & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ReadOther |
+                      QFileDevice::WriteOther)));
+    QSettings{}.sync();
+    QFile main{QSettings{}.fileName()};
+    QVERIFY(main.open(QIODevice::ReadOnly));
+    QVERIFY(!main.readAll().contains("s3cret"));
+    told = pluginSettings(*plugin);
+    QCOMPARE(told.value(QStringLiteral("url")).toString(), QStringLiteral("http://nas:8080"));
+    QCOMPARE(told.value(QStringLiteral("token")).toString(), QStringLiteral("s3cret"));
+    QCOMPARE(told.value(QStringLiteral("verbose")).toBool(true), false);
+    QCOMPARE(told.value(QStringLiteral("mode")).toString(), QStringLiteral("b"));
+
+    // Handed to a run with the rest.
+    const auto input =
+        QJsonDocument::fromJson(pluginInput(plugin->actions.front(), PluginEngine{}, {}, {}, told));
+    QCOMPARE(input.object()
+                 .value(QStringLiteral("settings"))
+                 .toObject()
+                 .value(QStringLiteral("token"))
+                 .toString(),
+             QStringLiteral("s3cret"));
+
+    // Emptied, the secret is gone from the file.
+    savePluginSecret(secret_key, {});
+    QCOMPARE(pluginSettings(*plugin).value(QStringLiteral("token")).toString(), QString{});
+    QSettings{}.remove(QStringLiteral("plugins"));
 }
 
 } // namespace trackknife::bench

@@ -56,9 +56,40 @@ any program you start: enable only those you trust.
 | `run` | The program and its arguments, without a shell. A first word starting with `./` is in the plugin's folder; any other is looked up in `PATH`. |
 | `result` | What the output is for: `notify` (the default), `copy` (to the clipboard), `notify-and-copy`, `none`, or `list` -- rows in a window of their own (below). |
 | `timeout` | Seconds before it is stopped, 1 to 3600 (default 120). |
+| `settings` | Optional: what it asks to be set (below). |
 
 An unknown key, or a value out of place, makes the plugin unusable, and
 Settings says why.
+
+### Settings
+
+A plugin that needs an address or an account says so, and Melody asks for
+it under the plugin in **Settings → Plugins**:
+
+```json
+"settings": [
+  {"key": "url", "label": "Address", "default": "http://localhost:8080"},
+  {"key": "token", "label": "API token", "kind": "secret",
+   "help": "dropwatch: settings -> Account"},
+  {"key": "covers", "label": "With covers", "kind": "toggle", "default": true},
+  {"key": "site", "label": "Site", "kind": "choice",
+   "choices": ["musicbrainz", "discogs"]}
+]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `key` | Its name in the input: `a`-`z`, `0`-`9`, `-` and `_`. |
+| `label` | What Settings shows beside it. |
+| `kind` | `text` (the default), `secret` (shown as dots), `toggle` (on or off), `choice` (one of `choices`). |
+| `default` | Its value until one is set: text, `true`/`false` for a toggle, one of the choices. A secret has none; a choice's is its first. |
+| `choices` | A choice's, as text. |
+| `help` | Said when the pointer is over it. |
+
+Every run is given them all, set or not, as `"settings": {"url":
+"http://localhost:8080", "token": "…", "covers": true, "site":
+"musicbrainz"}`. A secret is kept apart from Melody's other settings, in a
+file only you can read (`plugin-secrets.conf` beside them).
 
 The entries stand at the end of the context menu. With more than three of
 them, from every plugin enabled, each plugin's go in a submenu of its own,
@@ -73,6 +104,7 @@ It runs in its own folder and gets the choice on stdin, as one JSON object:
   "schema": 1,
   "action": "share",
   "engine": {"name": "gemenon", "address": "192.168.0.200:6603", "here": false},
+  "settings": {"server": "https://share.example.org"},
   "albums": [
     {
       "artist": "Air Supply",

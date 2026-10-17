@@ -60,6 +60,14 @@ Accepted, 2026-10-17.
      Melody's, the ones a panel (5.) will draw.
    - `timeout`: seconds before it is stopped (default 120).
 
+   A plugin may say what it needs set (2026-10-17): `settings`, each a
+   `key`, `label`, `kind` -- text, secret, toggle, choice -- and a
+   `default`, asked for under it in Settings › Plugins and handed to every
+   run as `"settings": {key: value}`. A secret is not kept with Melody's
+   settings but in a file of its own, readable by its owner alone: no
+   keyring is needed, on Linux or macOS. A plugin then needs no config
+   file of its own for an address or a token.
+
    The entries stand at the end of the menu; with more than three in all,
    each plugin's go in a submenu under its name, as foobar2000 groups its
    components'. Where they go is not a setting.

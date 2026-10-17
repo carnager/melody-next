@@ -72,10 +72,11 @@ void BenchMainWindow::runPlugin(const Plugin& plugin, const PluginAction& action
     std::vector<QByteArray> inputs;
     if (action.scope == PluginAction::Scope::albums) {
         for (const auto& album : albums) {
-            inputs.push_back(pluginInput(action, told, {album}, music_folders));
+            inputs.push_back(
+                pluginInput(action, told, {album}, music_folders, pluginSettings(plugin)));
         }
     } else {
-        inputs.push_back(pluginInput(action, told, albums, music_folders));
+        inputs.push_back(pluginInput(action, told, albums, music_folders, pluginSettings(plugin)));
     }
     for (auto& input : inputs) {
         showMessage(QStringLiteral("%1…").arg(action.label), 0);

@@ -6,6 +6,7 @@
 #include "workspace/plugins.hpp"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -311,6 +312,64 @@ void PluginsTest::theExamplePluginReads() {
     QVERIFY2(sites.has_value(), qPrintable(problem));
     QCOMPARE(sites->actions.size(), std::size_t{5U});
     QCOMPARE(sites->actions.back().label, QStringLiteral("AllMusic"));
+
+    // ADR-0291: the official artist panel reads, and answers what Melody
+    // draws -- from what it keeps, so asking nothing of the network here.
+    const QString about = QStringLiteral(MELODY_SOURCE_DIR "/plugins/artist-info");
+    QFile about_manifest{about + QStringLiteral("/plugin.json")};
+    QVERIFY(about_manifest.open(QIODevice::ReadOnly));
+    const auto artist_info = parsePluginManifest(about_manifest.readAll(), about, &problem);
+    QVERIFY2(artist_info.has_value(), qPrintable(problem));
+    QCOMPARE(artist_info->panels.size(), std::size_t{1U});
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const auto kept = QDir{cache.path()}.filePath(QStringLiteral("melody/plugins/artist-info"));
+    QVERIFY(QDir{}.mkpath(kept));
+    const auto mbid = QStringLiteral("05106775-5d45-4131-aecc-1177f813ba11");
+    const auto id_key = QCryptographicHash::hash(QStringLiteral("testament\x1fthe legacy").toUtf8(),
+                                                 QCryptographicHash::Sha1)
+                            .toHex();
+    writeFile(kept + QStringLiteral("/id-") + QString::fromLatin1(id_key),
+              QStringLiteral(R"({"id": "%1"})").arg(mbid).toUtf8());
+    writeFile(kept + QStringLiteral("/about-%1-en").arg(mbid),
+              QStringLiteral(R"json({"name": "Testament", "kind": "Group",
+                  "where": "Berkeley, United States", "when": "since 1983",
+                  "summary": "Testament is an American thrash metal band.",
+                  "page": "https://en.wikipedia.org/wiki/Testament_(band)", "image": "",
+                  "links": {"Wikipedia": "https://en.wikipedia.org/wiki/Testament_(band)",
+                            "MusicBrainz": "https://musicbrainz.org/artist/%1"}})json")
+                  .arg(mbid)
+                  .toUtf8());
+    qputenv("XDG_CACHE_HOME", QFile::encodeName(cache.path()));
+    const auto told = run(*artist_info,
+                          PluginAction{.id = QStringLiteral("artist"),
+                                       .label = QStringLiteral("About"),
+                                       .scope = PluginAction::Scope::tracks,
+                                       .run = artist_info->panels.front().run,
+                                       .result = PluginAction::Result::none,
+                                       .timeout_seconds = 30},
+                          pluginPanelInput(artist_info->panels.front(), PluginEngine{},
+                                           PluginTrack{.path = "/srv/music/Testament/01.flac",
+                                                       .title = "Over the Wall",
+                                                       .artist = "Testament",
+                                                       .album = "The Legacy",
+                                                       .album_artist = "Testament",
+                                                       .date = "1987",
+                                                       .track_number = "1"},
+                                           std::nullopt, {}, pluginSettings(*artist_info)));
+    QVERIFY2(told.succeeded, qPrintable(told.text));
+    const auto drawn = parsePluginPanel(told.text.toUtf8(), &problem);
+    QVERIFY2(drawn.has_value(), qPrintable(problem));
+    QCOMPARE(drawn->title, QStringLiteral("Testament"));
+    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::paragraph &&
+               part.text == QStringLiteral("Testament is an American thrash metal band.");
+    }));
+    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::item &&
+               part.text == QStringLiteral("Group from Berkeley, United States") &&
+               part.detail == QStringLiteral("since 1983");
+    }));
 }
 
 // What a `list` action answers: a heading and rows of text, detail and a

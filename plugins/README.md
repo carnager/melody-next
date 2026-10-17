@@ -10,3 +10,4 @@ nothing of anyone's own -- no server, no account.
 | Plugin | What |
 | --- | --- |
 | [`web-search`](web-search) | Looks the album up on MusicBrainz, Discogs, Bandcamp, Rate Your Music or AllMusic, in the browser. |
+| [`artist-info`](artist-info) | A panel about the playing artist: a photo, Wikipedia's summary, where and since when, links -- from MusicBrainz, Wikidata and Wikipedia, kept a week. |

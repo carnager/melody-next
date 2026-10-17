@@ -142,8 +142,9 @@ install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/melody.desktop
 # ADR-0288: the official plugins, found under the system's data folder and
 # off until enabled.
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/plugins/web-search
+                  ${PROJECT_SOURCE_DIR}/plugins/artist-info
         DESTINATION ${CMAKE_INSTALL_DATADIR}/melody/plugins COMPONENT app
-        USE_SOURCE_PERMISSIONS)
+        USE_SOURCE_PERMISSIONS PATTERN "__pycache__" EXCLUDE)
 # ADR-0287: the vinyl bird, for the desktop entry and the window.
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/icons/melody.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps COMPONENT app)

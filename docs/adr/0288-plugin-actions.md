@@ -24,7 +24,8 @@ Accepted, 2026-10-17.
    `~/.local/share/melody/plugins/NAME/`, or under `$XDG_DATA_DIRS`, where
    one of the user's of the same name wins. Melody ships a few **official**
    ones, under `/usr/share/melody/plugins/` -- only those that need nothing
-   of anyone's own, no server, no account: the web search (2026-10-17).
+   of anyone's own, no server, no account: the web search, and the panel
+   About the artist from MusicBrainz and Wikipedia (2026-10-17).
    Everything else is written and published apart.
 3. **It runs only when enabled**, under Settings → Plugins. One put there is
    found but off: a folder appearing does not run anything.

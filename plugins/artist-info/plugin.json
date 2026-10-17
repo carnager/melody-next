@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "name": "About the artist",
+  "description": "The playing artist from MusicBrainz and Wikipedia: a photo, a summary and links",
+  "panels": [
+    {
+      "id": "artist",
+      "label": "About the artist",
+      "run": [
+        "./artist-info"
+      ],
+      "timeout": 60
+    }
+  ],
+  "settings": [
+    {
+      "key": "language",
+      "label": "Wikipedia language",
+      "kind": "choice",
+      "choices": [
+        "en",
+        "de",
+        "fr",
+        "es",
+        "it",
+        "nl",
+        "pt",
+        "sv",
+        "no",
+        "da",
+        "fi",
+        "pl",
+        "cs",
+        "ru",
+        "ja"
+      ],
+      "default": "en",
+      "help": "Which Wikipedia to read. Where it has no article on the artist, the English one."
+    }
+  ]
+}

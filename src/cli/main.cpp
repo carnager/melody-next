@@ -5,6 +5,7 @@
 // wants, over the same protocol Trackknife speaks.
 
 #include "config_command.hpp"
+#include "convert_command.hpp"
 #include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -117,6 +118,11 @@ void usage(std::ostream& out) {
            "                              cron job: keep when it ran, and pass that\n"
            "         --folders            each album's folder, one a line, instead of\n"
            "                              its name; with --json, a \"folder\" each\n"
+           "  convert --to FOLDER [--layout NAME] [--preset ID] (--since WHEN | PATH...)\n"
+           "                              convert with Melody's converter, here: tags and\n"
+           "                              cover kept, named by an engine naming layout or\n"
+           "                              kept below the music folder; what is there\n"
+           "                              already is passed over (convert --help)\n"
            "  revision                    changes when the library does, for caches\n"
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
@@ -324,69 +330,11 @@ look_around(const std::string& wanted = {}) {
     return std::filesystem::path{raw}.filename().string();
 }
 
-// When `--since` means, as Unix seconds: those themselves, a local date or
-// date and time, or a time ago (90m, 12h, 3d, 2w).
-[[nodiscard]] std::optional<std::int64_t> since_seconds(const std::string& when) {
-    if (when.empty()) {
-        return std::nullopt;
-    }
-    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                         std::chrono::system_clock::now().time_since_epoch())
-                         .count();
-    std::int64_t number = 0;
-    const auto* end = when.data() + when.size();
-    const auto [rest, error] = std::from_chars(when.data(), end, number);
-    if (error == std::errc{} && rest == end) {
-        return number;
-    }
-    if (error == std::errc{} && rest + 1 == end && number >= 0) {
-        switch (*rest) {
-        case 's':
-            return now - number;
-        case 'm':
-            return now - number * 60;
-        case 'h':
-            return now - number * 3'600;
-        case 'd':
-            return now - number * 86'400;
-        case 'w':
-            return now - number * 604'800;
-        default:
-            return std::nullopt;
-        }
-    }
-    std::tm local{};
-    local.tm_isdst = -1;
-    for (const auto* shape :
-         {"%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"}) {
-        std::istringstream in{when};
-        local = std::tm{};
-        local.tm_isdst = -1;
-        in >> std::get_time(&local, shape);
-        if (!in.fail() && in.peek() == std::char_traits<char>::eof()) {
-            return static_cast<std::int64_t>(std::mktime(&local));
-        }
-    }
-    return std::nullopt;
-}
-
 // The folder every track of an album is in, from their encoded paths.
 [[nodiscard]] std::string album_folder(Client& client, const std::string& album_key) {
-    const auto tracks = call(client, "catalogue.query",
-                             Json{{"kind", 2},
-                                  {"text", ""},
-                                  {"album_key", album_key},
-                                  {"offset", 0},
-                                  {"limit", 5'000},
-                                  {"fields", Json::array({"title"})}})
-                            .value("entries", std::vector<Json>{});
     std::optional<std::filesystem::path> common;
-    for (const auto& track : tracks) {
-        auto raw = trackknife::protocol::decode_raw_path(text_of(track, "key"));
-        if (!raw) {
-            continue;
-        }
-        const auto folder = std::filesystem::path{*raw}.parent_path();
+    for (const auto& raw : trackknife::cli::album_track_paths(client, album_key)) {
+        const auto folder = std::filesystem::path{raw}.parent_path();
         if (!common) {
             common = folder;
             continue;
@@ -1113,6 +1061,8 @@ int run(const Options& options) {
         if (!options.json) {
             std::cerr << "melody-cli: " << chosen << "\n";
         }
+    } else if (command == "convert") {
+        return trackknife::cli::convert_command(*client, options.json, words);
     } else if (command == "latest" && std::ranges::any_of(words, [](const std::string& word) {
                    return word == "--since" || word == "--folders";
                })) {
@@ -1125,7 +1075,7 @@ int run(const Options& options) {
             if (words[at] == "--folders") {
                 folders = true;
             } else if (words[at] == "--since" && at + 1 < words.size()) {
-                since = since_seconds(words[++at]);
+                since = trackknife::cli::since_seconds(words[++at]);
                 if (!since) {
                     fail("--since wants Unix seconds, a date (2026-10-17, 2026-10-17T18:30) or "
                          "a time ago (90m, 12h, 3d, 2w), not " +

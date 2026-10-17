@@ -156,6 +156,61 @@ cli latest --since "$(( $(date +%s) + 3600 ))" || fail "and nothing new is no fa
 if cli latest --since whenever > /dev/null 2>&1; then
     fail "a moment latest cannot read is refused"
 fi
+
+# Converted here with Melody's converter: what came in, kept below the
+# music folder; again, nothing done twice.
+cli convert --presets | matches "^flac" || fail "convert lists its presets"
+cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain --dry-run \
+    > "${work}/plan.txt" \
+    || fail "convert --dry-run plans"
+[ "$(wc -l < "${work}/plan.txt")" -ge 1 ] || fail "and plans something"
+matches -P "^${work}/music/.+\t${work}/converted/.+\.flac$" "${work}/plan.txt" \
+    || fail "each line the source and its target, below the destination"
+[ ! -d "${work}/converted" ] || [ -z "$(find "${work}/converted" -type f)" ] \
+    || fail "a dry run converts nothing"
+cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain \
+    > "${work}/made.txt" \
+    || fail "convert converts"
+[ "$(wc -l < "${work}/made.txt")" = "$(wc -l < "${work}/plan.txt")" ] \
+    || fail "every planned track converted"
+while IFS= read -r made; do
+    [ -s "${made}" ] || fail "a converted file is there: ${made}"
+done < "${work}/made.txt"
+cli convert --to "${work}/converted" --preset flac --since 1h --no-replaygain \
+    > "${work}/again.txt" 2>&1 \
+    || fail "converting again succeeds"
+matches "converted before, passed over" "${work}/again.txt" || fail "and passes over what is there"
+if cli convert --to "${work}/converted" --layout "No such layout" --since 1h > /dev/null 2>&1; then
+    fail "a layout the engine does not have is refused"
+fi
+if cli convert --since 1h > /dev/null 2>&1; then
+    fail "convert wants a destination"
+fi
+# ReplayGain measured afresh on what was made, by the engine: a tone long
+# enough to measure, in the music folder, converted by its path.
+mkdir -p "${work}/music/zz-gain"
+python3 - "${work}/music/zz-gain/tone.wav" <<'PY'
+import math, struct, sys, wave
+with wave.open(sys.argv[1], "wb") as out:
+    out.setnchannels(2)
+    out.setsampwidth(2)
+    out.setframerate(44100)
+    frames = bytearray()
+    for n in range(44100 * 3):
+        sample = int(8000 * math.sin(2 * math.pi * 440 * n / 44100))
+        frames += struct.pack("<hh", sample, sample)
+    out.writeframes(bytes(frames))
+PY
+cli convert --to "${work}/gained" --preset flac "${work}/music/zz-gain" > "${work}/gain.txt" \
+    2> "${work}/gain-said.txt" || { cat "${work}/gain-said.txt" >&2; fail "convert measures ReplayGain"; }
+matches "ReplayGain measured and written for 1 files" "${work}/gain-said.txt" \
+    || fail "and says so"
+python3 - "$(cat "${work}/gain.txt")" <<'PY' || fail "the converted file has its gain"
+import sys
+data = open(sys.argv[1], "rb").read().upper()
+assert b"REPLAYGAIN_TRACK_GAIN=" in data, "no REPLAYGAIN_TRACK_GAIN"
+PY
+rm -rf "${work}/music/zz-gain"
 cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) == 2' \
     || fail "--json answers in JSON, every album"
 

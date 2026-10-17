@@ -7,6 +7,21 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 17 (2026-10-17)
+
+Conversion where the files are, as `melody-cli convert` asks it.
+
+- `convert.presets {}` -> `{presets: [{id, name, extension, available,
+  detail}]}`: what the engine's FFmpeg can make.
+- The `convert.apply` job `{paths: [file or folder], to, layout?, preset?,
+  gain?, artwork?, dry_run?}`: the files and the audio files in the folders
+  converted beneath `to` with the window's converter -- named by the
+  engine's naming layout of that name, else kept below their music folder --
+  tags and cover carried and verified, one there already passed over;
+  reporting `{completed, total}`, finishing with `{result: {files: [{source,
+  target, converted, error}], passed, problems}}`. All paths are encoded
+  raw paths, the engine's.
+
 ### Level 16 (2026-10-17)
 
 ADR-0289: undo copies only for a tagger, while it is open.

@@ -6,7 +6,6 @@ set_target_properties(melody_cli PROPERTIES OUTPUT_NAME melody-cli)
 target_link_libraries(
     melody_cli
     PRIVATE trackknife_daemon_settings Trackknife::Protocol Trackknife::Discovery Trackknife::Core
-            Trackknife::Engine Trackknife::Convert Trackknife::Operations Trackknife::Metadata
             trackknife_project_options trackknife_project_warnings
 )
 

@@ -642,6 +642,9 @@ int main(int argc, char** argv) {
     const auto follow_moves =
         trackknife::engine::follow_moves(*workspace, catalogue, player.get(), sink);
     trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
+    // Conversion where the files are, as melody-cli convert asks it.
+    trackknife::engine::register_convert_jobs(job_catalogue, *workspace, catalogue);
+    trackknife::engine::register_convert_methods(dispatcher);
     // File work a crash interrupted is finished or rolled back before anyone
     // connects (ADR-0237), and what could not be is kept for Trackknife to show.
     // ADR-0266: where the files writes replace are kept, before anything is

@@ -83,4 +83,22 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                              LocalCatalogue& catalogue, MoveFollower follow);
 
+class Workspace;
+
+// Conversion, here where the files are, with the converter the window uses:
+//   convert.presets {} -> {presets: [{id, name, extension, available,
+//     detail}]}: what this engine's FFmpeg can make.
+//   The convert.apply job {paths: [encoded raw path of a file or folder],
+//     to: encoded raw path, layout?: name, preset?: id (opus-192),
+//     gain?: none|track|album, artwork?: bool (true), dry_run?: bool}: the
+//     files, and the audio files in the folders, converted beneath `to` --
+//     named by the engine's naming layout of that name, else kept in their
+//     place below the music folder they are in -- tags and cover carried and
+//     verified; one there already is passed over. It reports {completed,
+//     total} and finishes with {result: {files: [{source, target,
+//     converted, error}], passed, problems: [message]}} -- `converted` false
+//     on a dry run -- or {error}.
+void register_convert_methods(protocol::Dispatcher& dispatcher);
+void register_convert_jobs(JobCatalog& jobs, Workspace& workspace, LocalCatalogue& catalogue);
+
 } // namespace trackknife::engine

@@ -2,12 +2,9 @@
 
 #include "convert_command.hpp"
 
-#include "trackknife/convert/preset.hpp"
-#include "trackknife/convert/scan.hpp"
-#include "trackknife/engine/file_work_wire.hpp"
-#include "trackknife/metadata/local_reader.hpp"
-#include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/protocol/message.hpp"
+
+#include <unistd.h>
 
 #include <algorithm>
 #include <charconv>
@@ -46,31 +43,19 @@ using Json = nlohmann::json;
     return found != value.end() && found->is_string() ? found->get<std::string>() : std::string{};
 }
 
-// What a scan of a folder takes for music: what Melody's library would.
-[[nodiscard]] bool audio_file(const std::filesystem::path& path) {
-    static const std::vector<std::string> extensions{
-        ".flac", ".mp3", ".m4a",  ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wv",
-        ".wav",  ".aif", ".aiff", ".ape", ".mpc", ".tta", ".wma", ".dsf",  ".dff"};
-    auto extension = path.extension().string();
-    std::ranges::transform(extension, extension.begin(), [](const unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return std::ranges::contains(extensions, extension);
-}
-
 void usage() {
     std::cerr
-        << "usage: melody-cli convert --to FOLDER [--layout NAME] [--preset ID] [--jobs N]\n"
+        << "usage: melody-cli convert --to FOLDER [--layout NAME] [--preset ID]\n"
            "                          [--gain none|track|album] [--no-replaygain] [--no-artwork]\n"
            "                          [--dry-run]\n"
            "                          (--since WHEN | PATH...)\n"
            "       melody-cli convert --presets | --layouts\n"
-           "  Converts with Melody's converter on this computer: tags and cover carried\n"
-           "  and checked, nothing left half-written. Files are named by the engine's\n"
-           "  naming layout NAME (melody-cli convert --layouts), else keep their place\n"
-           "  below the music folder. ReplayGain is measured afresh on what was converted\n"
-           "  -- by the engine, so it must reach FOLDER at the same path; --no-replaygain\n"
-           "  where it cannot. One already converted is passed over, so the same\n"
+           "  The engine converts, on its machine, with Melody's converter: tags and\n"
+           "  cover carried and checked, nothing left half-written. FOLDER and PATHs\n"
+           "  are the engine's. Files are named by its naming layout NAME (melody-cli\n"
+           "  convert --layouts), else keep their place below the music folder; then\n"
+           "  ReplayGain is measured afresh on what was made (--no-replaygain not to).\n"
+           "  One already converted is passed over, so the same\n"
            "  command can run again, from cron, say:\n"
            "    melody-cli convert --to ~/Opus --since 1d\n";
 }
@@ -140,11 +125,10 @@ std::vector<std::string> album_track_paths(protocol::Client& client, const std::
 int convert_command(protocol::Client& client, const bool json,
                     const std::vector<std::string>& words) {
     std::string to;
-    std::string layout_name;
-    std::string preset_id{"opus-192"};
+    std::string layout;
+    std::string preset{"opus-192"};
+    std::string gain{"none"};
     std::optional<std::int64_t> since;
-    std::size_t jobs = std::max(1U, std::thread::hardware_concurrency() / 2U);
-    auto gain = convert::ConversionGainMode::none;
     bool artwork = true;
     bool replaygain = true;
     bool dry_run = false;
@@ -163,19 +147,24 @@ int convert_command(protocol::Client& client, const bool json,
             return EXIT_SUCCESS;
         }
         if (word == "--presets") {
-            for (const auto& preset : convert::builtin_encoder_presets()) {
-                const auto here = convert::probe_encoder_preset(preset);
-                std::cout << preset.id << "\t" << preset.display_name
-                          << (here.available ? "" : "\t(not in this FFmpeg: " + here.detail + ")")
+            for (const auto& listed :
+                 call(client, "convert.presets").value("presets", Json::array())) {
+                std::cout << text_of(listed, "id") << "\t" << text_of(listed, "name")
+                          << (listed.value("available", false)
+                                  ? std::string{}
+                                  : "\t(not in the engine's FFmpeg: " + text_of(listed, "detail") +
+                                        ")")
                           << "\n";
             }
             return EXIT_SUCCESS;
         }
         if (word == "--layouts") {
-            for (const auto& layout :
+            for (const auto& listed :
                  call(client, "layouts.list").value("layouts", Json::array())) {
-                if (auto saved = engine::wire::decode_saved_layout(layout)) {
-                    std::cout << saved->profile.name << "\n";
+                const auto profile = listed.value("profile", Json::object());
+                if (const auto name = profile.find("name");
+                    name != profile.end() && name->is_string()) {
+                    std::cout << name->get<std::string>() << "\n";
                 }
             }
             return EXIT_SUCCESS;
@@ -183,11 +172,11 @@ int convert_command(protocol::Client& client, const bool json,
         if (word == "--to") {
             to = value();
         } else if (word == "--layout") {
-            layout_name = value();
+            layout = value();
         } else if (word == "--preset") {
-            preset_id = value();
-        } else if (word == "--jobs") {
-            jobs = static_cast<std::size_t>(std::clamp(std::atoi(value().c_str()), 1, 64));
+            preset = value();
+        } else if (word == "--gain") {
+            gain = value();
         } else if (word == "--since") {
             since = since_seconds(value());
             if (!since) {
@@ -195,13 +184,6 @@ int convert_command(protocol::Client& client, const bool json,
                      "time ago (90m, 12h, 3d, 2w), not " +
                      words[at]);
             }
-        } else if (word == "--gain") {
-            const auto& mode = value();
-            gain = mode == "track"   ? convert::ConversionGainMode::track
-                   : mode == "album" ? convert::ConversionGainMode::album
-                   : mode == "none"  ? convert::ConversionGainMode::none
-                                     : (fail("--gain is none, track or album"),
-                                        convert::ConversionGainMode::none);
         } else if (word == "--no-artwork") {
             artwork = false;
         } else if (word == "--no-replaygain") {
@@ -219,20 +201,13 @@ int convert_command(protocol::Client& client, const bool json,
         usage();
         fail("convert wants --to FOLDER, and --since WHEN or the paths to convert");
     }
-    const auto preset = convert::find_encoder_preset(preset_id);
-    if (!preset) {
-        fail("there is no preset " + preset_id + " (melody-cli convert --presets)");
-    }
-    if (const auto here = convert::probe_encoder_preset(*preset); !here.available) {
-        fail(preset->display_name + " cannot be made by this computer's FFmpeg: " + here.detail);
-    }
-    std::error_code made;
-    std::filesystem::create_directories(to, made);
-    const auto root = std::filesystem::weakly_canonical(to).lexically_normal().native();
-
-    // What to convert: the tracks of the albums added since, and the files
-    // named or in the folders named.
-    std::vector<std::string> sources;
+    // The engine's paths; relative ones are taken as from here, which is
+    // the engine's machine when it is this one.
+    const auto absolute = [](const std::string& path) {
+        return std::filesystem::path{path}.is_absolute() ? path
+                                                         : std::filesystem::absolute(path).native();
+    };
+    Json paths = Json::array();
     if (since) {
         for (std::size_t offset = 0;;) {
             auto answer = call(client, "catalogue.query",
@@ -249,8 +224,8 @@ int convert_command(protocol::Client& client, const bool json,
                     older = true;
                     break;
                 }
-                for (auto& path : album_track_paths(client, text_of(album, "key"))) {
-                    sources.push_back(std::move(path));
+                for (const auto& path : album_track_paths(client, text_of(album, "key"))) {
+                    paths.push_back(protocol::encode_raw_path(path));
                 }
             }
             offset += albums.size();
@@ -259,200 +234,85 @@ int convert_command(protocol::Client& client, const bool json,
             }
         }
     }
-    for (const auto& name : named) {
-        std::error_code looked;
-        if (std::filesystem::is_directory(name, looked)) {
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(name, looked)) {
-                if (entry.is_regular_file() && audio_file(entry.path())) {
-                    sources.push_back(std::filesystem::absolute(entry.path()).native());
-                }
-            }
-        } else {
-            sources.push_back(std::filesystem::absolute(name).native());
-        }
+    for (const auto& path : named) {
+        paths.push_back(protocol::encode_raw_path(absolute(path)));
     }
-    std::ranges::sort(sources);
-    sources.erase(std::ranges::unique(sources).begin(), sources.end());
-    if (sources.empty()) {
+    if (paths.empty()) {
         return EXIT_SUCCESS;
     }
-
-    // Named by a layout of the engine's, or in their place below the music
-    // folder they are in.
-    std::optional<operations::OutputLayoutProfile> layout;
-    if (!layout_name.empty()) {
-        for (const auto& listed : call(client, "layouts.list").value("layouts", Json::array())) {
-            if (auto saved = engine::wire::decode_saved_layout(listed);
-                saved && saved->profile.name == layout_name) {
-                layout = saved->profile;
-            }
-        }
-        if (!layout) {
-            fail("the engine has no naming layout " + layout_name +
-                 " (melody-cli convert --layouts)");
-        }
+    Json params{{"paths", std::move(paths)}, {"to", protocol::encode_raw_path(absolute(to))},
+                {"preset", preset},          {"gain", gain},
+                {"artwork", artwork},        {"dry_run", dry_run}};
+    if (!layout.empty()) {
+        params["layout"] = layout;
     }
-    std::vector<std::string> roots;
-    if (!layout) {
-        for (const auto& listed : call(client, "catalogue.roots").value("roots", Json::array())) {
-            if (auto raw = protocol::decode_raw_path(text_of(listed, "path"))) {
-                roots.push_back(std::filesystem::path{*raw}.lexically_normal().native());
-            }
+    const bool interactive = !json && ::isatty(STDERR_FILENO) == 1;
+    auto outcome = client.run_job("convert.apply", params, [interactive](const Json& progress) {
+        if (interactive) {
+            std::cerr << "\r\033[Kconverting " << progress.value("completed", 0) << "/"
+                      << progress.value("total", 0) << std::flush;
         }
+    });
+    if (interactive) {
+        std::cerr << "\r\033[K";
     }
-    const auto root_of = [&roots](const std::string& path) {
-        std::string found;
-        for (const auto& candidate : roots) {
-            if ((path.starts_with(candidate + "/") || candidate == "/") &&
-                candidate.size() > found.size()) {
-                found = candidate;
-            }
-        }
-        return found;
-    };
-
-    // Read here, planned as the converter window plans them, a plan for
-    // each music folder when mirroring.
-    std::map<std::string, std::vector<operations::OutputPathPlanningItem>> groups;
-    std::vector<metadata::MetadataDocument> documents;
+    if (!outcome) {
+        fail(outcome.error().message);
+    }
+    if (const auto error = outcome->find("error"); error != outcome->end()) {
+        fail(error->value("message", std::string{"the engine could not convert"}));
+    }
+    const auto result = outcome->value("result", Json::object());
     int problems = 0;
-    for (const auto& path : sources) {
-        auto read = metadata::read_local_metadata(path);
-        if (!read) {
-            std::cerr << "melody-cli: " << path << ": " << read.error().message << "\n";
-            ++problems;
-            continue;
-        }
-        const auto group = layout ? std::string{} : root_of(path);
-        if (!layout && group.empty()) {
-            std::cerr << "melody-cli: " << path
-                      << ": not in a music folder of the engine's; name a --layout\n";
-            ++problems;
-            continue;
-        }
-        groups[group].push_back(
-            operations::OutputPathPlanningItem{.item_index = documents.size(),
-                                               .source_raw_path = path,
-                                               .source_revision = read->source_revision,
-                                               .final_metadata = read->document});
-        documents.push_back(std::move(read->document));
+    for (const auto& problem : result.value("problems", Json::array())) {
+        std::cerr << "melody-cli: " << (problem.is_string() ? problem.get<std::string>() : "")
+                  << "\n";
+        ++problems;
     }
-    std::vector<convert::ConversionScanItem> work;
-    std::size_t passed = 0;
-    for (auto& [group, items] : groups) {
-        operations::OutputLayoutProfile used =
-            layout ? *layout
-                   : operations::OutputLayoutProfile{.schema_version = 1U,
-                                                     .name = "mirror",
-                                                     .dialect = {},
-                                                     .relative_directory_expression = "%directory%",
-                                                     .basename_expression = "%filename%",
-                                                     .sanitization_policy = {"linux", 1U}};
-        operations::ConvertedPublicationPolicy converted{
-            .target_extension = preset->file_extension,
-            .mirror_source_root_raw_path = layout ? std::nullopt : std::optional{group}};
-        auto planned = operations::plan_output_paths(
-            items, {.rename_files = true, .move_files = true}, std::move(used),
-            operations::DestinationProfile{.schema_version = 1U,
-                                           .name = "melody-cli",
-                                           .root_raw_path = root,
-                                           .containment_policy = {"lexical-beneath-root", 1U}},
-            {}, {}, {}, converted);
-        if (!planned) {
-            fail(planned.error().message);
-        }
-        for (const auto& issue : planned->issues) {
-            std::cerr << "melody-cli: " << issue.message << "\n";
-            ++problems;
-        }
-        for (const auto& source : planned->sources) {
-            std::error_code looked;
-            if (std::filesystem::exists(source.target_raw_path, looked)) {
-                ++passed;
-                continue;
+    const auto decoded = [](const Json& encoded) {
+        auto raw = protocol::decode_raw_path(encoded.is_string() ? encoded.get<std::string>()
+                                                                 : std::string{});
+        return raw ? *raw : std::string{};
+    };
+    Json made = Json::array();
+    for (const auto& file : result.value("files", Json::array())) {
+        const auto source = decoded(file.value("source", Json()));
+        const auto target = decoded(file.value("target", Json()));
+        if (dry_run) {
+            if (!json) {
+                std::cout << source << "\t" << target << "\n";
             }
-            for (const auto item : source.item_indexes) {
-                work.push_back(
-                    convert::ConversionScanItem{.item_index = item,
-                                                .source_raw_path = source.source_raw_path,
-                                                .selection = {},
-                                                .range = std::nullopt,
-                                                .destination_raw_path = source.target_raw_path,
-                                                .metadata = documents[item]});
+        } else if (file.value("converted", false)) {
+            made.push_back(file.value("target", Json()));
+            if (!json) {
+                std::cout << target << "\n";
             }
-        }
-    }
-    if (dry_run) {
-        for (const auto& item : work) {
-            std::cout << item.source_raw_path << "\t" << item.destination_raw_path << "\n";
-        }
-        return problems == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-    for (const auto& item : work) {
-        std::error_code created;
-        std::filesystem::create_directories(
-            std::filesystem::path{item.destination_raw_path}.parent_path(), created);
-    }
-    auto result =
-        convert::scan_conversion(work, {.preset = *preset,
-                                        .maximum_parallelism = jobs,
-                                        .target_sample_rate = std::nullopt,
-                                        .sample_rate_cap = std::nullopt,
-                                        .target_bit_depth = std::nullopt,
-                                        .keep_source_bit_depth = false,
-                                        .channel_policy = convert::ConversionChannelPolicy::keep,
-                                        .gain_mode = gain,
-                                        .gain_preamp_db = 0.0F,
-                                        .carry_artwork = artwork});
-    if (!result) {
-        fail(result.error().message);
-    }
-    Json listed = Json::array();
-    Json converted_paths = Json::array();
-    for (const auto& item : result->items) {
-        const bool converted = item.state == convert::ConversionScanState::converted;
-        if (converted) {
-            converted_paths.push_back(protocol::encode_raw_path(item.destination_raw_path));
-        }
-        if (json) {
-            listed.push_back(
-                Json{{"source", item.source_raw_path},
-                     {"converted", converted ? Json(item.destination_raw_path) : Json()},
-                     {"error", item.issue ? Json(item.issue->message) : Json()}});
-        } else if (converted) {
-            std::cout << item.destination_raw_path << "\n";
         } else {
-            std::cerr << "melody-cli: " << item.source_raw_path << ": "
-                      << (item.issue ? item.issue->message : std::string{"not converted"}) << "\n";
-        }
-        if (!converted) {
+            std::cerr << "melody-cli: " << source << ": "
+                      << (file.value("error", Json()).is_string() ? file["error"].get<std::string>()
+                                                                  : std::string{"not converted"})
+                      << "\n";
             ++problems;
         }
     }
-    // The source's gain does not fit what a lossy encoder made of it, and the
-    // converter carries none: measured again on the files made, by album, as
-    // Melody's ReplayGain scan does -- Opus's in its R128 tags.
+    // The converter carries no ReplayGain -- the source's does not fit what a
+    // lossy encoder made of it -- so the engine measures what it made, by
+    // album, as Melody's ReplayGain scan does: Opus's in its R128 tags.
     Json gained;
-    if (replaygain && gain == convert::ConversionGainMode::none && !converted_paths.empty()) {
-        const auto count = converted_paths.size();
-        auto outcome = client.run_job("replaygain.apply",
-                                      Json{{"paths", std::move(converted_paths)},
-                                           {"grouping", "album"},
-                                           {"true_peak", false},
-                                           {"sidecar", false}},
-                                      [](const Json&) {});
-        const auto* why = !outcome                     ? "the engine did not measure them"
-                          : outcome->contains("error") ? "the engine could not measure them"
-                                                       : nullptr;
-        if (why != nullptr) {
-            std::cerr << "melody-cli: ReplayGain: " << why << ": "
-                      << (!outcome ? outcome.error().message
-                                   : outcome->at("error").value("message", std::string{}))
-                      << " -- does the engine reach " << root
-                      << " at that path? Else --no-replaygain\n";
+    if (replaygain && gain == "none" && !made.empty()) {
+        const auto count = made.size();
+        auto measured = client.run_job(
+            "replaygain.apply",
+            Json{{"paths", made}, {"grouping", "album"}, {"true_peak", false}, {"sidecar", false}},
+            [](const Json&) {});
+        if (!measured || measured->contains("error")) {
+            std::cerr << "melody-cli: ReplayGain not measured: "
+                      << (!measured ? measured.error().message
+                                    : measured->at("error").value("message", std::string{}))
+                      << "\n";
             ++problems;
         } else {
-            gained = outcome->value("result", Json::object());
+            gained = measured->value("result", Json::object());
             const auto written = gained.value("written", std::size_t{0});
             if (gained.value("refused", false) || written < count) {
                 std::cerr << "melody-cli: ReplayGain written to " << written << " of " << count
@@ -460,8 +320,6 @@ int convert_command(protocol::Client& client, const bool json,
                 for (const auto& problem : gained.value("problems", Json::array())) {
                     if (problem.is_object()) {
                         std::cerr << "; " << problem.value("message", std::string{});
-                    } else if (problem.is_string()) {
-                        std::cerr << "; " << problem.get<std::string>();
                     }
                 }
                 std::cerr << "\n";
@@ -473,8 +331,8 @@ int convert_command(protocol::Client& client, const bool json,
         }
     }
     if (json) {
-        std::cout << Json{{"files", listed}, {"replaygain", gained}}.dump() << "\n";
-    } else if (passed > 0U) {
+        std::cout << Json{{"result", result}, {"replaygain", gained}}.dump() << "\n";
+    } else if (const auto passed = result.value("passed", std::size_t{0}); passed > 0U) {
         std::cerr << "melody-cli: " << passed << " converted before, passed over\n";
     }
     return problems == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

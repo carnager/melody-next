@@ -7,8 +7,11 @@ otherwise -- and its Wikidata entry names the Wikipedia article, whose
 summary and photo the panel shows, with links. Nothing is asked of anyone's
 own server and no account is needed. What is found is kept a week in the
 cache folder, so the same artist is not looked up every track; MusicBrainz
-is asked at most once a second, as it asks.
+is asked at most once a second, as it asks -- by every run together, the
+panel being run anew for each track -- and a 503, its answer to being asked
+too often, is asked again after the wait it names.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -22,7 +25,7 @@ AGENT = "Melody-artist-info/1 (https://github.com/carnager/melody-next)"
 KEPT = 7 * 24 * 3600
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                      "melody", "plugins", "artist-info")
-_last_musicbrainz = [0.0]
+TRIES = 4
 
 
 def fail(message):
@@ -30,23 +33,56 @@ def fail(message):
     sys.exit(1)
 
 
-def fetch(url, binary=False):
-    if url.startswith("https://musicbrainz.org/"):
-        wait = 1.1 - (time.monotonic() - _last_musicbrainz[0])
-        if wait > 0:
+def musicbrainz_turn():
+    """Waits until a second has passed since any run last asked MusicBrainz.
+
+    The time is kept in a file every run locks while it waits, so runs that
+    overlap -- one track after another, a refresh -- take turns.
+    """
+    os.makedirs(CACHE, exist_ok=True)
+    with open(os.path.join(CACHE, "musicbrainz.turn"), "a+", encoding="utf-8") as turn:
+        fcntl.flock(turn, fcntl.LOCK_EX)
+        turn.seek(0)
+        try:
+            last = float(turn.read().strip() or 0)
+        except ValueError:
+            last = 0.0
+        wait = 1.1 - (time.time() - last)
+        if 0 < wait <= 1.1:
             time.sleep(wait)
-        _last_musicbrainz[0] = time.monotonic()
-    request = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            body = response.read()
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return None
-        fail("%s answered %s" % (urllib.parse.urlsplit(url).netloc, error.code))
-    except Exception as error:
-        fail("%s: %s" % (urllib.parse.urlsplit(url).netloc, error))
-    return body if binary else json.loads(body)
+        turn.seek(0)
+        turn.truncate()
+        turn.write("%.3f" % time.time())
+        turn.flush()
+
+
+def fetch(url, binary=False):
+    host = urllib.parse.urlsplit(url).netloc
+    for attempt in range(TRIES):
+        if host == "musicbrainz.org":
+            musicbrainz_turn()
+        request = urllib.request.Request(url, headers={"User-Agent": AGENT})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                body = response.read()
+            return body if binary else json.loads(body)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
+            # Asked too often, or busy: again after the wait it names.
+            if error.code in (429, 503) and attempt + 1 < TRIES:
+                try:
+                    wait = float(error.headers.get("Retry-After") or 0)
+                except ValueError:
+                    wait = 0
+                time.sleep(min(max(wait, 1.0 + attempt), 8.0))
+                continue
+            fail("%s answered %s%s" % (host, error.code,
+                                       ", too often asked; try again in a while"
+                                       if error.code in (429, 503) else ""))
+        except Exception as error:
+            fail("%s: %s" % (host, error))
+    return None
 
 
 def cached(name):

@@ -101,7 +101,7 @@ fun TextTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
 }
 
 /**
- * Initials on a muted tile, as Trackknife's library shows an artist: a tone
+ * Initials on a muted tile, as the desktop app's library shows an artist: a tone
  * of its own per name, so a list reads as more than one grey column.
  */
 @Composable

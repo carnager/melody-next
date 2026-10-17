@@ -52,7 +52,7 @@ import com.melody.next.engine.FoundEngine
 import com.melody.next.engine.discoverEngines
 
 /**
- * Choosing an engine: the ones on this network by name, as Trackknife finds
+ * Choosing an engine: the ones on this network by name, as the desktop app finds
  * them, or an address typed in -- over a VPN from elsewhere, say.
  */
 @Composable

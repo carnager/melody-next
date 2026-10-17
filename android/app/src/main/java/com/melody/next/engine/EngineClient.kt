@@ -56,7 +56,7 @@ class EngineClient(
     val outputs: StateFlow<List<Output>> = _outputs
     /** Something asked for that failed, said for a person. */
     val problems: SharedFlow<String> = _problems
-    /** A rating set on the engine, by any client: this one, Trackknife, a script. */
+    /** A rating set on the engine, by any client: this one, the desktop app, a script. */
     val ratings: SharedFlow<RatingChange> = _ratings
     /** ADR-0233: a list on the engine was written or deleted, by anyone: its id. */
     val listsChanged: SharedFlow<String> = _listsChanged
@@ -254,7 +254,7 @@ class EngineClient(
     /** ADR-0233: the engine's lists, saved ones first, each by name. */
     suspend fun lists(): List<EngineList> =
         call("list.all").optJSONArray("lists").objects().map(EngineList::from)
-            .sortedWith(compareBy({ !it.saved }, { it.name.lowercase() }))
+            .sortedBy { it.name.lowercase() }
 
     suspend fun listEntries(id: String): List<ListEntry> =
         call("list.get", JSONObject().put("id", id)).optJSONArray("items").objects().map(ListEntry::from)

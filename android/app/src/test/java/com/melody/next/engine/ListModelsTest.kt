@@ -3,22 +3,19 @@ package com.melody.next.engine
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** ADR-0233: the engine's lists, as list.all and list.get describe them. */
+/** ADR-0233/0286: the engine's saved playlists, as list.all and list.get describe them. */
 class ListModelsTest {
     @Test
-    fun aListSaysWhetherItIsSavedAndHowLong() {
+    fun aListSaysWhatItIsAndHowLong() {
         val saved = EngineList.from(
             JSONObject("""{"id":"a","name":"Road trip","kind":"saved","revision":3,"tracks":12,"modified_ms":1}"""),
         )
+        assertEquals("a", saved.id)
         assertEquals("Road trip", saved.name)
-        assertTrue(saved.saved)
         assertEquals(12, saved.tracks)
         assertEquals(3L, saved.revision)
-        assertFalse(EngineList.from(JSONObject("""{"id":"b","name":"Untitled","kind":"working"}""")).saved)
     }
 
     @Test

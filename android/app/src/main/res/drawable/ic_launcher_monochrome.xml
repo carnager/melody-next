@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- ADR-0287: the vinyl bird, from packaging/icons/melody.svg, its outline, for
+     themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:name="vinyl_bird"
+        android:scaleX="0.00606061"
+        android:scaleY="-0.00606061"
+        android:translateX="15.545455"
+        android:translateY="93.363636">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M4045 10890 c-12 -19 109 -204 224 -341 334 -400 804 -682 1321 -792 107 -23 113 -25 86 -36 -258 -103 -700 -334 -931 -486 -978 -644 -1652 -1629 -1834 -2680 -67 -383 -65 -853 5 -1230 21 -113 88 -376 118 -463 28 -82 27 -83 -23 -43 -247 194 -614 337 -1223 475 -27 6 -28 5 -28 -30 0 -161 153 -610 309 -909 467 -893 1171 -1442 1899 -1481 101 -6 120 -9 142 -29 194 -172 593 -405 906 -529 1157 -456 2514 -224 3498 600 1243 1041 1652 2780 960 4082 l-55 102 26 10 c223 85 673 309 940 468 251 150 545 352 545 375 0 28 -372 324 -585 467 -191 128 -615 359 -660 360 -5 0 -33 40 -62 88 -161 273 -426 549 -711 740 -492 331 -1094 480 -1784 442 l-183 -10 -40 30 c-551 415 -1259 701 -1956 789 -295 38 -887 58 -904 31z" />
+    </group>
+</vector>

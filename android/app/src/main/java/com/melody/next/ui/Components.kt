@@ -125,7 +125,7 @@ fun ModeButton(icon: ImageVector, description: String, active: Boolean, once: Bo
         Box(contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = description, modifier = Modifier.size(24.dp), tint = tint)
             if (once) {
-                // A one-shot mode: a dot, as Trackknife marks it.
+                // A one-shot mode: a dot, as the desktop app marks it.
                 Canvas(Modifier.size(30.dp)) {
                     drawCircle(tint, radius = 3.dp.toPx(), center = center.copy(x = size.width - 3.dp.toPx(), y = 3.dp.toPx()))
                 }

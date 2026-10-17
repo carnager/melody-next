@@ -207,11 +207,10 @@ data class Output(
 /** A track's or an album's rating, 0-10, by the key the library rates it under. */
 data class RatingChange(val hash: String, val rating: Int)
 
-/** ADR-0233: one of the engine's lists -- saved, or a working one a window has open. */
+/** ADR-0286: one of the engine's saved playlists; tabs are each window's own. */
 data class EngineList(
     val id: String,
     val name: String,
-    val saved: Boolean,
     val tracks: Int,
     val revision: Long,
 ) {
@@ -219,7 +218,6 @@ data class EngineList(
         fun from(json: JSONObject) = EngineList(
             id = json.optString("id"),
             name = json.optString("name"),
-            saved = json.optString("kind") == "saved",
             tracks = json.optInt("tracks"),
             revision = json.optLong("revision"),
         )
@@ -260,7 +258,7 @@ data class ListEntry(
 
 /**
  * What a ReplayGain choice asks of the engine: Automatic is track gain while
- * Random is on and album gain otherwise -- Trackknife's rule, so the two
+ * Random is on and album gain otherwise -- the desktop app's rule, so the two
  * agree. The engine knows only off, track and album.
  */
 fun resolveReplayGain(choice: String, random: Boolean): String = when (choice) {
@@ -274,7 +272,7 @@ fun resolveReplayGain(choice: String, random: Boolean): String = when (choice) {
  * engine reports, it says what to do. Random moving -- or Automatic just
  * chosen, or the engine just reached -- tells the engine the mode it means;
  * a mode the engine reports otherwise, with nothing of ours on its way, was
- * chosen elsewhere and ends Automatic, as it does in Trackknife.
+ * chosen elsewhere and ends Automatic, as it does in the desktop app.
  */
 class AutomaticReplayGain {
     sealed interface Step {

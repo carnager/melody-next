@@ -426,7 +426,7 @@ private fun ListsPage(vm: MainViewModel) {
                 ) {
                     Text(list.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        listOfNotNull("${list.tracks} tracks", if (list.saved) null else "working").joinToString(" · "),
+                        "${list.tracks} tracks",
                         style = MaterialTheme.typography.bodySmall,
                         color = tones.muted,
                     )
@@ -456,7 +456,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList, engine: com.melody.nex
             Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(list.name, style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOfNotNull("${entries.size} tracks", total.takeIf { it > 0 }?.let(::formatMinutes), if (list.saved) null else "working")
+                    listOfNotNull("${entries.size} tracks", total.takeIf { it > 0 }?.let(::formatMinutes))
                         .joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall, color = tones.muted,
                 )

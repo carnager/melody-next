@@ -4,7 +4,7 @@ package com.melody.next.engine
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The phone's ReplayGain choice as the engine is told it, by Trackknife's rule. */
+/** The phone's ReplayGain choice as the engine is told it, by the desktop app's rule. */
 class ReplayGainTest {
     @Test
     fun automaticIsTrackGainWithRandomAndAlbumGainOtherwise() {
@@ -41,7 +41,7 @@ class ReplayGainTest {
     fun aModeChosenElsewhereEndsAutomatic() {
         val automatic = AutomaticReplayGain()
         assertEquals(AutomaticReplayGain.Step.Nothing, automatic.on(state(false, "album"), auto = true, connected = true))
-        // Trackknife set to Track, Random as it was.
+        // The desktop app set to Track, Random as it was.
         assertEquals(AutomaticReplayGain.Step.Chosen, automatic.on(state(false, "track"), auto = true, connected = true))
     }
 

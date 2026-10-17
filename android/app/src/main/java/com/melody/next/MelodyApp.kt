@@ -188,7 +188,7 @@ class MelodyApp : Application() {
     }
 
     // Automatic follows Random on the engine the phone follows. A mode
-    // chosen elsewhere -- Trackknife set to Album -- is a choice, and ends
+    // chosen elsewhere -- the desktop app set to Album -- is a choice, and ends
     // Automatic here, as it does there.
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun followReplayGain() {

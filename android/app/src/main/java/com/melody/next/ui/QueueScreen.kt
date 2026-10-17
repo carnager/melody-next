@@ -43,7 +43,7 @@ import com.melody.next.engine.QueueEntry
 
 /**
  * The engine's queue and Up Next. Up Next plays before the queue goes on;
- * the queue is shown by album, as Trackknife groups it, with what has
+ * the queue is shown by album, as the desktop app groups it, with what has
  * already played dimmed. A row goes with a swipe.
  */
 @Composable

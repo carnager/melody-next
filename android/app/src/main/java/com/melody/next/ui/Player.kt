@@ -197,7 +197,7 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
     LaunchedEffect(entry?.path, engine) {
         facts = entry?.path?.let { engine.track(it) }
     }
-    // Rated elsewhere -- in Trackknife, from a script -- while it plays.
+    // Rated elsewhere -- in the desktop app, from a script -- while it plays.
     LaunchedEffect(engine) {
         engine.ratings.collect { change ->
             facts?.let { if (it.ratingHash == change.hash) facts = it.copy(rating = change.rating) }
@@ -310,7 +310,7 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
 }
 
 /**
- * ReplayGain, as Trackknife offers it: off, the track's, the album's, or
+ * ReplayGain, as the desktop app offers it: off, the track's, the album's, or
  * Automatic -- track gain with Random, album gain otherwise. In the accent
  * when on, with a dot beneath when Automatic.
  */

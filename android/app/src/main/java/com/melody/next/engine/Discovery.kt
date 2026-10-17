@@ -24,7 +24,7 @@ data class FoundEngine(
 }
 
 /**
- * Engines on the network, by name, as Trackknife and the agents find them:
+ * Engines on the network, by name, as the desktop app and the agents find them:
  * each announces `_melody._tcp` over multicast DNS with its port and whether
  * it wants a password. Android resolves one service at a time, so found ones
  * wait their turn.

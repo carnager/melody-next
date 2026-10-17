@@ -137,6 +137,25 @@ if cli find nothing-like-this > /dev/null 2>&1; then
     fail "find with nothing found fails, as tracks does"
 fi
 [ "$(cli latest 5 | wc -l)" -ge 1 ] || fail "the newest albums are listed"
+# What came in since a moment, as a cron job asks it: names, or folders.
+[ "$(cli latest --since 1h | wc -l)" -ge 1 ] || fail "latest --since lists what came in"
+cli latest --since 1h --folders > "${work}/folders.txt" || fail "latest --since --folders answers"
+while IFS= read -r folder; do
+    case "${folder}" in
+        "${work}/music/"*) [ -d "${folder}" ] || fail "an album's folder is a folder: ${folder}" ;;
+        *) fail "an album's folder is in the music folder: ${folder}" ;;
+    esac
+done < "${work}/folders.txt"
+[ -s "${work}/folders.txt" ] || fail "and there is one"
+cli --json latest --since 1h --folders | python3 -c '
+import json, sys
+albums = json.load(sys.stdin)
+assert albums and all(a["folder"] for a in albums)' || fail "--json gives each album its folder"
+[ -z "$(cli latest --since "$(( $(date +%s) + 3600 ))")" ] || fail "nothing comes in from the future"
+cli latest --since "$(( $(date +%s) + 3600 ))" || fail "and nothing new is no failure"
+if cli latest --since whenever > /dev/null 2>&1; then
+    fail "a moment latest cannot read is refused"
+fi
 cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) == 2' \
     || fail "--json answers in JSON, every album"
 

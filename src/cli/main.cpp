@@ -10,6 +10,7 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/protocol/client.hpp"
+#include "trackknife/protocol/message.hpp"
 #include "trackknife/protocol/version.hpp"
 
 #include <unistd.h>
@@ -20,9 +21,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -108,6 +111,12 @@ void usage(std::ostream& out) {
            "                              melody-cli find 'genre IS jazz SORT BY %date%' \\\n"
            "                                --format '%date% %artist% - %title%'\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
+           "  latest --since WHEN         every album added after WHEN: Unix seconds,\n"
+           "                              2026-10-17, 2026-10-17T18:30, or ago -- 90m,\n"
+           "                              12h, 3d, 2w. Nothing new is no error. For a\n"
+           "                              cron job: keep when it ran, and pass that\n"
+           "         --folders            each album's folder, one a line, instead of\n"
+           "                              its name; with --json, a \"folder\" each\n"
            "  revision                    changes when the library does, for caches\n"
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
@@ -313,6 +322,84 @@ look_around(const std::string& wanted = {}) {
         }
     }
     return std::filesystem::path{raw}.filename().string();
+}
+
+// When `--since` means, as Unix seconds: those themselves, a local date or
+// date and time, or a time ago (90m, 12h, 3d, 2w).
+[[nodiscard]] std::optional<std::int64_t> since_seconds(const std::string& when) {
+    if (when.empty()) {
+        return std::nullopt;
+    }
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    std::int64_t number = 0;
+    const auto* end = when.data() + when.size();
+    const auto [rest, error] = std::from_chars(when.data(), end, number);
+    if (error == std::errc{} && rest == end) {
+        return number;
+    }
+    if (error == std::errc{} && rest + 1 == end && number >= 0) {
+        switch (*rest) {
+        case 's':
+            return now - number;
+        case 'm':
+            return now - number * 60;
+        case 'h':
+            return now - number * 3'600;
+        case 'd':
+            return now - number * 86'400;
+        case 'w':
+            return now - number * 604'800;
+        default:
+            return std::nullopt;
+        }
+    }
+    std::tm local{};
+    local.tm_isdst = -1;
+    for (const auto* shape :
+         {"%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"}) {
+        std::istringstream in{when};
+        local = std::tm{};
+        local.tm_isdst = -1;
+        in >> std::get_time(&local, shape);
+        if (!in.fail() && in.peek() == std::char_traits<char>::eof()) {
+            return static_cast<std::int64_t>(std::mktime(&local));
+        }
+    }
+    return std::nullopt;
+}
+
+// The folder every track of an album is in, from their encoded paths.
+[[nodiscard]] std::string album_folder(Client& client, const std::string& album_key) {
+    const auto tracks = call(client, "catalogue.query",
+                             Json{{"kind", 2},
+                                  {"text", ""},
+                                  {"album_key", album_key},
+                                  {"offset", 0},
+                                  {"limit", 5'000},
+                                  {"fields", Json::array({"title"})}})
+                            .value("entries", std::vector<Json>{});
+    std::optional<std::filesystem::path> common;
+    for (const auto& track : tracks) {
+        auto raw = trackknife::protocol::decode_raw_path(text_of(track, "key"));
+        if (!raw) {
+            continue;
+        }
+        const auto folder = std::filesystem::path{*raw}.parent_path();
+        if (!common) {
+            common = folder;
+            continue;
+        }
+        std::filesystem::path shared;
+        for (auto mine = common->begin(), theirs = folder.begin();
+             mine != common->end() && theirs != folder.end() && *mine == *theirs;
+             ++mine, ++theirs) {
+            shared /= *mine;
+        }
+        common = shared;
+    }
+    return common ? common->string() : std::string{};
 }
 
 // The library's albums or tracks for these words -- every one, page by
@@ -1026,6 +1113,84 @@ int run(const Options& options) {
         if (!options.json) {
             std::cerr << "melody-cli: " << chosen << "\n";
         }
+    } else if (command == "latest" && std::ranges::any_of(words, [](const std::string& word) {
+                   return word == "--since" || word == "--folders";
+               })) {
+        // Every album added after a moment, newest first, its folder if
+        // asked: what a cron job wants of what came in since it last ran.
+        std::optional<std::int64_t> since;
+        bool folders = false;
+        std::size_t count = 0;
+        for (std::size_t at = 1; at < words.size(); ++at) {
+            if (words[at] == "--folders") {
+                folders = true;
+            } else if (words[at] == "--since" && at + 1 < words.size()) {
+                since = since_seconds(words[++at]);
+                if (!since) {
+                    fail("--since wants Unix seconds, a date (2026-10-17, 2026-10-17T18:30) or "
+                         "a time ago (90m, 12h, 3d, 2w), not " +
+                         words[at]);
+                }
+            } else if (words[at] == "--since") {
+                fail("--since wants a moment: melody-cli latest --since 1d");
+            } else {
+                count = static_cast<std::size_t>(std::max(1, std::atoi(words[at].c_str())));
+            }
+        }
+        if (!since && count == 0U) {
+            count = 20U;
+        }
+        std::vector<Json> found;
+        constexpr std::size_t page = 200;
+        for (std::size_t offset = 0;;) {
+            Json params{{"kind", 1},
+                        {"text", ""},
+                        {"offset", offset},
+                        {"limit", page},
+                        {"newest_first", true}};
+            if (!options.json) {
+                params["fields"] = Json::array({"artist", "album", "date", "added"});
+            }
+            auto answer = call(*client, "catalogue.query", params);
+            const auto entries = answer.value("entries", std::vector<Json>{});
+            bool older = false;
+            for (const auto& entry : entries) {
+                if (since && entry.value("added", std::int64_t{0}) <= *since) {
+                    older = true;
+                    break;
+                }
+                found.push_back(entry);
+                if (count != 0U && found.size() >= count) {
+                    break;
+                }
+            }
+            offset += entries.size();
+            if (older || entries.empty() || !answer.value("more", false) ||
+                (count != 0U && found.size() >= count)) {
+                break;
+            }
+        }
+        if (folders) {
+            for (auto& entry : found) {
+                entry["folder"] = album_folder(*client, text_of(entry, "key"));
+            }
+        }
+        if (options.json) {
+            std::cout << Json(found).dump() << "\n";
+        } else {
+            std::string lines;
+            for (const auto& entry : found) {
+                lines += folders ? text_of(entry, "folder") : describe_found(entry, true);
+                if (options.keys) {
+                    lines += '\t';
+                    lines += text_of(entry, "key");
+                }
+                lines += '\n';
+            }
+            std::cout << lines;
+        }
+        // Nothing new since is no failure: a cron job runs on a quiet day too.
+        return since || !found.empty() ? EXIT_SUCCESS : EXIT_FAILURE;
     } else if (command == "albums" || command == "tracks" || command == "latest") {
         const bool albums = command != "tracks";
         const auto text = command == "latest" ? std::string{} : joined(words, 1);

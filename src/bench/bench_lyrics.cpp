@@ -11,7 +11,11 @@
 #include <QKeySequence>
 #include <QSettings>
 #include <QSlider>
+#include <QStringList>
+#include <QTimer>
+#include <QToolButton>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 
@@ -41,6 +45,61 @@ void BenchMainWindow::buildLyrics() {
     toggle->setObjectName(QStringLiteral("action-show-lyrics"));
     toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
     addAction(toggle);
+    watchSidePanel(lyrics_dock_);
+}
+
+void BenchMainWindow::watchSidePanel(QDockWidget* dock) {
+    connect(dock, &QDockWidget::visibilityChanged, this,
+            [this] { QTimer::singleShot(0, this, &BenchMainWindow::refreshPanelsButton); });
+}
+
+void BenchMainWindow::refreshPanelsButton() {
+    if (panels_button_ == nullptr) {
+        return;
+    }
+    const auto docks = findChildren<QDockWidget*>();
+    panels_button_->setChecked(std::ranges::any_of(docks, [](const QDockWidget* dock) {
+        return dynamic_cast<const AnimatedPanelDock*>(dock) != nullptr && dock->isVisible();
+    }));
+}
+
+void BenchMainWindow::togglePanels() {
+    std::vector<AnimatedPanelDock*> panels;
+    for (auto* dock : findChildren<QDockWidget*>()) {
+        if (auto* panel = dynamic_cast<AnimatedPanelDock*>(dock)) {
+            panels.push_back(panel);
+        }
+    }
+    QStringList open;
+    for (auto* panel : panels) {
+        if (panel->isVisible()) {
+            open << panel->objectName();
+        }
+    }
+    if (!open.isEmpty()) {
+        // Hidden together, remembered to come back together.
+        QSettings{}.setValue(QStringLiteral("panels/open"), open);
+        for (auto* panel : panels) {
+            if (panel->isVisible()) {
+                panel->setVisible(false);
+            }
+        }
+    } else {
+        auto wanted =
+            QSettings{}.value(QStringLiteral("panels/open"), QStringList{}).toStringList();
+        if (!std::ranges::any_of(panels, [&wanted](const AnimatedPanelDock* panel) {
+                return wanted.contains(panel->objectName());
+            })) {
+            wanted = {QStringLiteral("bench-lyrics")};
+        }
+        for (auto* panel : panels) {
+            if (wanted.contains(panel->objectName())) {
+                panel->setVisible(true);
+            }
+        }
+        QTimer::singleShot(0, this, &BenchMainWindow::tabOpenSidePanels);
+    }
+    QTimer::singleShot(0, this, &BenchMainWindow::refreshPanelsButton);
 }
 
 // Every seek from this window -- the slider, the desktop, a lyric line --

@@ -84,6 +84,7 @@ older ADRs and in `architecture.md`.
 - [ADR-0291: Plugin panels](adr/0291-plugin-panels.md).
 - [ADR-0292: One panel layout; side panels as tabs](adr/0292-one-panel-layout.md).
 - [ADR-0293: Lyrics providers](adr/0293-lyrics-providers.md).
+- [ADR-0294: Up Next under the lists; Panels for the rest](adr/0294-up-next-under-the-lists.md).
 - [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — implemented and optional.
 - [ADR-0234: Engines are connections, not a switch](adr/0234-engines-are-connections.md).
 - [ADR-0233: Lists live in the engine](adr/0233-lists-live-in-the-engine.md).

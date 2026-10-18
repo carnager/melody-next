@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/local_library_panel.hpp"
@@ -21,7 +20,9 @@
 #include <QPushButton>
 #include <QScopeGuard>
 #include <QSettings>
+#include <QSplitter>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -32,39 +33,37 @@ namespace trackknife::bench {
 
 void BenchMainWindow::buildUpNext() {
     const auto visible = QSettings{}.value(QStringLiteral("up-next/visible"), false).toBool();
-    auto* panel = new AnimatedPanelDock(QStringLiteral("Up Next"), QStringLiteral("up-next"), this);
-    up_next_dock_ = panel;
-    up_next_dock_->setObjectName(QStringLiteral("bench-up-next"));
-    up_next_dock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    auto* content = new QWidget(up_next_dock_);
+    // ADR-0294: under the lists, the queue it plays from: not a side panel.
+    auto* content = new QWidget(this);
+    up_next_section_ = content;
+    content->setObjectName(QStringLiteral("bench-up-next"));
+    auto* toggle = new QAction(QStringLiteral("Up Next"), this);
+    toggle->setObjectName(QStringLiteral("action-show-up-next"));
+    toggle->setCheckable(true);
+    toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    // Header: what this is, and whose, with how many wait.
+    // A bar: what this is, and whose, with how many wait.
     auto* heading = new QHBoxLayout;
-    heading->setContentsMargins(12, 10, 6, 8);
-    auto* titles = new QVBoxLayout;
-    titles->setSpacing(1);
+    heading->setContentsMargins(12, 5, 6, 5);
+    heading->setSpacing(10);
     auto* title = new QLabel(QStringLiteral("Up Next"), content);
     auto font = title->font();
     font.setWeight(QFont::DemiBold);
-    font.setPointSizeF(font.pointSizeF() * 1.08);
     title->setFont(font);
-    titles->addWidget(title);
+    heading->addWidget(title);
     up_next_status_ = new QLabel(content);
     up_next_status_->setObjectName(QStringLiteral("up-next-status"));
-    up_next_status_->setWordWrap(true);
     up_next_status_->setForegroundRole(QPalette::PlaceholderText);
-    titles->addWidget(up_next_status_);
-    heading->addLayout(titles, 1);
+    heading->addWidget(up_next_status_, 1);
     auto* close = new QToolButton(content);
     close->setObjectName(QStringLiteral("up-next-close"));
     close->setAutoRaise(true);
     close->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
     close->setToolTip(QStringLiteral("Close Up Next"));
     close->setAccessibleName(close->toolTip());
-    connect(close, &QToolButton::clicked, up_next_dock_,
-            [this] { up_next_dock_->setVisible(false); });
+    connect(close, &QToolButton::clicked, toggle, [toggle] { toggle->setChecked(false); });
     heading->addWidget(close);
     layout->addLayout(heading);
     up_next_view_ = new ui::QueueTableView(content);
@@ -193,12 +192,40 @@ void BenchMainWindow::buildUpNext() {
     connect(
         up_next_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
         [this] { refreshUpNext(); }, Qt::QueuedConnection);
-    panel->setPanelContent(content);
-    addDockWidget(Qt::RightDockWidgetArea, up_next_dock_);
-    up_next_dock_->setVisible(visible);
-    auto* toggle = panel->panelToggleAction();
-    toggle->setObjectName(QStringLiteral("action-show-up-next"));
-    toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
+    // The lists above it, in a split whose divider is kept where left.
+    auto* split = new QSplitter(Qt::Vertical, track_area_);
+    split->setObjectName(QStringLiteral("bench-lists-split"));
+    split->setChildrenCollapsible(false);
+    const auto at = track_area_->indexOf(tabs_);
+    track_area_->replaceWidget(at, split);
+    split->addWidget(tabs_);
+    tabs_->show();
+    split->addWidget(content);
+    split->setStretchFactor(0, 1);
+    split->setStretchFactor(1, 0);
+    const auto kept_height = [] {
+        return std::clamp(QSettings{}.value(QStringLiteral("up-next/height"), 220).toInt(), 120,
+                          800);
+    };
+    const auto place = [split, kept_height] {
+        const auto height = std::min(kept_height(), std::max(120, split->height() / 2));
+        split->setSizes({std::max(1, split->height() - height), height});
+    };
+    connect(split, &QSplitter::splitterMoved, this, [this, split](const int, const int) {
+        if (up_next_section_->isVisible()) {
+            QSettings{}.setValue(QStringLiteral("up-next/height"), split->sizes().value(1));
+        }
+    });
+    connect(toggle, &QAction::toggled, this, [this, place](const bool shown) {
+        up_next_section_->setVisible(shown);
+        QSettings{}.setValue(QStringLiteral("up-next/visible"), shown);
+        if (shown) {
+            QTimer::singleShot(0, this, place);
+        }
+    });
+    content->setVisible(visible);
+    toggle->setChecked(visible);
+    QTimer::singleShot(0, this, place);
     addAction(toggle);
 }
 
@@ -218,16 +245,16 @@ bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, co
 }
 
 void BenchMainWindow::refreshUpNext() {
-    if (!up_next_dock_)
+    if (!up_next_section_)
         return;
     std::vector<std::uint64_t> selectedIds;
     for (const auto& index : up_next_view_->selectionModel()->selectedRows())
         if (index.row() >= 0 && index.row() < static_cast<int>(up_next_display_ids_.size()))
             selectedIds.push_back(up_next_display_ids_[static_cast<std::size_t>(index.row())]);
     const auto heading = workspace_.upNextHeading();
-    if (auto* undo = up_next_dock_->findChild<QAction*>(QStringLiteral("up-next-undo")))
+    if (auto* undo = up_next_section_->findChild<QAction*>(QStringLiteral("up-next-undo")))
         undo->setEnabled(heading.can_undo);
-    auto* resume = up_next_dock_->findChild<QToolButton*>(QStringLiteral("up-next-return"));
+    auto* resume = up_next_section_->findChild<QToolButton*>(QStringLiteral("up-next-return"));
     auto* model = up_next_local_model_;
     up_next_view_->setEnabled(true);
     const bool replaced = workspace_.syncUpNextModel();
@@ -236,9 +263,9 @@ void BenchMainWindow::refreshUpNext() {
     if (resume != nullptr) {
         // Elided to what is left beside the edit buttons.
         const auto* toolbar =
-            up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
+            up_next_section_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
         const auto room =
-            std::max(48, up_next_dock_->width() - (toolbar ? toolbar->sizeHint().width() : 0) -
+            std::max(48, up_next_section_->width() - (toolbar ? toolbar->sizeHint().width() : 0) -
                              resume->iconSize().width() - 36);
         resume->setText(resume->fontMetrics().elidedText(heading.back, Qt::ElideRight, room));
         resume->setToolTip(heading.back_tooltip);
@@ -269,7 +296,7 @@ void BenchMainWindow::refreshUpNext() {
              {"up-next-move-up", row > 0},
              {"up-next-move-down", row >= 0 && last + 1 < count},
              {"up-next-clear", count > 0}}) {
-        if (auto* action = up_next_dock_->findChild<QAction*>(QString::fromLatin1(name)))
+        if (auto* action = up_next_section_->findChild<QAction*>(QString::fromLatin1(name)))
             action->setEnabled(enabled && available);
     }
     up_next_view_->setEmptyMessage(enabled ? tr("Nothing waiting") : QString{},

@@ -1788,18 +1788,49 @@ void BenchMainWindowTest::upNextMultiSelectionEdits() {
     QCOMPARE(window.up_next_display_ids_, moved);
 }
 
+// ADR-0294: Up Next under the lists, its height kept; the side panels slide
+// in, unless that is turned off.
 void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
     QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), false);
     QSettings{}.setValue(QStringLiteral("up-next/visible"), false);
-    QSettings{}.setValue(QStringLiteral("up-next/width"), 380);
+    QSettings{}.setValue(QStringLiteral("up-next/height"), 240);
+    QSettings{}.setValue(QStringLiteral("lyrics/visible"), false);
+    QSettings{}.setValue(QStringLiteral("lyrics/width"), 380);
     BenchMainWindow window;
     window.resize(1320, 760);
     window.show();
     QTRY_VERIFY(window.up_next_restored_);
-    auto* dock = window.up_next_dock_;
+
+    // Up Next: a section under the lists, not a side panel.
+    auto* section = window.up_next_section_;
+    auto* split = window.findChild<QSplitter*>(QStringLiteral("bench-lists-split"));
+    QVERIFY(split != nullptr);
+    QCOMPARE(split->orientation(), Qt::Vertical);
+    QCOMPARE(split->widget(0), window.tabs_);
+    QCOMPARE(split->widget(1), section);
+    QVERIFY(qobject_cast<QDockWidget*>(section) == nullptr);
+    auto* up_next = window.findChild<QAction*>(QStringLiteral("action-show-up-next"));
+    QVERIFY(!section->isVisible());
+    up_next->trigger();
+    QTRY_VERIFY(section->isVisible() && window.up_next_view_->isVisible());
+    QTRY_VERIFY(qAbs(split->sizes().value(1) - 240) <= 2);
+    QVERIFY(section->geometry().top() >= window.tabs_->geometry().bottom());
+    split->setSizes({split->height() - 300, 300});
+    emit split->splitterMoved(split->height() - 300, 1);
+    QTRY_COMPARE(QSettings{}.value(QStringLiteral("up-next/height")).toInt(), 300);
+    up_next->trigger();
+    QTRY_VERIFY(!section->isVisible());
+    QVERIFY(!QSettings{}.value(QStringLiteral("up-next/visible")).toBool());
+    up_next->trigger();
+    QTRY_VERIFY(section->isVisible());
+    QTRY_VERIFY(qAbs(split->sizes().value(1) - 300) <= 2);
+    up_next->trigger();
+
+    // A side panel slides in, as wide as it was left.
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
     auto* animation = dock->findChild<QVariantAnimation*>();
     QVERIFY(animation);
-    auto* toggle = window.findChild<QAction*>(QStringLiteral("action-show-up-next"));
+    auto* toggle = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
     QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), true);
     toggle->trigger();
     QTRY_COMPARE(animation->state(), QAbstractAnimation::Running);
@@ -1812,12 +1843,11 @@ void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
     QVERIFY(dock->isVisible());
     QVERIFY(toggle->isChecked());
     QVERIFY(qAbs(dock->width() - 380) <= 2);
-    QVERIFY(window.up_next_view_->isVisible());
     window.resizeDocks({dock}, {460}, Qt::Horizontal);
-    QTRY_COMPARE(QSettings{}.value(QStringLiteral("up-next/width")).toInt(), 460);
+    QTRY_COMPARE(QSettings{}.value(QStringLiteral("lyrics/width")).toInt(), 460);
     toggle->trigger();
     QTRY_VERIFY(!dock->isVisible());
-    QCOMPARE(QSettings{}.value(QStringLiteral("up-next/width")).toInt(), 460);
+    QCOMPARE(QSettings{}.value(QStringLiteral("lyrics/width")).toInt(), 460);
     auto* dialog = window.showSettingsDialog(SettingsDialog::Page::general);
     auto* checkbox =
         dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-panel-animations"));
@@ -1837,6 +1867,8 @@ void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
     QCOMPARE(animation->state(), QAbstractAnimation::Stopped);
     toggle->trigger();
     QVERIFY(!dock->isVisible());
+    QSettings{}.remove(QStringLiteral("lyrics"));
+    QSettings{}.remove(QStringLiteral("up-next"));
 }
 
 void BenchMainWindowTest::upNextEditingAndPersistence() {
@@ -1871,7 +1903,7 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     QVERIFY(!window.up_next_view_->albumGroupingEnabled());
     if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
-        window.up_next_dock_->setVisible(true);
+        window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->setChecked(true);
         window.resize(1320, 760);
         QTest::qWait(250);
         QVERIFY(window.grab().save(directory + QStringLiteral("/up-next.png")));

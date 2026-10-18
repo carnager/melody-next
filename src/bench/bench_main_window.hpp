@@ -851,7 +851,15 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::vector<QToolButton*> local_mode_buttons_;
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
-    QDockWidget* up_next_dock_{nullptr};
+    // ADR-0294: Up Next, under the lists.
+    QWidget* up_next_section_{nullptr};
+    // ADR-0294: the side panels, all at once.
+    QToolButton* panels_button_{nullptr};
+    void togglePanels();
+    void refreshPanelsButton();
+    // Each side panel told to keep the Panels button true when it shows or
+    // hides.
+    void watchSidePanel(QDockWidget* dock);
     QDockWidget* lyrics_dock_{nullptr};
     LyricsPanel* lyrics_panel_{nullptr};
     // The entry whose lyrics the panel shows or awaits -- empty, nothing

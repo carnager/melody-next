@@ -314,16 +314,16 @@ void BenchMainWindowTest::narrowWindowKeepsListAndUpNextCompact() {
     // moment, then fit again.
     window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
     window.resize(1'100, 720);
-    QTRY_VERIFY(window.up_next_dock_->isVisible());
+    QTRY_VERIFY(window.up_next_section_->isVisible());
     QTest::qWait(600);
 
-    // Up Next: a stack of two-line rows, no table headers, and narrow enough
-    // to leave the list its room.
+    // Up Next: a stack of two-line rows, no table headers, under the list
+    // and low enough to leave it its room (ADR-0294).
     QVERIFY(dynamic_cast<UpNextDelegate*>(window.up_next_view_->itemDelegate()) != nullptr);
     QVERIFY(window.up_next_view_->horizontalHeader()->isHidden());
     QVERIFY(window.up_next_view_->verticalHeader()->isHidden());
     QCOMPARE(window.up_next_view_->rowHeight(0), UpNextDelegate::row_height);
-    QTRY_VERIFY(window.up_next_dock_->width() <= 320);
+    QTRY_VERIFY(window.up_next_section_->height() <= window.tabs_->height());
 
     // The list's columns fit, so no scroll bar is left standing under it.
     QTRY_COMPARE(tab->view->horizontalHeader()->length(), tab->view->viewport()->width());

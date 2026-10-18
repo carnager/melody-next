@@ -217,6 +217,7 @@ void BenchMainWindow::buildPluginPanels() {
             addDockWidget(Qt::RightDockWidgetArea, dock);
             slot->dock = dock;
             slot->view = view;
+            watchSidePanel(dock);
             auto* raw = slot.get();
             connect(view, &PluginPanelView::closeRequested, dock,
                     [dock] { dock->setVisible(false); });

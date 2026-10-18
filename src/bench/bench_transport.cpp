@@ -463,6 +463,17 @@ void BenchMainWindow::buildTransport() {
     });
     setUpNextCount(0);
     header_layout->addWidget(up_next_button_);
+    // ADR-0294: the reading panels -- Lyrics, plugins' -- shown or hidden
+    // together, those open before coming back.
+    panels_button_ = new QToolButton(header);
+    panels_button_->setObjectName(QStringLiteral("action-panels"));
+    panels_button_->setText(QStringLiteral("Panels"));
+    panels_button_->setToolTip(QStringLiteral("Show or hide the side panels"));
+    panels_button_->setCheckable(true);
+    panels_button_->setFixedHeight(26);
+    panels_button_->setFont(pill_font);
+    connect(panels_button_, &QToolButton::clicked, this, &BenchMainWindow::togglePanels);
+    header_layout->addWidget(panels_button_);
     bar->addWidget(header);
     styleHeader();
     // A scheme applied later -- chosen, or the desktop turning dark --
@@ -774,6 +785,9 @@ void BenchMainWindow::styleHeader() {
     if (up_next_button_ != nullptr) {
         up_next_button_->setStyleSheet(pill);
     }
+    if (panels_button_ != nullptr) {
+        panels_button_->setStyleSheet(pill);
+    }
 }
 
 void BenchMainWindow::styleStatusBar() {
@@ -933,9 +947,8 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
     QTableView* view = nullptr;
     int row = -1;
     if (playback_.requests.active()) {
-        if (jump && up_next_dock_) {
-            up_next_dock_->setVisible(true);
-            up_next_dock_->raise();
+        if (jump && up_next_section_) {
+            findChild<QAction*>(QStringLiteral("action-show-up-next"))->setChecked(true);
         }
         return;
     }

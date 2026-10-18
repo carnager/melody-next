@@ -591,23 +591,41 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
 
 // ADR-0292: side panels open together share their room as tabs, and one
 // closed leaves the others as they were.
+namespace {
+
+// A plugin of one side panel, for side panels to share the room with Lyrics.
+void sidePanelPlugin(const QString& folder) {
+    QVERIFY(QDir{}.mkpath(folder));
+    QFile manifest{folder + QStringLiteral("/plugin.json")};
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    manifest.write(R"({"schema": 1, "name": "Side", "panels": [{"id": "p",
+                      "label": "Side", "run": ["true"]}]})");
+}
+
+} // namespace
+
+// ADR-0292: side panels open together share their room as tabs, and one
+// closed leaves the others as they were; ADR-0294: Panels hides them all and
+// brings the same back.
 void BenchMainWindowTest::sidePanelsShareTheirRoomAsTabs() {
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/side");
+    sidePanelPlugin(folder);
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("side")), true);
     BenchMainWindow window;
     window.resize(1200, 700);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     auto* lyrics = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
-    auto* up_next = window.findChild<QDockWidget*>(QStringLiteral("bench-up-next"));
-    QVERIFY(lyrics != nullptr && up_next != nullptr);
+    auto* side = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-side-p"));
+    QVERIFY(lyrics != nullptr && side != nullptr);
     auto* show_lyrics = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
-    QVERIFY(show_lyrics != nullptr);
-    if (!up_next->isVisible()) {
-        up_next->setVisible(true);
-    }
-    QTRY_VERIFY(up_next->isVisible() && up_next->width() >= 260);
+    auto* show_side = window.findChild<QAction*>(QStringLiteral("action-show-plugin-panel-side-p"));
+    QVERIFY(show_lyrics != nullptr && show_side != nullptr);
+    show_side->trigger();
+    QTRY_VERIFY(side->isVisible() && side->width() >= 260);
     show_lyrics->trigger();
     QTRY_VERIFY(lyrics->isVisible());
-    QVERIFY(window.tabifiedDockWidgets(lyrics).contains(up_next));
+    QVERIFY(window.tabifiedDockWidgets(lyrics).contains(side));
     // One area, two tabs, the one just opened in front.
     const auto tab_bar = [&window, lyrics]() -> QTabBar* {
         for (auto* bar : window.findChildren<QTabBar*>()) {
@@ -622,26 +640,39 @@ void BenchMainWindowTest::sidePanelsShareTheirRoomAsTabs() {
     QTRY_VERIFY(tab_bar() != nullptr);
     auto* tabs = tab_bar();
     QCOMPARE(tabs->tabText(tabs->currentIndex()), lyrics->windowTitle());
-    const auto width = lyrics->width();
-    // Closed, the other is there as it was.
+
+    // Panels: all hidden at once, and the same back.
+    auto* panels = window.findChild<QToolButton*>(QStringLiteral("action-panels"));
+    QVERIFY(panels != nullptr);
+    QTRY_VERIFY(panels->isChecked());
+    panels->click();
+    QTRY_VERIFY(!lyrics->isVisible() && !side->isVisible());
+    QTRY_VERIFY(!panels->isChecked());
+    panels->click();
+    QTRY_VERIFY(lyrics->isVisible() && side->isVisible());
+    QTRY_VERIFY(panels->isChecked());
+    QTRY_VERIFY(window.tabifiedDockWidgets(lyrics).contains(side) ||
+                window.tabifiedDockWidgets(side).contains(lyrics));
+
+    // Closed, the other stays, at a width of its own -- not squeezed.
     show_lyrics->trigger();
     QTRY_VERIFY(!lyrics->isVisible());
-    QVERIFY(up_next->isVisible());
-    QCOMPARE(up_next->width(), width);
-    up_next->setVisible(false);
+    QVERIFY(side->isVisible());
+    QTRY_VERIFY(side->width() >= 260);
+    show_side->trigger();
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QSettings{}.remove(QStringLiteral("plugin-panels"));
+    QSettings{}.remove(QStringLiteral("panels"));
+    QSettings{}.remove(QStringLiteral("lyrics"));
+    QDir{folder}.removeRecursively();
 }
 
 // ADR-0292: panels open before stay tabs when the window opens again, and
-// a plugin's made again when Settings are saved joins them.
+// a plugin's made again when Settings are saved joins them; Up Next, under
+// the lists, is none of them (ADR-0294).
 void BenchMainWindowTest::sidePanelsOpenBeforeAreTabsAgain() {
     const auto folder = pluginFolders().value(0) + QStringLiteral("/side");
-    QVERIFY(QDir{}.mkpath(folder));
-    {
-        QFile manifest{folder + QStringLiteral("/plugin.json")};
-        QVERIFY(manifest.open(QIODevice::WriteOnly));
-        manifest.write(R"({"schema": 1, "name": "Side", "panels": [{"id": "p",
-                          "label": "Side", "run": ["true"]}]})");
-    }
+    sidePanelPlugin(folder);
     QSettings{}.setValue(pluginEnabledKey(QStringLiteral("side")), true);
     QSettings{}.setValue(QStringLiteral("lyrics/visible"), true);
     QSettings{}.setValue(QStringLiteral("up-next/visible"), true);
@@ -652,8 +683,8 @@ void BenchMainWindowTest::sidePanelsOpenBeforeAreTabsAgain() {
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto* lyrics = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
-        auto* up_next = window.findChild<QDockWidget*>(QStringLiteral("bench-up-next"));
-        QVERIFY(lyrics != nullptr && up_next != nullptr);
+        QVERIFY(lyrics != nullptr);
+        QVERIFY(window.findChild<QDockWidget*>(QStringLiteral("bench-up-next")) == nullptr);
         const auto side = [&window] {
             return window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-side-p"));
         };
@@ -662,8 +693,9 @@ void BenchMainWindowTest::sidePanelsOpenBeforeAreTabsAgain() {
             return window.tabifiedDockWidgets(lyrics).contains(other) ||
                    window.tabifiedDockWidgets(other).contains(lyrics);
         };
-        QTRY_VERIFY(lyrics->isVisible() && up_next->isVisible() && side()->isVisible());
-        QTRY_VERIFY(tabbed(up_next) && tabbed(side()));
+        QTRY_VERIFY(lyrics->isVisible() && side()->isVisible() &&
+                    window.up_next_section_->isVisible());
+        QTRY_VERIFY(tabbed(side()));
         // Made again, as when Settings are saved: a tab still.
         window.buildPluginPanels();
         QTRY_VERIFY(side() != nullptr && side()->isVisible() && tabbed(side()));

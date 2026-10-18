@@ -211,10 +211,11 @@ expansion clear affected history in this first slice.
 
 Use `QMainWindow`, toolbars, tab containers, and model/view track tables.
 **Melody decision** (ADR-0292): one layout -- the sources left, the lists
-right, the divider kept where it was left. The side panels -- Up Next,
-Lyrics, a plugin's -- are docks beside it; open together on one side they
-share it as tabs, the last opened in front. There is no layout editor:
-ADR-0026's composed layouts are gone.
+right, the divider kept where it was left. Up Next is a section under the
+lists, its height kept (ADR-0294). The side panels -- Lyrics, a plugin's --
+are docks beside it; open together on one side they share it as tabs, the
+last opened in front, and Panels in the header hides or brings them all.
+There is no layout editor: ADR-0026's composed layouts are gone.
 
 Every panel has:
 

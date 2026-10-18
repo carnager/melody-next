@@ -27,7 +27,10 @@ namespace trackknife::bench {
 
 void BenchMainWindow::addPluginActions(
     QMenu* menu, std::function<void(const Plugin&, const PluginAction&)> run) {
-    const auto plugins = enabledPlugins();
+    // Only plugins with actions: one that only fills a panel or finds
+    // lyrics has nothing to offer here.
+    auto plugins = enabledPlugins();
+    std::erase_if(plugins, [](const Plugin& plugin) { return plugin.actions.empty(); });
     if (plugins.empty()) {
         return;
     }

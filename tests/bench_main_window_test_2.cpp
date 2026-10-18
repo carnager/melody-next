@@ -2954,6 +2954,22 @@ void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {
             {"id": "d", "label": "Fourth", "run": ["true"]}]})");
     }
     QSettings{}.setValue(pluginEnabledKey(QStringLiteral("many")), true);
+    // A plugin with only a panel, and one with only a provider: nothing of
+    // theirs in the menu.
+    const auto panel_only = pluginFolders().value(0) + QStringLiteral("/side");
+    const auto provider_only = pluginFolders().value(0) + QStringLiteral("/finder");
+    for (const auto& [where, json] :
+         {std::pair{panel_only, QByteArray{R"({"schema": 1, "name": "Side", "panels": [
+             {"id": "p", "label": "Side panel", "run": ["true"]}]})"}},
+          std::pair{provider_only, QByteArray{R"({"schema": 1, "name": "Finder", "providers": [
+             {"id": "l", "provides": "lyrics", "run": ["true"]}]})"}}}) {
+        QVERIFY(QDir{}.mkpath(where));
+        QFile manifest{where + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(json);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("side")), true);
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("finder")), true);
 
     BenchMainWindow window;
     window.show();
@@ -2987,9 +3003,13 @@ void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {
     QVERIFY(std::ranges::none_of(menu->actions(), [](const QAction* action) {
         return action->text() == QStringLiteral("First");
     }));
+    QVERIFY(menu->findChild<QMenu*>(QStringLiteral("menu-plugin-side")) == nullptr);
+    QVERIFY(menu->findChild<QMenu*>(QStringLiteral("menu-plugin-finder")) == nullptr);
     menu->close();
     QSettings{}.remove(QStringLiteral("plugins"));
     QDir{folder}.removeRecursively();
+    QDir{panel_only}.removeRecursively();
+    QDir{provider_only}.removeRecursively();
 }
 
 } // namespace trackknife::bench

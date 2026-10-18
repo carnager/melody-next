@@ -651,16 +651,13 @@ void BenchMainWindow::placeSources() {
 } // namespace trackknife::bench
 
 void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind) {
-    // The library of the tab in front: a remote tab's albums come from its
-    // engine and go where that tab's would.
-    const auto* current = currentListTab();
-    auto engine = current != nullptr ? EngineKey::of(current->document) : EngineKey::local();
-    if (catalogueOf(engine) == nullptr || libraryOf(engine) == nullptr) {
-        engine = EngineKey::local();
-    }
+    // ADR-0286: the library, on the engine holding it, whichever tab is in
+    // front -- as search asks it.
+    const auto engine = workspace_.libraryKey();
     auto* library = libraryOf(engine);
     const auto* source = catalogueOf(engine);
     if (library == nullptr || source == nullptr) {
+        showMessage(QStringLiteral("The library's engine is not connected"), 4'000);
         return;
     }
     auto* popup = new QuickPickPopup(kind, std::shared_ptr<engine::Catalogue>{source->open()},

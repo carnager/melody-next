@@ -720,6 +720,62 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
+// ADR-0286: quick album, from a tab of this computer's, searches the one
+// library, on the engine holding it -- not this computer.
+void BenchMainWindowTest::quickAlbumSearchesTheLibraryChosen() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    std::string album;
+    {
+        auto catalogue = window.remoteCatalogue()->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+        persistence::LibraryQuery albums;
+        albums.kind = persistence::LibraryEntryKind::album;
+        const auto page = catalogue->query(albums);
+        QVERIFY(page && page->entries.size() == 1U);
+        album = page->entries.front().album;
+    }
+    for (auto& candidate : window.list_tabs_) {
+        if (EngineKey::of(candidate->document).isLocal()) {
+            window.tabs_->setCurrentWidget(candidate->view);
+            break;
+        }
+    }
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr && EngineKey::of(tab->document).isLocal());
+
+    window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
+    QuickPickPopup* popup = nullptr;
+    for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
+        if (candidate->isVisible()) {
+            popup = candidate;
+        }
+    }
+    QVERIFY(popup != nullptr);
+    QCOMPARE(popup->findChild<QLabel*>(QStringLiteral("bench-quick-album-scope"))->text(),
+             window.remoteCatalogue()->name());
+    QVERIFY(popup->findChild<QLabel*>(QStringLiteral("bench-quick-album-scope"))->text() !=
+            QStringLiteral("This computer"));
+    QTest::keyClicks(popup->input(), QString::fromStdString(album).section(QLatin1Char(' '), 0, 0));
+    QTRY_COMPARE(popup->results()->count(), 1);
+    QTest::keyClick(popup->input(), Qt::Key_Escape);
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
+}
+
 void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

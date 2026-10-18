@@ -399,6 +399,7 @@ class BenchMainWindowTest final : public QObject {
     void thisComputersFilesMoveIntoTheLibrary();
     void aRatingSetElsewhereShowsInTheTabs();
     void dynamicPlaylistsReadTheLibraryChosen();
+    void quickAlbumSearchesTheLibraryChosen();
     void replacingARemoteTabFromItsLibraryPlays();
     void locateFindsARemoteTracksAlbumInTheRemoteLibrary();
     void remoteUpNextKeepsItsIdentityAcrossARestart();

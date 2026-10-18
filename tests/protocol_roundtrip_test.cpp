@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <future>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -152,6 +153,43 @@ void events_reach_the_client(const std::filesystem::path& path) {
     (*server)->stop();
 }
 
+// A quick job -- a preflight -- can finish before job.submit's answer is
+// back: its job.finished arrives while nobody waits on it yet. run_job still
+// gets its outcome, rather than waiting for ever.
+void a_job_done_before_its_submission_answers_is_not_lost(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    std::shared_ptr<engine::EventSink> sink = std::make_shared<engine::EventSink>();
+    dispatcher.on("job.submit", [sink](const protocol::Json&) -> core::Result<protocol::Json> {
+        (*sink)(protocol::Event{
+            .name = "job.finished",
+            .data = protocol::Json{{"job_id", "j1"}, {"outcome", {{"done", true}}}}});
+        // The event well on its way before the answer.
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        return protocol::Json{{"job_id", "j1"}};
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the engine binds");
+    *sink = (*server)->sink();
+    (*server)->start();
+
+    auto client = protocol::Client::connect(path);
+    require(client.has_value(), "the client connects");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while ((*server)->connections() == 0U && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    auto ran = std::async(std::launch::async, [&client] {
+        return (*client)->run_job("quick", protocol::Json::object(), {}, {});
+    });
+    require(ran.wait_for(std::chrono::seconds{5}) == std::future_status::ready,
+            "a job finished before its submission answered is not waited on for ever");
+    const auto outcome = ran.get();
+    require(outcome.has_value() && outcome->value("done", false),
+            "and its outcome is the one the engine said");
+
+    (*server)->stop();
+}
+
 void a_vanished_engine_fails_rather_than_hangs(const std::filesystem::path& path) {
     // Unanswered until the test lets it go: stopping the server waits for
     // its handlers, so a handler that only slept would hold the stop as long.
@@ -198,8 +236,9 @@ int main() {
     calls_and_errors_survive_the_round_trip(directory / "a.sock");
     events_reach_the_client(directory / "b.sock");
     a_vanished_engine_fails_rather_than_hangs(directory / "c.sock");
+    a_job_done_before_its_submission_answers_is_not_lost(directory / "d.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "protocol round trip: 3 scenarios\n";
+    std::cout << "protocol round trip: 4 scenarios\n";
     return EXIT_SUCCESS;
 }

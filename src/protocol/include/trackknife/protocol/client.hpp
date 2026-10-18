@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -155,6 +156,9 @@ class Client final {
     std::int64_t next_id_{1};
     std::map<std::int64_t, std::shared_ptr<Pending>> pending_;
     std::map<std::string, std::shared_ptr<RunningJob>> jobs_;
+    // A job can finish before run_job, back from job.submit, waits on it:
+    // its outcome is kept here for it, the newest few only.
+    std::deque<std::pair<std::string, Json>> finished_early_;
     std::string failure_;
 
     std::mutex handler_mutex_;

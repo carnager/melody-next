@@ -12,6 +12,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -59,6 +60,9 @@ namespace {
 // switched off -- the NAS -- holds a connect for about two minutes of SYN
 // retries, and whoever asked waits that long.
 constexpr std::chrono::milliseconds connect_timeout{5'000};
+// Outcomes of jobs finished before anyone here waited on them, kept for
+// run_job: as many as can be on their way at once, and more.
+constexpr std::size_t max_finished_early = 64U;
 
 // connect(), but giving up after connect_timeout. The socket is left
 // blocking, as the rest of the client expects.
@@ -407,6 +411,16 @@ void Client::read_loop() {
                                 waiting->outcome = event->data.value("outcome", Json::object());
                                 arrived_.notify_all();
                             }
+                        } else if (event->name == "job.finished") {
+                            // Finished before run_job knew its name -- or a
+                            // job nobody here waits on: kept a while for it.
+                            const std::lock_guard guard{mutex_};
+                            finished_early_.emplace_back(
+                                identity->get<std::string>(),
+                                event->data.value("outcome", Json::object()));
+                            while (finished_early_.size() > max_finished_early) {
+                                finished_early_.pop_front();
+                            }
                         }
                     }
                 }
@@ -518,6 +532,13 @@ core::Result<Json> Client::run_job(const std::string& job, const Json& params,
     slot->on_progress = on_progress;
     {
         const std::lock_guard guard{mutex_};
+        // Done already, while job.submit's answer was on its way here.
+        if (const auto early =
+                std::ranges::find(finished_early_, job_id, &std::pair<std::string, Json>::first);
+            early != finished_early_.end()) {
+            slot->outcome = std::move(early->second);
+            finished_early_.erase(early);
+        }
         jobs_.emplace(job_id, slot);
     }
 

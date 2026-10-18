@@ -316,6 +316,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void addDroppedPaths(const QString& id, const EngineKey& files_engine,
                          std::vector<std::string> paths);
     QSplitter* track_area_{nullptr};
+    // ADR-0292: the sources beside the lists, at the width they were left.
+    QSplitter* sources_split_{nullptr};
+    void placeSources();
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
     QAction* lists_panel_action_{nullptr};

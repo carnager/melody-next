@@ -22,6 +22,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPointer>
+#include <QSplitter>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
@@ -112,6 +113,10 @@ void BenchMainWindow::closeEvent(QCloseEvent* event) {
 }
 
 bool BenchMainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == sources_split_ && event->type() == QEvent::Resize) {
+        placeSources();
+        return false;
+    }
     if (watched == up_next_button_ &&
         (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
          event->type() == QEvent::Drop)) {

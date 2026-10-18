@@ -57,7 +57,6 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
-#include <QTimer>
 #include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -231,21 +230,19 @@ void BenchMainWindow::buildWorkspace() {
     folders_layout->addWidget(source_stack_, 1);
 
     // ADR-0292: one layout -- the sources left, the lists right -- and the
-    // divider where it was left.
+    // divider where it was left. The sources keep their width however the
+    // window is sized, and the lists take the rest: a window the window
+    // manager sizes after it opens finds them as they were.
     auto* split = new QSplitter(Qt::Horizontal, this);
     split->setObjectName(QStringLiteral("bench-panel-split"));
     split->setChildrenCollapsible(false);
     split->addWidget(folders_panel_);
     split->addWidget(track_area_);
-    split->setStretchFactor(0, 1);
-    split->setStretchFactor(1, 3);
+    split->setStretchFactor(0, 0);
+    split->setStretchFactor(1, 1);
     setCentralWidget(split);
-    QTimer::singleShot(0, split, [split] {
-        const auto kept = QSettings{}.value(QLatin1String(sources_width_key), 0).toInt();
-        const auto extent = split->width();
-        const auto sources = kept > 0 ? std::min(kept, extent * 2 / 3) : extent / 4;
-        split->setSizes({sources, std::max(1, extent - sources)});
-    });
+    sources_split_ = split;
+    split->installEventFilter(this);
     connect(split, &QSplitter::splitterMoved, this, [split](const int, const int) {
         QSettings{}.setValue(QLatin1String(sources_width_key), split->sizes().value(0));
     });
@@ -638,6 +635,17 @@ void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
     }
     folder_bookmarks_->setCurrentRow(index.row());
     folder_bookmark_menu_->popup(folder_bookmarks_->viewport()->mapToGlobal(position));
+}
+
+void BenchMainWindow::placeSources() {
+    // The width kept, or a quarter of the window when none is, as much of
+    // it as leaves the lists room; not kept anew, so a window made narrow
+    // and wide again finds the sources as wide as they were.
+    const auto extent = sources_split_->width();
+    const auto kept = QSettings{}.value(QLatin1String(sources_width_key), 0).toInt();
+    const auto room = std::max(1, extent - track_area_->minimumSizeHint().width());
+    const auto sources = std::min(kept > 0 ? kept : extent / 4, room);
+    sources_split_->setSizes({sources, std::max(1, extent - sources)});
 }
 
 } // namespace trackknife::bench

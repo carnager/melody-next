@@ -741,6 +741,20 @@ void BenchMainWindowTest::theSourcesKeepTheirWidth() {
     auto* split = qobject_cast<QSplitter*>(again.centralWidget());
     QVERIFY(split != nullptr);
     QTRY_VERIFY(std::abs(split->sizes().value(0) - 360) < 4);
+    // Sized by the window manager after it opened -- as a tiling one does --
+    // and made narrow and wide again: the sources as they were.
+    BenchMainWindow tiled;
+    tiled.resize(640, 480);
+    tiled.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&tiled));
+    auto* tiled_split = qobject_cast<QSplitter*>(tiled.centralWidget());
+    QVERIFY(tiled_split != nullptr);
+    for (const int width : {1800, 900, 1600}) {
+        tiled.resize(width, 900);
+        QTRY_COMPARE(tiled_split->width(), tiled.centralWidget()->width());
+        QTRY_VERIFY2(std::abs(tiled_split->sizes().value(0) - 360) < 4,
+                     qPrintable(QString::number(tiled_split->sizes().value(0))));
+    }
     QSettings{}.remove(QStringLiteral("workspace/sources-width"));
 }
 

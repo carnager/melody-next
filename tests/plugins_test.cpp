@@ -315,25 +315,35 @@ void PluginsTest::theExamplePluginReads() {
     QCOMPARE(sites->actions.size(), std::size_t{5U});
     QCOMPARE(sites->actions.back().label, QStringLiteral("AllMusic"));
 
-    // ADR-0291: the official artist panel reads, and answers what Melody
-    // draws -- from what it keeps, so asking nothing of the network here.
-    const QString about = QStringLiteral(MELODY_SOURCE_DIR "/plugins/artist-info");
+    // ADR-0291: the official About panel reads, and answers what Melody
+    // draws of the artist and the album -- from what it keeps, so asking
+    // nothing of the network here.
+    const QString about = QStringLiteral(MELODY_SOURCE_DIR "/plugins/about");
     QFile about_manifest{about + QStringLiteral("/plugin.json")};
     QVERIFY(about_manifest.open(QIODevice::ReadOnly));
-    const auto artist_info = parsePluginManifest(about_manifest.readAll(), about, &problem);
-    QVERIFY2(artist_info.has_value(), qPrintable(problem));
-    QCOMPARE(artist_info->panels.size(), std::size_t{1U});
+    const auto about_panel = parsePluginManifest(about_manifest.readAll(), about, &problem);
+    QVERIFY2(about_panel.has_value(), qPrintable(problem));
+    QCOMPARE(about_panel->panels.size(), std::size_t{1U});
     QTemporaryDir cache;
     QVERIFY(cache.isValid());
-    const auto kept = QDir{cache.path()}.filePath(QStringLiteral("melody/plugins/artist-info"));
+    const auto kept = QDir{cache.path()}.filePath(QStringLiteral("melody/plugins/about"));
     QVERIFY(QDir{}.mkpath(kept));
     const auto mbid = QStringLiteral("05106775-5d45-4131-aecc-1177f813ba11");
+    const auto group = QStringLiteral("fc164cde-a62d-3011-9ac8-b969a92b83cf");
     const auto id_key = QCryptographicHash::hash(QStringLiteral("testament\x1fthe legacy").toUtf8(),
                                                  QCryptographicHash::Sha1)
                             .toHex();
     writeFile(kept + QStringLiteral("/id-") + QString::fromLatin1(id_key),
-              QStringLiteral(R"({"id": "%1"})").arg(mbid).toUtf8());
-    writeFile(kept + QStringLiteral("/about-%1-en").arg(mbid),
+              QStringLiteral(R"({"artist": "%1", "album": "%2"})").arg(mbid, group).toUtf8());
+    writeFile(kept + QStringLiteral("/album-%1-en").arg(group),
+              QStringLiteral(R"json({"title": "The Legacy", "artist": "Testament",
+                  "kind": "Album", "date": "1987-04-21", "label": "Megaforce Worldwide",
+                  "summary": "The Legacy is the debut studio album by Testament.",
+                  "links": {"MusicBrainz": "https://musicbrainz.org/release-group/%1",
+                            "Discogs": "https://www.discogs.com/master/67184"}})json")
+                  .arg(group)
+                  .toUtf8());
+    writeFile(kept + QStringLiteral("/artist-%1-en").arg(mbid),
               QStringLiteral(R"json({"name": "Testament", "kind": "Group",
                   "where": "Berkeley, United States", "when": "since 1983",
                   "summary": "Testament is an American thrash metal band.",
@@ -343,14 +353,14 @@ void PluginsTest::theExamplePluginReads() {
                   .arg(mbid)
                   .toUtf8());
     qputenv("XDG_CACHE_HOME", QFile::encodeName(cache.path()));
-    const auto told = run(*artist_info,
+    const auto told = run(*about_panel,
                           PluginAction{.id = QStringLiteral("artist"),
                                        .label = QStringLiteral("About"),
                                        .scope = PluginAction::Scope::tracks,
-                                       .run = artist_info->panels.front().run,
+                                       .run = about_panel->panels.front().run,
                                        .result = PluginAction::Result::none,
                                        .timeout_seconds = 30},
-                          pluginPanelInput(artist_info->panels.front(), PluginEngine{},
+                          pluginPanelInput(about_panel->panels.front(), PluginEngine{},
                                            PluginTrack{.path = "/srv/music/Testament/01.flac",
                                                        .title = "Over the Wall",
                                                        .artist = "Testament",
@@ -358,7 +368,7 @@ void PluginsTest::theExamplePluginReads() {
                                                        .album_artist = "Testament",
                                                        .date = "1987",
                                                        .track_number = "1"},
-                                           std::nullopt, {}, pluginSettings(*artist_info)));
+                                           std::nullopt, {}, pluginSettings(*about_panel)));
     QVERIFY2(told.succeeded, qPrintable(told.text));
     const auto drawn = parsePluginPanel(told.text.toUtf8(), &problem);
     QVERIFY2(drawn.has_value(), qPrintable(problem));
@@ -371,6 +381,54 @@ void PluginsTest::theExamplePluginReads() {
         return part.kind == PluginPanelContent::Part::Kind::item &&
                part.text == QStringLiteral("Group from Berkeley, United States") &&
                part.detail == QStringLiteral("since 1983");
+    }));
+    // The album beneath, under its name: when, what, on which label.
+    const auto heading = std::ranges::find_if(drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::heading &&
+               part.text == QStringLiteral("The Legacy");
+    });
+    QVERIFY(heading != drawn->parts.end());
+    QCOMPARE(std::next(heading)->text, QStringLiteral("Album · 1987"));
+    QCOMPARE(std::next(heading)->detail, QStringLiteral("Megaforce Worldwide"));
+    QCOMPARE(std::next(heading, 2)->text,
+             QStringLiteral("The Legacy is the debut studio album by Testament."));
+    // Its links: the one MusicBrainz names, and a search where it names none.
+    const auto link = [&drawn](const QString& site) {
+        const auto found = std::ranges::find_if(drawn->parts, [&site](const auto& part) {
+            return part.text == site && part.detail == QStringLiteral("The Legacy");
+        });
+        return found == drawn->parts.end() ? QString{} : found->url;
+    };
+    QCOMPARE(link(QStringLiteral("Discogs")),
+             QStringLiteral("https://www.discogs.com/master/67184"));
+    QVERIFY(
+        link(QStringLiteral("Bandcamp")).startsWith(QStringLiteral("https://bandcamp.com/search")));
+
+    // Either half off by its setting: the album alone, titled by it.
+    QSettings{}.setValue(pluginSettingKey(about_panel->name, QStringLiteral("artist")), false);
+    const auto album_only = run(*about_panel,
+                                PluginAction{.id = QStringLiteral("about"),
+                                             .label = QStringLiteral("About"),
+                                             .scope = PluginAction::Scope::tracks,
+                                             .run = about_panel->panels.front().run,
+                                             .result = PluginAction::Result::none,
+                                             .timeout_seconds = 30},
+                                pluginPanelInput(about_panel->panels.front(), PluginEngine{},
+                                                 PluginTrack{.path = "/srv/music/Testament/01.flac",
+                                                             .title = "Over the Wall",
+                                                             .artist = "Testament",
+                                                             .album = "The Legacy",
+                                                             .album_artist = "Testament",
+                                                             .date = "1987",
+                                                             .track_number = "1"},
+                                                 std::nullopt, {}, pluginSettings(*about_panel)));
+    QSettings{}.remove(pluginSettingKey(about_panel->name, QStringLiteral("artist")));
+    QVERIFY2(album_only.succeeded, qPrintable(album_only.text));
+    const auto album_drawn = parsePluginPanel(album_only.text.toUtf8(), &problem);
+    QVERIFY2(album_drawn.has_value(), qPrintable(problem));
+    QCOMPARE(album_drawn->title, QStringLiteral("The Legacy"));
+    QVERIFY(std::ranges::none_of(album_drawn->parts, [](const auto& part) {
+        return part.text.contains(QStringLiteral("Berkeley"));
     }));
 }
 

@@ -2,7 +2,7 @@
 
 A plugin adds an entry to the context menu of track lists and of the library:
 "Share album", "Send to …". A few official ones come with Melody
-([`plugins/`](../plugins): the web search, a panel about the playing artist,
+([`plugins/`](../plugins): the web search, a panel about the playing artist and album,
 and lyrics from LRCLIB); everything else is written and published apart. A plugin is a program of its
 own, in any language; Melody runs it, tells it what was chosen in JSON, and
 shows what it answers ([ADR-0288](adr/0288-plugin-actions.md)).

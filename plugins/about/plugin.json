@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "name": "About",
+  "description": "The playing artist and album from MusicBrainz and Wikipedia: a photo, summaries, the label and links",
+  "panels": [
+    {
+      "id": "about",
+      "label": "About",
+      "run": [
+        "./about"
+      ],
+      "timeout": 60
+    }
+  ],
+  "settings": [
+    {
+      "key": "artist",
+      "label": "About the artist",
+      "kind": "toggle",
+      "default": true
+    },
+    {
+      "key": "album",
+      "label": "About the album",
+      "kind": "toggle",
+      "default": true
+    },
+    {
+      "key": "language",
+      "label": "Wikipedia language",
+      "kind": "choice",
+      "choices": [
+        "en",
+        "de",
+        "fr",
+        "es",
+        "it",
+        "nl",
+        "pt",
+        "sv",
+        "no",
+        "da",
+        "fi",
+        "pl",
+        "cs",
+        "ru",
+        "ja"
+      ],
+      "default": "en",
+      "help": "Which Wikipedia to read. Where it has no article, the English one."
+    }
+  ]
+}

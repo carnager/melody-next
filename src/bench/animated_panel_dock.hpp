@@ -3,6 +3,7 @@
 
 #include <QAction>
 #include <QDockWidget>
+#include <QLayout>
 #include <QMainWindow>
 #include <QResizeEvent>
 #include <QSettings>
@@ -91,9 +92,16 @@ class AnimatedPanelDock final : public QDockWidget {
                 });
             }
             QDockWidget::setVisible(visible);
-            // In front, once the tab bar it joined is there.
-            if (visible)
+            // In front. A tab not yet on a tab bar cannot be raised, and
+            // some Qt versions (6.8) make the bar only when the window is
+            // next laid out: laid out now, then raised -- and again once
+            // what is queued has run.
+            if (visible) {
+                if (auto* layout = parentWidget()->layout(); layout != nullptr)
+                    layout->activate();
+                raise();
                 QTimer::singleShot(0, this, [this] { raise(); });
+            }
             const QSignalBlocker blocker(panelToggleAction());
             panelToggleAction()->setChecked(visible);
             return;

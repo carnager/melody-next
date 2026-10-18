@@ -10,6 +10,8 @@
 #include <QTimer>
 #include <QVariantAnimation>
 
+#include <algorithm>
+
 namespace trackknife::bench {
 
 // A clipping viewport keeps expensive track layouts steady during a reveal.
@@ -52,6 +54,12 @@ class AnimatedPanelDock final : public QDockWidget {
 
     QAction* panelToggleAction() const { return toggle_; }
 
+    // The width it is on its way to, sliding; else the one it has.
+    [[nodiscard]] int headingWidth() const {
+        return animation_.state() == QAbstractAnimation::Running ? animation_.endValue().toInt()
+                                                                 : width();
+    }
+
     void setPanelContent(QWidget* content) {
         content->setParent(viewport_);
         viewport_->content = content;
@@ -72,6 +80,16 @@ class AnimatedPanelDock final : public QDockWidget {
             animation_.stop();
             wanted_ = visible;
             QSettings{}.setValue(key_ + "/visible", visible);
+            // Laid out at the width its tabs are on their way to, so what it
+            // shows does not reflow while they slide in; let go once there.
+            if (visible) {
+                viewport_->revealWidth = std::max(260, groupHeading());
+                viewport_->arrange();
+                QTimer::singleShot(animation_.duration() + 80, this, [this] {
+                    viewport_->revealWidth = 0;
+                    viewport_->arrange();
+                });
+            }
             QDockWidget::setVisible(visible);
             // In front, once the tab bar it joined is there.
             if (visible)
@@ -115,6 +133,11 @@ class AnimatedPanelDock final : public QDockWidget {
         QDockWidget::resizeEvent(event);
         if (animation_.state() == QAbstractAnimation::Running)
             return;
+        // Joined while the others slid in, and now as wide as they went.
+        if (viewport_->revealWidth > 0 && width() >= viewport_->revealWidth) {
+            viewport_->revealWidth = 0;
+            viewport_->arrange();
+        }
         QTimer::singleShot(0, this, [this] {
             if (wanted_ && isVisible() && animation_.state() != QAbstractAnimation::Running &&
                 width() >= 260) {
@@ -125,6 +148,18 @@ class AnimatedPanelDock final : public QDockWidget {
     }
 
   private:
+    // Where the side panels it is tabbed with are heading.
+    [[nodiscard]] int groupHeading() const {
+        const auto* window = qobject_cast<const QMainWindow*>(parentWidget());
+        int heading = savedWidth_;
+        if (window == nullptr)
+            return heading;
+        for (auto* other : window->tabifiedDockWidgets(const_cast<AnimatedPanelDock*>(this)))
+            if (const auto* panel = dynamic_cast<const AnimatedPanelDock*>(other);
+                panel != nullptr && panel->isVisible())
+                heading = panel->headingWidth();
+        return heading;
+    }
     bool joinAnOpenPanel() {
         auto* window = qobject_cast<QMainWindow*>(parentWidget());
         if (window == nullptr)

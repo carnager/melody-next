@@ -26,7 +26,9 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QVariantAnimation>
 #include <algorithm>
+#include <memory>
 #include <numeric>
 
 namespace trackknife::bench {
@@ -216,13 +218,53 @@ void BenchMainWindow::buildUpNext() {
             QSettings{}.setValue(QStringLiteral("up-next/height"), split->sizes().value(1));
         }
     });
-    connect(toggle, &QAction::toggled, this, [this, place](const bool shown) {
-        up_next_section_->setVisible(shown);
-        QSettings{}.setValue(QStringLiteral("up-next/visible"), shown);
-        if (shown) {
-            QTimer::singleShot(0, this, place);
-        }
+    // Slid up from under the lists and back down, as the side panels slide
+    // in from the side -- unless panel animations are off.
+    auto* slide = new QVariantAnimation(split);
+    slide->setDuration(180);
+    slide->setEasingCurve(QEasingCurve::OutCubic);
+    connect(slide, &QVariantAnimation::valueChanged, split, [split](const QVariant& value) {
+        const auto height = std::max(1, value.toInt());
+        split->setSizes({std::max(1, split->height() - height), height});
     });
+    // What the slide does when it ends: the last one's, only.
+    auto ended = std::make_shared<QMetaObject::Connection>();
+    connect(toggle, &QAction::toggled, this,
+            [this, place, split, slide, kept_height, ended](const bool shown) {
+                QSettings{}.setValue(QStringLiteral("up-next/visible"), shown);
+                slide->stop();
+                QObject::disconnect(*ended);
+                const bool animate =
+                    isVisible() &&
+                    QSettings{}.value(QStringLiteral("appearance/panel-animations"), true).toBool();
+                if (!animate) {
+                    up_next_section_->setMinimumHeight(0);
+                    up_next_section_->setVisible(shown);
+                    if (shown) {
+                        QTimer::singleShot(0, this, place);
+                    }
+                    return;
+                }
+                // Down to a line and back: it lets itself be that small meanwhile.
+                up_next_section_->setMinimumHeight(1);
+                auto from = up_next_section_->isVisible() ? split->sizes().value(1) : 1;
+                if (shown && !up_next_section_->isVisible()) {
+                    up_next_section_->setVisible(true);
+                    split->setSizes({std::max(1, split->height() - 1), 1});
+                    from = 1;
+                }
+                const auto to =
+                    shown ? std::min(kept_height(), std::max(120, split->height() / 2)) : 1;
+                slide->setStartValue(from);
+                slide->setEndValue(to);
+                *ended = connect(slide, &QVariantAnimation::finished, this, [this, shown] {
+                    if (!shown) {
+                        up_next_section_->setVisible(false);
+                    }
+                    up_next_section_->setMinimumHeight(0);
+                });
+                slide->start();
+            });
     content->setVisible(visible);
     toggle->setChecked(visible);
     QTimer::singleShot(0, this, place);

@@ -1825,6 +1825,20 @@ void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
     QTRY_VERIFY(section->isVisible());
     QTRY_VERIFY(qAbs(split->sizes().value(1) - 300) <= 2);
     up_next->trigger();
+    QTRY_VERIFY(!section->isVisible());
+    // With panel animations on, it slides up to that height and back down.
+    QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), true);
+    auto* slide = split->findChild<QVariantAnimation*>();
+    QVERIFY(slide != nullptr);
+    up_next->trigger();
+    QTRY_COMPARE(slide->state(), QAbstractAnimation::Running);
+    QVERIFY(section->isVisible() && split->sizes().value(1) < 300);
+    QTRY_COMPARE(slide->state(), QAbstractAnimation::Stopped);
+    QTRY_VERIFY(qAbs(split->sizes().value(1) - 300) <= 2);
+    up_next->trigger();
+    QTRY_COMPARE(slide->state(), QAbstractAnimation::Running);
+    QTRY_VERIFY(!section->isVisible());
+    QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), false);
 
     // A side panel slides in, as wide as it was left.
     auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));

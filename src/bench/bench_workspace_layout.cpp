@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/playlist_folder_widget.hpp"
+#include "bench/themed_icon.hpp"
 #include "bench/undo_location_widget.hpp"
 #include "workspace/list_view_definitions.hpp"
 #include "workspace/playlist_folder_session.hpp"
@@ -42,6 +43,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMenu>
@@ -168,9 +170,21 @@ void BenchMainWindow::buildWorkspace() {
     library_missing_->setMargin(12);
     library_missing_->setForegroundRole(QPalette::PlaceholderText);
     source_stack_->addWidget(library_missing_);
-    // ADR-0296: the library's playlists.
-    playlists_view_ = new ListsPanel(source_stack_);
+    // ADR-0296: the library's playlists -- laid out as the library is: a
+    // field above, the rows, and a quiet line below with what can be done.
+    playlists_panel_ = new QWidget(source_stack_);
+    playlists_panel_->setObjectName(QStringLiteral("bench-playlists-panel"));
+    auto* playlists_layout = new QVBoxLayout(playlists_panel_);
+    playlists_layout->setContentsMargins(4, 4, 4, 4);
+    playlists_layout->setSpacing(4);
+    auto* playlists_filter = new QLineEdit(playlists_panel_);
+    playlists_filter->setObjectName(QStringLiteral("bench-playlists-filter"));
+    playlists_filter->setPlaceholderText(QStringLiteral("Filter playlists"));
+    playlists_filter->setClearButtonEnabled(true);
+    playlists_layout->addWidget(playlists_filter);
+    playlists_view_ = new ListsPanel(playlists_panel_);
     playlists_view_->setObjectName(QStringLiteral("bench-library-playlists"));
+    connect(playlists_filter, &QLineEdit::textChanged, playlists_view_, &ListsPanel::setFilter);
     playlists_view_->setDropHandler(
         [this](QDropEvent* drop, const EngineKey& engine, const QString& id) {
             return dropOnPanelList(drop, engine, id);
@@ -179,7 +193,42 @@ void BenchMainWindow::buildWorkspace() {
             [this](const EngineKey& engine, const QString& id) { openEngineList(engine, id); });
     connect(playlists_view_, &QWidget::customContextMenuRequested, this,
             [this](const QPoint& position) { showListsMenu(playlists_view_, position); });
-    source_stack_->addWidget(playlists_view_);
+    playlists_layout->addWidget(playlists_view_, 1);
+    auto* playlists_footer = new RuledFrame(playlists_panel_);
+    playlists_footer->setObjectName(QStringLiteral("bench-playlists-footer"));
+    auto* footer_row = new QHBoxLayout(playlists_footer);
+    footer_row->setContentsMargins(4, 6, 4, 2);
+    footer_row->setSpacing(0);
+    playlists_status_ = new QLabel(playlists_footer);
+    playlists_status_->setObjectName(QStringLiteral("bench-playlists-status"));
+    playlists_status_->setWordWrap(true);
+    {
+        auto small = playlists_status_->font();
+        small.setPointSizeF(small.pointSizeF() * 0.9);
+        playlists_status_->setFont(small);
+    }
+    playlists_status_->setForegroundRole(QPalette::PlaceholderText);
+    footer_row->addWidget(playlists_status_, 1);
+    const auto footer_button = [playlists_footer, footer_row](const char* name, QStringView icon,
+                                                              const QString& tip) {
+        auto* button = new QToolButton(playlists_footer);
+        button->setObjectName(QString::fromLatin1(name));
+        button->setIcon(themedIcon(icon));
+        button->setToolTip(tip);
+        button->setAccessibleName(tip);
+        button->setAutoRaise(true);
+        footer_row->addWidget(button, 0, Qt::AlignTop);
+        return button;
+    };
+    connect(footer_button("bench-playlists-new", u"list-add|sp:SP_FileDialogNewFolder",
+                          QStringLiteral("New playlist")),
+            &QToolButton::clicked, this, &BenchMainWindow::createList);
+    connect(footer_button("bench-playlists-folder", u"folder|sp:SP_DirIcon",
+                          QStringLiteral("Where the playlists are: Settings › Engines")),
+            &QToolButton::clicked, this,
+            [this] { static_cast<void>(showSettingsDialog(SettingsDialog::Page::engine)); });
+    playlists_layout->addWidget(playlists_footer);
+    source_stack_->addWidget(playlists_panel_);
     sources_layout->addWidget(source_stack_, 1);
 
     // ADR-0292: one layout -- the sources left, the lists right -- and the

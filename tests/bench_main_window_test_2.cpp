@@ -3162,9 +3162,10 @@ void BenchMainWindowTest::settingsSayAndChooseThePlaylistFolder() {
     }
 }
 
-// ADR-0296: under the library, its engine's playlists -- a file someone
-// dropped in the playlist folder too -- one opened as a tab by choosing it.
-void BenchMainWindowTest::playlistsUnderTheLibraryOpenAsTabs() {
+// ADR-0296, ADR-0298: the library's Playlists tab, its engine's playlists --
+// a file someone dropped in the playlist folder too -- one opened as a tab by
+// choosing it.
+void BenchMainWindowTest::thePlaylistsTabOpensAPlaylistFile() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto music = media.filePath(QStringLiteral("music"));
@@ -3183,15 +3184,15 @@ void BenchMainWindowTest::playlistsUnderTheLibraryOpenAsTabs() {
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
     QVERIFY(window.localCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
 
-    // Under the library -- not under Folders -- its engine's playlists.
+    // The library's Playlists tab: its engine's playlists.
     auto* sources = window.local_source_tabs_;
     auto* playlists = window.findChild<ListsPanel*>(QStringLiteral("bench-library-playlists"));
     QVERIFY(playlists != nullptr);
-    sources->setCurrentIndex(0);
-    QTRY_VERIFY(playlists->isHidden());
     QTRY_VERIFY(window.localLibrary() != nullptr);
-    sources->setCurrentIndex(1);
-    QTRY_VERIFY(!playlists->isHidden());
+    sources->setCurrentIndex(0);
+    QTRY_VERIFY(!playlists->isVisibleTo(&window));
+    sources->setCurrentIndex(window.playlists_tab_);
+    QTRY_VERIFY(playlists->isVisibleTo(&window));
     // The engine reads its folder every few seconds; the list then shows.
     QTreeWidgetItem* found = nullptr;
     QTRY_VERIFY_WITH_TIMEOUT((found = [playlists]() -> QTreeWidgetItem* {
@@ -3209,9 +3210,9 @@ void BenchMainWindowTest::playlistsUnderTheLibraryOpenAsTabs() {
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(QString::fromStdString(tab->model->rows().front().raw_path),
              music + QStringLiteral("/art.flac"));
-    // Headed Playlists, the engine's own only.
+    // The engine's own only, flat.
     QCOMPARE(playlists->topLevelItemCount(), 1);
-    QCOMPARE(playlists->topLevelItem(0)->text(0), QStringLiteral("Playlists"));
+    QCOMPARE(playlists->topLevelItem(0)->text(0), QStringLiteral("mix"));
 }
 
 // ADR-0297: the heart by what plays -- into the Favorites playlist of the

@@ -2177,7 +2177,28 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     window.local_source_tabs_->setCurrentIndex(window.playlists_tab_);
     auto* panel = window.playlists_view_;
     QTRY_VERIFY(panel->itemFor(elsewhere) != nullptr && panel->itemFor(target) != nullptr);
-    QCOMPARE(panel->itemFor(elsewhere)->parent()->text(0), QStringLiteral("Playlists"));
+    // Flat, as the library's rows: no heading over them, and how many said.
+    QVERIFY(panel->itemFor(elsewhere)->parent() == nullptr);
+    QCOMPARE(window.findChild<QLabel*>(QStringLiteral("bench-playlists-status"))->text(),
+             QStringLiteral("2 playlists on this computer"));
+    // Filtered by name.
+    auto* filter = window.findChild<QLineEdit*>(QStringLiteral("bench-playlists-filter"));
+    QVERIFY(filter != nullptr);
+    filter->setText(QStringLiteral("targ"));
+    QVERIFY(panel->itemFor(elsewhere)->isHidden() && !panel->itemFor(target)->isHidden());
+    filter->clear();
+    QVERIFY(!panel->itemFor(elsewhere)->isHidden());
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(window.grab().save(directory + QStringLiteral("/playlists.png")));
+    }
+    window.local_source_tabs_->setCurrentIndex(0);
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QTest::qWait(300);
+        QVERIFY(window.grab().save(directory + QStringLiteral("/library.png")));
+    }
+    window.local_source_tabs_->setCurrentIndex(window.playlists_tab_);
     // The window's own tab, never saved, is no playlist.
     auto* own = window.currentListTab();
     QVERIFY(own != nullptr);

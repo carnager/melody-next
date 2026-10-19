@@ -50,8 +50,8 @@ void BenchMainWindow::buildListsPanel() {
 }
 
 bool BenchMainWindow::playlistsShown() const {
-    return playlists_view_ != nullptr && source_stack_ != nullptr &&
-           source_stack_->currentWidget() == playlists_view_;
+    return playlists_panel_ != nullptr && source_stack_ != nullptr &&
+           source_stack_->currentWidget() == playlists_panel_;
 }
 
 void BenchMainWindow::followLibraryPlaylists() {
@@ -115,6 +115,13 @@ void BenchMainWindow::presentListsPanel() {
     const auto current_id =
         current != nullptr ? QString::fromStdString(current->document.id.to_string()) : QString{};
     playlists_view_->present(shown, {}, current_id, nullptr);
+    // How many, and on which engine.
+    const auto count = shown.empty() ? 0U : shown.front().lists.size();
+    playlists_status_->setText(
+        count == 0U ? QStringLiteral("No playlists on %1").arg(engineName(playlists_engine_))
+        : count == 1U
+            ? QStringLiteral("1 playlist on %1").arg(engineName(playlists_engine_))
+            : QStringLiteral("%1 playlists on %2").arg(count).arg(engineName(playlists_engine_)));
 }
 
 void BenchMainWindow::showListsMenu(ListsPanel* panel, const QPoint& position) {

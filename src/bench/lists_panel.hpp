@@ -61,6 +61,8 @@ class ListsPanel final : public QTreeWidget {
     [[nodiscard]] static QString idOf(const QTreeWidgetItem* item);
     [[nodiscard]] static EngineKey engineOf(const QTreeWidgetItem* item);
     [[nodiscard]] QTreeWidgetItem* itemFor(const QString& id) const;
+    // Only the lists whose name holds `text`; empty, all.
+    void setFilter(const QString& text);
 
   signals:
     void listChosen(const trackknife::ui::EngineKey& engine, const QString& id);
@@ -73,9 +75,11 @@ class ListsPanel final : public QTreeWidget {
 
   private:
     bool offer(QDropEvent* event);
+    void presentFlat(const Group& group, const QString& current_id);
 
     DropHandler drop_handler_;
     bool presenting_{false};
+    QString filter_;
 };
 
 } // namespace trackknife::bench

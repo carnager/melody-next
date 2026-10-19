@@ -611,7 +611,7 @@ void BenchMainWindow::refreshActiveContext() {
         const auto shown = local_source_tabs_->tabData(index).toString();
         auto* other_library = shown.isEmpty() ? nullptr : libraryOf(EngineKey::fromText(shown));
         auto* source = other_library != nullptr  ? static_cast<QWidget*>(other_library)
-                       : index == playlists_tab_ ? static_cast<QWidget*>(playlists_view_)
+                       : index == playlists_tab_ ? playlists_panel_
                        : index == 0 && localLibrary() != nullptr
                            ? static_cast<QWidget*>(localLibrary())
                            : static_cast<QWidget*>(library_missing_);
@@ -619,7 +619,7 @@ void BenchMainWindow::refreshActiveContext() {
         source_stack_->setCurrentWidget(source);
         // ADR-0296: the library's playlists, asked for when they come into
         // sight or the library moved; changes come on their own.
-        if (source == playlists_view_ &&
+        if (source == playlists_panel_ &&
             (arriving || !(playlists_engine_ == workspace_.libraryKey()))) {
             playlists_engine_ = workspace_.libraryKey();
             fetchEngineLists();

@@ -319,7 +319,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
 
     // ADR-0296: the library's playlists -- the saved lists of the engine
     // holding it, each a file in its playlist folder -- a source tab, last.
+    QWidget* playlists_panel_{nullptr};
     ListsPanel* playlists_view_{nullptr};
+    QLabel* playlists_status_{nullptr};
     int playlists_tab_{-1};
     EngineKey playlists_engine_;
     [[nodiscard]] bool playlistsShown() const;

@@ -428,14 +428,38 @@ void BenchMainWindow::copyTrackViewLayoutToAllTabs() {
     schedulePersist();
 }
 
+void BenchMainWindow::rebuildListViewActions() {
+    if (track_layout_menu_ == nullptr || track_presentation_group_ == nullptr) {
+        return;
+    }
+    for (auto* action : track_presentation_group_->actions()) {
+        delete action;
+    }
+    for (const auto& definition : listViews()) {
+        const auto id = QString::fromStdString(definition.id);
+        auto* action = new QAction(QString::fromStdString(definition.name), track_layout_menu_);
+        action->setObjectName(QStringLiteral("action-list-view-menu-%1").arg(id));
+        action->setCheckable(true);
+        action->setData(id);
+        track_presentation_group_->addAction(action);
+        track_layout_menu_->insertAction(list_views_end_, action);
+        connect(action, &QAction::triggered, this, [this, id] { chooseListView(id); });
+    }
+    refreshTrackViewActions();
+}
+
 void BenchMainWindow::refreshTrackViewActions() {
-    if (track_presentation_group_ == nullptr) {
+    // Not before the whole menu is made.
+    if (track_presentation_group_ == nullptr || track_layout_reset_action_ == nullptr ||
+        track_layout_copy_action_ == nullptr) {
         return;
     }
     auto* tab = currentListTab();
     const auto available = tab != nullptr;
-    for (auto* action : {track_albums_side_action_, track_plain_columns_action_,
-                         track_layout_reset_action_, track_layout_copy_action_}) {
+    for (auto* action : {track_layout_reset_action_, track_layout_copy_action_}) {
+        action->setEnabled(available);
+    }
+    for (auto* action : track_presentation_group_->actions()) {
         action->setEnabled(available);
     }
     for (auto it = track_column_actions_.cbegin(); it != track_column_actions_.cend(); ++it) {
@@ -447,16 +471,12 @@ void BenchMainWindow::refreshTrackViewActions() {
         return;
     }
     const auto layout = captureTrackViewLayout(*tab);
-    const auto shipped = [&layout](const ui::TrackViewPresentation presentation) {
-        return layout.view == ui::trackViewPresentationId(presentation);
-    };
-    const QSignalBlocker side_blocker{track_albums_side_action_};
-    const QSignalBlocker plain_blocker{track_plain_columns_action_};
-    // A view of the user's own is none of the shipped four.
-    track_presentation_group_->setExclusive(false);
-    track_albums_side_action_->setChecked(shipped(ui::TrackViewPresentation::albums_side_artwork));
-    track_plain_columns_action_->setChecked(shipped(ui::TrackViewPresentation::plain_columns));
-    track_presentation_group_->setExclusive(true);
+    // The view shown, checked: shipped or the user's own.
+    for (auto* action : track_presentation_group_->actions()) {
+        const QSignalBlocker blocker{action};
+        action->setChecked(action->data().toString() == layout.view);
+    }
+
     for (const auto& column : layout.columns) {
         auto* action = track_column_actions_.value(column.id, nullptr);
         if (action == nullptr) {

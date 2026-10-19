@@ -34,15 +34,4 @@ void BenchMainWindow::openFolderDialog() {
     openLocalPaths({{encoded.constData(), static_cast<std::size_t>(encoded.size())}});
 }
 
-void BenchMainWindow::addFolderRoot() {
-    const auto folder = QFileDialog::getExistingDirectory(this, QStringLiteral("Bookmark folder"));
-    if (folder.isEmpty()) {
-        return;
-    }
-    const auto encoded = QFile::encodeName(folder);
-    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
-    addFolderBookmark(raw_path);
-    revealFolderPath(raw_path);
-}
-
 } // namespace trackknife::bench

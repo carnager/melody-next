@@ -50,12 +50,10 @@ continuations (ADR-0253) are unchanged.
    before a line keeps what a file cannot say -- a CUE track's segment, a
    subsong, a sidecar's ReplayGain. Other players skip both. A list's entry
    identities are kept across a re-read by matching paths in order.
-7. **In the window, the playlists are under the library**: the saved
-   playlists of the engine holding the library shown -- none under This
-   computer's folders -- in a part of their own its divider sizes; one
+7. **In the window, the library's Playlists are a source tab** beside it
+   (ADR-0298): the saved playlists of the engine holding the library; one
    chosen opens as a tab, its menu opens, renames and deletes it, and tracks
-   dropped on one are added to it. Lists in a side panel (ADR-0233) stays
-   for keeping the open tabs in sight.
+   dropped on one are added to it.
 8. **The engine keeps its index** -- the folder, the style, which file is
    which list -- in `playlists.json` in its state folder. Protocol level 19.
 
@@ -78,5 +76,4 @@ continuations (ADR-0253) are unchanged.
   and is not made again.
 - `cli`: `melody-cli playlists` says and chooses the folder.
 - `bench-main-window`: Settings › Engines says the folder and sets the style;
-  an MPD file dropped in the folder shows under the library, not under
-  Folders, and opens as a tab.
+  an MPD file dropped in the folder shows under Playlists and opens as a tab.

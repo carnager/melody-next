@@ -220,8 +220,9 @@ int main(int argc, char* argv[]) {
             QTest::qWait(5);
         }
     }
-    auto* plain = window.findChild<QAction*>(QStringLiteral("action-track-layout-plain"));
-    auto* grouped = window.findChild<QAction*>(QStringLiteral("action-track-layout-albums-side"));
+    auto* plain = window.findChild<QAction*>(QStringLiteral("action-list-view-menu-plain-columns"));
+    auto* grouped =
+        window.findChild<QAction*>(QStringLiteral("action-list-view-menu-albums-side-artwork"));
     if (tabs == nullptr || view == nullptr || model == nullptr || plain == nullptr ||
         grouped == nullptr) {
         std::cerr << "benchmark could not locate the Trackknife list workspace\n";

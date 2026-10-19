@@ -176,12 +176,6 @@ QString SettingsSession::saveNote(const Page page) {
     return {};
 }
 
-std::vector<SettingsSession::Choice> SettingsSession::listsDisplays() {
-    // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
-    return {{QStringLiteral("Tab bar"), QStringLiteral("tabs")},
-            {QStringLiteral("Side panel"), QStringLiteral("panel")}};
-}
-
 std::vector<SettingsSession::Choice> SettingsSession::bufferProfiles() {
     return {{QStringLiteral("Responsive"), QStringLiteral("responsive")},
             {QStringLiteral("Balanced"), QStringLiteral("balanced")},

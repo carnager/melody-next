@@ -2536,9 +2536,9 @@ void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() 
     QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("played here")));
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
-    QCOMPARE(sources->tabText(0), QStringLiteral("This computer"));
     // This computer's library is no library: its tab is not shown.
-    QVERIFY(!sources->isTabVisible(1));
+    QCOMPARE(sources->tabText(0), QStringLiteral("Library"));
+    QVERIFY(!sources->isTabVisible(0));
 
     // The library here again: nothing to mark.
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
@@ -3271,6 +3271,45 @@ void BenchMainWindowTest::theHeartMakesWhatPlaysAFavourite() {
     state.status = QStringLiteral("stopped");
     window.refreshFavorite(state);
     QVERIFY(heart->isHidden());
+}
+
+// ADR-0282: Workspace › Track list layout lists every list view -- the
+// shipped ones and the user's own -- the one shown checked, and choosing one
+// shows it.
+void BenchMainWindowTest::theTrackLayoutMenuListsEveryListView() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("menu-track-list-layout"));
+    QVERIFY(menu != nullptr);
+    const auto listed = [&window] {
+        QStringList ids;
+        for (auto* action : window.track_presentation_group_->actions()) {
+            ids << action->data().toString();
+        }
+        return ids;
+    };
+    QStringList shipped;
+    for (const auto& view : listViews()) {
+        shipped << QString::fromStdString(view.id);
+    }
+    QCOMPARE(listed(), shipped);
+    // One of the user's own: listed as soon as it is made.
+    auto base = findListView(default_list_view_id);
+    QVERIFY(base.has_value());
+    auto made = listViewCopy(*base, base->columns, QStringLiteral("Mine"));
+    QVERIFY2(made.has_value(), made ? "" : made.error().message.c_str());
+    emit ListViewCatalog::instance().changed();
+    QTRY_VERIFY(listed().contains(*made));
+    auto* mine = window.findChild<QAction*>(QStringLiteral("action-list-view-menu-%1").arg(*made));
+    QVERIFY(mine != nullptr && menu->actions().contains(mine));
+    QCOMPARE(mine->text(), QStringLiteral("Mine"));
+    mine->trigger();
+    QTRY_COMPARE(window.currentListTab()->view_layout.view, *made);
+    QVERIFY(mine->isChecked());
+    QVERIFY(saveCustomListViews({}).has_value());
+    emit ListViewCatalog::instance().changed();
+    QTRY_VERIFY(!listed().contains(*made));
 }
 
 } // namespace trackknife::bench

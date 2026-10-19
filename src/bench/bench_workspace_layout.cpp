@@ -25,7 +25,6 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/command_palette.hpp"
 #include "uicommon/list_persistence_service.hpp"
-#include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_view_layout.hpp"
@@ -115,128 +114,63 @@ void BenchMainWindow::buildWorkspace() {
     track_area_->addWidget(tabs_);
     buildListsPanel();
 
-    folder_browser_ = new FolderBrowser(this);
-    folder_model_ = folder_browser_->model();
-    folders_panel_ = new QWidget(this);
-    folders_panel_->setObjectName(QStringLiteral("bench-panel-folders"));
-    folders_panel_->setMinimumWidth(160);
-    auto* folders_layout = new QVBoxLayout(folders_panel_);
-    folders_layout->setContentsMargins(0, 0, 0, 0);
-    folders_layout->setSpacing(0);
+    sources_panel_ = new QWidget(this);
+    sources_panel_->setObjectName(QStringLiteral("bench-panel-sources"));
+    sources_panel_->setMinimumWidth(160);
+    auto* sources_layout = new QVBoxLayout(sources_panel_);
+    sources_layout->setContentsMargins(0, 0, 0, 0);
+    sources_layout->setSpacing(0);
     auto* heading_row = new QHBoxLayout;
     heading_row->setContentsMargins(6, 6, 6, 4);
     heading_row->setSpacing(2);
-    // One-click source switching (ADR-0130): a flat tab bar per authority
-    // replaces the dropdown and static heading.
-    const auto make_source_tabs = [this](const QString& object_name,
-                                         const QString& accessible_name) {
-        // The same tabs as the lists', without close buttons: a source is
-        // chosen, not closed.
-        auto* bar = new PlaybackTabBar(folders_panel_, false);
-        bar->setDrawBase(false);
-        bar->setExpanding(false);
-        bar->setUsesScrollButtons(true);
-        bar->setElideMode(Qt::ElideRight);
-        bar->setObjectName(object_name);
-        bar->setAccessibleName(accessible_name);
-        return bar;
-    };
-    local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),
-                                          QStringLiteral("Local music source"));
-    // ADR-0286: "This computer" -- its folders, not an engine's -- and the
-    // library, named by the engine holding it.
-    local_source_tabs_->addTab(QIcon::fromTheme(QStringLiteral("computer"),
-                                                style()->standardIcon(QStyle::SP_ComputerIcon)),
-                               QStringLiteral("This computer"));
-    local_source_tabs_->setTabToolTip(
-        0, QStringLiteral("Folders on this computer, %1").arg(QSysInfo::machineHostName()));
+    // One-click source switching (ADR-0130). The same tabs as the lists',
+    // without close buttons: a source is chosen, not closed.
+    local_source_tabs_ = new PlaybackTabBar(sources_panel_, false);
+    local_source_tabs_->setDrawBase(false);
+    local_source_tabs_->setExpanding(false);
+    local_source_tabs_->setUsesScrollButtons(true);
+    local_source_tabs_->setElideMode(Qt::ElideRight);
+    local_source_tabs_->setObjectName(QStringLiteral("bench-local-source-tabs"));
+    local_source_tabs_->setAccessibleName(QStringLiteral("Music source"));
+    // ADR-0286: the library, named by the engine holding it -- this
+    // computer's here, an engine elsewhere's added when it connects -- and,
+    // last, its playlists (ADR-0296).
     local_source_tabs_->addTab(QStringLiteral("Library"));
-    local_source_tabs_->setTabToolTip(1, QStringLiteral("The library on this computer"));
+    local_source_tabs_->setTabToolTip(0, QStringLiteral("The library on this computer"));
+    playlists_tab_ = local_source_tabs_->addTab(QStringLiteral("Playlists"));
+    local_source_tabs_->setTabToolTip(
+        playlists_tab_, QStringLiteral("The library's playlists: the files in its engine's "
+                                       "playlist folder, Settings › Engines"));
     heading_row->addWidget(local_source_tabs_, 1);
     // Remembered only when chosen: tabs appearing, hiding or being switched
     // by the window itself do not change what the user asked for.
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
         const auto kind = local_source_tabs_->tabData(index).toString();
-        // The temporary Files page (ADR-0183 addendum) is session-only.
-        rememberSource(!kind.isEmpty() ? QStringLiteral("remote")
-                       : index == 0    ? QStringLiteral("folders")
-                       : index == 1    ? QStringLiteral("library")
-                                       : QString{});
+        rememberSource(index == playlists_tab_ ? QStringLiteral("playlists")
+                       : !kind.isEmpty()       ? QStringLiteral("remote")
+                                               : QStringLiteral("library"));
     });
     // Before the window reacts to changes: the rest of it is not built yet.
     selectPreferredSource();
     connect(local_source_tabs_, &QTabBar::currentChanged, this,
             [this](int) { refreshActiveContext(); });
-    folders_layout->addLayout(heading_row);
-    folder_bookmarks_heading_ = new QLabel(QStringLiteral("Bookmarks"), folders_panel_);
-    auto* bookmarks_heading = folder_bookmarks_heading_;
-    bookmarks_heading->setObjectName(QStringLiteral("bench-folder-bookmarks-heading"));
-    bookmarks_heading->setContentsMargins(8, 4, 8, 2);
-    auto bookmarks_font = bookmarks_heading->font();
-    bookmarks_font.setPointSizeF(bookmarks_font.pointSizeF() * 0.85);
-    bookmarks_font.setBold(true);
-    bookmarks_heading->setFont(bookmarks_font);
-    folders_layout->addWidget(bookmarks_heading);
-    folder_bookmarks_ = new QListWidget(folders_panel_);
-    folder_bookmarks_->setObjectName(QStringLiteral("bench-folder-bookmarks"));
-    folder_bookmarks_->setAccessibleName(QStringLiteral("Folder bookmarks"));
-    folder_bookmarks_->setFrameShape(QFrame::NoFrame);
-    folder_bookmarks_->setUniformItemSizes(true);
-    folder_bookmarks_->setMaximumHeight(150);
-    folder_bookmarks_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
-    folder_bookmarks_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    folder_bookmarks_->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(folder_bookmarks_, &QWidget::customContextMenuRequested, this,
-            &BenchMainWindow::showFolderBookmarkMenu);
-    connect(folder_bookmarks_, &QListWidget::activated, this, [this](const QModelIndex& index) {
-        const auto* item = folder_bookmarks_->item(index.row());
-        if (item == nullptr) {
-            return;
-        }
-        const auto bytes = item->data(Qt::UserRole).toByteArray();
-        if (!bytes.isEmpty()) {
-            revealFolderPath(
-                std::string{bytes.constData(), static_cast<std::size_t>(bytes.size())});
-        }
-    });
-    folders_layout->addWidget(folder_bookmarks_);
-    source_stack_ = new QStackedWidget(folders_panel_);
+    sources_layout->addLayout(heading_row);
+    source_stack_ = new QStackedWidget(sources_panel_);
     source_stack_->setObjectName(QStringLiteral("bench-source-stack"));
-    folder_view_ = new QTreeView(source_stack_);
-    folder_view_->setObjectName(QStringLiteral("bench-folder-tree"));
-    folder_view_->setModel(folder_model_);
-    folder_view_->setHeaderHidden(true);
-    folder_view_->setUniformRowHeights(true);
-    // Folders and files dragged into a list, as from the library.
-    folder_view_->setDragEnabled(true);
-    folder_view_->setDragDropMode(QAbstractItemView::DragOnly);
-    folder_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    folder_view_->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(folder_view_, &QWidget::customContextMenuRequested, this,
-            &BenchMainWindow::showFolderContextMenu);
-    connect(folder_browser_, &FolderBrowser::expandRequested, folder_view_,
-            [this](const QModelIndex& index) { folder_view_->expand(index); });
-    connect(folder_browser_, &FolderBrowser::currentRequested, folder_view_,
-            [this](const QModelIndex& index) {
-                folder_view_->setCurrentIndex(index);
-                folder_view_->scrollTo(index);
-            });
-    connect(folder_browser_, &FolderBrowser::bookmarksChanged, this,
-            &BenchMainWindow::loadFolderBookmarks);
-    connect(folder_view_, &QTreeView::activated, this, [this](const QModelIndex& index) {
-        if (!index.isValid() || folder_model_->isDirectory(index)) {
-            return;
-        }
-        openLocalPaths({folder_model_->rawPath(index)});
-    });
-    source_stack_->addWidget(folder_view_);
-    // ADR-0296: under the library, its engine's playlists.
-    library_split_ = new QSplitter(Qt::Vertical, folders_panel_);
-    library_split_->setObjectName(QStringLiteral("bench-library-split"));
-    library_split_->setChildrenCollapsible(false);
-    playlists_view_ = new ListsPanel(library_split_);
+    // No library to show: the engine holding it not reached yet.
+    library_missing_ = new QLabel(
+        QStringLiteral("The library's engine is not connected. Settings › Engines says which "
+                       "holds it."),
+        source_stack_);
+    library_missing_->setObjectName(QStringLiteral("bench-library-missing"));
+    library_missing_->setWordWrap(true);
+    library_missing_->setAlignment(Qt::AlignCenter);
+    library_missing_->setMargin(12);
+    library_missing_->setForegroundRole(QPalette::PlaceholderText);
+    source_stack_->addWidget(library_missing_);
+    // ADR-0296: the library's playlists.
+    playlists_view_ = new ListsPanel(source_stack_);
     playlists_view_->setObjectName(QStringLiteral("bench-library-playlists"));
-    playlists_view_->setMinimumHeight(60);
     playlists_view_->setDropHandler(
         [this](QDropEvent* drop, const EngineKey& engine, const QString& id) {
             return dropOnPanelList(drop, engine, id);
@@ -245,21 +179,8 @@ void BenchMainWindow::buildWorkspace() {
             [this](const EngineKey& engine, const QString& id) { openEngineList(engine, id); });
     connect(playlists_view_, &QWidget::customContextMenuRequested, this,
             [this](const QPoint& position) { showListsMenu(playlists_view_, position); });
-    library_split_->addWidget(source_stack_);
-    library_split_->addWidget(playlists_view_);
-    library_split_->setStretchFactor(0, 1);
-    library_split_->setStretchFactor(1, 0);
-    {
-        const auto height =
-            QSettings{}.value(QStringLiteral("library/playlists-height"), 160).toInt();
-        library_split_->setSizes({std::max(1, 600 - height), height});
-    }
-    connect(library_split_, &QSplitter::splitterMoved, this, [this](const int, const int) {
-        QSettings{}.setValue(QStringLiteral("library/playlists-height"),
-                             library_split_->sizes().value(1));
-    });
-    playlists_view_->hide();
-    folders_layout->addWidget(library_split_, 1);
+    source_stack_->addWidget(playlists_view_);
+    sources_layout->addWidget(source_stack_, 1);
 
     // ADR-0292: one layout -- the sources left, the lists right -- and the
     // divider where it was left. The sources keep their width however the
@@ -268,7 +189,7 @@ void BenchMainWindow::buildWorkspace() {
     auto* split = new QSplitter(Qt::Horizontal, this);
     split->setObjectName(QStringLiteral("bench-panel-split"));
     split->setChildrenCollapsible(false);
-    split->addWidget(folders_panel_);
+    split->addWidget(sources_panel_);
     split->addWidget(track_area_);
     split->setStretchFactor(0, 0);
     split->setStretchFactor(1, 1);
@@ -286,28 +207,6 @@ void BenchMainWindow::buildWorkspace() {
     selection_status_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     statusBar()->addWidget(selection_status_, 1);
     refreshSelectionStatus();
-
-    folder_bookmark_add_action_ = new QAction(QStringLiteral("Bookmark folder"), this);
-    folder_bookmark_add_action_->setObjectName(QStringLiteral("action-folder-bookmark-add"));
-    connect(folder_bookmark_add_action_, &QAction::triggered, this, [this] {
-        const auto index = folder_view_->currentIndex();
-        if (index.isValid() && folder_model_->isDirectory(index)) {
-            addFolderBookmark(folder_model_->rawPath(index));
-        }
-    });
-    folder_bookmark_remove_action_ = new QAction(QStringLiteral("Remove bookmark"), this);
-    folder_bookmark_remove_action_->setObjectName(QStringLiteral("action-folder-bookmark-remove"));
-    connect(folder_bookmark_remove_action_, &QAction::triggered, this,
-            [this] { folder_browser_->removeBookmark(folder_bookmarks_->currentRow()); });
-    folder_bookmark_menu_ = new QMenu(this);
-    folder_bookmark_menu_->setObjectName(QStringLiteral("bench-folder-bookmark-menu"));
-    folder_bookmark_menu_->addAction(folder_bookmark_remove_action_);
-    loadFolderBookmarks();
-
-    // The tree browses the whole filesystem; bookmarks are the fast lane.
-    folder_model_->addRoot("/");
-    const auto home = QFile::encodeName(QDir::homePath());
-    revealFolderPath(std::string{home.constData(), static_cast<std::size_t>(home.size())});
 
     auto* file_menu = menuBar()->addMenu(QStringLiteral("&File"));
     auto* new_list = file_menu->addAction(QStringLiteral("New list…"));
@@ -338,8 +237,6 @@ void BenchMainWindow::buildWorkspace() {
     restore_workspace->setObjectName(QStringLiteral("action-restore-workspace"));
     connect(restore_workspace, &QAction::triggered, this,
             &BenchMainWindow::scheduleWorkspaceRestore);
-    auto* add_root = file_menu->addAction(QStringLiteral("Bookmark folder…"));
-    connect(add_root, &QAction::triggered, this, &BenchMainWindow::addFolderRoot);
     file_menu->addSeparator();
     // The two ways out, side by side and named for what they do to the
     // music: only a tooltip told them apart, and menus do not show those.
@@ -478,24 +375,6 @@ void BenchMainWindow::buildWorkspace() {
     connect(remove_selected_action_, &QAction::triggered, this,
             &BenchMainWindow::removeSelectedRows);
 
-    folder_add_to_list_action_ = new QAction(QStringLiteral("Add to current list"), this);
-    folder_add_to_list_action_->setObjectName(QStringLiteral("action-folder-add-to-list"));
-    connect(folder_add_to_list_action_, &QAction::triggered, this, [this] {
-        const auto index = folder_view_->currentIndex();
-        if (index.isValid()) {
-            openLocalPaths({folder_model_->rawPath(index)});
-        }
-    });
-    folder_toggle_expanded_action_ = new QAction(QStringLiteral("Expand"), this);
-    folder_toggle_expanded_action_->setObjectName(QStringLiteral("action-folder-toggle-expanded"));
-    connect(folder_toggle_expanded_action_, &QAction::triggered, this, [this] {
-        const auto index = folder_view_->currentIndex();
-        if (!index.isValid() || !folder_model_->isDirectory(index)) {
-            return;
-        }
-        folder_view_->setExpanded(index, !folder_view_->isExpanded(index));
-    });
-
     auto* workspace_menu = menuBar()->addMenu(QStringLiteral("&Workspace"));
     auto* commands = workspace_menu->addAction(tr("Commands…"));
     commands->setObjectName(QStringLiteral("action-command-palette"));
@@ -534,16 +413,6 @@ void BenchMainWindow::buildWorkspace() {
     quick_track->setShortcutContext(Qt::WindowShortcut);
     connect(quick_track, &QAction::triggered, this,
             [this] { openQuickPick(QuickPickKind::track); });
-    // ADR-0233: a tab bar, or a pane that keeps every list in sight.
-    lists_panel_action_ = workspace_menu->addAction(tr("Lists in a side panel"));
-    lists_panel_action_->setObjectName(QStringLiteral("action-lists-panel"));
-    lists_panel_action_->setCheckable(true);
-    lists_panel_action_->setChecked(listsInPanel());
-    connect(lists_panel_action_, &QAction::toggled, this, [this](const bool panel) {
-        QSettings{}.setValue(QLatin1String(lists_display_key),
-                             panel ? QStringLiteral("panel") : QStringLiteral("tabs"));
-        applyListsDisplay();
-    });
     workspace_menu->addSeparator();
     duplicate_tab_action_ = workspace_menu->addAction(QStringLiteral("Duplicate tab"));
     duplicate_tab_action_->setObjectName(QStringLiteral("action-duplicate-tab"));
@@ -570,25 +439,14 @@ void BenchMainWindow::buildWorkspace() {
     connect(close_tab_action_, &QAction::triggered, this, &BenchMainWindow::closeCurrentTab);
 
     workspace_menu->addSeparator();
-    auto* track_layout_menu = workspace_menu->addMenu(QStringLiteral("Track list layout"));
+    track_layout_menu_ = workspace_menu->addMenu(QStringLiteral("Track list layout"));
+    auto* track_layout_menu = track_layout_menu_;
     track_layout_menu->setObjectName(QStringLiteral("menu-track-list-layout"));
     track_presentation_group_ = new QActionGroup(track_layout_menu);
     track_presentation_group_->setExclusive(true);
-    track_albums_side_action_ =
-        track_layout_menu->addAction(QStringLiteral("Albums with side artwork"));
-    track_albums_side_action_->setObjectName(QStringLiteral("action-track-layout-albums-side"));
-    track_albums_side_action_->setCheckable(true);
-    track_presentation_group_->addAction(track_albums_side_action_);
-    connect(track_albums_side_action_, &QAction::triggered, this,
-            [this] { setTrackViewPresentation(ui::TrackViewPresentation::albums_side_artwork); });
-    track_plain_columns_action_ = track_layout_menu->addAction(QStringLiteral("Plain columns"));
-    track_plain_columns_action_->setObjectName(QStringLiteral("action-track-layout-plain"));
-    track_plain_columns_action_->setCheckable(true);
-    track_presentation_group_->addAction(track_plain_columns_action_);
-    connect(track_plain_columns_action_, &QAction::triggered, this,
-            [this] { setTrackViewPresentation(ui::TrackViewPresentation::plain_columns); });
-    track_layout_menu->addSeparator();
-    // ADR-0282: list views of the user's own.
+    // ADR-0282: every list view, the shipped and the user's own, filled in
+    // before this.
+    list_views_end_ = track_layout_menu->addSeparator();
     auto* edit_view = track_layout_menu->addAction(QStringLiteral("Edit list view…"));
     edit_view->setObjectName(QStringLiteral("action-edit-list-view-menu"));
     connect(edit_view, &QAction::triggered, this, [this] { editListView(false); });
@@ -597,6 +455,9 @@ void BenchMainWindow::buildWorkspace() {
     connect(new_view, &QAction::triggered, this, [this] { editListView(true); });
     connect(&ListViewCatalog::instance(), &ListViewCatalog::changed, this,
             &BenchMainWindow::redrawListViews);
+    connect(&ListViewCatalog::instance(), &ListViewCatalog::changed, this,
+            &BenchMainWindow::rebuildListViewActions);
+    rebuildListViewActions();
     track_layout_menu->addSeparator();
     track_columns_menu_ = track_layout_menu->addMenu(QStringLiteral("Columns"));
     track_columns_menu_->setObjectName(QStringLiteral("menu-track-columns"));
@@ -638,35 +499,8 @@ void BenchMainWindow::buildWorkspace() {
             &BenchMainWindow::showTabContextMenu);
     track_context_menu_ = new QMenu(tabs_);
     track_context_menu_->setObjectName(QStringLiteral("bench-track-context-menu"));
-    folder_context_menu_ = new QMenu(folders_panel_);
-    folder_context_menu_->setObjectName(QStringLiteral("bench-folder-context-menu"));
     refreshTabActions();
     refreshTrackViewActions();
-}
-
-void BenchMainWindow::loadFolderBookmarks() {
-    folder_bookmarks_->clear();
-    for (const auto& raw_path : folder_browser_->bookmarkPaths()) {
-        auto* item = new QListWidgetItem(
-            QIcon::fromTheme(QStringLiteral("folder"), style()->standardIcon(QStyle::SP_DirIcon)),
-            folderBookmarkLabel(raw_path), folder_bookmarks_);
-        item->setToolTip(folderBookmarkTooltip(raw_path));
-        item->setData(Qt::UserRole,
-                      QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});
-    }
-    const auto folders_visible =
-        local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0;
-    folder_bookmarks_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
-    folder_bookmarks_heading_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
-}
-
-void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
-    const auto index = folder_bookmarks_->indexAt(position);
-    if (!index.isValid()) {
-        return;
-    }
-    folder_bookmarks_->setCurrentRow(index.row());
-    folder_bookmark_menu_->popup(folder_bookmarks_->viewport()->mapToGlobal(position));
 }
 
 void BenchMainWindow::placeSources() {
@@ -849,7 +683,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             refreshEmptyMessage(*tab);
         }
         keepTabGroupsTogether();
-        applyListsDisplay();
+        // The playlists shown are the library's, wherever it now is.
+        followLibraryPlaylists();
         if (notifications_action_)
             notifications_action_->setChecked(
                 QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());

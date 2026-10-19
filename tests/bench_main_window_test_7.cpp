@@ -470,7 +470,7 @@ void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
     QCOMPARE(moved_view->model()->rowCount(), 0);
 }
 
-void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
+void BenchMainWindowTest::contextMenusTargetSelectionsAndLists() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
     std::vector<std::string> raw_paths;
@@ -486,15 +486,9 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     auto* duplicate = window.findChild<QAction*>(QStringLiteral("action-duplicate-tab"));
     auto* track_menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
-    auto* folder_menu = window.findChild<QMenu*>(QStringLiteral("bench-folder-context-menu"));
-    auto* folder_view = window.findChild<QTreeView*>(QStringLiteral("bench-folder-tree"));
-    auto* folder_model = window.findChild<ui::LocalFolderTreeModel*>();
     QVERIFY(tabs != nullptr);
     QVERIFY(duplicate != nullptr);
     QVERIFY(track_menu != nullptr);
-    QVERIFY(folder_menu != nullptr);
-    QVERIFY(folder_view != nullptr);
-    QVERIFY(folder_model != nullptr);
     QTRY_COMPARE(tabs->count(), 1);
     window.openLocalPaths(raw_paths);
     auto* source = qobject_cast<QTableView*>(tabs->currentWidget());
@@ -560,33 +554,6 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
                                       Q_ARG(QPoint, album_header_position)));
     QCOMPARE(source->selectionModel()->selectedRows().size(), 3);
     track_menu->close();
-
-    const auto directory_encoded = QFile::encodeName(media.path());
-    const std::string directory_raw{directory_encoded.constData(),
-                                    static_cast<std::size_t>(directory_encoded.size())};
-    folder_model->addRoot(directory_raw);
-    QModelIndex root;
-    for (int row = 0; row < folder_model->rowCount(); ++row) {
-        if (folder_model->rawPath(folder_model->index(row, 0)) == directory_raw) {
-            root = folder_model->index(row, 0);
-        }
-    }
-    QVERIFY(root.isValid());
-    folder_view->scrollTo(root);
-    const auto root_position = folder_view->visualRect(root).center();
-    QVERIFY(QMetaObject::invokeMethod(folder_view, "customContextMenuRequested",
-                                      Qt::DirectConnection, Q_ARG(QPoint, root_position)));
-    auto* add_folder = window.findChild<QAction*>(QStringLiteral("action-folder-add-to-list"));
-    auto* toggle_folder =
-        window.findChild<QAction*>(QStringLiteral("action-folder-toggle-expanded"));
-    QVERIFY(add_folder != nullptr);
-    QVERIFY(toggle_folder != nullptr);
-    QCOMPARE(add_folder->text(), QStringLiteral("Add folder to current list"));
-    QCOMPARE(toggle_folder->text(), QStringLiteral("Expand"));
-    toggle_folder->trigger();
-    QVERIFY(folder_view->isExpanded(root));
-    add_folder->trigger();
-    QTRY_COMPARE(source->model()->rowCount(), 6);
 }
 
 // ADR-0292: side panels open together share their room as tabs, and one
@@ -720,7 +687,7 @@ void BenchMainWindowTest::theSourcesKeepTheirWidth() {
         QVERIFY(split != nullptr);
         QCOMPARE(split->objectName(), QStringLiteral("bench-panel-split"));
         QCOMPARE(split->count(), 2);
-        QCOMPARE(split->widget(0)->objectName(), QStringLiteral("bench-panel-folders"));
+        QCOMPARE(split->widget(0)->objectName(), QStringLiteral("bench-panel-sources"));
         QCOMPARE(split->widget(1)->objectName(), QStringLiteral("bench-track-area"));
         for (const auto* gone :
              {"action-edit-panel-layout", "action-layout-side-by-side", "action-layout-top-bottom",
@@ -1737,8 +1704,10 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         BenchMainWindow window;
         window.show();
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        auto* side = window.findChild<QAction*>(QStringLiteral("action-track-layout-albums-side"));
-        auto* plain = window.findChild<QAction*>(QStringLiteral("action-track-layout-plain"));
+        auto* side =
+            window.findChild<QAction*>(QStringLiteral("action-list-view-menu-albums-side-artwork"));
+        auto* plain =
+            window.findChild<QAction*>(QStringLiteral("action-list-view-menu-plain-columns"));
         auto* date = window.findChild<QAction*>(QStringLiteral("action-track-column-date"));
         QVERIFY(tabs != nullptr);
         QVERIFY(side != nullptr);

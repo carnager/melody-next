@@ -10,12 +10,13 @@
 
 ## Application scope
 
-ADR-0115 adds a local source switch with **Folders** and **Library**. Folders
-keeps direct navigation and bookmarks; Library provides optional indexed
-artist/album browsing and album/track search. Per ADR-0130 each authority's
-sidebar carries a flat one-click tab bar: **Folders | Library** in local
-context, **Library | Playlists** in MPD context, replacing the earlier
-dropdown. See [local-library.md](local-library.md).
+The sources are a flat one-click tab bar (ADR-0130): **Library | Playlists**
+(ADR-0298) -- the library of the engine holding it, with indexed
+artist/album browsing and album/track search, and that engine's saved
+playlists, the files in its playlist folder (ADR-0296). Files from this
+computer come in through File › Open files… and Open folder…, dropped from a
+file manager, or on the command line; the folder browser of ADR-0115 is
+retired. See [local-library.md](local-library.md).
 
 Per ADR-0058 these surfaces share one Trackbench shell while retaining distinct
 authorities. Selecting **MPD Queue** binds the sidebar, transport, and output
@@ -112,14 +113,11 @@ The initial workspace is intentionally conventional:
   and server-round-trip edits with `stored_playlist`
   idle refresh; multi-row reorder and restoring open playlist tabs across
   restart remain follow-ups.
-- **Melody decision** (ADR-0233): lists show as a tab bar grouped by
-  engine (default), or -- Settings → General → *Show lists as*, or Workspace →
-  *Lists in a side panel* -- as a Lists pane beside the tracks. The pane hides
-  the tab bar and lists every engine's lists under its name, saved ones first
-  and working ones in italics, whether open in this window or not; choosing
-  one shows it, dropping library rows, folders or tracks on one adds them
-  (opening it first if needed), and its menu opens, closes, saves, renames and
-  deletes. Tabs that are not lists (tag editors) appear under *Other tabs*.
+- **Melody decision** (ADR-0298): lists show as a tab bar grouped by
+  engine. The library's saved playlists are its Playlists source tab:
+  choosing one shows it, dropping library rows or files on one adds them
+  (opening it first if needed), and its menu opens, closes, saves, renames
+  and deletes. The Lists pane of ADR-0233 is retired.
 - The default track presentation is grouped albums with cover art and readable
   track rows.
 - A plain, information-dense columns preset is one action away.

@@ -62,7 +62,6 @@ class SettingsSession final : public QObject {
     // What a page says about when its changes take effect, if it does not
     // wait for Save.
     [[nodiscard]] static QString saveNote(Page page);
-    [[nodiscard]] static std::vector<Choice> listsDisplays();
     [[nodiscard]] static std::vector<Choice> bufferProfiles();
     [[nodiscard]] static std::vector<Choice> ratingScales();
     // ADR-0247: the system's colours, or Trackknife's light or dark scheme.

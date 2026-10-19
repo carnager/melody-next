@@ -19,7 +19,6 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "uicommon/list_persistence_service.hpp"
-#include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/rating_stars.hpp"
@@ -606,39 +605,26 @@ BenchMainWindow::ListTab* BenchMainWindow::currentListTab() {
 }
 
 void BenchMainWindow::refreshActiveContext() {
-    if (source_stack_ != nullptr) {
-        const auto index = local_source_tabs_ != nullptr ? local_source_tabs_->currentIndex() : 0;
+    if (source_stack_ != nullptr && local_source_tabs_ != nullptr) {
+        const auto index = local_source_tabs_->currentIndex();
         // A sidebar tab of another engine's library carries that engine's key.
-        const auto shown = local_source_tabs_ != nullptr
-                               ? local_source_tabs_->tabData(index).toString()
-                               : QString{};
+        const auto shown = local_source_tabs_->tabData(index).toString();
         auto* other_library = shown.isEmpty() ? nullptr : libraryOf(EngineKey::fromText(shown));
-        auto* source = other_library != nullptr ? static_cast<QWidget*>(other_library)
-                       : index == 1 && localLibrary() != nullptr
+        auto* source = other_library != nullptr  ? static_cast<QWidget*>(other_library)
+                       : index == playlists_tab_ ? static_cast<QWidget*>(playlists_view_)
+                       : index == 0 && localLibrary() != nullptr
                            ? static_cast<QWidget*>(localLibrary())
-                           : static_cast<QWidget*>(folder_view_);
+                           : static_cast<QWidget*>(library_missing_);
+        const bool arriving = source_stack_->currentWidget() != source;
         source_stack_->setCurrentWidget(source);
-        // ADR-0296: under a library, its engine's playlists -- asked for
-        // when they come into sight; changes come on their own.
-        if (playlists_view_ != nullptr) {
-            const bool library = source != folder_view_;
-            const auto engine =
-                other_library != nullptr ? EngineKey::fromText(shown) : EngineKey::local();
-            const bool arriving =
-                library && (playlists_view_->isHidden() || !(engine == playlists_engine_));
-            playlists_engine_ = engine;
-            playlists_view_->setVisible(library);
-            if (arriving) {
-                fetchEngineLists();
-                refreshListsPanel();
-            }
+        // ADR-0296: the library's playlists, asked for when they come into
+        // sight or the library moved; changes come on their own.
+        if (source == playlists_view_ &&
+            (arriving || !(playlists_engine_ == workspace_.libraryKey()))) {
+            playlists_engine_ = workspace_.libraryKey();
+            fetchEngineLists();
+            refreshListsPanel();
         }
-    }
-    if (folder_bookmarks_ != nullptr) {
-        const auto folders_visible =
-            local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0;
-        folder_bookmarks_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
-        folder_bookmarks_heading_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
     }
     if (device_menu_ != nullptr && device_menu_->isEmpty()) {
         rebuildDeviceMenu();
@@ -700,7 +686,7 @@ void BenchMainWindow::applyLocalLibraryVisibility() {
     if (local_source_tabs_ == nullptr) {
         return;
     }
-    constexpr int library_tab = 1;
+    constexpr int library_tab = 0;
     // Noted first: hiding the current tab moves the bar to another.
     const auto current = local_source_tabs_->currentIndex();
     const bool shown = localLibraryShown();
@@ -726,8 +712,8 @@ void BenchMainWindow::selectPreferredSource() {
     if (local_source_tabs_ == nullptr) {
         return;
     }
-    // A library unless Folders was chosen: this computer's, or the remote's
-    // when this computer's is hidden or the remote's was chosen.
+    // The library -- this computer's, or the remote's when this computer's
+    // is hidden or the remote's was chosen -- unless Playlists was.
     const auto wanted = preferredSource();
     // A library tab of another engine carries that engine's key.
     int remote = -1;
@@ -739,12 +725,10 @@ void BenchMainWindow::selectPreferredSource() {
     }
     const bool local = localLibraryShown();
     int target = 0;
-    if (wanted == QStringLiteral("folders")) {
-        target = 0;
+    if (wanted == QStringLiteral("playlists")) {
+        target = playlists_tab_;
     } else if (wanted == QStringLiteral("remote") || !local) {
-        target = remote >= 0 ? remote : local ? 1 : 0;
-    } else {
-        target = 1;
+        target = remote >= 0 ? remote : local ? 0 : playlists_tab_;
     }
     local_source_tabs_->setCurrentIndex(target);
 }
@@ -753,12 +737,13 @@ void BenchMainWindow::focusLibrarySearch() {
     if (source_stack_ == nullptr || local_source_tabs_ == nullptr) {
         return;
     }
-    if (qobject_cast<LocalLibraryPanel*>(source_stack_->currentWidget()) == nullptr) {
-        // On Folders, which has no search: the library it would switch to.
-        const auto folders = local_source_tabs_->currentIndex();
-        selectPreferredSource();
-        if (local_source_tabs_->currentIndex() == folders && local_source_tabs_->count() > 1) {
-            local_source_tabs_->setCurrentIndex(1);
+    // On Playlists, which has no search: the library's tab -- the visible
+    // one before Playlists.
+    for (int index = 0; index < local_source_tabs_->count() &&
+                        qobject_cast<LocalLibraryPanel*>(source_stack_->currentWidget()) == nullptr;
+         ++index) {
+        if (index != playlists_tab_ && local_source_tabs_->isTabVisible(index)) {
+            local_source_tabs_->setCurrentIndex(index);
         }
     }
     if (auto* panel = qobject_cast<LocalLibraryPanel*>(source_stack_->currentWidget())) {
@@ -1362,31 +1347,6 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
             workspace_.rate(engine, album_hashes, true, rating);
         });
     }
-}
-
-void BenchMainWindow::showFolderContextMenu(const QPoint& position) {
-    if (folder_context_menu_ == nullptr) {
-        return;
-    }
-    const auto target = folder_view_->indexAt(position);
-    if (!target.isValid()) {
-        return;
-    }
-    folder_view_->selectionModel()->setCurrentIndex(target, QItemSelectionModel::ClearAndSelect |
-                                                                QItemSelectionModel::Rows);
-    const auto directory = folder_model_->isDirectory(target);
-    folder_add_to_list_action_->setText(directory ? QStringLiteral("Add folder to current list")
-                                                  : QStringLiteral("Add file to current list"));
-    folder_toggle_expanded_action_->setText(
-        folder_view_->isExpanded(target) ? QStringLiteral("Collapse") : QStringLiteral("Expand"));
-    folder_toggle_expanded_action_->setEnabled(directory);
-    folder_context_menu_->clear();
-    folder_context_menu_->addAction(folder_add_to_list_action_);
-    if (directory) {
-        folder_context_menu_->addAction(folder_toggle_expanded_action_);
-        folder_context_menu_->addAction(folder_bookmark_add_action_);
-    }
-    folder_context_menu_->popup(folder_view_->viewport()->mapToGlobal(position));
 }
 
 void BenchMainWindow::playCurrentRow() {

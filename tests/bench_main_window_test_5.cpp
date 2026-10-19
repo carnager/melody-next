@@ -29,11 +29,14 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QVERIFY(remote_tab != nullptr && !EngineKey::of(remote_tab->document).isLocal());
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
-    QCOMPARE(sources->tabData(sources->count() - 1).toString(), window.remoteEngine()->key.text());
+    // The remote's library tab, before Playlists, which stays last.
+    QCOMPARE(window.playlists_tab_, sources->count() - 1);
+    const auto remote_at = window.playlists_tab_ - 1;
+    QCOMPARE(sources->tabData(remote_at).toString(), window.remoteEngine()->key.text());
     // Someone whose music is all on the remote can hide this computer's
     // library; its tab goes, and the remote's stays in front.
     {
-        const auto library_tab = 1;
+        const auto library_tab = 0;
         QVERIFY(sources->isTabVisible(library_tab));
         sources->setCurrentIndex(library_tab);
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
@@ -52,10 +55,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // "Library", the engine named in its tooltip by what it calls itself --
     // here its machine's name, as it was started without one -- rather than
     // by its socket or address.
-    QCOMPARE(sources->tabText(sources->count() - 1), QStringLiteral("Library"));
-    QTRY_VERIFY(
-        sources->tabToolTip(sources->count() - 1)
-            .startsWith(QStringLiteral("The library on %1").arg(QSysInfo::machineHostName())));
+    QCOMPARE(sources->tabText(remote_at), QStringLiteral("Library"));
+    QTRY_VERIFY(sources->tabToolTip(remote_at).startsWith(
+        QStringLiteral("The library on %1").arg(QSysInfo::machineHostName())));
     // And the library says so too, not the address.
     QTRY_COMPARE(window.remoteCatalogue()->describe(),
                  QStringLiteral("Library: %1").arg(QSysInfo::machineHostName()));
@@ -410,21 +412,31 @@ void BenchMainWindowTest::emptyListsSayHowToFillThem() {
 void BenchMainWindowTest::sourcePanelOpensOnALibrary() {
     QSettings{}.remove(QStringLiteral("local-library/view"));
     {
-        // Nothing chosen yet: the library, not the folders.
+        // Nothing chosen yet: the library -- the first tab, Playlists last.
         BenchMainWindow window;
         window.show();
         QTRY_VERIFY(window.lists_restored_);
-        QCOMPARE(window.local_source_tabs_->currentIndex(), 1);
-        // Clicking Folders is a choice, and is kept.
-        emit window.local_source_tabs_->tabBarClicked(0);
-        window.local_source_tabs_->setCurrentIndex(0);
+        QCOMPARE(window.local_source_tabs_->currentIndex(), 0);
+        QCOMPARE(window.local_source_tabs_->tabText(0), QStringLiteral("Library"));
+        QCOMPARE(window.playlists_tab_, window.local_source_tabs_->count() - 1);
+        // Clicking Playlists is a choice, and is kept.
+        emit window.local_source_tabs_->tabBarClicked(window.playlists_tab_);
+        window.local_source_tabs_->setCurrentIndex(window.playlists_tab_);
     }
     {
         BenchMainWindow window;
         window.show();
         QTRY_VERIFY(window.lists_restored_);
+        QCOMPARE(window.local_source_tabs_->currentIndex(), window.playlists_tab_);
+        emit window.local_source_tabs_->tabBarClicked(0);
+    }
+    // Folders, as kept from before they went, is the library.
+    QSettings{}.setValue(QStringLiteral("local-library/view"), QStringLiteral("folders"));
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
         QCOMPARE(window.local_source_tabs_->currentIndex(), 0);
-        emit window.local_source_tabs_->tabBarClicked(1);
     }
 
     // This computer's library hidden: the remote's opens in its place.

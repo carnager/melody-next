@@ -934,14 +934,6 @@ if(MELODY_BUILD_UI)
     add_test(NAME artwork-fitting COMMAND trackknife_artwork_fitting_tests)
     set_tests_properties(artwork-fitting PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-    qt_add_executable(trackknife_local_folder_tree_model_tests local_folder_tree_model_test.cpp)
-    target_link_libraries(
-        trackknife_local_folder_tree_model_tests
-        PRIVATE Trackknife::UiCommon Qt6::Test trackknife_project_options trackknife_project_warnings
-    )
-    add_test(NAME local-folder-tree-model COMMAND trackknife_local_folder_tree_model_tests)
-    set_tests_properties(local-folder-tree-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
         qt_add_executable(trackknife_lastfm_service_tests lastfm_service_test.cpp)
     target_link_libraries(trackknife_lastfm_service_tests PRIVATE Trackknife::BenchUi Qt6::Network
         Qt6::Test trackknife_project_options trackknife_project_warnings)

@@ -47,11 +47,11 @@
 #include "workspace/album_batch_session.hpp"
 #include "workspace/color_scheme.hpp"
 #include "workspace/identify_session.hpp"
-#include "workspace/playlist_folder_session.hpp"
 #include "workspace/interface_scale.hpp"
 #include "workspace/keep_awake.hpp"
 #include "workspace/lastfm_settings_session.hpp"
 #include "workspace/list_view_definitions.hpp"
+#include "workspace/playlist_folder_session.hpp"
 #include "workspace/settings_session.hpp"
 #include "workspace/tab_store.hpp"
 
@@ -78,7 +78,6 @@
 #include "uicommon/command_palette.hpp"
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
-#include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
@@ -100,6 +99,7 @@
 
 #include <QAbstractItemModelTester>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
@@ -327,6 +327,7 @@ class BenchMainWindowTest final : public QObject {
     void playlistsUnderTheLibraryOpenAsTabs();
     void theEngineFolderDialogBrowsesAnEnginesMachine();
     void theHeartMakesWhatPlaysAFavourite();
+    void theTrackLayoutMenuListsEveryListView();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -437,8 +438,6 @@ class BenchMainWindowTest final : public QObject {
     void selectionActionsFollowTheActiveTab();
     void closingATabReturnsToThePreviousOne();
     void localArtworkSurvivesInvalidation();
-    void folderBookmarksRevealTreePaths();
-    void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront_data();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
     void metadataRetrySkipsSavedFiles_data();
@@ -461,7 +460,7 @@ class BenchMainWindowTest final : public QObject {
     void filePublicationStartupPresentsReconciliation();
     void combinedPublicationStartupRecoversMetadataAndPath();
     void folderDiscoveryAdmitsWave64();
-    void contextMenusTargetSelectionsListsAndFolders();
+    void contextMenusTargetSelectionsAndLists();
     void contextTransfersCreateTabs();
     void tabBarDropsTransferLocalRows();
     void filesDroppedOnTheTabBarMakeATab();

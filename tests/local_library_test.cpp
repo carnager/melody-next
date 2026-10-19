@@ -1591,8 +1591,8 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         auto* sources = window.findChild<QStackedWidget*>(QStringLiteral("bench-source-stack"));
         QVERIFY(selector && tree && search && tabs && sources);
-        // A library opens first, not the folders.
-        QCOMPARE(selector->currentIndex(), 1);
+        // The library opens first, before its Playlists.
+        QCOMPARE(selector->currentIndex(), 0);
         QCOMPARE(sources->currentWidget(), panel);
         panel->addRoot(root.native());
         QTRY_COMPARE(panel->findChild<QLabel*>(QStringLiteral("local-library-status"))->text(),

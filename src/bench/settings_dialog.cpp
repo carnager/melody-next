@@ -222,11 +222,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     restart_note->setForegroundRole(QPalette::PlaceholderText);
     interface_scale_layout->addWidget(restart_note, 1);
     general_form->addRow(QStringLiteral("Interface size:"), interface_scale_row);
-    // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
-    lists_display_ = new QComboBox(general);
-    lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));
-    bind(lists_display_, SettingsSession::listsDisplays(), "appearance/lists-display");
-    general_form->addRow(QStringLiteral("Show lists as:"), lists_display_);
 
     add_page(QStringLiteral("General"), general);
 

@@ -26,7 +26,6 @@
 #include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/track_view_layout.hpp"
-#include "workspace/folder_browser.hpp"
 #include "workspace/plugins.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
@@ -84,7 +83,6 @@ namespace trackknife::audio {} // namespace trackknife::audio
 namespace trackknife::ui {
 class QueueTableView;
 class ListPersistenceService;
-class LocalFolderTreeModel;
 class RatingStrip;
 } // namespace trackknife::ui
 
@@ -304,16 +302,12 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     }
     // ADR-0233: the lists as a pane beside the tracks instead of as a tab
     // bar, by the setting below.
-    static constexpr auto lists_display_key = "appearance/lists-display";
     void buildListsPanel();
-    void applyListsDisplay();
-    [[nodiscard]] bool listsInPanel() const;
     // Asks the engines for their lists again, a moment later.
     void fetchEngineLists();
     // Shows the window's tabs and the engines' lists in the pane, soon.
     void refreshListsPanel();
     void presentListsPanel();
-    void showListsPanelMenu(const QPoint& position);
     void showListsMenu(ListsPanel* panel, const QPoint& position);
     bool dropOnPanelList(QDropEvent* drop, const EngineKey& engine, const QString& id);
     void addDroppedPaths(const QString& id, const EngineKey& files_engine,
@@ -322,15 +316,15 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // ADR-0292: the sources beside the lists, at the width they were left.
     QSplitter* sources_split_{nullptr};
     void placeSources();
-    QWidget* lists_pane_{nullptr};
-    ListsPanel* lists_panel_{nullptr};
-    // ADR-0296: under the library, the saved playlists of the engine
-    // holding it -- each a file in its playlist folder.
+
+    // ADR-0296: the library's playlists -- the saved lists of the engine
+    // holding it, each a file in its playlist folder -- a source tab, last.
     ListsPanel* playlists_view_{nullptr};
-    QSplitter* library_split_{nullptr};
+    int playlists_tab_{-1};
     EngineKey playlists_engine_;
     [[nodiscard]] bool playlistsShown() const;
-    QAction* lists_panel_action_{nullptr};
+    // Shown, they are asked for again when the library moved to another engine.
+    void followLibraryPlaylists();
     ListsCatalog* lists_catalog_{nullptr};
     QTimer* lists_present_timer_{nullptr};
     void backupWorkspace();
@@ -499,11 +493,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void askLyricsProviders(const QString& entry, const EnginePlayback::State& state,
                             const QString& otherwise);
     QPointer<QObject> lyrics_provider_run_;
-    void showFolderContextMenu(const QPoint& position);
-    void showFolderBookmarkMenu(const QPoint& position);
-    void loadFolderBookmarks();
-    void addFolderBookmark(const std::string& raw_path) { folder_browser_->addBookmark(raw_path); }
-    void revealFolderPath(const std::string& raw_path) { folder_browser_->reveal(raw_path); }
     void playCurrentRow();
     void showMetadataProperties();
     // ADR-0237: `work` is the engine that does the file work, or null for
@@ -575,7 +564,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
 
     void openFilesDialog();
     void openFolderDialog();
-    void addFolderRoot();
     void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
                         int insertion_row, bool replace_and_play = false) {
         workspace_.startDiscovery(std::move(raw_paths), std::move(target_document_id),
@@ -731,12 +719,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void togglePlayPause() { workspace_.togglePlayPause(); }
     void seekToMs(qint64 position_ms);
 
-    FolderBrowser* folder_browser_{nullptr};
-    ui::LocalFolderTreeModel* folder_model_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
     // temporary page hosting its file list (ADR-0183 addendum).
     QTabBar* local_source_tabs_{nullptr};
-    QTreeView* folder_view_{nullptr};
     QTabWidget* tabs_{nullptr};
     QPointer<SearchDialog> search_dialog_;
     QAction* replaygain_action_{nullptr};
@@ -773,10 +758,12 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* find_list_action_{nullptr};
     QAction* find_next_action_{nullptr};
     QAction* find_previous_action_{nullptr};
-    QAction* folder_add_to_list_action_{nullptr};
-    QAction* folder_toggle_expanded_action_{nullptr};
-    QAction* track_albums_side_action_{nullptr};
-    QAction* track_plain_columns_action_{nullptr};
+    // ADR-0282: Workspace › Track list layout lists every list view --
+    // shipped and the user's own -- the one shown checked; made again when
+    // they change, before `list_views_end_`.
+    QMenu* track_layout_menu_{nullptr};
+    QAction* list_views_end_{nullptr};
+    void rebuildListViewActions();
     QAction* track_layout_reset_action_{nullptr};
     QAction* track_layout_copy_action_{nullptr};
     QSlider* seek_{nullptr};
@@ -820,17 +807,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QMenu* continue_menu_{nullptr};
     void fillContinueMenu();
     QMenu* track_context_menu_{nullptr};
-    QMenu* folder_context_menu_{nullptr};
     QActionGroup* track_presentation_group_{nullptr};
     QMenu* track_columns_menu_{nullptr};
     QHash<QString, QAction*> track_column_actions_;
 
-    QWidget* folders_panel_{nullptr};
-    QListWidget* folder_bookmarks_{nullptr};
-    QLabel* folder_bookmarks_heading_{nullptr};
-    QMenu* folder_bookmark_menu_{nullptr};
-    QAction* folder_bookmark_add_action_{nullptr};
-    QAction* folder_bookmark_remove_action_{nullptr};
+    QWidget* sources_panel_{nullptr};
+    // Shown in place of a library its engine has not given yet.
+    QLabel* library_missing_{nullptr};
     QStackedWidget* source_stack_{nullptr};
     bool applying_track_view_layout_{false};
 

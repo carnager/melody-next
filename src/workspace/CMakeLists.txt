@@ -41,8 +41,6 @@ qt_add_library(
     identify_session.cpp
     identify_session.hpp
     field_filter.hpp
-    folder_browser.cpp
-    folder_browser.hpp
     library_browser.cpp
     library_tree_model.cpp
     library_tree_model.hpp
@@ -161,8 +159,6 @@ qt_add_library(
     ../uicommon/local_artwork.cpp
     ../uicommon/local_artwork.hpp
     ../uicommon/local_files_mime_data.hpp
-    ../uicommon/local_folder_tree_model.cpp
-    ../uicommon/local_folder_tree_model.hpp
     ../uicommon/metadata_transformation_interchange.cpp
     ../uicommon/metadata_transformation_interchange.hpp
     ../uicommon/rating_color.hpp

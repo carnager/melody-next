@@ -27,8 +27,6 @@ void BenchMainWindow::buildLyrics() {
     lyrics_dock_->setObjectName(QStringLiteral("bench-lyrics"));
     lyrics_dock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     lyrics_panel_ = new LyricsPanel(lyrics_dock_);
-    connect(lyrics_panel_, &LyricsPanel::closeRequested, lyrics_dock_,
-            [this] { lyrics_dock_->setVisible(false); });
     connect(lyrics_panel_, &LyricsPanel::seekRequested, this, [this](const qint64 position_ms) {
         if (seek_ != nullptr && seek_->isEnabled()) {
             seekToMs(position_ms);
@@ -40,11 +38,15 @@ void BenchMainWindow::buildLyrics() {
     // another.
     setTabPosition(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea, QTabWidget::North);
 
-    lyrics_dock_->setVisible(QSettings{}.value(QStringLiteral("lyrics/visible"), false).toBool());
-    auto* toggle = panel->panelToggleAction();
-    toggle->setObjectName(QStringLiteral("action-show-lyrics"));
-    toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
-    addAction(toggle);
+    // ADR-0299: the side panels show together or not at all -- Panels says
+    // which, as it was left; Lyrics' own setting before there was one.
+    lyrics_dock_->setVisible(panelsShown());
+    panel->panelToggleAction()->setObjectName(QStringLiteral("action-show-lyrics"));
+    auto* panels = new QAction(QStringLiteral("Panels"), this);
+    panels->setObjectName(QStringLiteral("action-toggle-panels"));
+    panels->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
+    connect(panels, &QAction::triggered, this, &BenchMainWindow::togglePanels);
+    addAction(panels);
     watchSidePanel(lyrics_dock_);
 }
 
@@ -63,41 +65,35 @@ void BenchMainWindow::refreshPanelsButton() {
     }));
 }
 
+bool BenchMainWindow::panelsShown() const {
+    const QSettings settings;
+    return settings.contains(QStringLiteral("panels/shown"))
+               ? settings.value(QStringLiteral("panels/shown")).toBool()
+               : settings.value(QStringLiteral("lyrics/visible"), false).toBool();
+}
+
 void BenchMainWindow::togglePanels() {
+    // ADR-0299: Lyrics and every enabled plugin's panel, shown together or
+    // hidden together.
     std::vector<AnimatedPanelDock*> panels;
     for (auto* dock : findChildren<QDockWidget*>()) {
         if (auto* panel = dynamic_cast<AnimatedPanelDock*>(dock)) {
             panels.push_back(panel);
         }
     }
-    QStringList open;
+    const bool shown = std::ranges::any_of(
+        panels, [](const AnimatedPanelDock* panel) { return panel->isVisible(); });
+    QSettings{}.setValue(QStringLiteral("panels/shown"), !shown);
     for (auto* panel : panels) {
-        if (panel->isVisible()) {
-            open << panel->objectName();
+        if (panel->isVisible() == shown) {
+            panel->setVisible(!shown);
         }
     }
-    if (!open.isEmpty()) {
-        // Hidden together, remembered to come back together.
-        QSettings{}.setValue(QStringLiteral("panels/open"), open);
-        for (auto* panel : panels) {
-            if (panel->isVisible()) {
-                panel->setVisible(false);
-            }
-        }
-    } else {
-        auto wanted =
-            QSettings{}.value(QStringLiteral("panels/open"), QStringList{}).toStringList();
-        if (!std::ranges::any_of(panels, [&wanted](const AnimatedPanelDock* panel) {
-                return wanted.contains(panel->objectName());
-            })) {
-            wanted = {QStringLiteral("bench-lyrics")};
-        }
-        for (auto* panel : panels) {
-            if (wanted.contains(panel->objectName())) {
-                panel->setVisible(true);
-            }
-        }
+    if (!shown) {
         QTimer::singleShot(0, this, &BenchMainWindow::tabOpenSidePanels);
+        // In sight again: each asked about what plays now.
+        refreshLyrics(plugin_panel_state_);
+        refreshPluginPanels(plugin_panel_state_);
     }
     QTimer::singleShot(0, this, &BenchMainWindow::refreshPanelsButton);
 }

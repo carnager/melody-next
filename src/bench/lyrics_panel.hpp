@@ -45,7 +45,6 @@ class LyricsPanel final : public QWidget {
 
   signals:
     void seekRequested(qint64 position_ms);
-    void closeRequested();
 
   protected:
     void changeEvent(QEvent* event) override;

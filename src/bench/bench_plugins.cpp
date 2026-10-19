@@ -194,17 +194,6 @@ void BenchMainWindow::buildPluginPanels() {
         delete slot->dock;
     }
     plugin_panels_.clear();
-    QAction* lyrics = findChild<QAction*>(QStringLiteral("action-show-lyrics"));
-    QMenu* menu = nullptr;
-    QAction* after_lyrics = nullptr;
-    for (auto* candidate : menuBar()->findChildren<QMenu*>()) {
-        const auto actions = candidate->actions();
-        if (const auto at = actions.indexOf(lyrics); lyrics != nullptr && at >= 0) {
-            menu = candidate;
-            after_lyrics = actions.value(at + 1);
-            break;
-        }
-    }
     for (const auto& plugin : enabledPlugins()) {
         for (const auto& panel : plugin.panels) {
             auto slot = std::make_unique<PluginPanelDock>();
@@ -222,8 +211,6 @@ void BenchMainWindow::buildPluginPanels() {
             slot->view = view;
             watchSidePanel(dock);
             auto* raw = slot.get();
-            connect(view, &PluginPanelView::closeRequested, dock,
-                    [dock] { dock->setVisible(false); });
             connect(view, &PluginPanelView::refreshRequested, this,
                     [this, raw] { askPluginPanel(*raw); });
             auto* toggle = dock->panelToggleAction();
@@ -237,13 +224,8 @@ void BenchMainWindow::buildPluginPanels() {
                     raw->asked.reset();
                 }
             });
-            if (menu != nullptr) {
-                menu->insertAction(after_lyrics, toggle);
-            }
-            dock->setVisible(open.contains(dock->objectName()) ||
-                             QSettings{}
-                                 .value(QStringLiteral("plugin-panels/%1/visible").arg(id), false)
-                                 .toBool());
+            // ADR-0299: enabled, its panel is there -- shown with the rest.
+            dock->setVisible(open.contains(dock->objectName()) || panelsShown());
             plugin_panels_.push_back(std::move(slot));
         }
     }

@@ -239,6 +239,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    // None: Qt's list of every dock and toolbar, its panel entries greyed --
+    // they are not Qt's to close -- and the window's own bars offered to
+    // hide. The side panels show together, with Panels (ADR-0299).
+    QMenu* createPopupMenu() override { return nullptr; }
     void changeEvent(QEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -453,6 +457,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
     EnginePlayback::State plugin_panel_state_;
     void buildPluginPanels();
+    // ADR-0299: whether the side panels show, as Panels left them.
+    [[nodiscard]] bool panelsShown() const;
     // ADR-0292: the side panels open on a side as tabs of one group --
     // after the window opens with those open before, and after the
     // plugins' are made again.

@@ -239,14 +239,6 @@ PluginPanelView::PluginPanelView(const QString& label, QWidget* parent) : QWidge
     refresh->setAccessibleName(refresh->toolTip());
     connect(refresh, &QToolButton::clicked, this, &PluginPanelView::refreshRequested);
     heading->addWidget(refresh);
-    auto* close = new QToolButton(this);
-    close->setObjectName(QStringLiteral("bench-plugin-panel-close"));
-    close->setAutoRaise(true);
-    close->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-    close->setToolTip(QStringLiteral("Close %1").arg(label));
-    close->setAccessibleName(close->toolTip());
-    connect(close, &QToolButton::clicked, this, &PluginPanelView::closeRequested);
-    heading->addWidget(close);
     layout->addLayout(heading);
 
     auto* scroll = new QScrollArea(this);

@@ -177,9 +177,11 @@ missing albums, a biography, credits ([ADR-0291](adr/0291-plugin-panels.md)):
 "panels": [{"id": "artist", "label": "About the artist", "run": ["./about"]}]
 ```
 
-A plugin needs actions, panels, or both. Each panel is toggled under
-**Playback**, after Lyrics, and asks only while it is open: when the track
-changes, when it is opened, and on its refresh button. Its program is given
+A plugin needs actions, panels, or both. Enabled, its panel is beside
+Lyrics, shown and hidden with the other side panels by **Panels**
+([ADR-0299](adr/0299-the-side-panels-show-together.md)). It asks only while
+it shows: when the track changes, when it is shown, and on its refresh
+button. Its program is given
 
 ```json
 {"schema": 1, "panel": "artist", "engine": {…}, "settings": {…},

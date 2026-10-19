@@ -2813,21 +2813,20 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
         window.findChild<QAction*>(QStringLiteral("action-show-plugin-panel-about-artist"));
     QVERIFY(toggle != nullptr);
     QCOMPARE(toggle->text(), QStringLiteral("About the artist"));
-    // In the Playback menu, after Lyrics.
+    // ADR-0299: no switch of its own in a menu -- enabled, it is there,
+    // shown with the side panels by Panels.
     auto* lyrics = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
-    QMenu* playback = nullptr;
     for (auto* menu : window.menuBar()->findChildren<QMenu*>()) {
-        if (menu->actions().contains(lyrics)) {
-            playback = menu;
-        }
+        QVERIFY(!menu->actions().contains(lyrics) && !menu->actions().contains(toggle));
     }
-    QVERIFY(playback != nullptr);
-    QCOMPARE(playback->actions().indexOf(toggle), playback->actions().indexOf(lyrics) + 1);
-
+    QVERIFY(window.createPopupMenu() == nullptr);
     auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-about-artist"));
-    QVERIFY(dock != nullptr && dock->isHidden());
-    toggle->trigger();
+    QVERIFY(dock != nullptr);
+    if (dock->isHidden()) {
+        window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+    }
     QTRY_VERIFY(dock->isVisible());
+    QVERIFY(dock->findChild<QToolButton*>(QStringLiteral("bench-plugin-panel-close")) == nullptr);
     auto* message = dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-message"));
     QVERIFY(message != nullptr);
     QCOMPARE(message->text(), QStringLiteral("Nothing is playing"));

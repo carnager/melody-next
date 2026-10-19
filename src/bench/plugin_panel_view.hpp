@@ -28,7 +28,6 @@ class PluginPanelView final : public QWidget {
 
   signals:
     void refreshRequested();
-    void closeRequested();
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

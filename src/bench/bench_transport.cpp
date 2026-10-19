@@ -496,8 +496,6 @@ void BenchMainWindow::buildTransport() {
 
     buildLocalPlaybackControls(playback_menu);
     playback_menu->addSeparator();
-    playback_menu->addAction(findChild<QAction*>(QStringLiteral("action-show-lyrics")));
-    playback_menu->addSeparator();
     playback_menu->addAction(favorite_action_);
 
     // ADR-0144: quiet, opt-in track-change notifications while the

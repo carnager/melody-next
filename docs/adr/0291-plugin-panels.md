@@ -23,7 +23,8 @@ was designed there; providers (its decision 5's other half) stay to come.
    `"panels": [{"id": "artist", "label": "About the artist", "run":
    ["./about"], "timeout": 30}]` -- `timeout` 1 to 300 seconds, 30 by
    default.
-2. **A panel is a dock beside Lyrics**, toggled under Playback after it,
+2. **A panel is a dock beside Lyrics** (shown with the others since
+   ADR-0299, not toggled), toggled under Playback after it,
    remembering whether it is open and how wide, as Lyrics does.
 3. **It asks about what plays, and only while open:** when the playing
    track changes, when it is opened, and when its refresh button is

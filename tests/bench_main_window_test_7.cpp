@@ -1328,14 +1328,24 @@ void BenchMainWindowTest::lyricsPanelFollowsThePosition() {
     QCOMPARE(lines->item(0)->text(), QStringLiteral("No lyrics"));
     QVERIFY(source->text().isEmpty());
 
-    // In the window: a dock, hidden at first, shown from the Playback menu.
+    // In the window: a dock, shown with the other side panels -- Panels,
+    // Ctrl+Shift+L, shows and hides them together (ADR-0299).
+    QSettings{}.remove(QStringLiteral("panels/shown"));
+    QSettings{}.setValue(QStringLiteral("lyrics/visible"), false);
     BenchMainWindow window;
+    window.show();
     auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-lyrics"));
-    auto* toggle = window.findChild<QAction*>(QStringLiteral("action-show-lyrics"));
-    QVERIFY(dock != nullptr && toggle != nullptr);
-    QCOMPARE(toggle->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+L")));
-    QVERIFY(!QSettings{}.value(QStringLiteral("lyrics/visible"), false).toBool() ||
-            dock->isVisibleTo(&window));
+    auto* panels = window.findChild<QAction*>(QStringLiteral("action-toggle-panels"));
+    QVERIFY(dock != nullptr && panels != nullptr);
+    QCOMPARE(panels->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+L")));
+    QVERIFY(dock->isHidden());
+    panels->trigger();
+    QTRY_VERIFY(dock->isVisible());
+    QVERIFY(QSettings{}.value(QStringLiteral("panels/shown")).toBool());
+    panels->trigger();
+    QTRY_VERIFY(dock->isHidden());
+    QVERIFY(!QSettings{}.value(QStringLiteral("panels/shown")).toBool());
+    QSettings{}.remove(QStringLiteral("panels/shown"));
 }
 
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {

@@ -61,14 +61,6 @@ LyricsPanel::LyricsPanel(QWidget* parent) : QWidget(parent) {
     source_->setForegroundRole(QPalette::PlaceholderText);
     titles->addWidget(source_);
     heading->addLayout(titles, 1);
-    auto* close = new QToolButton(this);
-    close->setObjectName(QStringLiteral("lyrics-close"));
-    close->setAutoRaise(true);
-    close->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-    close->setToolTip(QStringLiteral("Close Lyrics"));
-    close->setAccessibleName(close->toolTip());
-    connect(close, &QToolButton::clicked, this, &LyricsPanel::closeRequested);
-    heading->addWidget(close);
     layout->addLayout(heading);
 
     lines_ = new QListWidget(this);

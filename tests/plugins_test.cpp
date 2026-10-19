@@ -609,23 +609,29 @@ void PluginsTest::panelsAreReadAndTheirAnswersToo() {
         R"({"title": "Testament", "parts": [{"heading": "About"},
             {"paragraph": "Thrash from Berkeley."},
             {"text": "The Legacy", "detail": "1987", "url": "https://example.org/1"},
-            {"image": "/tmp/cover.jpg", "caption": "Live", "url": "https://example.org/2"}]})",
+            {"image": "/tmp/cover.jpg", "caption": "Live", "url": "https://example.org/2"},
+            {"link": "Discogs", "detail": "The Legacy", "url": "https://example.org/3"}]})",
         &problem);
     QVERIFY2(content.has_value(), qPrintable(problem));
     using Kind = PluginPanelContent::Part::Kind;
     QCOMPARE(content->title, QStringLiteral("Testament"));
-    QCOMPARE(content->parts.size(), 4U);
+    QCOMPARE(content->parts.size(), 5U);
     QCOMPARE(content->parts[0].kind, Kind::heading);
     QCOMPARE(content->parts[1].kind, Kind::paragraph);
     QCOMPARE(content->parts[2].kind, Kind::item);
     QCOMPARE(content->parts[2].detail, QStringLiteral("1987"));
     QCOMPARE(content->parts[3].kind, Kind::image);
     QCOMPARE(content->parts[3].text, QStringLiteral("Live"));
+    // A link alone: drawn among its neighbours as a small button.
+    QCOMPARE(content->parts[4].kind, Kind::link);
+    QCOMPARE(content->parts[4].text, QStringLiteral("Discogs"));
+    QCOMPARE(content->parts[4].detail, QStringLiteral("The Legacy"));
     QVERIFY(parsePluginPanel(R"({"parts": []})", &problem).has_value());
     for (const auto* broken :
          {R"({"title": "x"})", R"({"parts": [{"heading": "a", "url": "https://x"}]})",
           R"({"parts": [{"quote": "a"}]})", R"({"parts": [{"image": "cover.jpg"}]})",
           R"({"parts": [{"text": "a", "url": "file:///etc/passwd"}]})",
+          R"({"parts": [{"link": "a"}]})", R"({"parts": [{"link": "a", "url": "file:///x"}]})",
           R"({"parts": [], "html": "<b>"})", "["}) {
         problem.clear();
         QVERIFY2(!parsePluginPanel(broken, &problem), broken);

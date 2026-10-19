@@ -2863,6 +2863,107 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
     }));
     QCOMPARE(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-detail"))->text(),
              QStringLiteral("official"));
+    // For a look at it: an About as the official plugin answers one.
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QImage photo{480, 320, QImage::Format_RGB32};
+        photo.fill(QColor{90, 110, 140});
+        const auto photo_path = directory + QStringLiteral("/photo.png");
+        QVERIFY(photo.save(photo_path));
+        PluginPanelContent about;
+        about.title = QStringLiteral("Testament");
+        using Part = PluginPanelContent::Part;
+        about.parts = {
+            Part{.kind = Part::Kind::image,
+                 .text = {},
+                 .detail = {},
+                 .url = {},
+                 .image = photo_path},
+            Part{.kind = Part::Kind::item,
+                 .text = QStringLiteral("Group from Berkeley, United States"),
+                 .detail = QStringLiteral("since 1983"),
+                 .url = {},
+                 .image = {}},
+            Part{.kind = Part::Kind::paragraph,
+                 .text = QStringLiteral(
+                     "Testament is an American thrash metal band from Berkeley, California. "
+                     "Formed in 1983 under the name Legacy, the band's current lineup comprises "
+                     "vocalist Chuck Billy, guitarists Eric Peterson and Alex Skolnick, bassist "
+                     "Steve Di Giorgio and drummer Chris Dovas. Testament has released fourteen "
+                     "studio albums, and is one of the most successful thrash metal bands of "
+                     "the Bay Area scene, credited with influencing many that followed."),
+                 .detail = {},
+                 .url = {},
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Wikipedia"),
+                 .detail = QStringLiteral("Testament"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Official site"),
+                 .detail = QStringLiteral("Testament"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("MusicBrainz"),
+                 .detail = QStringLiteral("Testament"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::heading,
+                 .text = QStringLiteral("The Legacy"),
+                 .detail = {},
+                 .url = {},
+                 .image = {}},
+            Part{.kind = Part::Kind::item,
+                 .text = QStringLiteral("Album · 1987"),
+                 .detail = QStringLiteral("Atlantic, Megaforce Worldwide"),
+                 .url = {},
+                 .image = {}},
+            Part{.kind = Part::Kind::paragraph,
+                 .text = QStringLiteral("The Legacy is the debut studio album by Testament."),
+                 .detail = {},
+                 .url = {},
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Wikipedia"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("MusicBrainz"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Discogs"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Bandcamp"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("Rate Your Music"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+            Part{.kind = Part::Kind::link,
+                 .text = QStringLiteral("AllMusic"),
+                 .detail = QStringLiteral("The Legacy"),
+                 .url = QStringLiteral("https://x.org"),
+                 .image = {}},
+        };
+        PluginPanelView shown{QStringLiteral("About"), nullptr};
+        shown.resize(300, 900);
+        shown.setSubject(QStringLiteral("Testament — Over the Wall"));
+        shown.showContent(about);
+        shown.show();
+        QTest::qWait(200);
+        QVERIFY(shown.grab().save(directory + QStringLiteral("/about.png")));
+    }
     // Escaped and shown as rich text: a quote or an ampersand reads as one.
     for (const auto* part : dock->findChildren<QLabel*>()) {
         if (QStringList{QStringLiteral("bench-plugin-panel-part"),

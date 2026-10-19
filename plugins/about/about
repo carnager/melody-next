@@ -291,7 +291,6 @@ def main():
         return
     artist_id, album_id = identify(artist, album)
     parts = []
-    links = []
     title = artist
     if show_artist:
         if artist_id:
@@ -306,7 +305,8 @@ def main():
                               **({"detail": told["when"]} if told["when"] else {})})
             if told["summary"]:
                 parts.append({"paragraph": told["summary"]})
-            links += [{"text": name, "detail": title, "url": url}
+            # Its links beneath it, side by side.
+            parts += [{"link": name, "detail": title, "url": url}
                       for name, url in told["links"].items()]
         else:
             parts.append({"paragraph": "MusicBrainz knows no artist of that name for certain."})
@@ -336,11 +336,8 @@ def main():
         for site, _, search in SITES:
             found[site] = found.get(site) or search(album_artist, name)
         order = ["Wikipedia", "MusicBrainz"] + [site for site, _, _ in SITES]
-        links += [{"text": site, "detail": name, "url": found[site]}
+        parts += [{"link": site, "detail": name, "url": found[site]}
                   for site in order if site in found]
-    if links:
-        parts.append({"heading": "Links"})
-        parts += links
     print(json.dumps({"title": title, "parts": parts}))
 
 

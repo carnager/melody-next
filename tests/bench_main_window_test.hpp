@@ -18,6 +18,7 @@
 #include "bench/lastfm_service.hpp"
 #include "bench/list_view_dialog.hpp"
 #include "bench/lists_panel.hpp"
+#include "bench/plugin_panel_view.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"

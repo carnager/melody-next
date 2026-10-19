@@ -205,9 +205,12 @@ and answers what to show, in parts Melody draws:
 | Heading | `heading` |
 | Paragraph | `paragraph` |
 | Item | `text`, and `detail` beneath, a `url` it opens |
-| Image | `image` -- an absolute path of a file the plugin keeps -- and `caption`, `url` |
+| Image | `image` -- an absolute path of a file the plugin keeps -- and `caption`, `url`; as wide as the panel, no wider than it is |
+| Link | `link`, its `url`, and `detail` -- what it is about, its tip; links side by side are a row of small buttons |
 
-Links are `http` or `https`. Melody fetches nothing for a panel: an image is
+The title is the panel's heading; a heading opens a section; a paragraph
+longer than six lines is folded, More beneath it. Links are `http` or
+`https`. Melody fetches nothing for a panel: an image is
 the plugin's to download and keep. `timeout` is 1 to 300 seconds, 30 by
 default.
 

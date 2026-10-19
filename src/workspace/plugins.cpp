@@ -609,6 +609,17 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                 return fail(
                     QStringLiteral("an image is a file's absolute path: %1").arg(read.image));
             }
+        } else if (part.contains(QStringLiteral("link"))) {
+            // ADR-0291: a link alone, drawn as a small button among its
+            // neighbours; `detail` says what it is about.
+            read.kind = Kind::link;
+            read.text = part.value(QStringLiteral("link")).toString();
+            read.detail = part.value(QStringLiteral("detail")).toString();
+            read.url = part.value(QStringLiteral("url")).toString();
+            allowed = {QStringLiteral("link"), QStringLiteral("detail"), QStringLiteral("url")};
+            if (read.url.isEmpty()) {
+                return fail(QStringLiteral("a link needs its url: %1").arg(read.text));
+            }
         } else if (part.contains(QStringLiteral("text"))) {
             read.kind = Kind::item;
             read.text = part.value(QStringLiteral("text")).toString();
@@ -616,7 +627,7 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.url = part.value(QStringLiteral("url")).toString();
             allowed = {QStringLiteral("text"), QStringLiteral("detail"), QStringLiteral("url")};
         } else {
-            return fail(QStringLiteral("a part is a heading, paragraph, text or image"));
+            return fail(QStringLiteral("a part is a heading, paragraph, text, link or image"));
         }
         for (const auto& key : part.keys()) {
             if (!allowed.contains(key)) {

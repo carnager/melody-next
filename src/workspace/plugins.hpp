@@ -208,11 +208,12 @@ struct PluginList {
 [[nodiscard]] std::optional<PluginList> parsePluginList(const QByteArray& json, QString* problem);
 
 // ADR-0291: what a panel answers -- a heading and parts, each Melody's to
-// draw: a heading, a paragraph, an item (text, detail beneath, a link) or an
-// image (a file the plugin keeps, a link on it).
+// draw: a heading, a paragraph, an item (text, detail beneath, a link), an
+// image (a file the plugin keeps, a link on it) or a link alone -- links side
+// by side are drawn as a row of small buttons, what each is about their tip.
 struct PluginPanelContent {
     struct Part {
-        enum class Kind : std::uint8_t { heading, paragraph, item, image };
+        enum class Kind : std::uint8_t { heading, paragraph, item, image, link };
         Kind kind{Kind::item};
         QString text;
         QString detail;

@@ -402,9 +402,11 @@ void Workspace::libraryTakes(const std::vector<std::string>& moved_here) {
 
 EngineFolderLister
 Workspace::engineFolderLister(const std::shared_ptr<engine::RemoteFileWork>& work) {
-    return [this, work](std::string path, EngineFolderListingCompletion done) {
+    EngineFolderLister lister;
+    // Browsing goes into folders that are links too, said as such.
+    lister.list = [this, work](std::string path, EngineFolderListingCompletion done) {
         offThread(
-            this, [work, path] { return work->folders(path); },
+            this, [work, path] { return work->folders(path, true); },
             [done = std::move(done)](auto listed) {
                 if (!listed) {
                     done(std::unexpected(std::move(listed.error())));
@@ -412,9 +414,19 @@ Workspace::engineFolderLister(const std::shared_ptr<engine::RemoteFileWork>& wor
                 }
                 done(EngineFolderListing{.path = std::move(listed->path),
                                          .parent = std::move(listed->parent),
-                                         .folders = std::move(listed->folders)});
+                                         .folders = std::move(listed->folders),
+                                         .linked = std::move(listed->linked),
+                                         .home = std::move(listed->home),
+                                         .roots = std::move(listed->roots)});
             });
     };
+    lister.make = [this, work](std::string path, std::string name,
+                               EngineFolderMadeCompletion done) {
+        offThread(
+            this, [work, path, name] { return work->make_folder(path, name); },
+            [done = std::move(done)](auto made) { done(std::move(made)); });
+    };
+    return lister;
 }
 
 MetadataPropertiesSourceReader

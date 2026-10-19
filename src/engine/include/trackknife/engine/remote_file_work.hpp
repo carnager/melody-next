@@ -196,9 +196,19 @@ class RemoteFileWork final {
         std::string path;
         std::optional<std::string> parent;
         std::vector<std::string> folders;
+        // Of `folders`, those that are links to a folder (asked for).
+        std::vector<std::string> linked;
+        // Where browsing starts: the engine's home and its music folders;
+        // empty from an engine older than level 20.
+        std::string home;
+        std::vector<std::string> roots;
     };
-    // `path` empty: where the engine starts, its home.
-    [[nodiscard]] core::Result<FolderListing> folders(const std::string& path);
+    // `path` empty: where the engine starts, its home. `links`: folders that
+    // are links too -- for browsing, not for a move's destination.
+    [[nodiscard]] core::Result<FolderListing> folders(const std::string& path, bool links = false);
+    // A new folder `name` in `path` (folders.make): its path.
+    [[nodiscard]] core::Result<std::string> make_folder(const std::string& path,
+                                                        const std::string& name);
 
     // metadata.interrupted: what the engine recovered at startup and what it
     // could not. Absent (not_found) when the engine is older than file work.

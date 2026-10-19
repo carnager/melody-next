@@ -1220,15 +1220,20 @@ core::Result<std::vector<std::optional<RemoteFileWork::Moved>>> RemoteFileWork::
     return moved;
 }
 
-core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::string& path) {
+core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::string& path,
+                                                                    const bool links) {
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto answer =
-        (*connection)
-            ->call("folders.list",
-                   path.empty() ? Json::object() : Json{{"path", protocol::encode_raw_path(path)}});
+    Json params = Json::object();
+    if (!path.empty()) {
+        params["path"] = protocol::encode_raw_path(path);
+    }
+    if (links) {
+        params["links"] = true;
+    }
+    auto answer = (*connection)->call("folders.list", params);
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }
@@ -1251,7 +1256,37 @@ core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::s
             listing.folders.push_back(std::move(*folder));
         }
     }
+    for (const auto& name : answer->value("linked", Json::array())) {
+        if (auto folder = decoded(name)) {
+            listing.linked.push_back(std::move(*folder));
+        }
+    }
+    listing.home = decoded(answer->value("home", Json())).value_or(std::string{});
+    for (const auto& root : answer->value("roots", Json::array())) {
+        if (auto folder = decoded(root)) {
+            listing.roots.push_back(std::move(*folder));
+        }
+    }
     return listing;
+}
+
+core::Result<std::string> RemoteFileWork::make_folder(const std::string& path,
+                                                      const std::string& name) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer =
+        (*connection)
+            ->call("folders.make", Json{{"path", protocol::encode_raw_path(path)}, {"name", name}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    auto made = protocol::decode_raw_path(answer->value("path", std::string{}));
+    if (!made) {
+        return std::unexpected(unexpected_answer("a folder made"));
+    }
+    return std::move(*made);
 }
 
 core::Result<Json> RemoteFileWork::interrupted() {

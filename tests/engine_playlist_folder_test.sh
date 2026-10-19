@@ -170,6 +170,23 @@ os.remove(f"{folder}/mix.m3u")
 c.call("playlists.sync")
 check("mix" not in lists(), "a file taken away takes its list")
 
+# The folder chooser's: links listed when asked, and said; home and the music
+# folders said; a folder made, and one already there refused.
+os.symlink(f"{music}/A", f"{work}/linked")
+plain = c.call("folders.list", {"path": encode(work)})["result"]
+check("linked" not in [decode(n) for n in plain["folders"]], "a link is left out unasked")
+check([decode(r) for r in plain["roots"]] == [music], "the music folders are said")
+with_links = c.call("folders.list", {"path": encode(work), "links": True})["result"]
+check("linked" in [decode(n) for n in with_links["folders"]] and
+      [decode(n) for n in with_links["linked"]] == ["linked"], "asked, it is listed and said")
+made = c.call("folders.make", {"path": encode(work), "name": "New one"})
+check("result" in made and decode(made["result"]["path"]) == f"{work}/New one" and
+      os.path.isdir(f"{work}/New one"), "a folder is made")
+check(c.call("folders.make", {"path": encode(work), "name": "New one"})["error"]["code"]
+      == "conflict", "one already there is refused")
+check(c.call("folders.make", {"path": encode(work), "name": "a/b"})["error"]["code"]
+      == "invalid_argument", "a name with a slash is refused")
+
 # A third, for the restart.
 c.call("list.save", {"name": "Keep", "items": [{"path": encode(f"{music}/A/one.wav")}]})
 check(os.path.exists(f"{folder}/Keep.m3u8"), "a new list is written")

@@ -46,8 +46,12 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
     remote.folders = [&listed_paths](std::string path, EngineFolderDialog::ListingCompletion done) {
         listed_paths.push_back(path);
         const auto at = path.empty() ? std::string{"/srv/music"} : path;
-        done(EngineFolderDialog::Listing{
-            .path = at, .parent = std::string{"/srv"}, .folders = {"incoming", "sorted"}});
+        done(EngineFolderDialog::Listing{.path = at,
+                                         .parent = std::string{"/srv"},
+                                         .folders = {"incoming", "sorted"},
+                                         .linked = {},
+                                         .home = {},
+                                         .roots = {}});
     };
     remote.copyable = [] {
         return std::vector{
@@ -2274,6 +2278,91 @@ void BenchMainWindowTest::identifyAlbumsWritesWhatIsChosen() {
     QTRY_COMPARE(write_again->text(), QStringLiteral("Write 2 albums"));
     QSettings{}.remove(QStringLiteral("properties/actions"));
     delete properties;
+}
+
+// The folder chooser for an engine elsewhere: where to start -- home, its
+// music folders, the root -- the path in steps and typed, hidden folders
+// when asked, links said, Backspace going out, and a folder made there.
+void BenchMainWindowTest::theEngineFolderDialogBrowsesAnEnginesMachine() {
+    std::vector<std::string> asked;
+    std::vector<std::string> made;
+    EngineFolderLister lister;
+    lister.list = [&asked, &made](std::string path, EngineFolderListingCompletion done) {
+        asked.push_back(path);
+        const auto at = path.empty() ? std::string{"/home/me"} : path;
+        std::vector<std::string> folders{".mpd", "Music", "linked"};
+        for (const auto& name : made) {
+            folders.push_back(name);
+        }
+        done(EngineFolderListing{.path = at,
+                                 .parent = at == "/" ? std::optional<std::string>{}
+                                                     : std::optional<std::string>{"/home"},
+                                 .folders = folders,
+                                 .linked = {"linked"},
+                                 .home = "/home/me",
+                                 .roots = {"/srv/music"}});
+    };
+    lister.make = [&made](std::string path, std::string name, EngineFolderMadeCompletion done) {
+        made.push_back(name);
+        done(path + "/" + name);
+    };
+    EngineFolderDialog dialog{QStringLiteral("gemenon"), lister, {}, nullptr};
+    dialog.setAttribute(Qt::WA_DeleteOnClose, false);
+    dialog.show();
+    auto* folders = dialog.findChild<QListWidget*>(QStringLiteral("bench-engine-folder-list"));
+    auto* places = dialog.findChild<QListWidget*>(QStringLiteral("bench-engine-folder-places"));
+    QVERIFY(folders != nullptr && places != nullptr);
+    // Hidden ones left out until asked for.
+    QTRY_COMPARE(folders->count(), 2);
+    QCOMPARE(folders->item(0)->text(), QStringLiteral("Music"));
+    QCOMPARE(folders->item(1)->toolTip(), QStringLiteral("A link to a folder"));
+    dialog.findChild<QCheckBox*>(QStringLiteral("bench-engine-folder-hidden"))->setChecked(true);
+    QTRY_COMPARE(folders->count(), 3);
+    QCOMPARE(folders->item(0)->text(), QStringLiteral(".mpd"));
+    // Places: home, the music folders, the root.
+    QCOMPARE(places->count(), 3);
+    QCOMPARE(places->item(1)->text(), QStringLiteral("/srv/music"));
+    emit places->itemClicked(places->item(1));
+    QTRY_COMPARE(asked.back(), std::string{"/srv/music"});
+    // The steps of the path, each going back there.
+    QList<QToolButton*> crumbs;
+    QTRY_COMPARE(
+        (crumbs = dialog.findChildren<QToolButton*>(QStringLiteral("bench-engine-folder-crumb")))
+            .size(),
+        3);
+    crumbs.at(1)->click();
+    QTRY_COMPARE(asked.back(), std::string{"/srv"});
+    // A path typed, Enter going there.
+    auto* path = dialog.findChild<QLineEdit*>(QStringLiteral("bench-engine-folder-path"));
+    path->setText(QStringLiteral("/var/lib/mpd"));
+    emit path->returnPressed();
+    QTRY_COMPARE(asked.back(), std::string{"/var/lib/mpd"});
+    // Backspace in the folders goes out.
+    folders->setFocus();
+    QTest::keyClick(folders, Qt::Key_Backspace);
+    QTRY_COMPARE(asked.back(), std::string{"/home"});
+    // A folder made there, and gone into.
+    auto* make = dialog.findChild<QPushButton*>(QStringLiteral("bench-engine-folder-make"));
+    QVERIFY(make != nullptr && make->isVisible());
+    QTimer::singleShot(0, [] {
+        for (auto* question : QApplication::topLevelWidgets()) {
+            if (auto* input = qobject_cast<QInputDialog*>(question); input && input->isVisible()) {
+                input->setTextValue(QStringLiteral("Playlists"));
+                input->accept();
+            }
+        }
+    });
+    make->click();
+    QTRY_COMPARE(made, std::vector<std::string>{"Playlists"});
+    QTRY_COMPARE(asked.back(), std::string{"/home/Playlists"});
+    // Choose: the folder shown, none selected.
+    QByteArray chosen;
+    connect(&dialog, &EngineFolderDialog::folderChosen, &dialog,
+            [&chosen](const QByteArray& raw) { chosen = raw; });
+    folders->clearSelection();
+    folders->setCurrentItem(nullptr);
+    dialog.findChild<QPushButton*>(QStringLiteral("bench-engine-folder-choose"))->click();
+    QCOMPARE(chosen, QByteArray{"/home/Playlists"});
 }
 
 } // namespace trackknife::bench

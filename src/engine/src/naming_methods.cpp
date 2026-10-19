@@ -3,6 +3,7 @@
 #include "trackknife/engine/naming_methods.hpp"
 
 #include "trackknife/core/environment.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -50,8 +51,8 @@ using protocol::Json;
 
 } // namespace
 
-void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& workspace,
-                             EventSink sink) {
+void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
+                             const LocalCatalogue* catalogue) {
     dispatcher.on("layouts.list",
                   [&workspace](const Json&) -> core::Result<Json> { return layouts(workspace); });
 
@@ -160,7 +161,7 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
                       return destinations(workspace);
                   });
 
-    dispatcher.on("folders.list", [](const Json& params) -> core::Result<Json> {
+    dispatcher.on("folders.list", [catalogue](const Json& params) -> core::Result<Json> {
         std::filesystem::path folder;
         if (const auto given = params.find("path"); given != params.end() && !given->is_null()) {
             auto decoded = given->is_string()
@@ -187,15 +188,23 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
                             .message = "the folder cannot be read: " + error.message(),
                             .context = {{.key = "path", .value = folder.native()}}});
         }
+        const bool links = params.value("links", false);
         std::vector<std::string> names;
+        std::vector<std::string> linked;
         for (; entries != std::filesystem::directory_iterator{}; entries.increment(error)) {
             if (error) {
                 break;
             }
             std::error_code kind;
-            // What a move may go below: real folders, not links to them.
-            if (entries->symlink_status(kind).type() == std::filesystem::file_type::directory) {
+            // What a move may go below: real folders, not links to them --
+            // unless links are asked for, and said.
+            const auto type = entries->symlink_status(kind).type();
+            if (type == std::filesystem::file_type::directory) {
                 names.push_back(entries->path().filename().native());
+            } else if (links && type == std::filesystem::file_type::symlink &&
+                       entries->is_directory(kind)) {
+                names.push_back(entries->path().filename().native());
+                linked.push_back(entries->path().filename().native());
             }
             if (names.size() > folder_list_limit) {
                 return std::unexpected(
@@ -209,11 +218,64 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
         for (const auto& name : names) {
             listed.push_back(protocol::encode_raw_path(name));
         }
+        auto links_listed = Json::array();
+        for (const auto& name : linked) {
+            links_listed.push_back(protocol::encode_raw_path(name));
+        }
+        // Where browsing starts: home, and the library's music folders.
+        const auto* home = trackknife::core::environment_variable("HOME");
+        auto roots = Json::array();
+        if (catalogue != nullptr) {
+            if (auto found = catalogue->roots()) {
+                for (const auto& root : *found) {
+                    roots.push_back(protocol::encode_raw_path(root.raw_path));
+                }
+            }
+        }
         const auto parent = folder.parent_path();
         return Json{{"path", protocol::encode_raw_path(folder.native())},
                     {"parent",
                      parent == folder ? Json() : Json(protocol::encode_raw_path(parent.native()))},
-                    {"folders", std::move(listed)}};
+                    {"folders", std::move(listed)},
+                    {"linked", std::move(links_listed)},
+                    {"home", home != nullptr && *home == '/' ? Json(protocol::encode_raw_path(home))
+                                                             : Json(nullptr)},
+                    {"roots", std::move(roots)}};
+    });
+
+    dispatcher.on("folders.make", [](const Json& params) -> core::Result<Json> {
+        const auto given = [&params](const char* key) -> std::optional<std::string> {
+            const auto found = params.find(key);
+            if (found == params.end() || !found->is_string()) {
+                return std::nullopt;
+            }
+            auto decoded = protocol::decode_raw_path(found->get<std::string>());
+            return decoded ? std::optional{std::move(*decoded)} : std::nullopt;
+        };
+        const auto path = given("path");
+        if (!path || !path->starts_with('/')) {
+            return std::unexpected(bad_params("path is an absolute encoded path", "path"));
+        }
+        const auto name = params.value("name", std::string{});
+        if (name.empty() || name == "." || name == ".." ||
+            name.find_first_of(std::string_view{"/\0", 2}) != std::string::npos) {
+            return std::unexpected(bad_params("name is a folder's name, without a slash", "name"));
+        }
+        const auto made = std::filesystem::path{*path} / name;
+        std::error_code error;
+        if (std::filesystem::exists(made, error)) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::conflict,
+                            .message = "there is already something of that name",
+                            .context = {{.key = "path", .value = made.native()}}});
+        }
+        if (!std::filesystem::create_directory(made, error) || error) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::io,
+                            .message = "the folder could not be made: " + error.message(),
+                            .context = {{.key = "path", .value = made.native()}}});
+        }
+        return Json{{"path", protocol::encode_raw_path(made.native())}};
     });
 }
 

@@ -709,7 +709,7 @@ int main(int argc, char** argv) {
     trackknife::engine::register_list_continuation_methods(dispatcher, continuation);
     // ADR-0237: naming layouts (Trackknife's, copied here) and this engine's
     // move destinations.
-    trackknife::engine::register_naming_methods(dispatcher, *workspace, sink);
+    trackknife::engine::register_naming_methods(dispatcher, *workspace, sink, &catalogue);
 
     // Pushed state, so a client learns a track changed without asking.
     std::optional<trackknife::engine::PlaybackWatcher> watcher;

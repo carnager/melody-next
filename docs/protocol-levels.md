@@ -7,6 +7,16 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 20 (2026-10-19)
+
+The folder chooser for an engine elsewhere.
+
+- `folders.list {path?, links?}` also answers `linked` -- of `folders`, those
+  that are links to a folder, listed only when `links` is true -- `home` and
+  `roots`, the library's music folders: where browsing starts.
+- `folders.make {path, name}` -> `{path}`: a new folder there; one already
+  there is a conflict, a name with a slash refused.
+
 ### Level 19 (2026-10-19)
 
 ADR-0296: the saved playlists are the files in the engine's playlist folder.

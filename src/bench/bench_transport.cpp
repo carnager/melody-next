@@ -78,6 +78,7 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
     buildWorkspace();
     buildTransport();
     buildPluginPanels();
+    buildPluginTriggers();
     buildLastFm();
     buildHelpMenu();
     buildShortcuts();

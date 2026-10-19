@@ -158,6 +158,41 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
             }
             return;
         }
+        if (event.name == "catalogue.albums_added") {
+            const auto raw = [](const protocol::Json& from, const char* key) {
+                auto decoded = protocol::decode_raw_path(from.value(key, std::string{}));
+                return decoded ? std::move(*decoded) : std::string{};
+            };
+            std::vector<AlbumArrival> albums;
+            for (const auto& album : event.data.value("albums", protocol::Json::array())) {
+                if (!album.is_object()) {
+                    continue;
+                }
+                AlbumArrival arrival{.artist = album.value("artist", std::string{}),
+                                     .album = album.value("album", std::string{}),
+                                     .date = album.value("date", std::string{}),
+                                     .folder = raw(album, "folder"),
+                                     .paths = {}};
+                for (const auto& path : album.value("paths", protocol::Json::array())) {
+                    if (auto decoded = protocol::decode_raw_path(
+                            path.is_string() ? path.get<std::string>() : std::string{})) {
+                        arrival.paths.push_back(std::move(*decoded));
+                    }
+                }
+                albums.push_back(std::move(arrival));
+            }
+            if (self && !albums.empty()) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, albums = std::move(albums)] {
+                        if (self) {
+                            emit self->albumsAdded(albums);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "list.continuations") {
             auto continuations = continuationsOf(event.data);
             if (self) {

@@ -1,9 +1,11 @@
 # Plugins
 
-A plugin adds an entry to the context menu of track lists and of the library:
-"Share album", "Send to …". A few official ones come with Melody
-([`plugins/`](../plugins): the web search, a panel about the playing artist and album,
-and lyrics from LRCLIB); everything else is written and published apart. A plugin is a program of its
+A plugin adds an entry to the context menu of track lists and of the library
+-- "Share album", "Send to …" -- a side panel, lyrics, or a program run on the
+library's news. A few official ones come with Melody
+([`plugins/`](../plugins): the web search, a panel about the playing artist
+and album, lyrics from LRCLIB, and Scripts, your own commands); everything
+else is written and published apart. A plugin is a program of its
 own, in any language; Melody runs it, tells it what was chosen in JSON, and
 shows what it answers ([ADR-0288](adr/0288-plugin-actions.md)).
 
@@ -230,6 +232,50 @@ or `{"lyrics": null}` when it has none. Timed lines (LRC) are synced and
 followed as the music plays; text without timings is shown as it is. What a
 provider finds is shown, never written into the files. `timeout` is 1 to 120
 seconds, 30 by default. The official one, `lrclib`, comes with Melody.
+
+## Triggers
+
+A plugin can also run on its own -- when albums come into the library, when
+it changes, every so often, when Melody starts, or from **Workspace › Run**
+([ADR-0295](adr/0295-plugin-triggers.md)):
+
+```json
+"triggers": [{"id": "page", "label": "Write the music page", "run": ["./page"],
+              "on": ["library-changed", "hand"]},
+             {"id": "nightly", "on": "every", "every": 1440, "run": ["./backup"]}]
+```
+
+| Key | |
+| --- | --- |
+| `on` | One or more of `albums-added`, `library-changed` (once the library has been still half a minute), `every`, `start`, `hand`. |
+| `every` | With `every`: minutes, 1 to 10080 -- or the key of a setting that holds them. |
+| `label` | With `hand`: its entry under Workspace › Run. |
+| `result` | `none` (the default) or `notify`: what it prints, as a notification. |
+| `timeout` | 1 to 21600 seconds, 600 by default. |
+
+Its program is given what started it, the engine holding the library and its
+music folders -- and, for new albums, the albums, as an action gets them:
+
+```json
+{"schema": 1, "trigger": "page", "on": "library-changed", "engine": {…},
+ "music_folders": ["/srv/music"], "settings": {…}}
+```
+
+One run of a trigger at a time: started again while it runs, it runs once
+more after. Triggers run while Melody does; for the window closed, use
+`melody-cli watch albums` or cron.
+
+The official **Scripts** plugin needs no `plugin.json` of your own: a shell
+command for each trigger, set under Settings → Plugins → Scripts. For each
+new album it runs once, `{}` the album's folder and `MELODY_ALBUM_FOLDER`,
+`_ARTIST`, `_TITLE`, `_DATE` set; every command is told `MELODY_TRIGGER`,
+`MELODY_ENGINE`, `MELODY_MUSIC_FOLDERS` and -- the library on another engine
+-- `MELODY_SERVER`, which melody-cli follows. A music page written whenever
+the library changes:
+
+```sh
+melody-musiclist --output ~/public_html/index.html
+```
 
 ## Example
 

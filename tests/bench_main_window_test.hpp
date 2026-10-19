@@ -321,6 +321,7 @@ class BenchMainWindowTest final : public QObject {
     void aboutShowsTheMascotAndTheRelease();
     void aPluginActionSharesWhatIsChosen();
     void manyPluginActionsGoInASubmenu();
+    void pluginTriggersRunOnTheLibrarysNews();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

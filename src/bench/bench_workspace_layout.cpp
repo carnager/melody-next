@@ -780,6 +780,7 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
         workspace_.settingsSaved(sharing);
         // ADR-0291: a plugin enabled or turned off brings or takes its panels.
         buildPluginPanels();
+        buildPluginTriggers();
         applyLocalLibraryVisibility();
         // ADR-0286: which engine holds the library decides how tabs are
         // marked and ordered.

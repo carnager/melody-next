@@ -40,6 +40,15 @@ namespace trackknife::bench {
 // library query would wait for it; a second connection costs one socket and
 // removes the whole question. This is the case ADR-0222 names when it says a
 // client needing concurrency opens another connection.
+// An album new to an engine's library, as catalogue.albums_added says it.
+struct AlbumArrival {
+    std::string artist;
+    std::string album;
+    std::string date;
+    std::string folder;
+    std::vector<std::string> paths;
+};
+
 class EnginePlayback final : public QObject {
     Q_OBJECT
 
@@ -297,6 +306,9 @@ class EnginePlayback final : public QObject {
                           const std::vector<std::string>& albums, bool everything);
     // The lists that continue changed, by any client (ADR-0253).
     void continuationsChanged();
+    // Albums new to its library, each once it is whole
+    // (catalogue.albums_added, level 18).
+    void albumsAdded(const std::vector<AlbumArrival>& albums);
 
   private:
     // Parsed from list.continuations' answer or event.

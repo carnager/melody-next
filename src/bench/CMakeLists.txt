@@ -13,6 +13,7 @@ qt_add_library(
     bench_remote.cpp
     bench_playlists.cpp
     bench_plugins.cpp
+    bench_plugin_triggers.cpp
     plugin_list_window.cpp
     plugin_panel_view.cpp
     plugin_list_window.hpp
@@ -144,6 +145,7 @@ install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/melody.desktop
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/plugins/web-search
                   ${PROJECT_SOURCE_DIR}/plugins/about
                   ${PROJECT_SOURCE_DIR}/plugins/lrclib
+                  ${PROJECT_SOURCE_DIR}/plugins/scripts
         DESTINATION ${CMAKE_INSTALL_DATADIR}/melody/plugins COMPONENT app
         USE_SOURCE_PERMISSIONS PATTERN "__pycache__" EXCLUDE)
 # ADR-0287: the vinyl bird, for the desktop entry and the window.

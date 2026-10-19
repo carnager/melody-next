@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Scripts",
+  "description": "Your own commands, run when albums come into the library, when it changes, every so often, when Melody starts, or by hand",
+  "triggers": [
+    {"id": "albums", "on": "albums-added", "run": ["./scripts"], "timeout": 21600},
+    {"id": "library", "on": "library-changed", "run": ["./scripts"], "timeout": 21600},
+    {"id": "every", "on": "every", "every": "minutes", "run": ["./scripts"], "timeout": 21600},
+    {"id": "start", "on": "start", "run": ["./scripts"], "timeout": 21600},
+    {"id": "hand", "label": "Run my command", "on": "hand", "run": ["./scripts"], "timeout": 21600}
+  ],
+  "settings": [
+    {"key": "albums", "label": "For each new album",
+     "help": "Run once for each album new to the library, once it is whole. {} is its folder; MELODY_ALBUM_FOLDER, _ARTIST, _TITLE and _DATE say it too."},
+    {"key": "library", "label": "When the library changed",
+     "help": "Run once the library has been still for half a minute after a change -- a scan, a write, a move."},
+    {"key": "every", "label": "Every so often",
+     "help": "Run every so many minutes, as set below, while Melody runs."},
+    {"key": "minutes", "label": "Every (minutes)", "default": "60"},
+    {"key": "start", "label": "When Melody starts"},
+    {"key": "hand", "label": "By hand",
+     "help": "Run from Workspace › Run › Run my command."}
+  ]
+}

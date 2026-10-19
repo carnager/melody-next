@@ -3012,4 +3012,99 @@ void BenchMainWindowTest::manyPluginActionsGoInASubmenu() {
     QDir{provider_only}.removeRecursively();
 }
 
+// ADR-0295: a plugin's triggers -- at start, by hand from Workspace › Run,
+// when the library has changed and been still, for new albums -- one run of
+// each at a time, asked again while it runs, once more after.
+void BenchMainWindowTest::pluginTriggersRunOnTheLibrarysNews() {
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const auto log = out.filePath(QStringLiteral("log"));
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/hooks");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Hooks", "triggers": [
+            {"id": "page", "label": "Write the page", "run": ["./hook"],
+             "on": ["start", "hand", "library-changed"]},
+            {"id": "new", "on": "albums-added", "run": ["./hook"]}]})");
+        QFile script{folder + QStringLiteral("/hook")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(QStringLiteral(R"sh(#!/bin/sh
+input=$(cat)
+on=$(printf '%s' "$input" | grep -o '"on":"[^"]*"' | cut -d '"' -f 4)
+folders=$(printf '%s' "$input" | grep -o '"folder":"[^"]*"' | cut -d '"' -f 4 | tr '\n' ' ')
+echo "$on $folders" >> '%1'
+[ "$on" = library-changed ] && sleep 1
+exit 0
+)sh")
+                         .arg(log)
+                         .toUtf8());
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("hooks")), true);
+    qputenv("MELODY_LIBRARY_SETTLE_SECONDS", "0");
+    const auto lines = [&log] {
+        QFile file{log};
+        if (!file.open(QIODevice::ReadOnly)) {
+            return QStringList{};
+        }
+        QStringList read;
+        for (const auto& line :
+             QString::fromUtf8(file.readAll()).trimmed().split(QLatin1Char('\n'))) {
+            read << line.trimmed();
+        }
+        return read;
+    };
+
+    BenchMainWindow window;
+    window.show();
+    // At start, once.
+    QTRY_COMPARE(lines(), QStringList{QStringLiteral("start")});
+
+    // By hand, from Workspace › Run.
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("menu-run-plugins"));
+    QVERIFY(menu != nullptr && menu->menuAction()->isVisible());
+    auto* page = window.findChild<QAction*>(QStringLiteral("action-run-plugin-hooks-page"));
+    QVERIFY(page != nullptr && menu->actions().contains(page));
+    QCOMPARE(page->text(), QStringLiteral("Write the page"));
+    page->trigger();
+    QTRY_COMPARE(lines().size(), 2);
+    QCOMPARE(lines().back(), QStringLiteral("hand"));
+
+    // The library changed, three times while it ran: once, and once after.
+    window.libraryChanged();
+    QTRY_COMPARE(lines().size(), 3);
+    window.libraryChanged();
+    window.libraryChanged();
+    QTRY_COMPARE(lines().size(), 4);
+    QTest::qWait(1'500);
+    QCOMPARE(lines().size(), 4);
+    QCOMPARE(lines().mid(2),
+             (QStringList{QStringLiteral("library-changed"), QStringLiteral("library-changed")}));
+
+    // New albums, told with their folders.
+    window.albumsAdded({AlbumArrival{.artist = "A",
+                                     .album = "B",
+                                     .date = "1999",
+                                     .folder = "/srv/music/A/B",
+                                     .paths = {"/srv/music/A/B/01.flac"}}});
+    QTRY_COMPARE(lines().size(), 5);
+    QCOMPARE(lines().back(), QStringLiteral("albums-added /srv/music/A/B"));
+
+    // Turned off: its entry goes, and the menu with it.
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("hooks")), false);
+    window.buildPluginTriggers();
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-run-plugin-hooks-page")) == nullptr);
+    QVERIFY(!menu->menuAction()->isVisible());
+    window.libraryChanged();
+    QTest::qWait(300);
+    QCOMPARE(lines().size(), 5);
+
+    qunsetenv("MELODY_LIBRARY_SETTLE_SECONDS");
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 } // namespace trackknife::bench

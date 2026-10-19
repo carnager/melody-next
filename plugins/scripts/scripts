@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""Melody trigger plugin (ADR-0295): the user's own shell commands.
+
+Melody runs this for each of the plugin's triggers; the trigger's setting is
+the command, run with sh. It is told, in the environment, what started it
+(MELODY_TRIGGER), the engine holding the library (MELODY_ENGINE, and
+MELODY_SERVER when it is elsewhere, which melody-cli follows) and its music
+folders (MELODY_MUSIC_FOLDERS, one a line). For new albums the command runs
+once each, {} its folder, MELODY_ALBUM_FOLDER, _ARTIST, _TITLE and _DATE what
+it is. What the command prints is shown; a command that fails says so.
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+
+
+def run(command, env):
+    done = subprocess.run(["sh", "-c", command], env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True)
+    if done.stdout:
+        sys.stdout.write(done.stdout)
+    if done.returncode != 0:
+        said = done.stderr.strip().splitlines()
+        sys.stderr.write("%s exited %d%s\n" % (command.split()[0] if command.split() else command,
+                                               done.returncode,
+                                               ": " + said[-1] if said else ""))
+    return done.returncode
+
+
+def main():
+    given = json.load(sys.stdin)
+    trigger = given.get("trigger", "")
+    command = str((given.get("settings") or {}).get(trigger) or "").strip()
+    if not command:
+        if given.get("on") == "hand":
+            print("No command is set: Settings › Plugins › Scripts › By hand", file=sys.stderr)
+            return 1
+        return 0
+    engine = given.get("engine") or {}
+    env = dict(os.environ)
+    env["MELODY_TRIGGER"] = given.get("on", "")
+    env["MELODY_ENGINE"] = engine.get("name", "")
+    if engine.get("address"):
+        env["MELODY_SERVER"] = engine["address"]
+    env["MELODY_MUSIC_FOLDERS"] = "\n".join(given.get("music_folders") or [])
+    if given.get("on") != "albums-added":
+        return run(command, env)
+    failed = 0
+    for album in given.get("albums") or []:
+        each = dict(env)
+        each["MELODY_ALBUM_FOLDER"] = album.get("folder", "")
+        each["MELODY_ALBUM_ARTIST"] = album.get("artist", "")
+        each["MELODY_ALBUM_TITLE"] = album.get("album", "")
+        each["MELODY_ALBUM_DATE"] = album.get("date", "")
+        if run(command.replace("{}", shlex.quote(album.get("folder", ""))), each) != 0:
+            failed = 1
+    return failed
+
+
+if __name__ == "__main__":
+    sys.exit(main())

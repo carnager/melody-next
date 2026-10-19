@@ -32,6 +32,10 @@ class WorkspaceView {
     virtual void workspaceRestored(bool restored) = 0;
     // A passing message, gone after `timeout_ms`.
     virtual void showMessage(const QString& text, int timeout_ms) = 0;
+    // ADR-0295: the library -- on whichever engine holds it -- changed, or
+    // albums came into it, each once whole. For what runs on them.
+    virtual void libraryChanged() {}
+    virtual void albumsAdded(const std::vector<AlbumArrival>& /*albums*/) {}
 
     // The lists as the window shows them. A list added is drawn, and shown
     // at once when `select`; the list on show is the current one.

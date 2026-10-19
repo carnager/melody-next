@@ -17,6 +17,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <memory>
 #include <utility>
@@ -26,6 +27,10 @@ namespace {
 
 constexpr int manifest_schema = 1;
 constexpr int input_schema = 1;
+// ADR-0295: a trigger runs at most a week apart, and for at most six hours
+// -- a whole library converted.
+constexpr int max_trigger_minutes = 7 * 24 * 60;
+constexpr int max_trigger_seconds = 6 * 3600;
 
 [[nodiscard]] QString text(const std::string& value) { return QString::fromUtf8(value); }
 
@@ -75,6 +80,107 @@ constexpr int input_schema = 1;
 }
 
 // Each setting read with its every key, or why one cannot be.
+// ADR-0295: a plugin's triggers, each key checked.
+[[nodiscard]] std::optional<QString> readTriggers(const QJsonArray& entries, Plugin& plugin) {
+    static const QStringList keys{QStringLiteral("id"),     QStringLiteral("label"),
+                                  QStringLiteral("on"),     QStringLiteral("every"),
+                                  QStringLiteral("run"),    QStringLiteral("result"),
+                                  QStringLiteral("timeout")};
+    static const std::array whens{PluginTrigger::When::albums_added,
+                                  PluginTrigger::When::library_changed, PluginTrigger::When::every,
+                                  PluginTrigger::When::start, PluginTrigger::When::hand};
+    for (const auto& value : entries) {
+        if (!value.isObject()) {
+            return QStringLiteral("a trigger is not an object");
+        }
+        const auto entry = value.toObject();
+        for (const auto& key : entry.keys()) {
+            if (!keys.contains(key)) {
+                return QStringLiteral("a trigger has an unknown key \"%1\"").arg(key);
+            }
+        }
+        PluginTrigger trigger;
+        trigger.id = entry.value(QStringLiteral("id")).toString().trimmed();
+        if (trigger.id.isEmpty()) {
+            return QStringLiteral("a trigger needs an id");
+        }
+        if (std::ranges::any_of(plugin.triggers,
+                                [&trigger](const auto& other) { return other.id == trigger.id; })) {
+            return QStringLiteral("trigger \"%1\" is there twice").arg(trigger.id);
+        }
+        trigger.label = entry.value(QStringLiteral("label")).toString().trimmed();
+        // One word, or a list of them.
+        auto on = entry.value(QStringLiteral("on"));
+        const auto words = on.isString() ? QJsonArray{on} : on.toArray();
+        for (const auto& word : words) {
+            const auto found = std::ranges::find(whens, word.toString(), pluginTriggerWhenName);
+            if (found == whens.end()) {
+                return QStringLiteral("trigger \"%1\": \"on\" is albums-added, library-changed, "
+                                      "every, start or hand")
+                    .arg(trigger.id);
+            }
+            if (!std::ranges::contains(trigger.on, *found)) {
+                trigger.on.push_back(*found);
+            }
+        }
+        if (trigger.on.empty()) {
+            return QStringLiteral("trigger \"%1\" says nothing it runs on").arg(trigger.id);
+        }
+        const bool every = std::ranges::contains(trigger.on, PluginTrigger::When::every);
+        const auto interval = entry.value(QStringLiteral("every"));
+        if (every != !interval.isUndefined()) {
+            return QStringLiteral("trigger \"%1\": \"every\" is given when it runs on every, "
+                                  "and only then")
+                .arg(trigger.id);
+        }
+        if (every && interval.isString()) {
+            trigger.every_setting = interval.toString();
+            if (!std::ranges::contains(plugin.settings, trigger.every_setting,
+                                       &PluginSetting::key)) {
+                return QStringLiteral("trigger \"%1\": \"every\" names no setting of the plugin")
+                    .arg(trigger.id);
+            }
+        } else if (every) {
+            trigger.every_minutes = interval.toInt(0);
+            if (trigger.every_minutes < 1 || trigger.every_minutes > max_trigger_minutes) {
+                return QStringLiteral("trigger \"%1\": \"every\" is 1 to %2 minutes, or a "
+                                      "setting's key")
+                    .arg(trigger.id)
+                    .arg(max_trigger_minutes);
+            }
+        }
+        if (std::ranges::contains(trigger.on, PluginTrigger::When::hand) &&
+            trigger.label.isEmpty()) {
+            return QStringLiteral("trigger \"%1\" runs by hand and needs a label").arg(trigger.id);
+        }
+        for (const auto& word : entry.value(QStringLiteral("run")).toArray()) {
+            if (!word.isString() || word.toString().isEmpty()) {
+                return QStringLiteral("trigger \"%1\": \"run\" is a list of words").arg(trigger.id);
+            }
+            trigger.run.push_back(word.toString());
+        }
+        if (trigger.run.isEmpty()) {
+            return QStringLiteral("trigger \"%1\" has nothing to run").arg(trigger.id);
+        }
+        const auto result = entry.value(QStringLiteral("result")).toString(QStringLiteral("none"));
+        if (result != QStringLiteral("none") && result != QStringLiteral("notify")) {
+            return QStringLiteral("trigger \"%1\": \"result\" is none or notify").arg(trigger.id);
+        }
+        trigger.notify = result == QStringLiteral("notify");
+        if (entry.contains(QStringLiteral("timeout"))) {
+            const auto seconds = entry.value(QStringLiteral("timeout")).toInt(0);
+            if (seconds < 1 || seconds > max_trigger_seconds) {
+                return QStringLiteral("trigger \"%1\": \"timeout\" is 1 to %2 seconds")
+                    .arg(trigger.id)
+                    .arg(max_trigger_seconds);
+            }
+            trigger.timeout_seconds = seconds;
+        }
+        plugin.triggers.push_back(std::move(trigger));
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] std::optional<QString> readSettings(const QJsonArray& listed,
                                                   std::vector<PluginSetting>& settings) {
     static const QStringList setting_keys{QStringLiteral("key"),     QStringLiteral("label"),
@@ -173,7 +279,7 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     static const QStringList known{QStringLiteral("schema"),      QStringLiteral("name"),
                                    QStringLiteral("description"), QStringLiteral("actions"),
                                    QStringLiteral("panels"),      QStringLiteral("providers"),
-                                   QStringLiteral("settings")};
+                                   QStringLiteral("triggers"),    QStringLiteral("settings")};
     for (const auto& key : object.keys()) {
         if (!known.contains(key)) {
             return fail(QStringLiteral("plugin.json has an unknown key \"%1\"").arg(key));
@@ -193,14 +299,17 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     const auto actions = object.value(QStringLiteral("actions"));
     const auto panels = object.value(QStringLiteral("panels"));
     const auto providers = object.value(QStringLiteral("providers"));
+    const auto triggers = object.value(QStringLiteral("triggers"));
     if ((!actions.isUndefined() && !actions.isArray()) ||
         (!panels.isUndefined() && !panels.isArray()) ||
-        (!providers.isUndefined() && !providers.isArray())) {
-        return fail(QStringLiteral("\"actions\", \"panels\" and \"providers\" are lists"));
+        (!providers.isUndefined() && !providers.isArray()) ||
+        (!triggers.isUndefined() && !triggers.isArray())) {
+        return fail(
+            QStringLiteral("\"actions\", \"panels\", \"providers\" and \"triggers\" are lists"));
     }
     if (actions.toArray().isEmpty() && panels.toArray().isEmpty() &&
-        providers.toArray().isEmpty()) {
-        return fail(QStringLiteral("plugin.json has no actions, panels or providers"));
+        providers.toArray().isEmpty() && triggers.toArray().isEmpty()) {
+        return fail(QStringLiteral("plugin.json has no actions, panels, providers or triggers"));
     }
     static const QStringList provider_keys{QStringLiteral("id"), QStringLiteral("provides"),
                                            QStringLiteral("run"), QStringLiteral("timeout")};
@@ -360,7 +469,45 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             return fail(*why);
         }
     }
+    // After the settings: a trigger's interval can be one of them.
+    if (auto why = readTriggers(triggers.toArray(), plugin)) {
+        return fail(*why);
+    }
     return plugin;
+}
+
+QString pluginTriggerWhenName(const PluginTrigger::When when) {
+    switch (when) {
+    case PluginTrigger::When::albums_added:
+        return QStringLiteral("albums-added");
+    case PluginTrigger::When::library_changed:
+        return QStringLiteral("library-changed");
+    case PluginTrigger::When::every:
+        return QStringLiteral("every");
+    case PluginTrigger::When::start:
+        return QStringLiteral("start");
+    case PluginTrigger::When::hand:
+        return QStringLiteral("hand");
+    }
+    return {};
+}
+
+int pluginTriggerMinutes(const Plugin& plugin, const PluginTrigger& trigger) {
+    if (!std::ranges::contains(trigger.on, PluginTrigger::When::every)) {
+        return 0;
+    }
+    if (trigger.every_setting.isEmpty()) {
+        return trigger.every_minutes;
+    }
+    const auto setting =
+        std::ranges::find(plugin.settings, trigger.every_setting, &PluginSetting::key);
+    if (setting == plugin.settings.end()) {
+        return 0;
+    }
+    bool number = false;
+    const auto minutes =
+        pluginSettingValue(plugin.name, *setting).toString().trimmed().toInt(&number);
+    return number && minutes > 0 && minutes <= max_trigger_minutes ? minutes : 0;
 }
 
 std::optional<PluginList> parsePluginList(const QByteArray& json, QString* problem) {
@@ -663,9 +810,11 @@ std::vector<PluginAlbum> pluginAlbums(std::vector<PluginTrack> tracks,
     return albums;
 }
 
-QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
-                       const std::vector<PluginAlbum>& albums,
-                       const std::vector<std::string>& music_folders, const QJsonObject& settings) {
+namespace {
+
+// Albums as a run is given them, each with its tracks.
+[[nodiscard]] QJsonArray albumsJson(const std::vector<PluginAlbum>& albums,
+                                    const std::vector<std::string>& music_folders) {
     QJsonArray listed;
     for (const auto& album : albums) {
         QJsonArray tracks;
@@ -687,14 +836,45 @@ QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
                         {QStringLiteral("relative_folder"), text(album.relative_folder)},
                         {QStringLiteral("tracks"), tracks}});
     }
-    const QJsonObject input{
-        {QStringLiteral("schema"), input_schema},
-        {QStringLiteral("action"), action.id},
-        {QStringLiteral("engine"), QJsonObject{{QStringLiteral("name"), engine.name},
-                                               {QStringLiteral("address"), engine.address},
-                                               {QStringLiteral("here"), engine.here}}},
-        {QStringLiteral("albums"), listed},
-        {QStringLiteral("settings"), settings}};
+    return listed;
+}
+
+[[nodiscard]] QJsonObject engineOf(const PluginEngine& engine) {
+    return QJsonObject{{QStringLiteral("name"), engine.name},
+                       {QStringLiteral("address"), engine.address},
+                       {QStringLiteral("here"), engine.here}};
+}
+
+} // namespace
+
+QByteArray pluginInput(const PluginAction& action, const PluginEngine& engine,
+                       const std::vector<PluginAlbum>& albums,
+                       const std::vector<std::string>& music_folders, const QJsonObject& settings) {
+    const QJsonObject input{{QStringLiteral("schema"), input_schema},
+                            {QStringLiteral("action"), action.id},
+                            {QStringLiteral("engine"), engineOf(engine)},
+                            {QStringLiteral("albums"), albumsJson(albums, music_folders)},
+                            {QStringLiteral("settings"), settings}};
+    return QJsonDocument{input}.toJson(QJsonDocument::Compact);
+}
+
+QByteArray pluginTriggerInput(const PluginTrigger& trigger, const PluginTrigger::When when,
+                              const PluginEngine& engine, const std::vector<PluginAlbum>& albums,
+                              const std::vector<std::string>& music_folders,
+                              const QJsonObject& settings) {
+    QJsonArray folders;
+    for (const auto& folder : music_folders) {
+        folders.push_back(text(folder));
+    }
+    QJsonObject input{{QStringLiteral("schema"), input_schema},
+                      {QStringLiteral("trigger"), trigger.id},
+                      {QStringLiteral("on"), pluginTriggerWhenName(when)},
+                      {QStringLiteral("engine"), engineOf(engine)},
+                      {QStringLiteral("music_folders"), folders},
+                      {QStringLiteral("settings"), settings}};
+    if (when == PluginTrigger::When::albums_added) {
+        input.insert(QStringLiteral("albums"), albumsJson(albums, music_folders));
+    }
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
 }
 
@@ -805,6 +985,12 @@ void runPluginAction(const Plugin& plugin, const PluginAction& action, QByteArra
 void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray input,
                     QObject* context, std::function<void(PluginOutcome)> done) {
     runPluginProgram(plugin, panel.run, panel.timeout_seconds, std::move(input), context,
+                     std::move(done));
+}
+
+void runPluginTrigger(const Plugin& plugin, const PluginTrigger& trigger, QByteArray input,
+                      QObject* context, std::function<void(PluginOutcome)> done) {
+    runPluginProgram(plugin, trigger.run, trigger.timeout_seconds, std::move(input), context,
                      std::move(done));
 }
 

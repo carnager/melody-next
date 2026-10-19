@@ -71,6 +71,12 @@ void Workspace::connectLocalEngine() {
                    const bool everything) {
                 adoptLibraryChange(EngineKey::local(), paths, albums, everything);
             });
+    connect(localPlayback(), &EnginePlayback::albumsAdded, this,
+            [this](const std::vector<AlbumArrival>& albums) {
+                if (libraryKey().isLocal()) {
+                    view_->albumsAdded(albums);
+                }
+            });
     connect(localPlayback(), &EnginePlayback::failed, this, [this](const QString& message) {
         view_->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
@@ -293,6 +299,12 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
                          const std::vector<std::string>& albums, const bool everything) {
                 adoptLibraryChange(link->key, paths, albums, everything);
             });
+    connect(link->playback, &EnginePlayback::albumsAdded, this,
+            [this, link](const std::vector<AlbumArrival>& albums) {
+                if (libraryKey() == link->key) {
+                    view_->albumsAdded(albums);
+                }
+            });
     connect(link->playback, &EnginePlayback::failed, this, [this](const QString& message) {
         view_->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
@@ -410,6 +422,9 @@ void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<st
                                    const std::vector<std::string>& albums, const bool everything) {
     if (auto* found = link(engine); found != nullptr && found->browser) {
         found->browser->applyChanges(albums, everything);
+    }
+    if (engine == libraryKey()) {
+        view_->libraryChanged();
     }
     // A file read again may have brought a rating in its tags (ADR-0237),
     // which its engine does not tell as one.

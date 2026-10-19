@@ -32,6 +32,8 @@ class PluginsTest final : public QObject {
     void settingsAreReadKeptAndHandedOn();
     void panelsAreReadAndTheirAnswersToo();
     void providersAreReadAndTheirLyricsToo();
+    void triggersAreReadAndTold();
+    void theScriptsPluginRunsTheCommandsSet();
 
   private:
     // Settings of this test's own, not in the config folder of whoever runs it.
@@ -64,6 +66,18 @@ void writeFile(const QString& path, const QByteArray& content, const bool execut
     QObject context;
     runPluginAction(plugin, action, input, &context,
                     [&outcome](PluginOutcome done) { outcome = std::move(done); });
+    if (!QTest::qWaitFor([&outcome] { return outcome.has_value(); }, 10'000)) {
+        return PluginOutcome{.succeeded = false, .text = QStringLiteral("never answered")};
+    }
+    return *outcome;
+}
+
+[[nodiscard]] PluginOutcome runTrigger(const Plugin& plugin, const PluginTrigger& trigger,
+                                       const QByteArray& input) {
+    std::optional<PluginOutcome> outcome;
+    QObject context;
+    runPluginTrigger(plugin, trigger, input, &context,
+                     [&outcome](PluginOutcome done) { outcome = std::move(done); });
     if (!QTest::qWaitFor([&outcome] { return outcome.has_value(); }, 10'000)) {
         return PluginOutcome{.succeeded = false, .text = QStringLiteral("never answered")};
     }
@@ -201,6 +215,7 @@ printf '%s\n' "$input" | sed -n 's/.*"relative_folder":"\([^"]*\)".*/https:\/\/e
                   .actions = {},
                   .panels = {},
                   .providers = {},
+                  .triggers = {},
                   .settings = {}};
     PluginAction action{.id = QStringLiteral("share"),
                         .label = QStringLiteral("Share"),
@@ -742,7 +757,175 @@ void PluginsTest::providersAreReadAndTheirLyricsToo() {
     QCOMPARE((*lyrics)->source, QStringLiteral("LRCLIB"));
 }
 
+// ADR-0295: a trigger runs on the library's news, every so often, at start
+// or by hand -- read with every key checked, and told what started it.
+void PluginsTest::triggersAreReadAndTold() {
+    QString problem;
+    const auto read = [&problem](const QString& triggers, const QString& settings = {}) {
+        problem.clear();
+        return parsePluginManifest(
+            QStringLiteral(R"({"schema": 1, "name": "Page", "triggers": [%1]%2})")
+                .arg(triggers, settings.isEmpty()
+                                   ? QString{}
+                                   : QStringLiteral(R"(, "settings": [%1])").arg(settings))
+                .toUtf8(),
+            QStringLiteral("/plugins/page"), &problem);
+    };
+    const auto plugin = read(QStringLiteral(R"({"id": "page", "label": "Write the page",
+                                "on": ["library-changed", "hand", "every"], "every": 90,
+                                "run": ["./page"], "result": "notify", "timeout": 3600},
+                               {"id": "new", "on": "albums-added", "run": ["./new"]})"));
+    QVERIFY2(plugin.has_value(), qPrintable(problem));
+    QCOMPARE(plugin->triggers.size(), std::size_t{2U});
+    const auto& page = plugin->triggers.front();
+    QCOMPARE(page.label, QStringLiteral("Write the page"));
+    QCOMPARE(page.on.size(), std::size_t{3U});
+    QVERIFY(page.notify);
+    QCOMPARE(page.timeout_seconds, 3600);
+    QCOMPARE(pluginTriggerMinutes(*plugin, page), 90);
+    const auto& added = plugin->triggers.back();
+    QCOMPARE(added.on, std::vector{PluginTrigger::When::albums_added});
+    QVERIFY(!added.notify);
+    QCOMPARE(added.timeout_seconds, 600);
+    QCOMPARE(pluginTriggerMinutes(*plugin, added), 0);
+
+    // Its interval a setting's: read when it is built; not a number, none.
+    const auto every =
+        read(QStringLiteral(R"({"id": "tick", "on": "every", "every": "minutes", "run": ["./t"]})"),
+             QStringLiteral(R"({"key": "minutes", "label": "Minutes", "default": "15"})"));
+    QVERIFY2(every.has_value(), qPrintable(problem));
+    QCOMPARE(pluginTriggerMinutes(*every, every->triggers.front()), 15);
+    QSettings{}.setValue(pluginSettingKey(QStringLiteral("page"), QStringLiteral("minutes")),
+                         QStringLiteral("soon"));
+    QCOMPARE(pluginTriggerMinutes(*every, every->triggers.front()), 0);
+    QSettings{}.remove(QStringLiteral("plugins"));
+
+    const auto refused = [&read, &problem](const QString& triggers) {
+        return !read(triggers).has_value() && !problem.isEmpty();
+    };
+    QVERIFY(refused(QStringLiteral(R"({"on": "start", "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "sometimes", "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": [], "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "hand", "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "every", "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "every": 5, "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "every", "every": 0, "run": ["./x"]})")));
+    QVERIFY(refused(
+        QStringLiteral(R"({"id": "x", "on": "every", "every": "nothing", "run": ["./x"]})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start"})")));
+    QVERIFY(
+        refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "result": "copy"})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "timeout": 0})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "x": 1})")));
+    QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"]},
+                                      {"id": "x", "on": "hand", "label": "X", "run": ["./x"]})")));
+
+    // Told what started it; albums only when albums came.
+    const auto albums = pluginAlbums({PluginTrack{.path = "/srv/music/A/B/01.flac",
+                                                  .title = {},
+                                                  .artist = "A",
+                                                  .album = "B",
+                                                  .album_artist = "A",
+                                                  .date = "1999",
+                                                  .track_number = {}}},
+                                     {"/srv/music"});
+    const auto told = QJsonDocument::fromJson(
+                          pluginTriggerInput(added, PluginTrigger::When::albums_added,
+                                             PluginEngine{.name = QStringLiteral("nas"),
+                                                          .address = QStringLiteral("nas:6601"),
+                                                          .here = false},
+                                             albums, {"/srv/music"}, {}))
+                          .object();
+    QCOMPARE(told.value(QStringLiteral("trigger")).toString(), QStringLiteral("new"));
+    QCOMPARE(told.value(QStringLiteral("on")).toString(), QStringLiteral("albums-added"));
+    QCOMPARE(told.value(QStringLiteral("engine")).toObject().value(QStringLiteral("address")),
+             QJsonValue{QStringLiteral("nas:6601")});
+    QCOMPARE(told.value(QStringLiteral("music_folders")).toArray().first().toString(),
+             QStringLiteral("/srv/music"));
+    const auto album = told.value(QStringLiteral("albums")).toArray().first().toObject();
+    QCOMPARE(album.value(QStringLiteral("folder")).toString(), QStringLiteral("/srv/music/A/B"));
+    QCOMPARE(album.value(QStringLiteral("relative_folder")).toString(), QStringLiteral("A/B"));
+    const auto by_hand = QJsonDocument::fromJson(pluginTriggerInput(page, PluginTrigger::When::hand,
+                                                                    PluginEngine{}, {}, {}, {}))
+                             .object();
+    QCOMPARE(by_hand.value(QStringLiteral("on")).toString(), QStringLiteral("hand"));
+    QVERIFY(!by_hand.contains(QStringLiteral("albums")));
+}
+
+// The official Scripts plugin: the command set for a trigger, run with sh,
+// told what started it; for new albums once each, {} its folder.
+void PluginsTest::theScriptsPluginRunsTheCommandsSet() {
+    const QString folder = QStringLiteral(MELODY_SOURCE_DIR "/plugins/scripts");
+    QFile manifest_file{folder + QStringLiteral("/plugin.json")};
+    QVERIFY(manifest_file.open(QIODevice::ReadOnly));
+    QString problem;
+    const auto scripts = parsePluginManifest(manifest_file.readAll(), folder, &problem);
+    QVERIFY2(scripts.has_value(), qPrintable(problem));
+    QCOMPARE(scripts->triggers.size(), std::size_t{5U});
+    const auto trigger = [&scripts](const QString& id) {
+        return *std::ranges::find(scripts->triggers, id, &PluginTrigger::id);
+    };
+    QCOMPARE(pluginTriggerMinutes(*scripts, trigger(QStringLiteral("every"))), 60);
+
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const auto said = out.filePath(QStringLiteral("said"));
+    const auto set = [&scripts](const QString& key, const QString& value) {
+        QSettings{}.setValue(pluginSettingKey(scripts->name, key), value);
+    };
+    set(QStringLiteral("albums"),
+        QStringLiteral(R"(printf '%s|%s|%s\n' {} "$MELODY_ALBUM_TITLE" "$MELODY_TRIGGER" >> ')") +
+            said + QStringLiteral("'"));
+    set(QStringLiteral("library"), QStringLiteral("echo written; false"));
+    const auto albums = pluginAlbums({PluginTrack{.path = "/srv/music/A/It's/01.flac",
+                                                  .title = {},
+                                                  .artist = "A",
+                                                  .album = "It's",
+                                                  .album_artist = "A",
+                                                  .date = "1999",
+                                                  .track_number = {}},
+                                      PluginTrack{.path = "/srv/music/C/D/01.flac",
+                                                  .title = {},
+                                                  .artist = "C",
+                                                  .album = "D",
+                                                  .album_artist = "C",
+                                                  .date = "2001",
+                                                  .track_number = {}}},
+                                     {"/srv/music"});
+    const auto added = runTrigger(
+        *scripts, trigger(QStringLiteral("albums")),
+        pluginTriggerInput(trigger(QStringLiteral("albums")), PluginTrigger::When::albums_added,
+                           PluginEngine{}, albums, {"/srv/music"}, pluginSettings(*scripts)));
+    QVERIFY2(added.succeeded, qPrintable(added.text));
+    QFile lines{said};
+    QVERIFY(lines.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(lines.readAll()),
+             QStringLiteral("/srv/music/A/It's|It's|albums-added\n"
+                            "/srv/music/C/D|D|albums-added\n"));
+
+    // A command that fails says so, with what it printed.
+    const auto changed = runTrigger(
+        *scripts, trigger(QStringLiteral("library")),
+        pluginTriggerInput(trigger(QStringLiteral("library")), PluginTrigger::When::library_changed,
+                           PluginEngine{}, {}, {}, pluginSettings(*scripts)));
+    QVERIFY(!changed.succeeded);
+    // None set: nothing runs -- but asked by hand, it says what to set.
+    const auto started =
+        runTrigger(*scripts, trigger(QStringLiteral("start")),
+                   pluginTriggerInput(trigger(QStringLiteral("start")), PluginTrigger::When::start,
+                                      PluginEngine{}, {}, {}, pluginSettings(*scripts)));
+    QVERIFY2(started.succeeded, qPrintable(started.text));
+    const auto by_hand =
+        runTrigger(*scripts, trigger(QStringLiteral("hand")),
+                   pluginTriggerInput(trigger(QStringLiteral("hand")), PluginTrigger::When::hand,
+                                      PluginEngine{}, {}, {}, pluginSettings(*scripts)));
+    QVERIFY(!by_hand.succeeded);
+    QVERIFY2(by_hand.text.contains(QStringLiteral("No command is set")), qPrintable(by_hand.text));
+    QSettings{}.remove(QStringLiteral("plugins"));
+}
+
 } // namespace trackknife::bench
 
 QTEST_GUILESS_MAIN(trackknife::bench::PluginsTest)
+
 #include "plugins_test.moc"

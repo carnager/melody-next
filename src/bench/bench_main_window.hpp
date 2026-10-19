@@ -228,6 +228,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void engineRekeyed(EngineLink& engine, const EngineKey& from, bool lists_follow) override;
     void engineRemoving(EngineLink& engine) override;
     void engineRemoved() override;
+    void libraryChanged() override;
+    void albumsAdded(const std::vector<AlbumArrival>& albums) override;
     void enginesSynced() override;
     void engineListsChanged() override { fetchEngineLists(); }
     void offerRetiredLists(const QString& engine, const QStringList& names,
@@ -463,6 +465,28 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         std::vector<std::string> music_folders;
     };
     [[nodiscard]] PluginPlaying pluginPlaying(const EnginePlayback::State& state);
+    // ADR-0295: each enabled plugin's triggers -- run on the library's news,
+    // every so often, at start, or from Workspace › Run. One run of each at a
+    // time; asked again while it runs, it runs once more after.
+    struct PluginTriggerRun {
+        Plugin plugin;
+        PluginTrigger trigger;
+        QTimer* every{nullptr};
+        QAction* hand{nullptr};
+        // Its run on the way: deleted, it stops.
+        QPointer<QObject> run;
+        std::optional<PluginTrigger::When> again;
+        std::vector<AlbumArrival> again_albums;
+    };
+    std::vector<std::unique_ptr<PluginTriggerRun>> plugin_triggers_;
+    // A library changes in bursts -- a scan, a tagger's write: its triggers
+    // run once it has been still a while.
+    QTimer* library_settle_{nullptr};
+    bool triggers_started_{false};
+    void buildPluginTriggers();
+    void runPluginTriggers(PluginTrigger::When when, const std::vector<AlbumArrival>& albums = {});
+    void runPluginTrigger(PluginTriggerRun& slot, PluginTrigger::When when,
+                          std::vector<AlbumArrival> albums);
     // ADR-0293: no lyrics in the files -- the lyrics providers enabled, in
     // turn, the first to find them shown. A newer track stops the asking.
     void askLyricsProviders(const QString& entry, const EnginePlayback::State& state,

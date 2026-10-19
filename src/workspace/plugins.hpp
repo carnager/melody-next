@@ -55,6 +55,28 @@ struct PluginProvider {
     int timeout_seconds{30};
 };
 
+// ADR-0295: a program a plugin runs on its own -- when albums come into the
+// library, when the library changes, every so often, when Melody starts, or
+// when asked from the Workspace menu -- nothing chosen and nothing playing.
+struct PluginTrigger {
+    enum class When : std::uint8_t { albums_added, library_changed, every, start, hand };
+
+    QString id;
+    // Its entry under Workspace › Run, when it runs by hand.
+    QString label;
+    std::vector<When> on;
+    // When it runs every so often: so many minutes, or the setting holding
+    // them -- none, or not a number, and it does not.
+    int every_minutes{0};
+    QString every_setting;
+    QStringList run;
+    // What it prints, said as a notification; else only a failure is said.
+    bool notify{false};
+    int timeout_seconds{600};
+};
+// How a trigger's `on` is written: "albums-added", "library-changed", ….
+[[nodiscard]] QString pluginTriggerWhenName(PluginTrigger::When when);
+
 // What a plugin asks to be set, shown under it in Settings › Plugins and
 // handed to it with every run: an address, an account's token.
 struct PluginSetting {
@@ -78,8 +100,12 @@ struct Plugin {
     std::vector<PluginAction> actions;
     std::vector<PluginPanel> panels;
     std::vector<PluginProvider> providers;
+    std::vector<PluginTrigger> triggers;
     std::vector<PluginSetting> settings;
 };
+
+// How many minutes apart a trigger runs, its setting read; 0, it does not.
+[[nodiscard]] int pluginTriggerMinutes(const Plugin& plugin, const PluginTrigger& trigger);
 
 // A manifest read, or why it cannot be: every key checked, none guessed.
 [[nodiscard]] std::optional<Plugin> parsePluginManifest(const QByteArray& json,
@@ -156,6 +182,15 @@ struct PluginAlbum {
                                      const std::vector<PluginAlbum>& albums,
                                      const std::vector<std::string>& music_folders,
                                      const QJsonObject& settings = {});
+
+// The JSON a trigger's run is given: what started it, the engine holding the
+// library, its music folders, the plugin's settings -- and, for albums come
+// in, the albums, as an action is given them.
+[[nodiscard]] QByteArray pluginTriggerInput(const PluginTrigger& trigger, PluginTrigger::When when,
+                                            const PluginEngine& engine,
+                                            const std::vector<PluginAlbum>& albums,
+                                            const std::vector<std::string>& music_folders,
+                                            const QJsonObject& settings);
 
 // What a `list` action answers: a heading and rows, each of text, a detail
 // and a link -- the parts Melody draws, none of the plugin's own.
@@ -234,5 +269,8 @@ void runPluginPanel(const Plugin& plugin, const PluginPanel& panel, QByteArray i
 // And for a provider.
 void runPluginProvider(const Plugin& plugin, const PluginProvider& provider, QByteArray input,
                        QObject* context, std::function<void(PluginOutcome)> done);
+// And for a trigger.
+void runPluginTrigger(const Plugin& plugin, const PluginTrigger& trigger, QByteArray input,
+                      QObject* context, std::function<void(PluginOutcome)> done);
 
 } // namespace trackknife::bench

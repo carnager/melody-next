@@ -7,6 +7,25 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 19 (2026-10-19)
+
+ADR-0296: the saved playlists are the files in the engine's playlist folder.
+
+- `playlists.folder {}` -> `{folder, default, chosen, style}`: the folder its
+  playlists are in (null without one), the default -- Playlists in the first
+  music folder -- the folder chosen (empty: the default), and how the files
+  it writes name their tracks: `root` (relative to the music folder, as MPD
+  names them), `playlist` (relative to the playlist) or `absolute`. Folders
+  are encoded raw paths.
+- `playlists.set_folder {folder?, style?}` -> the same: another folder --
+  empty, the default -- or style. The lists are written to a new folder, and
+  its files read.
+- `playlists.sync {}` -> `{}` once the folder is read; the engine also reads
+  it every few seconds.
+- Every saved list is its file: `list.save`, `list.edit`, `list.rename`,
+  `list.delete` and a move followed write it; a file another program put,
+  changed or took away makes, changes or drops its list, with `list.changed`.
+
 ### Level 18 (2026-10-17)
 
 - `catalogue.albums_added {albums: [{key, artist, album, date, folder,

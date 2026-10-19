@@ -81,7 +81,9 @@ qt_add_library(
     single_instance.cpp
     single_instance.hpp
     undo_location_widget.cpp
+    playlist_folder_widget.cpp
     undo_location_widget.hpp
+    playlist_folder_widget.hpp
     shortcut_settings.cpp
     shortcut_settings.hpp
     settings_dialog.cpp

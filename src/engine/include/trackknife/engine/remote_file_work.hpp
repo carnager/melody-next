@@ -157,6 +157,21 @@ class RemoteFileWork final {
     };
     [[nodiscard]] core::Result<std::vector<std::optional<Moved>>>
     resolve_moves(const std::vector<std::pair<std::string, core::LocalSourceRevision>>& sources);
+    // ADR-0296: the engine's playlist folder (playlists.folder): the one it
+    // uses, the default -- Playlists in its first music folder -- the one
+    // chosen (empty: the default), and how new files name their tracks:
+    // "root", "playlist" or "absolute".
+    struct PlaylistFolder {
+        std::string folder;
+        std::string default_folder;
+        std::string chosen;
+        std::string style;
+    };
+    [[nodiscard]] core::Result<PlaylistFolder> playlist_folder();
+    // Another folder -- empty, the default -- or style, as given.
+    [[nodiscard]] core::Result<PlaylistFolder>
+    set_playlist_folder(const std::optional<std::string>& folder,
+                        const std::optional<std::string>& style);
     struct BackupLocation {
         std::string place;
         std::string folder;

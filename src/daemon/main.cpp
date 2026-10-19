@@ -33,6 +33,7 @@
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/playback_store.hpp"
+#include "trackknife/engine/playlist_folder.hpp"
 #include "trackknife/engine/rating_tags.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
@@ -654,10 +655,15 @@ int main(int argc, char** argv) {
     trackknife::engine::JobRegistry jobs{sink};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
+    // ADR-0296: the saved lists are the files in the playlist folder; every
+    // change to a list is written to its file, so lists announce through it.
+    trackknife::engine::PlaylistFolder playlist_folder{*workspace, catalogue,
+                                                       state_directory / "playlists.json", sink};
+    const auto list_sink = playlist_folder.list_sink();
     // ADR-0237: a file moved here is followed, in the same commit, by the
     // workspace, the library, the lists and the queue.
     const auto follow_moves =
-        trackknife::engine::follow_moves(*workspace, catalogue, player.get(), sink);
+        trackknife::engine::follow_moves(*workspace, catalogue, player.get(), list_sink);
     trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
     // Conversion where the files are, as melody-cli convert asks it.
     trackknife::engine::register_convert_jobs(job_catalogue, *workspace, catalogue);
@@ -693,7 +699,10 @@ int main(int argc, char** argv) {
                                                    std::move(file_work_recovery));
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
-    trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player, &catalogue);
+    trackknife::engine::register_list_methods(dispatcher, *workspace, list_sink, *player,
+                                              &catalogue);
+    trackknife::engine::register_playlist_folder_methods(dispatcher, playlist_folder);
+    playlist_folder.start(std::chrono::seconds{5});
     // ADR-0253: a list that ends continues with its rule, from this engine's
     // library, whether or not a window is open.
     trackknife::engine::ListContinuation continuation{*workspace, catalogue, sink};

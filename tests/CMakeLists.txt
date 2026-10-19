@@ -324,6 +324,14 @@ target_link_libraries(
 )
 add_test(NAME list-view COMMAND trackknife_list_view_tests)
 
+# ADR-0296: playlist files in an engine's playlist folder, read and written.
+add_executable(trackknife_playlist_file_tests playlist_file_test.cpp)
+target_link_libraries(
+    trackknife_playlist_file_tests
+    PRIVATE Trackknife::Lists trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME playlist-file COMMAND trackknife_playlist_file_tests)
+
 add_executable(trackknife_track_description_tests track_description_test.cpp)
 target_link_libraries(
     trackknife_track_description_tests
@@ -590,6 +598,14 @@ add_test(
             "$<TARGET_FILE:trackknife_engine_daemon>"
 )
 set_tests_properties(engine-lists PROPERTIES TIMEOUT 60)
+
+# ADR-0296: the playlist folder, its files the saved playlists.
+add_test(
+    NAME engine-playlist-folder
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_playlist_folder_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>"
+)
+set_tests_properties(engine-playlist-folder PROPERTIES TIMEOUT 60)
 
 add_test(
     NAME engine-identity

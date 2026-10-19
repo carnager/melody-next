@@ -1019,4 +1019,14 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
     });
 }
 
+Json list_item_json(const persistence::EngineListItem& item) { return item_json(item); }
+
+core::Result<persistence::EngineListItem> list_item_from_json(const Json& value) {
+    return item_from_json(value);
+}
+
+persistence::EngineListItem list_item_of_track(persistence::LibraryTrackSnapshot track) {
+    return item_of_track(std::move(track));
+}
+
 } // namespace trackknife::engine

@@ -82,7 +82,8 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
                             std::function<QWidget*(QWidget*)> library_folders = {},
                             std::function<QWidget*(QWidget*)> lastfm = {},
                             QList<QAction*> shortcuts = {},
-                            std::function<QWidget*(QWidget*)> undo_locations = {});
+                            std::function<QWidget*(QWidget*)> undo_locations = {},
+                            std::function<QWidget*(QWidget*)> playlist_folders = {});
     ~SettingsDialog() override;
     void showPage(Page page);
     // ADR-0237: the Naming page, with the move destinations of the engine
@@ -141,6 +142,9 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QGroupBox* folders_box_{nullptr};
     QStackedWidget* library_folders_{nullptr};
     QLabel* folders_missing_{nullptr};
+    // ADR-0296: the library engine's playlist folder, a page per engine.
+    QGroupBox* playlists_box_{nullptr};
+    QStackedWidget* playlist_folders_{nullptr};
     QGroupBox* remote_box_{nullptr};
     QWidget* own_password_{nullptr};
     QPushButton* remove_engine_{nullptr};

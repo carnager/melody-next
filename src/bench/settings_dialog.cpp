@@ -95,7 +95,8 @@ SettingsDialog::~SettingsDialog() = default;
 SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store,
                                std::function<QWidget*(QWidget*)> library_folders,
                                std::function<QWidget*(QWidget*)> lastfm, QList<QAction*> shortcuts,
-                               std::function<QWidget*(QWidget*)> undo_locations)
+                               std::function<QWidget*(QWidget*)> undo_locations,
+                               std::function<QWidget*(QWidget*)> playlist_folders)
     : QDialog(parent) {
     setWindowTitle(QStringLiteral("Settings"));
     setObjectName(QStringLiteral("bench-settings-dialog"));
@@ -396,6 +397,25 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     library_folders_->addWidget(folders_missing_);
     folders_layout->addWidget(library_folders_, 1);
     engine_layout->addWidget(folders_box_, 1);
+
+    // ADR-0296: where its playlists are -- each file there a playlist.
+    playlists_box_ = new QGroupBox(QStringLiteral("Playlists"), engine);
+    playlists_box_->setObjectName(QStringLiteral("bench-settings-playlists"));
+    auto* playlists_layout = new QVBoxLayout(playlists_box_);
+    playlist_folders_ = new QStackedWidget(playlists_box_);
+    playlist_folders_->setObjectName(QStringLiteral("bench-settings-playlist-folders"));
+    if (playlist_folders) {
+        auto* pages = playlist_folders(playlist_folders_);
+        for (auto* page : pages->findChildren<QWidget*>(Qt::FindDirectChildrenOnly)) {
+            if (page->property("engine-address").isValid()) {
+                page->setParent(nullptr);
+                playlist_folders_->addWidget(page);
+            }
+        }
+        pages->deleteLater();
+    }
+    playlists_layout->addWidget(playlist_folders_);
+    engine_layout->addWidget(playlists_box_);
 
     // ADR-0228, ADR-0286: this computer's speakers, offered to every engine.
     play_for_remote_ =
@@ -1297,6 +1317,14 @@ void SettingsDialog::showLibraryFolders() {
         }
     }
     folders_box_->setTitle(QStringLiteral("Music folders of %1").arg(name));
+    playlists_box_->setVisible(false);
+    for (int index = 0; index < playlist_folders_->count(); ++index) {
+        if (playlist_folders_->widget(index)->property("engine-address").toString() == library) {
+            playlist_folders_->setCurrentIndex(index);
+            playlists_box_->setTitle(QStringLiteral("Playlists of %1").arg(name));
+            playlists_box_->setVisible(true);
+        }
+    }
     for (int index = 0; index < library_folders_->count(); ++index) {
         if (library_folders_->widget(index)->property("engine-address").toString() == library) {
             library_folders_->setCurrentIndex(index);

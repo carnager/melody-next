@@ -3107,4 +3107,42 @@ exit 0
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0296: Settings › Engines says where the engine's playlists are --
+// Playlists in its music folder -- and a style chosen there is the engine's.
+void BenchMainWindowTest::settingsSayAndChooseThePlaylistFolder() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QVERIFY(window.localCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    QPointer<QDialog> guard{dialog};
+    QRadioButton* standard = nullptr;
+    QTRY_VERIFY((standard = dialog->findChild<QRadioButton*>(
+                     QStringLiteral("bench-playlist-folder-default"))) != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(standard->isChecked() && standard->isEnabled(), 10'000);
+    QVERIFY2(standard->text().endsWith(music + QStringLiteral("/Playlists")),
+             qPrintable(standard->text()));
+    auto* style = dialog->findChild<QComboBox*>(QStringLiteral("bench-playlist-folder-style"));
+    QVERIFY(style != nullptr);
+    QCOMPARE(style->currentData().toString(), QStringLiteral("root"));
+    const auto absolute = style->findData(QStringLiteral("absolute"));
+    style->setCurrentIndex(absolute);
+    emit style->activated(absolute);
+    QTRY_VERIFY_WITH_TIMEOUT(!style->isEnabled(), 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(style->isEnabled(), 10'000);
+    // The engine's now: asked again, it says so.
+    auto* again = new PlaylistFolderSession(window.localEngine().file_work, {}, &window);
+    again->load();
+    QTRY_VERIFY_WITH_TIMEOUT(again->loaded() && again->style() == "absolute", 10'000);
+    if (guard) {
+        dialog->reject();
+    }
+}
+
 } // namespace trackknife::bench

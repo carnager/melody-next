@@ -952,6 +952,59 @@ namespace {
 
 } // namespace
 
+namespace {
+
+[[nodiscard]] RemoteFileWork::PlaylistFolder playlist_folder_from(const Json& answer) {
+    const auto decoded = [&answer](const char* key) {
+        const auto found = answer.find(key);
+        if (found == answer.end() || !found->is_string()) {
+            return std::string{};
+        }
+        auto raw = protocol::decode_raw_path(found->get<std::string>());
+        return raw ? std::move(*raw) : std::string{};
+    };
+    return RemoteFileWork::PlaylistFolder{.folder = decoded("folder"),
+                                          .default_folder = decoded("default"),
+                                          .chosen = decoded("chosen"),
+                                          .style = answer.value("style", std::string{"root"})};
+}
+
+} // namespace
+
+core::Result<RemoteFileWork::PlaylistFolder> RemoteFileWork::playlist_folder() {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("playlists.folder");
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return playlist_folder_from(*answer);
+}
+
+core::Result<RemoteFileWork::PlaylistFolder>
+RemoteFileWork::set_playlist_folder(const std::optional<std::string>& folder,
+                                    const std::optional<std::string>& style) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    Json params = Json::object();
+    if (folder) {
+        params["folder"] = protocol::encode_raw_path(*folder);
+    }
+    if (style) {
+        params["style"] = *style;
+    }
+    // The lists are written to a new folder, and its files read.
+    auto answer = (*connection)->call("playlists.set_folder", params, std::chrono::minutes{5});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return playlist_folder_from(*answer);
+}
+
 core::Result<RemoteFileWork::BackupLocation> RemoteFileWork::backup_location() {
     auto connection = client();
     if (!connection) {

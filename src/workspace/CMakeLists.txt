@@ -79,10 +79,12 @@ qt_add_library(
     playlist_transfer.hpp
     profiles_session.cpp
     undo_location_session.cpp
+    playlist_folder_session.cpp
     shortcut_session.cpp
     shortcut_session.hpp
     profiles_session.hpp
     undo_location_session.hpp
+    playlist_folder_session.hpp
     search_session.cpp
     search_session.hpp
     settings_session.cpp

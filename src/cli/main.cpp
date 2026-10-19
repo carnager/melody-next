@@ -103,6 +103,12 @@ void usage(std::ostream& out) {
            "                              or every word found in one name\n"
            "\n"
            "  lists                       the engine's saved playlists\n"
+           "  playlists                   where they are: the engine's playlist folder,\n"
+           "                              each file there a playlist (ADR-0296)\n"
+           "  playlists folder DIR|default [--style root|playlist|absolute]\n"
+           "                              keep them in DIR -- MPD's playlist_directory,\n"
+           "                              say -- or Playlists in the music folder; the\n"
+           "                              style is how new files name their tracks\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  find QUERY [--format EXPR]  tracks a query finds, one line each, formatted\n"
@@ -1113,6 +1119,52 @@ int run(const Options& options) {
         if (!options.json) {
             std::cerr << "melody-cli: " << text_of(matches.front(), "name") << "\n";
         }
+    } else if (command == "playlists") {
+        // ADR-0296: the playlist folder, said or chosen.
+        Json answer;
+        if (words.size() == 1U) {
+            answer = call(*client, "playlists.folder");
+        } else if (words[1] == "folder" && words.size() >= 3U) {
+            Json params = Json::object();
+            const auto& where = words[2];
+            if (where == "default") {
+                params["folder"] = std::string{};
+            } else {
+                std::error_code error;
+                const auto absolute = std::filesystem::absolute(where, error);
+                params["folder"] =
+                    trackknife::protocol::encode_raw_path(error ? where : absolute.string());
+            }
+            for (std::size_t at = 3; at < words.size(); ++at) {
+                if (words[at] == "--style" && at + 1 < words.size()) {
+                    params["style"] = words[++at];
+                } else {
+                    fail("playlists folder takes DIR|default [--style root|playlist|absolute]");
+                }
+            }
+            answer = call(*client, "playlists.set_folder", params);
+        } else {
+            fail("playlists takes nothing, or folder DIR|default [--style STYLE]");
+        }
+        if (options.json) {
+            std::cout << answer.dump() << "\n";
+            return EXIT_SUCCESS;
+        }
+        const auto shown = [&answer](const char* key) {
+            auto raw = trackknife::protocol::decode_raw_path(text_of(answer, key));
+            return raw ? *raw : std::string{};
+        };
+        const auto folder = shown("folder");
+        std::cout << (folder.empty() ? std::string{"no playlist folder: the engine has no music "
+                                                   "folder, and none was chosen"}
+                                     : folder)
+                  << (shown("chosen").empty() ? " (the default)" : "") << "\n"
+                  << "new playlists name their tracks: "
+                  << (text_of(answer, "style") == "playlist"   ? "relative to the playlist"
+                      : text_of(answer, "style") == "absolute" ? "whole paths"
+                                                               : "relative to the music folder")
+                  << "\n";
+        return EXIT_SUCCESS;
     } else if (command == "lists") {
         const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
         if (options.json) {

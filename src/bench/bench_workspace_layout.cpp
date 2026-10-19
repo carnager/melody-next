@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/playlist_folder_widget.hpp"
 #include "bench/undo_location_widget.hpp"
 #include "workspace/list_view_definitions.hpp"
+#include "workspace/playlist_folder_session.hpp"
 #include "workspace/undo_location_session.hpp"
 
 #include "bench/engine_launcher.hpp"
@@ -724,6 +726,34 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return pages;
         };
     }
+    // ADR-0296: where each engine's playlists are, a page each as its music
+    // folders are: the Engines page shows the one holding the library.
+    std::function<QWidget*(QWidget*)> playlist_folders;
+    if (std::ranges::any_of(engines_,
+                            [](const auto& engine) { return engine->file_work != nullptr; })) {
+        playlist_folders = [this](QWidget* parent) -> QWidget* {
+            auto* pages = new QWidget(parent);
+            for (const auto& engine : engines_) {
+                if (engine->file_work == nullptr) {
+                    continue;
+                }
+                const auto name =
+                    engine->key.isLocal() ? tr("This computer") : engineName(engine->key);
+                auto* session = new PlaylistFolderSession(
+                    engine->file_work,
+                    engine->key.isLocal() ? EngineFolderLister{}
+                                          : workspace_.engineFolderLister(engine->file_work),
+                    pages);
+                auto* shown = new PlaylistFolderWidget(*session, name, pages);
+                session->setParent(shown);
+                shown->setProperty("engine-address",
+                                   engine->key.isLocal()
+                                       ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                       : engine->setting.address);
+            }
+            return pages;
+        };
+    }
     // ADR-0266: where each engine keeps its undo copies, asked of it.
     std::function<QWidget*(QWidget*)> undo_locations;
     if (std::ranges::any_of(engines_,
@@ -767,7 +797,7 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     auto* dialog = new SettingsDialog(
         this, buildOutputProfileStore(), std::move(library_folders),
         [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_,
-        std::move(undo_locations));
+        std::move(undo_locations), std::move(playlist_folders));
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {

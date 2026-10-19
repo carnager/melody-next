@@ -491,6 +491,17 @@ cli lists > "${work}/lists.txt" || fail "lists lists"
 grep -q "^Road trip (2 tracks)$" "${work}/lists.txt" || fail "a saved list, by name and size"
 # ADR-0286: a list saved without a kind is a saved playlist too.
 grep -q "^Road work (1 tracks)$" "${work}/lists.txt" || fail "every list is a saved playlist"
+# ADR-0296: and each is a file in the playlist folder, which is said and chosen.
+cli playlists | head -1 | grep -q "/music/Playlists (the default)$" || fail "playlists says the folder"
+[ -f "${work}/music/Playlists/Road trip.m3u8" ] || fail "a saved list is its file"
+grep -q "^second/gamma.wav$" "${work}/music/Playlists/Road trip.m3u8" \
+    || fail "its tracks named as MPD names them"
+mkdir -p "${work}/mpd-playlists"
+cli playlists folder "${work}/mpd-playlists" --style absolute | head -1 \
+    | grep -q "/mpd-playlists$" || fail "playlists folder chooses another"
+grep -q "^${work}/music/second/gamma.wav$" "${work}/mpd-playlists/Road trip.m3u8" \
+    || fail "the lists written there, in the style chosen"
+cli playlists folder default > /dev/null || fail "and back to the default"
 cli --keys lists | matches -P "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
 cli play list trip 2>/dev/null | matches "^playing:" || fail "play list plays one by a word of its name"
 cli --json status | python3 -c '

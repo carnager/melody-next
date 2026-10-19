@@ -47,6 +47,7 @@
 #include "workspace/album_batch_session.hpp"
 #include "workspace/color_scheme.hpp"
 #include "workspace/identify_session.hpp"
+#include "workspace/playlist_folder_session.hpp"
 #include "workspace/interface_scale.hpp"
 #include "workspace/keep_awake.hpp"
 #include "workspace/lastfm_settings_session.hpp"
@@ -322,6 +323,7 @@ class BenchMainWindowTest final : public QObject {
     void aPluginActionSharesWhatIsChosen();
     void manyPluginActionsGoInASubmenu();
     void pluginTriggersRunOnTheLibrarysNews();
+    void settingsSayAndChooseThePlaylistFolder();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

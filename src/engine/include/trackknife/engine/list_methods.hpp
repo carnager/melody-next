@@ -4,6 +4,7 @@
 
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/local_library.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 namespace trackknife::engine {
@@ -48,6 +49,15 @@ class Workspace;
 // title, artist and album are only for a file it does not.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
                            Player& player, const LocalCatalogue* catalogue = nullptr);
+
+// A list item as the protocol says it, both ways (ADR-0256), and one for an
+// indexed track, named from the library -- for the playlist folder
+// (ADR-0296) as for list.from_query.
+[[nodiscard]] protocol::Json list_item_json(const persistence::EngineListItem& item);
+[[nodiscard]] core::Result<persistence::EngineListItem>
+list_item_from_json(const protocol::Json& value);
+[[nodiscard]] persistence::EngineListItem
+list_item_of_track(persistence::LibraryTrackSnapshot track);
 
 // list.changed, as every change to a list is announced: `summary` null when
 // it was deleted.

@@ -87,8 +87,7 @@ QString preferredSource() {
     if (wanted == QStringLiteral("0")) {
         return QStringLiteral("folders");
     }
-    if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote") &&
-        wanted != QStringLiteral("playlists")) {
+    if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote")) {
         return QStringLiteral("library");
     }
     return wanted;

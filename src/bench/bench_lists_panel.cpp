@@ -114,8 +114,7 @@ void BenchMainWindow::applyListsDisplay() {
 }
 
 bool BenchMainWindow::playlistsShown() const {
-    return playlists_view_ != nullptr && source_stack_ != nullptr &&
-           source_stack_->currentWidget() == playlists_view_;
+    return playlists_view_ != nullptr && !playlists_view_->isHidden();
 }
 
 void BenchMainWindow::fetchEngineLists() {
@@ -172,16 +171,23 @@ void BenchMainWindow::presentListsPanel() {
                                    return other.widget == current_widget;
                                });
     lists_panel_->present(groups, others, current_id, other_current ? current_widget : nullptr);
-    // ADR-0296: the playlists source -- the saved ones only, a tab not saved
-    // is not a playlist.
+    // ADR-0296: under the library, its engine's playlists -- the saved
+    // ones only, a tab not saved is not a playlist -- headed Playlists.
     if (playlists_view_ != nullptr) {
+        std::vector<ListsPanel::Group> shown;
         for (auto& group : groups) {
-            std::erase_if(group.lists, [](const ListsPanel::List& list) { return !list.saved; });
-            if (group.lists.empty() && group.note.isEmpty()) {
-                group.note = QStringLiteral("No playlists");
+            if (!(group.engine == playlists_engine_)) {
+                continue;
             }
+            std::erase_if(group.lists, [](const ListsPanel::List& list) { return !list.saved; });
+            group.name = QStringLiteral("Playlists");
+            if (group.lists.empty() && group.note.isEmpty()) {
+                group.note = QStringLiteral("None yet: save a tab, or put playlist files in "
+                                            "the playlist folder (Settings › Engines)");
+            }
+            shown.push_back(std::move(group));
         }
-        playlists_view_->present(groups, {}, current_id, nullptr);
+        playlists_view_->present(shown, {}, current_id, nullptr);
     }
 }
 

@@ -3162,10 +3162,9 @@ void BenchMainWindowTest::settingsSayAndChooseThePlaylistFolder() {
     }
 }
 
-// ADR-0296: Playlists, beside the folders and the library: every saved
-// playlist -- a file someone dropped in the playlist folder too -- opened
-// as a tab by choosing it.
-void BenchMainWindowTest::thePlaylistsSourceOpensAPlaylistFile() {
+// ADR-0296: under the library, its engine's playlists -- a file someone
+// dropped in the playlist folder too -- one opened as a tab by choosing it.
+void BenchMainWindowTest::playlistsUnderTheLibraryOpenAsTabs() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto music = media.filePath(QStringLiteral("music"));
@@ -3184,13 +3183,15 @@ void BenchMainWindowTest::thePlaylistsSourceOpensAPlaylistFile() {
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
     QVERIFY(window.localCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
 
+    // Under the library -- not under Folders -- its engine's playlists.
     auto* sources = window.local_source_tabs_;
-    QVERIFY(window.playlists_tab_ > 0);
-    QCOMPARE(sources->tabText(window.playlists_tab_), QStringLiteral("Playlists"));
-    sources->setCurrentIndex(window.playlists_tab_);
-    auto* playlists = window.findChild<ListsPanel*>(QStringLiteral("bench-playlists-source"));
+    auto* playlists = window.findChild<ListsPanel*>(QStringLiteral("bench-library-playlists"));
     QVERIFY(playlists != nullptr);
-    QTRY_COMPARE(window.source_stack_->currentWidget(), static_cast<QWidget*>(playlists));
+    sources->setCurrentIndex(0);
+    QTRY_VERIFY(playlists->isHidden());
+    QTRY_VERIFY(window.localLibrary() != nullptr);
+    sources->setCurrentIndex(1);
+    QTRY_VERIFY(!playlists->isHidden());
     // The engine reads its folder every few seconds; the list then shows.
     QTreeWidgetItem* found = nullptr;
     QTRY_VERIFY_WITH_TIMEOUT((found = [playlists]() -> QTreeWidgetItem* {
@@ -3208,11 +3209,9 @@ void BenchMainWindowTest::thePlaylistsSourceOpensAPlaylistFile() {
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(QString::fromStdString(tab->model->rows().front().raw_path),
              music + QStringLiteral("/art.flac"));
-    // Remembered as the source chosen, when chosen by a click.
-    emit sources->tabBarClicked(window.playlists_tab_);
-    QCOMPARE(QSettings{}.value(QStringLiteral("local-library/view")).toString(),
-             QStringLiteral("playlists"));
-    QSettings{}.remove(QStringLiteral("local-library/view"));
+    // Headed Playlists, the engine's own only.
+    QCOMPARE(playlists->topLevelItemCount(), 1);
+    QCOMPARE(playlists->topLevelItem(0)->text(0), QStringLiteral("Playlists"));
 }
 
 } // namespace trackknife::bench

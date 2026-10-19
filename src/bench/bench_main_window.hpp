@@ -324,10 +324,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void placeSources();
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
-    // ADR-0296: the saved playlists as a source beside the folders and the
-    // library -- every engine's, each a file in its playlist folder.
+    // ADR-0296: under the library, the saved playlists of the engine
+    // holding it -- each a file in its playlist folder.
     ListsPanel* playlists_view_{nullptr};
-    int playlists_tab_{-1};
+    QSplitter* library_split_{nullptr};
+    EngineKey playlists_engine_;
     [[nodiscard]] bool playlistsShown() const;
     QAction* lists_panel_action_{nullptr};
     ListsCatalog* lists_catalog_{nullptr};

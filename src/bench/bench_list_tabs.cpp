@@ -614,17 +614,24 @@ void BenchMainWindow::refreshActiveContext() {
                                : QString{};
         auto* other_library = shown.isEmpty() ? nullptr : libraryOf(EngineKey::fromText(shown));
         auto* source = other_library != nullptr ? static_cast<QWidget*>(other_library)
-                       : index == playlists_tab_ && playlists_view_ != nullptr
-                           ? static_cast<QWidget*>(playlists_view_)
                        : index == 1 && localLibrary() != nullptr
                            ? static_cast<QWidget*>(localLibrary())
                            : static_cast<QWidget*>(folder_view_);
-        const bool arriving = source_stack_->currentWidget() != source;
         source_stack_->setCurrentWidget(source);
-        // The playlists asked for when shown; changes come on their own.
-        if (arriving && source == playlists_view_) {
-            fetchEngineLists();
-            refreshListsPanel();
+        // ADR-0296: under a library, its engine's playlists -- asked for
+        // when they come into sight; changes come on their own.
+        if (playlists_view_ != nullptr) {
+            const bool library = source != folder_view_;
+            const auto engine =
+                other_library != nullptr ? EngineKey::fromText(shown) : EngineKey::local();
+            const bool arriving =
+                library && (playlists_view_->isHidden() || !(engine == playlists_engine_));
+            playlists_engine_ = engine;
+            playlists_view_->setVisible(library);
+            if (arriving) {
+                fetchEngineLists();
+                refreshListsPanel();
+            }
         }
     }
     if (folder_bookmarks_ != nullptr) {
@@ -734,8 +741,6 @@ void BenchMainWindow::selectPreferredSource() {
     int target = 0;
     if (wanted == QStringLiteral("folders")) {
         target = 0;
-    } else if (wanted == QStringLiteral("playlists") && playlists_tab_ >= 0) {
-        target = playlists_tab_;
     } else if (wanted == QStringLiteral("remote") || !local) {
         target = remote >= 0 ? remote : local ? 1 : 0;
     } else {

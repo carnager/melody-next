@@ -38,6 +38,8 @@ class PlaylistFolderWidget final : public QWidget {
     QPushButton* choose_;
     QComboBox* style_;
     QLabel* status_;
+    // A path typed and not yet the engine's.
+    bool typed_{false};
 };
 
 } // namespace trackknife::bench

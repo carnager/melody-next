@@ -34,8 +34,12 @@ PlaylistFolderWidget::PlaylistFolderWidget(PlaylistFolderSession& session, QStri
     chosen_->setObjectName(QStringLiteral("bench-playlist-folder-chosen"));
     chosen_path_ = new QLineEdit(this);
     chosen_path_->setObjectName(QStringLiteral("bench-playlist-folder-path"));
-    chosen_path_->setReadOnly(true);
-    chosen_path_->setPlaceholderText(tr("Choose a folder -- MPD's playlist_directory, say"));
+    // Typed as well as chosen: a path on the engine's machine -- one behind
+    // a link, which the folder browser does not go into, included.
+    chosen_path_->setPlaceholderText(tr("A folder on the engine's machine -- MPD's "
+                                        "playlist_directory, say"));
+    chosen_path_->setToolTip(tr("Type or paste a path on the engine's machine and press Enter, "
+                                "or choose one"));
     choose_ = new QPushButton(tr("Choose…"), this);
     choose_->setObjectName(QStringLiteral("bench-playlist-folder-choose"));
     places_->addButton(default_, 0);
@@ -79,6 +83,15 @@ PlaylistFolderWidget::PlaylistFolderWidget(PlaylistFolderSession& session, QStri
         session_.choose(session_.chosen());
     });
     connect(choose_, &QPushButton::clicked, this, &PlaylistFolderWidget::chooseFolder);
+    connect(chosen_path_, &QLineEdit::textEdited, this, [this] { typed_ = true; });
+    connect(chosen_path_, &QLineEdit::returnPressed, this, [this] {
+        const auto typed = chosen_path_->text().trimmed();
+        if (typed.isEmpty() || typed == session_.chosenText()) {
+            return;
+        }
+        const auto encoded = QFile::encodeName(typed);
+        session_.choose(std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
+    });
     connect(style_, &QComboBox::activated, this, [this](const int index) {
         session_.choose(std::nullopt, style_->itemData(index).toString().toStdString());
     });
@@ -123,14 +136,20 @@ void PlaylistFolderWidget::sync() {
     default_->setText(session_.defaultText().isEmpty()
                           ? tr("Playlists in the music folder (none yet: add a music folder)")
                           : tr("Playlists in the music folder: %1").arg(session_.defaultText()));
-    chosen_path_->setText(session_.chosenText());
+    // What was typed is left alone until the engine takes it -- a path
+    // refused stays, to mend.
+    if (!typed_ || chosen_path_->text().trimmed() == session_.chosenText()) {
+        typed_ = false;
+        chosen_path_->setText(session_.chosenText());
+    }
     {
         const QSignalBlocker blocker{style_};
         style_->setCurrentIndex(
             std::max(0, style_->findData(QString::fromStdString(session_.style()))));
     }
     const bool usable = loaded && !session_.busy();
-    for (auto* widget : std::initializer_list<QWidget*>{default_, chosen_, choose_, style_}) {
+    for (auto* widget :
+         std::initializer_list<QWidget*>{default_, chosen_, chosen_path_, choose_, style_}) {
         widget->setEnabled(usable);
     }
     status_->setText(session_.status());

@@ -3140,6 +3140,23 @@ void BenchMainWindowTest::settingsSayAndChooseThePlaylistFolder() {
     auto* again = new PlaylistFolderSession(window.localEngine().file_work, {}, &window);
     again->load();
     QTRY_VERIFY_WITH_TIMEOUT(again->loaded() && again->style() == "absolute", 10'000);
+    // A folder typed -- on the engine's machine -- is taken as one chosen.
+    QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    auto* path = dialog->findChild<QLineEdit*>(QStringLiteral("bench-playlist-folder-path"));
+    QVERIFY(path != nullptr && !path->isReadOnly());
+    path->setText(elsewhere.path());
+    emit path->textEdited(path->text());
+    emit path->returnPressed();
+    auto* chosen = dialog->findChild<QRadioButton*>(QStringLiteral("bench-playlist-folder-chosen"));
+    QTRY_VERIFY_WITH_TIMEOUT(chosen->isChecked() && chosen->isEnabled(), 10'000);
+    // One that is not a folder there is refused, and stays to be mended.
+    path->setText(elsewhere.filePath(QStringLiteral("not-there")));
+    emit path->textEdited(path->text());
+    emit path->returnPressed();
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-playlist-folder-status"));
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Not changed")), 10'000);
+    QCOMPARE(path->text(), elsewhere.filePath(QStringLiteral("not-there")));
     if (guard) {
         dialog->reject();
     }

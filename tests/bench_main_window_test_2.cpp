@@ -3145,4 +3145,57 @@ void BenchMainWindowTest::settingsSayAndChooseThePlaylistFolder() {
     }
 }
 
+// ADR-0296: Playlists, beside the folders and the library: every saved
+// playlist -- a file someone dropped in the playlist folder too -- opened
+// as a tab by choosing it.
+void BenchMainWindowTest::thePlaylistsSourceOpensAPlaylistFile() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/Playlists")));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    // As MPD writes it: the track named under the music folder.
+    {
+        QFile mix{music + QStringLiteral("/Playlists/mix.m3u")};
+        QVERIFY(mix.open(QIODevice::WriteOnly));
+        mix.write("art.flac\n");
+    }
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QVERIFY(window.localCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
+
+    auto* sources = window.local_source_tabs_;
+    QVERIFY(window.playlists_tab_ > 0);
+    QCOMPARE(sources->tabText(window.playlists_tab_), QStringLiteral("Playlists"));
+    sources->setCurrentIndex(window.playlists_tab_);
+    auto* playlists = window.findChild<ListsPanel*>(QStringLiteral("bench-playlists-source"));
+    QVERIFY(playlists != nullptr);
+    QTRY_COMPARE(window.source_stack_->currentWidget(), static_cast<QWidget*>(playlists));
+    // The engine reads its folder every few seconds; the list then shows.
+    QTreeWidgetItem* found = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((found = [playlists]() -> QTreeWidgetItem* {
+                                 const auto items =
+                                     playlists->findItems(QStringLiteral("mix"),
+                                                          Qt::MatchStartsWith | Qt::MatchRecursive);
+                                 return items.isEmpty() ? nullptr : items.front();
+                             }()) != nullptr,
+                             15'000);
+    const auto before = window.list_tabs_.size();
+    playlists->setCurrentItem(found);
+    QTRY_COMPARE(window.list_tabs_.size(), before + 1);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QCOMPARE(QString::fromStdString(tab->model->rows().front().raw_path),
+             music + QStringLiteral("/art.flac"));
+    // Remembered as the source chosen, when chosen by a click.
+    emit sources->tabBarClicked(window.playlists_tab_);
+    QCOMPARE(QSettings{}.value(QStringLiteral("local-library/view")).toString(),
+             QStringLiteral("playlists"));
+    QSettings{}.remove(QStringLiteral("local-library/view"));
+}
+
 } // namespace trackknife::bench

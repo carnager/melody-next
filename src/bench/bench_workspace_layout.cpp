@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/lists_panel.hpp"
 #include "bench/playlist_folder_widget.hpp"
 #include "bench/undo_location_widget.hpp"
 #include "workspace/list_view_definitions.hpp"
@@ -151,16 +152,22 @@ void BenchMainWindow::buildWorkspace() {
         0, QStringLiteral("Folders on this computer, %1").arg(QSysInfo::machineHostName()));
     local_source_tabs_->addTab(QStringLiteral("Library"));
     local_source_tabs_->setTabToolTip(1, QStringLiteral("The library on this computer"));
+    // ADR-0296: the saved playlists, files in each engine's playlist folder.
+    playlists_tab_ = local_source_tabs_->addTab(QStringLiteral("Playlists"));
+    local_source_tabs_->setTabToolTip(
+        playlists_tab_, QStringLiteral("The saved playlists: the files in each engine's playlist "
+                                       "folder, Settings › Engines"));
     heading_row->addWidget(local_source_tabs_, 1);
     // Remembered only when chosen: tabs appearing, hiding or being switched
     // by the window itself do not change what the user asked for.
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
         const auto kind = local_source_tabs_->tabData(index).toString();
         // The temporary Files page (ADR-0183 addendum) is session-only.
-        rememberSource(!kind.isEmpty() ? QStringLiteral("remote")
-                       : index == 0    ? QStringLiteral("folders")
-                       : index == 1    ? QStringLiteral("library")
-                                       : QString{});
+        rememberSource(!kind.isEmpty()           ? QStringLiteral("remote")
+                       : index == 0              ? QStringLiteral("folders")
+                       : index == 1              ? QStringLiteral("library")
+                       : index == playlists_tab_ ? QStringLiteral("playlists")
+                                                 : QString{});
     });
     // Before the window reacts to changes: the rest of it is not built yet.
     selectPreferredSource();
@@ -229,6 +236,17 @@ void BenchMainWindow::buildWorkspace() {
         openLocalPaths({folder_model_->rawPath(index)});
     });
     source_stack_->addWidget(folder_view_);
+    playlists_view_ = new ListsPanel(source_stack_);
+    playlists_view_->setObjectName(QStringLiteral("bench-playlists-source"));
+    playlists_view_->setDropHandler(
+        [this](QDropEvent* drop, const EngineKey& engine, const QString& id) {
+            return dropOnPanelList(drop, engine, id);
+        });
+    connect(playlists_view_, &ListsPanel::listChosen, this,
+            [this](const EngineKey& engine, const QString& id) { openEngineList(engine, id); });
+    connect(playlists_view_, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint& position) { showListsMenu(playlists_view_, position); });
+    source_stack_->addWidget(playlists_view_);
     folders_layout->addWidget(source_stack_, 1);
 
     // ADR-0292: one layout -- the sources left, the lists right -- and the

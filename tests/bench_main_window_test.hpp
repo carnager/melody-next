@@ -324,6 +324,7 @@ class BenchMainWindowTest final : public QObject {
     void manyPluginActionsGoInASubmenu();
     void pluginTriggersRunOnTheLibrarysNews();
     void settingsSayAndChooseThePlaylistFolder();
+    void thePlaylistsSourceOpensAPlaylistFile();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

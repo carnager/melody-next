@@ -314,6 +314,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void refreshListsPanel();
     void presentListsPanel();
     void showListsPanelMenu(const QPoint& position);
+    void showListsMenu(ListsPanel* panel, const QPoint& position);
     bool dropOnPanelList(QDropEvent* drop, const EngineKey& engine, const QString& id);
     void addDroppedPaths(const QString& id, const EngineKey& files_engine,
                          std::vector<std::string> paths);
@@ -323,6 +324,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void placeSources();
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
+    // ADR-0296: the saved playlists as a source beside the folders and the
+    // library -- every engine's, each a file in its playlist folder.
+    ListsPanel* playlists_view_{nullptr};
+    int playlists_tab_{-1};
+    [[nodiscard]] bool playlistsShown() const;
     QAction* lists_panel_action_{nullptr};
     ListsCatalog* lists_catalog_{nullptr};
     QTimer* lists_present_timer_{nullptr};

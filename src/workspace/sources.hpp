@@ -26,7 +26,7 @@ void storeFolderBookmarks(const std::vector<std::string>& raw_paths);
 // Whether this computer's library is offered: it holds the library.
 [[nodiscard]] bool localLibraryShown();
 // Which source the panel opens on, as chosen last: "folders", "library" or
-// "remote" -- a library unless Folders was chosen.
+// "remote", or "playlists" -- a library unless another was chosen.
 [[nodiscard]] QString preferredSource();
 // Remembered when the user picks a source, not when the window switches.
 void rememberSource(const QString& kind);

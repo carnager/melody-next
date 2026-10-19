@@ -20,6 +20,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTableView>
 #include <QTimer>
@@ -64,7 +65,7 @@ void BenchMainWindow::buildListsPanel() {
     connect(lists_panel_, &ListsPanel::otherChosen, this,
             [this](QWidget* widget) { tabs_->setCurrentWidget(widget); });
     connect(lists_panel_, &QWidget::customContextMenuRequested, this,
-            &BenchMainWindow::showListsPanelMenu);
+            [this](const QPoint& position) { showListsMenu(lists_panel_, position); });
     track_area_->addWidget(lists_pane_);
     track_area_->setStretchFactor(0, 1);
     track_area_->setStretchFactor(1, 0);
@@ -112,14 +113,20 @@ void BenchMainWindow::applyListsDisplay() {
     }
 }
 
+bool BenchMainWindow::playlistsShown() const {
+    return playlists_view_ != nullptr && source_stack_ != nullptr &&
+           source_stack_->currentWidget() == playlists_view_;
+}
+
 void BenchMainWindow::fetchEngineLists() {
-    if (lists_catalog_ != nullptr && listsInPanel()) {
+    if (lists_catalog_ != nullptr && (listsInPanel() || playlistsShown())) {
         lists_catalog_->fetch();
     }
 }
 
 void BenchMainWindow::refreshListsPanel() {
-    if (lists_present_timer_ != nullptr && lists_pane_ != nullptr && !lists_pane_->isHidden()) {
+    if (lists_present_timer_ != nullptr &&
+        ((lists_pane_ != nullptr && !lists_pane_->isHidden()) || playlistsShown())) {
         lists_present_timer_->start();
     }
 }
@@ -165,13 +172,28 @@ void BenchMainWindow::presentListsPanel() {
                                    return other.widget == current_widget;
                                });
     lists_panel_->present(groups, others, current_id, other_current ? current_widget : nullptr);
+    // ADR-0296: the playlists source -- the saved ones only, a tab not saved
+    // is not a playlist.
+    if (playlists_view_ != nullptr) {
+        for (auto& group : groups) {
+            std::erase_if(group.lists, [](const ListsPanel::List& list) { return !list.saved; });
+            if (group.lists.empty() && group.note.isEmpty()) {
+                group.note = QStringLiteral("No playlists");
+            }
+        }
+        playlists_view_->present(groups, {}, current_id, nullptr);
+    }
 }
 
 void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
-    auto* item = lists_panel_->itemAt(position);
+    showListsMenu(lists_panel_, position);
+}
+
+void BenchMainWindow::showListsMenu(ListsPanel* panel, const QPoint& position) {
+    auto* item = panel->itemAt(position);
     const auto id = ListsPanel::idOf(item);
     const auto engine = ListsPanel::engineOf(item);
-    QMenu menu(lists_panel_);
+    QMenu menu(panel);
     if (!id.isEmpty()) {
         auto* tab = tabForDocument(id);
         const auto name = item->text(0).remove(QRegularExpression(QStringLiteral(" \\*$")));
@@ -200,7 +222,9 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
         menu.addAction(QStringLiteral("Delete…"), this, [this, engine, id, name] {
             auto* question =
                 new QMessageBox(QMessageBox::Question, QStringLiteral("Delete list"),
-                                QStringLiteral("Delete “%1”? Its files are not touched.").arg(name),
+                                QStringLiteral("Delete “%1”? Its tracks are not touched; its "
+                                               "playlist file is set aside in .deleted.")
+                                    .arg(name),
                                 QMessageBox::Cancel, this);
             question->setObjectName(QStringLiteral("bench-lists-delete"));
             question->setAttribute(Qt::WA_DeleteOnClose);
@@ -220,7 +244,7 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
     }
     menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), QStringLiteral("New list"), this,
                    &BenchMainWindow::createList);
-    menu.exec(lists_panel_->viewport()->mapToGlobal(position));
+    menu.exec(panel->viewport()->mapToGlobal(position));
 }
 
 } // namespace trackknife::bench

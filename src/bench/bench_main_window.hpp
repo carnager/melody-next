@@ -790,6 +790,18 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     ui::RatingStrip* now_playing_rating_{nullptr};
     QString header_rating_hash_;
     EngineKey header_rating_engine_;
+    // ADR-0297: the playing track a favourite or not -- in the Favorites
+    // playlist of the engine playing it -- and, asked, loved on Last.fm.
+    QToolButton* favorite_button_{nullptr};
+    QAction* favorite_action_{nullptr};
+    QString favorite_entry_;
+    // The shown track's raw path: the one made a favourite, whatever plays
+    // by the time the click arrives.
+    std::string favorite_path_;
+    void buildFavorite(QWidget* header, QHBoxLayout* layout);
+    void refreshFavorite(const EnginePlayback::State& state);
+    void showFavorite(bool favorite);
+    void toggleFavorite();
     // The group whose cover the header shows, so a tick does not rescale it.
     QString header_cover_key_;
     // The album whose cover the header is waiting for, and the entry playing.

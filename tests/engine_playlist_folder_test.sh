@@ -187,6 +187,21 @@ check(c.call("folders.make", {"path": encode(work), "name": "New one"})["error"]
 check(c.call("folders.make", {"path": encode(work), "name": "a/b"})["error"]["code"]
       == "invalid_argument", "a name with a slash is refused")
 
+# ADR-0297: a favourite -- the first makes the Favorites playlist, a file too.
+check(c.call("favorites.toggle")["error"]["code"] == "not_found", "nothing playing, nothing to favour")
+one = encode(f"{music}/A/one.wav")
+faved = c.call("favorites.toggle", {"path": one})["result"]
+check(faved["favorite"] is True, "a track is made a favourite")
+check(lists()["Favorites"]["tracks"] == 1, "into a Favorites playlist")
+check("A/one.wav" in read("Favorites.m3u8"), "which is a file too")
+said = c.call("favorites.state", {"paths": [one, encode(f"{music}/A/two.wav")]})["result"]
+check(said["favorites"] == [True, False] and said["list"] == faved["list"], "and said so")
+check(c.call("favorites.toggle", {"path": one, "favorite": True})["result"]["favorite"] is True
+      and lists()["Favorites"]["tracks"] == 1, "made one again, it is there once")
+check(c.call("favorites.toggle", {"path": one})["result"]["favorite"] is False and
+      lists()["Favorites"]["tracks"] == 0, "toggled again, it is taken out")
+c.call("list.delete", {"id": faved["list"]})
+
 # A third, for the restart.
 c.call("list.save", {"name": "Keep", "items": [{"path": encode(f"{music}/A/one.wav")}]})
 check(os.path.exists(f"{folder}/Keep.m3u8"), "a new list is written")

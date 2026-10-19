@@ -21,6 +21,7 @@
 #include "trackknife/core/environment.hpp"
 #include "trackknife/engine/album_arrivals.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/favorites.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/lastfm.hpp"
@@ -702,6 +703,9 @@ int main(int argc, char** argv) {
     trackknife::engine::register_list_methods(dispatcher, *workspace, list_sink, *player,
                                               &catalogue);
     trackknife::engine::register_playlist_folder_methods(dispatcher, playlist_folder);
+    // ADR-0297: the favourite tracks, a playlist like any other.
+    trackknife::engine::register_favorite_methods(dispatcher, *workspace, list_sink, *player,
+                                                  &catalogue);
     playlist_folder.start(std::chrono::seconds{5});
     // ADR-0253: a list that ends continues with its rule, from this engine's
     // library, whether or not a window is open.

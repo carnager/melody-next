@@ -300,6 +300,7 @@ void BenchMainWindow::buildTransport() {
         }
     });
     header_layout->addWidget(now_playing_rating_);
+    buildFavorite(header, header_layout);
     header_layout->addSpacing(6);
 
     // Stop is in the Playback menu: pause does what it did, and the row has
@@ -497,6 +498,7 @@ void BenchMainWindow::buildTransport() {
     playback_menu->addSeparator();
     playback_menu->addAction(findChild<QAction*>(QStringLiteral("action-show-lyrics")));
     playback_menu->addSeparator();
+    playback_menu->addAction(favorite_action_);
 
     // ADR-0144: quiet, opt-in track-change notifications while the
     // window is in the background.
@@ -1033,6 +1035,7 @@ void BenchMainWindow::refreshEngineTransport() {
     header_rating_engine_ = shown.rating_engine;
     now_playing_rating_->setRating(shown.rating);
     now_playing_rating_->setVisible(!shown.rating_hash.isEmpty());
+    refreshFavorite(state);
     workspace_.followEngineState(state);
 
     refreshOutputControls(state);

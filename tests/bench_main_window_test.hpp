@@ -326,6 +326,7 @@ class BenchMainWindowTest final : public QObject {
     void settingsSayAndChooseThePlaylistFolder();
     void playlistsUnderTheLibraryOpenAsTabs();
     void theEngineFolderDialogBrowsesAnEnginesMachine();
+    void theHeartMakesWhatPlaysAFavourite();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

@@ -14,6 +14,7 @@ qt_add_library(
     bench_playlists.cpp
     bench_plugins.cpp
     bench_plugin_triggers.cpp
+    bench_favorites.cpp
     plugin_list_window.cpp
     plugin_panel_view.cpp
     plugin_list_window.hpp

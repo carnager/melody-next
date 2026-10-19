@@ -16,6 +16,11 @@ The folder chooser for an engine elsewhere.
   `roots`, the library's music folders: where browsing starts.
 - `folders.make {path, name}` -> `{path}`: a new folder there; one already
   there is a conflict, a name with a slash refused.
+- ADR-0297: `favorites.toggle {path?, favorite?}` -> `{favorite, list}`: the
+  track at `path` (the one playing when absent) into the saved playlist
+  Favorites -- made with the first -- or out of it; `favorite` says which,
+  else it turns over. `favorites.state {paths}` -> `{favorites: [bool],
+  list}`: whether each is one.
 
 ### Level 19 (2026-10-19)
 

@@ -160,6 +160,8 @@ void usage(std::ostream& out) {
            "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
            "                              SIZE pixels across at most if given\n"
            "  love | unlove               the playing track, on Last.fm\n"
+           "  fav | unfav                 the playing track into the Favorites playlist,\n"
+           "                              or out of it (ADR-0297)\n"
            "\n"
            "  replaygain album|track WORDS... [--track-gain] [--true-peak] [--sidecar]\n"
            "                              measure its loudness and write ReplayGain, as\n"
@@ -1678,6 +1680,19 @@ int run(const Options& options) {
                                     {"loved", loved}}));
         if (!options.json) {
             std::cout << (loved ? "loved: " : "unloved: ") << describe_track(track) << "\n";
+        }
+    } else if (command == "fav" || command == "unfav") {
+        const auto track = now_playing(*client, state());
+        if (track.is_null()) {
+            fail("nothing is playing");
+        }
+        // ADR-0297: what the engine plays, in its Favorites playlist or not.
+        const auto answer = call(*client, "favorites.toggle", Json{{"favorite", command == "fav"}});
+        if (options.json) {
+            std::cout << answer.dump() << "\n";
+        } else {
+            std::cout << (answer.value("favorite", false) ? "a favourite: " : "not a favourite: ")
+                      << describe_track(track) << "\n";
         }
     } else {
         usage(std::cerr);

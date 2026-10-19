@@ -3214,4 +3214,63 @@ void BenchMainWindowTest::playlistsUnderTheLibraryOpenAsTabs() {
     QCOMPARE(playlists->topLevelItem(0)->text(0), QStringLiteral("Playlists"));
 }
 
+// ADR-0297: the heart by what plays -- into the Favorites playlist of the
+// engine playing it, and out again; shown only while something plays.
+void BenchMainWindowTest::theHeartMakesWhatPlaysAFavourite() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    const auto file = music + QStringLiteral("/art.flac");
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), file));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    QVERIFY(window.localCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
+    // Told here what plays; the engine, in this test, plays nothing.
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    auto* heart = window.findChild<QToolButton*>(QStringLiteral("bench-favorite"));
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-favorite"));
+    QVERIFY(heart != nullptr && action != nullptr);
+    QVERIFY(heart->isHidden());
+    EnginePlayback::State state;
+    state.status = QStringLiteral("playing");
+    state.entry = QStringLiteral("e1");
+    state.path = file;
+    window.refreshFavorite(state);
+    QVERIFY(!heart->isHidden());
+    QCOMPARE(heart->text(), QStringLiteral("♡"));
+    action->trigger();
+    QTRY_COMPARE(heart->text(), QStringLiteral("♥"));
+    QVERIFY(action->isChecked());
+    // The engine's: a Favorites playlist with the track.
+    bool asked = false;
+    window.localPlayback()->request(
+        QStringLiteral("favorites.state"),
+        protocol::Json{{"paths", protocol::Json::array({protocol::encode_raw_path(
+                                     QFile::encodeName(file).toStdString())})}},
+        [&asked](core::Result<protocol::Json> answer) {
+            asked = answer && answer->at("favorites").front().get<bool>();
+        });
+    QTRY_VERIFY(asked);
+    // Asked again for the same track, after another: still a favourite.
+    state.entry = QStringLiteral("e2");
+    state.path = music + QStringLiteral("/other.flac");
+    window.refreshFavorite(state);
+    QTRY_COMPARE(heart->text(), QStringLiteral("♡"));
+    state.entry = QStringLiteral("e1");
+    state.path = file;
+    window.refreshFavorite(state);
+    QTRY_COMPARE(heart->text(), QStringLiteral("♥"));
+    // And out again.
+    action->trigger();
+    QTRY_COMPARE(heart->text(), QStringLiteral("♡"));
+    // Nothing playing: no heart.
+    state.status = QStringLiteral("stopped");
+    window.refreshFavorite(state);
+    QVERIFY(heart->isHidden());
+}
+
 } // namespace trackknife::bench

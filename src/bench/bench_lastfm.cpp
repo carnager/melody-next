@@ -98,6 +98,14 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* enabled = new QCheckBox(QStringLiteral("Scrobble playback to Last.fm"), page);
     enabled->setObjectName(QStringLiteral("lastfm-enabled"));
     layout->addWidget(enabled);
+    // ADR-0297: a favourite loved there too, and unloved when it is no more.
+    auto* love = new QCheckBox(QStringLiteral("Favourite tracks are also loved on Last.fm"), page);
+    love->setObjectName(QStringLiteral("lastfm-love-favorites"));
+    love->setChecked(QSettings{}.value(QStringLiteral("lastfm/love-favorites"), false).toBool());
+    connect(love, &QCheckBox::toggled, page, [](const bool on) {
+        QSettings{}.setValue(QStringLiteral("lastfm/love-favorites"), on);
+    });
+    layout->addWidget(love);
     auto* status = new QLabel(page);
     status->setObjectName(QStringLiteral("lastfm-status"));
     status->setWordWrap(true);

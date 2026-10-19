@@ -2863,6 +2863,15 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
     }));
     QCOMPARE(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-detail"))->text(),
              QStringLiteral("official"));
+    // Escaped and shown as rich text: a quote or an ampersand reads as one.
+    for (const auto* part : dock->findChildren<QLabel*>()) {
+        if (QStringList{QStringLiteral("bench-plugin-panel-part"),
+                        QStringLiteral("bench-plugin-panel-title"),
+                        QStringLiteral("bench-plugin-panel-detail")}
+                .contains(part->objectName())) {
+            QCOMPARE(part->textFormat(), Qt::RichText);
+        }
+    }
 
     // Turned off and saved, its panel goes.
     QSettings{}.setValue(pluginEnabledKey(QStringLiteral("about")), false);

@@ -21,7 +21,11 @@ namespace {
 constexpr int image_width = 240;
 
 [[nodiscard]] QLabel* partLabel(const QString& text, QWidget* parent) {
-    auto* label = new QLabel(text, parent);
+    auto* label = new QLabel(parent);
+    // Always rich: every text is escaped, or a link. Left to guess, a
+    // paragraph without a tag was shown as plain -- its &quot; as typed.
+    label->setTextFormat(Qt::RichText);
+    label->setText(text);
     label->setObjectName(QStringLiteral("bench-plugin-panel-part"));
     label->setWordWrap(true);
     label->setTextInteractionFlags(Qt::TextBrowserInteraction);

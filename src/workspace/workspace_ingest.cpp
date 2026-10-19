@@ -920,6 +920,46 @@ void Workspace::finishDiscovery() {
     if (tab == nullptr || (discovery_anchored_ && !discovery_insertion_anchor_.isValid())) {
         return;
     }
+    // This computer's files found for another engine's list: each as that
+    // engine reaches it -- the library's music mounted here, say. The rest
+    // can play only here: into a list of this computer's, not left out.
+    if (const auto into = EngineKey::of(tab->document); !into.isLocal() && !result.rows.empty()) {
+        std::vector<LocalTrackRow> reached;
+        std::vector<LocalTrackRow> here;
+        for (auto& row : result.rows) {
+            if (auto translated = crossEnginePath(row.raw_path, EngineKey::local(), into)) {
+                row.raw_path = std::move(*translated);
+                // Known of the file here says nothing of it there.
+                row.source_revision.reset();
+                reached.push_back(std::move(row));
+            } else {
+                here.push_back(std::move(row));
+            }
+        }
+        result.rows = std::move(reached);
+        if (!here.empty()) {
+            const auto count = static_cast<int>(here.size());
+            auto* local =
+                addList(persistence::ListDocument{.id = core::StableId::random(),
+                                                  .kind = persistence::ListKind::scratch,
+                                                  .name = utf8Bytes(tr("On this computer")),
+                                                  .pinned = false,
+                                                  .dirty = false,
+                                                  .items = {},
+                                                  .engine = {}},
+                        result.rows.empty());
+            local->model->appendRows(std::move(here), -1);
+            markTabDirty(*local);
+            enqueueUnprobedRows(*local);
+            syncArtwork(*local);
+            schedulePersist();
+            view_->showMessage(tr("%n track(s) not in %1's library went into a list of this "
+                                  "computer's, played here",
+                                  nullptr, count)
+                                   .arg(engineName(into)),
+                               8'000);
+        }
+    }
     if (!result.rows.empty() && (!discovery_replace_and_play_ || !result.cancelled)) {
         if (discovery_replace_and_play_) {
             tab->model->replaceRows(std::move(result.rows), true);

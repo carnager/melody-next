@@ -328,6 +328,7 @@ class BenchMainWindowTest final : public QObject {
     void theEngineFolderDialogBrowsesAnEnginesMachine();
     void theHeartMakesWhatPlaysAFavourite();
     void theTrackLayoutMenuListsEveryListView();
+    void thisComputersFilesDroppedOnARemoteTab();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();

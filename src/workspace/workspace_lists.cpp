@@ -629,11 +629,11 @@ void Workspace::openLocalPaths(std::vector<std::string> raw_paths) {
                                    std::make_move_iterator(raw_paths.end()));
         return;
     }
-    // Files on this computer go into a local list (ADR-0227): the one on
-    // screen when it is one, else the first there is, else a new one. Into a
-    // remote tab they would be the remote's paths, which they are not.
+    // Files on this computer go into the list on screen -- one of another
+    // engine's taking those it reaches, the rest going into a list of this
+    // computer's (finishDiscovery) -- else the first local one, else a new one.
     auto* tab = view_->currentList();
-    if (tab == nullptr || !EngineKey::of(tab->document).isLocal()) {
+    if (tab == nullptr) {
         const auto local = std::ranges::find_if(list_tabs_, [](const auto& candidate) {
             return EngineKey::of(candidate->document).isLocal();
         });

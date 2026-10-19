@@ -2414,4 +2414,61 @@ void BenchMainWindowTest::searchPresetsAreGroupedAndPrompt() {
     QVERIFY(menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums")));
 }
 
+// The library on an engine elsewhere, its music mounted here: files from a
+// file manager dropped on its tab are its tracks where they are under its
+// music folder; the rest, which only this computer reaches, go into a list
+// of this computer's -- not left out.
+void BenchMainWindowTest::thisComputersFilesDroppedOnARemoteTab() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/album")));
+    QVERIFY(QDir{}.mkpath(media.filePath(QStringLiteral("downloads"))));
+    const auto there = music + QStringLiteral("/album/one.wav");
+    const auto here = media.filePath(QStringLiteral("downloads/two.wav"));
+    write_wave(there, wave_sample_rate / 10U);
+    write_wave(here, wave_sample_rate / 10U);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QVERIFY(window.remoteCatalogue()->open()->add_root(QFile::encodeName(music).toStdString()));
+    const auto* library = window.workspace_.libraryElsewhere();
+    QVERIFY(library != nullptr && library->browser);
+    library->browser->reload();
+    QTRY_VERIFY(!library->browser->rootPaths().empty());
+    auto* remote_tab = window.remoteQueueTab();
+    QVERIFY(remote_tab != nullptr && !EngineKey::of(remote_tab->document).isLocal());
+    window.tabs_->setCurrentWidget(remote_tab->view);
+    const auto before = window.list_tabs_.size();
+    const auto rows_before = remote_tab->model->rowCount();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(there), QUrl::fromLocalFile(here)});
+    auto* viewport = remote_tab->view->viewport();
+    QDragEnterEvent enter{dragPosition(QPoint{10, 10}), Qt::CopyAction, &mime, Qt::LeftButton,
+                          Qt::NoModifier};
+    QApplication::sendEvent(viewport, &enter);
+    QVERIFY(enter.isAccepted());
+    QDropEvent drop{QPointF{10, 10}, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &drop);
+    QVERIFY(drop.isAccepted());
+    // The library's own, in its tab.
+    QTRY_COMPARE(remote_tab->model->rowCount(), rows_before + 1);
+    QCOMPARE(QString::fromStdString(remote_tab->model->rows().back().raw_path), there);
+    // The other, in a list of this computer's.
+    QTRY_COMPARE(window.list_tabs_.size(), before + 1U);
+    auto* local = window.list_tabs_.back().get();
+    QVERIFY(EngineKey::of(local->document).isLocal());
+    QCOMPARE(local->document.name, std::string{"On this computer"});
+    QTRY_COMPARE(local->model->rowCount(), 1);
+    QCOMPARE(QString::fromStdString(local->model->rows().front().raw_path), here);
+    QTRY_VERIFY(!window.discovery_running_);
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
+}
+
 } // namespace trackknife::bench

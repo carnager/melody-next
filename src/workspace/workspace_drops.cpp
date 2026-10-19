@@ -40,6 +40,15 @@ void Workspace::addDroppedPaths(const QString& id, const EngineKey& files_engine
     const auto into = EngineKey::of(destination->document);
     // From another engine's library: as this list's engine sees those files,
     // where it can.
+    // This computer's -- from a file manager, say: found here, folders and
+    // CUE sheets opened, then each as the list's engine reaches it
+    // (finishDiscovery).
+    if (files_engine.isLocal()) {
+        startDiscovery(std::move(paths), id, row);
+        return;
+    }
+    // From another engine's library: as this list's engine sees those files,
+    // where it can.
     if (files_engine != into) {
         paths = crossEnginePaths(std::move(paths), files_engine, into);
     }

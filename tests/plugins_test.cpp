@@ -1139,7 +1139,12 @@ esac
     };
     QVERIFY(said(QStringLiteral("Royal Thunder — Time Machine")));
     QVERIFY(said(QStringLiteral("Ana")));
-    QVERIFY(said(QStringLiteral("https://t.example/rooms/r#k")));
+    // The invite as a button opening it -- too long to show as text.
+    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::link &&
+               part.url == QStringLiteral("https://t.example/rooms/r#k");
+    }));
+    QVERIFY(!said(QStringLiteral("https://t.example/rooms/r#k")));
     qputenv("PATH", path);
 }
 

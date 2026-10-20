@@ -5,8 +5,8 @@
 Accepted, 2026-10-20. Phase 1 -- everyone plays their own copy -- is built
 with this record; phase 2 -- the host's copy for those without one -- and
 phase 3 -- a web page for friends without Melody, with the room's chat --
-after it. Phase 4 -- party mode, suggestions and votes -- the chat in
-Melody, and the phone are its direction.
+after it. Phase 4 -- party mode, suggestions and votes -- and the phone are
+its direction.
 
 ## Context
 
@@ -64,7 +64,9 @@ Melody, and the phone are its direction.
    seeked back past 300 ms -- or opens Melody. Melody's blackbird is its
    centre, bobbing while music plays, the track's progress a ring around
    it; who listens, and the room's chat, beside it. The chat is the
-   server's: the last hundred lines, carried by the same long poll.
+   server's: the last hundred lines, carried by the same long poll. It is
+   the page's alone: Melody listeners chat there too, and Melody shows no
+   chat of its own (2026-10-20).
 7. **Phase 4: party mode.** A room the host opens as a party lets anyone
    suggest a track -- from their own library, or the host's -- and vote for
    the suggestions; the host's engine takes the most wanted into its Up Next

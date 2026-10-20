@@ -61,9 +61,10 @@ def panel(given):
         parts.append({"paragraph": "Nobody yet." if role == "host" else "Just you, and the host."})
     if role == "host" and room.get("invite"):
         parts.append({"heading": "Invite"})
-        parts.append({"paragraph": room["invite"]})
-        parts.append({"paragraph": "On your clipboard when you hosted: send it to a friend. "
-                                   "Opened in their browser, it opens their Melody in the room."})
+        parts.append({"paragraph": "On your clipboard since you hosted: send it to your friends. "
+                                   "It opens the room in their browser, or in their Melody."})
+        # A button, not the address itself: an invite is too long to show.
+        parts.append({"link": "Open the room", "detail": room["invite"], "url": room["invite"]})
     if room.get("message"):
         parts.append({"paragraph": room["message"]})
     print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",

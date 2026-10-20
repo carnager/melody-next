@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "Listen together",
+  "description": "Listen along with friends: host a room on a melody-together server, or join one with an invite",
+  "triggers": [
+    {"id": "host", "label": "Host a listening room", "on": "hand", "run": ["./together", "host"],
+     "result": "notify", "timeout": 30},
+    {"id": "join", "label": "Join the listening room", "on": "hand", "run": ["./together", "join"],
+     "result": "notify", "timeout": 30},
+    {"id": "leave", "label": "Leave the listening room", "on": "hand", "run": ["./together", "leave"],
+     "result": "notify", "timeout": 30}
+  ],
+  "panels": [
+    {"id": "room", "label": "Listening together", "run": ["./together", "panel"], "timeout": 15}
+  ],
+  "settings": [
+    {"key": "server", "label": "Server",
+     "help": "Where your melody-together runs, e.g. https://together.example.org -- for hosting",
+     "link": "https://github.com/carnager/melody-next/blob/main/docs/together.md"},
+    {"key": "password", "label": "Server password", "kind": "secret",
+     "help": "The password the server makes rooms with; listeners need only an invite"},
+    {"key": "invite", "label": "Invite",
+     "help": "The invite a friend sent: paste it here, then Workspace › Run › Join the listening room"},
+    {"key": "name", "label": "Your name",
+     "help": "How the others see you; empty, your login name"}
+  ]
+}

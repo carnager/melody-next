@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""Melody plugin (ADR-0302): listening together, from Workspace › Run and a
+panel.
+
+The engine hosts a room or follows one; this asks it to, through melody-cli
+-- MELODY_SERVER when the engine is elsewhere, as the Scripts plugin does --
+and shows the room in a panel: what plays, who listens, the invite to send.
+"""
+import json
+import os
+import subprocess
+import sys
+
+
+def cli(given, *words, password=None):
+    engine = given.get("engine") or {}
+    env = dict(os.environ)
+    if engine.get("address"):
+        env["MELODY_SERVER"] = engine["address"]
+    if password:
+        env["MELODY_TOGETHER_PASSWORD"] = password
+    try:
+        done = subprocess.run(["melody-cli", "--json", *words], env=env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=25)
+    except FileNotFoundError:
+        fail("melody-cli is not installed beside Melody")
+    except subprocess.TimeoutExpired:
+        fail("the engine did not answer")
+    if done.returncode != 0:
+        said = done.stderr.strip().splitlines()
+        fail(said[-1].removeprefix("melody-cli: ") if said else "the engine refused")
+    try:
+        return json.loads(done.stdout.strip().splitlines()[-1]) if done.stdout.strip() else {}
+    except ValueError:
+        return {}
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def panel(given):
+    room = cli(given, "together", "status")
+    role = room.get("role") or ""
+    if not role:
+        parts = [{"paragraph": room.get("message") or
+                  "Not in a listening room. Host one, or join one with an invite, from "
+                  "Workspace › Run."}]
+        print(json.dumps({"title": "Listening together", "parts": parts}))
+        return
+    parts = []
+    if room.get("track"):
+        parts.append({"text": room["track"], "detail": "playing in the room"})
+    listeners = room.get("listeners") or []
+    parts.append({"heading": "Listening along" if role == "host" else "In the room"})
+    if listeners:
+        parts += [{"text": name} for name in listeners]
+    else:
+        parts.append({"paragraph": "Nobody yet." if role == "host" else "Just you, and the host."})
+    if role == "host" and room.get("invite"):
+        parts.append({"heading": "Invite"})
+        parts.append({"paragraph": room["invite"]})
+        parts.append({"paragraph": "Send it to a friend: they paste it under Listen together's "
+                                   "settings, then Workspace › Run › Join the listening room."})
+    if room.get("message"):
+        parts.append({"paragraph": room["message"]})
+    print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",
+                      "parts": parts}))
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ("host", "join", "leave", "panel"):
+        fail("usage: together host|join|leave|panel")
+    given = json.load(sys.stdin)
+    settings = given.get("settings") or {}
+    what = sys.argv[1]
+    if what == "panel":
+        panel(given)
+    elif what == "host":
+        server = str(settings.get("server") or "").strip()
+        password = str(settings.get("password") or "").strip()
+        if not server or not password:
+            fail("Set the server and its password under Settings › Plugins › Listen together")
+        answer = cli(given, "together", "host", server, password=password)
+        print("Hosting. The invite, also in the Listening together panel: %s"
+              % answer.get("invite", ""))
+    elif what == "join":
+        invite = str(settings.get("invite") or "").strip()
+        if not invite:
+            fail("Paste the invite under Settings › Plugins › Listen together first")
+        name = str(settings.get("name") or "").strip() or os.environ.get("USER", "a friend")
+        room = cli(given, "together", "join", invite, name)
+        print("Listening along%s" % (": " + room["track"] if room.get("track") else ""))
+    else:
+        cli(given, "together", "leave")
+        print("Left the listening room")
+
+
+if __name__ == "__main__":
+    main()

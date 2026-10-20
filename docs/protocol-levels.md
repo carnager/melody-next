@@ -7,6 +7,21 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 21 (2026-10-20)
+
+ADR-0302: listening together, through a melody-together server.
+
+- `together.host {server, password}` -> `{invite}`: a room on the server,
+  made with its password; this engine its host, telling the room what it
+  plays. The invite is `SERVER/rooms/ROOM#KEY`, for friends.
+- `together.join {invite, name}` -> `{joined}`: into the room, as `name`;
+  this engine plays the host's track from its own library where the host is.
+- `together.leave {}` -> `{left}`: out of the room; as its host, closing it.
+- `together.state {}` -> `{role, invite, listeners, track, message}`: `role`
+  is "host", "listener" or empty; `message` says what is wrong, if anything
+  -- a track not in this library, the room closed. Event
+  `together.changed` carries the same when any of it changes.
+
 ### Level 20 (2026-10-19)
 
 The folder chooser for an engine elsewhere.

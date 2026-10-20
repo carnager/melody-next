@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+
+#include "trackknife/core/result.hpp"
+#include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/interruptible_pause.hpp"
+#include "trackknife/engine/job_registry.hpp"
+#include "trackknife/engine/player.hpp"
+#include "trackknife/protocol/dispatch.hpp"
+
+#include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace trackknife::engine {
+
+// ADR-0302: listening together, the engine's part. Hosting, it tells a
+// melody-together server what it plays -- each track, seek and pause --
+// on the server's clock; listening, it follows: it finds the host's track
+// in its own library and plays it where the host is, seeking back when it
+// drifts. The session is the engine's, so it goes on with every window
+// closed and plays through whatever speakers the engine has.
+class Together final {
+  public:
+    // Where a room is: the server, the room's name, and the key that opens
+    // it. An invite says all three in one line, to be sent to a friend:
+    //   https://together.example.org/rooms/ROOM#INVITE
+    struct Invite final {
+        std::string server;
+        std::string room;
+        std::string key;
+    };
+    [[nodiscard]] static std::optional<Invite> parse_invite(std::string_view text);
+    [[nodiscard]] static std::string invite_text(const Invite& invite);
+
+    // The queries that find a described track in a library, in the order to
+    // try them: by MusicBrainz track id, then by artist, title and album,
+    // then without the album.
+    [[nodiscard]] static std::vector<std::string> track_queries(const protocol::Json& track);
+
+    struct Status final {
+        std::string role; // "", "host" or "listener"
+        std::string invite;
+        std::vector<std::string> listeners;
+        // What plays in the room, as "Artist — Title".
+        std::string track;
+        // Something to say: a track not in this library, the room closed, the
+        // server not reached.
+        std::string message;
+    };
+
+    Together(Player& player, Catalogue& catalogue, EventSink sink);
+    Together(const Together&) = delete;
+    Together(Together&&) = delete;
+    Together& operator=(const Together&) = delete;
+    Together& operator=(Together&&) = delete;
+    ~Together();
+
+    // A room on `server`, made with its password; this engine its host. The
+    // invite to send to friends.
+    [[nodiscard]] core::Result<std::string> host(const std::string& server,
+                                                 const std::string& password);
+    // Into the room an invite names, as `name`.
+    [[nodiscard]] core::Result<void> join(const std::string& invite, const std::string& name);
+    // Out of the room -- closing it, as its host.
+    void leave();
+    [[nodiscard]] Status status() const;
+
+  private:
+    struct Session;
+    // Ends the session there is, if any; under control_.
+    void end();
+    void run(std::shared_ptr<Session> session);
+    void host_round(Session& session);
+    void listen_round(Session& session);
+    void follow(Session& session, const protocol::Json& state);
+    void keep_in_step(Session& session);
+    [[nodiscard]] core::Result<void> measure_clock(Session& session);
+    void changed();
+    void say(std::string message);
+
+    Player* player_;
+    Catalogue* catalogue_;
+    EventSink sink_;
+    // Starting and ending a session, one at a time.
+    std::mutex control_;
+    mutable std::mutex mutex_;
+    std::shared_ptr<Session> session_;
+    Status status_;
+    std::thread worker_;
+};
+
+void register_together_methods(protocol::Dispatcher& dispatcher, Together& together);
+
+} // namespace trackknife::engine

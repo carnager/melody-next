@@ -25,6 +25,7 @@
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/lastfm.hpp"
+#include "trackknife/engine/together.hpp"
 #include "trackknife/engine/list_continuation.hpp"
 #include "trackknife/engine/list_methods.hpp"
 #include "trackknife/engine/media_streams.hpp"
@@ -954,6 +955,11 @@ int main(int argc, char** argv) {
     trackknife::engine::register_lastfm_methods(dispatcher, lastfm);
     lastfm.start();
 
+    // ADR-0302: listening together -- hosting a room, or following one --
+    // with every window closed.
+    trackknife::engine::Together together{*player, catalogue, sink};
+    trackknife::engine::register_together_methods(dispatcher, together);
+
     // Another engine on these speakers, through an agent built in: newest
     // wins them (ADR-0228).
     // One agent each, with audio of its own; they share the speakers
@@ -1137,6 +1143,7 @@ int main(int argc, char** argv) {
         watcher->stop();
     }
     lastfm.stop();
+    together.leave();
     if (streams) {
         streams->stop();
     }

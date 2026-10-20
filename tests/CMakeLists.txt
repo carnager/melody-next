@@ -144,6 +144,33 @@ add_test(
     COMMAND trackknife_cover_fitting_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
+# ADR-0302: melody-together is Go, for one binary to copy to a server; its
+# tests run where Go is installed.
+find_program(MELODY_GO go)
+if(MELODY_GO)
+    add_test(NAME together COMMAND "${MELODY_GO}" test -count=1 ./...
+             WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/together")
+    set_tests_properties(together PROPERTIES TIMEOUT 300)
+    # The engines' side, against the real server.
+    file(GLOB MELODY_TOGETHER_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/together/*.go")
+    set(MELODY_TOGETHER_BINARY "${CMAKE_CURRENT_BINARY_DIR}/melody-together")
+    add_custom_command(
+        OUTPUT "${MELODY_TOGETHER_BINARY}"
+        COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=0 "${MELODY_GO}" build -o
+                "${MELODY_TOGETHER_BINARY}" .
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/together"
+        DEPENDS ${MELODY_TOGETHER_SOURCES} "${PROJECT_SOURCE_DIR}/together/go.mod"
+        COMMENT "Building melody-together")
+    add_custom_target(melody_together_for_tests ALL DEPENDS "${MELODY_TOGETHER_BINARY}")
+    add_executable(trackknife_engine_together_tests engine_together_test.cpp)
+    target_link_libraries(trackknife_engine_together_tests PRIVATE Trackknife::Engine
+        trackknife_project_options trackknife_project_warnings)
+    add_dependencies(trackknife_engine_together_tests melody_together_for_tests)
+    add_test(NAME engine-together COMMAND trackknife_engine_together_tests
+             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio" "${MELODY_TOGETHER_BINARY}")
+    set_tests_properties(engine-together PROPERTIES TIMEOUT 120)
+endif()
+
 add_executable(trackknife_artwork_export_tests artwork_export_test.cpp)
 target_link_libraries(
     trackknife_artwork_export_tests

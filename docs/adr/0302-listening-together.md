@@ -1,0 +1,85 @@
+# ADR-0302: Listening together
+
+## Status
+
+Accepted, 2026-10-20. Phase 1 -- everyone plays their own copy -- is built
+with this record; phase 2 -- the host's copy for those without one --
+phase 3 -- a web page for friends without Melody -- phase 4 -- party
+mode, suggestions and votes -- and then chat and the phone are its
+direction.
+
+## Context
+
+- **Friends want to hear the same album at the same moment**, each at home,
+  talking about it as it plays. It is for a few friends, never a public
+  service: a room is reached only by its invite.
+- **Most often only one of them has the album.** Sending it from the host to
+  each listener costs the host's upload once for every listener, which
+  breaks down past one or two over a home connection.
+- **The engine plays; the window may be closed** (ADR-0220). Following
+  someone else's playback is playback, so it is the engine's to do, through
+  whichever speakers and agents it has.
+- **Nothing in the engine starts at a wall-clock time** or knows another
+  machine's clock, and its Opus transcodes (ADR-0231) are whole files, one a
+  track, cached -- not a live stream.
+
+## Decision
+
+1. **A small server, `melody-together`, in this repository** -- in Go, the
+   one Go program here, because it is copied to a server as a single
+   static binary and nothing else -- run by one of the friends -- behind the web proxy that already gives the engine its TLS
+   (ADR-0271); it speaks plain HTTP and has no TLS of its own. It holds
+   rooms: each the host's playback state, the listeners present, and an
+   invite. Making a room takes the server's password; joining takes the
+   room's invite; the host alone changes what plays.
+2. **One timeline, on the server's clock.** Each engine measures its clock
+   against the server's (`GET /time`, the best of several round trips). The
+   host's state says which track, from which moment of the server's clock it
+   counts, and whether it is paused. A listener's engine plays the track at
+   the position that moment implies, and seeks back to it when it drifts by
+   more than a quarter of a second.
+3. **The session is the engine's**: `together.host`, `together.join`,
+   `together.leave` and `together.state`, and an event, `together.changed`.
+   The host's engine says every change of what plays -- a track, a seek, a
+   pause -- to the server; a listener's engine waits for the next (a long
+   poll, plain HTTP through any proxy) and follows it. While listening, the
+   listener's queue is the session's.
+4. **Phase 1: each plays their own copy.** A listener's engine finds the
+   track in its library by MusicBrainz track id, else by artist, title and
+   album; one not found is said, and the listener waits silently for the
+   next.
+5. **Phase 2: the host's copy, sent once.** For a track a listener does not
+   have, the host's engine uploads its Opus transcode to the room -- once,
+   however many listen -- and each such listener downloads it before it is
+   due. The server keeps a track an hour. The host's upload is one copy of
+   each track: a hundred kilobits a second, for any number of friends.
+6. **Phase 3: a web page, for friends without Melody.** Served by
+   melody-together itself: the browser keeps the same clock and plays the
+   host's Opus files as phase 2 sends them, with the room's chat and who
+   listens around it -- and Melody's mascot at its centre.
+7. **Phase 4: party mode.** A room the host opens as a party lets anyone
+   suggest a track -- from their own library, or the host's -- and vote for
+   the suggestions; the host's engine takes the most wanted into its Up Next
+   as each track ends. A suggestion only its friend has is sent as phase 2
+   sends the host's: once, by whoever has the file. A room not a party
+   stays the host's alone.
+8. **Driven by melody-cli and an official plugin.** `melody-cli together
+   host|join|leave|status`; the "Listen together" plugin starts, joins and
+   leaves from Workspace › Run and shows the room -- who listens, the invite
+   -- in a panel.
+
+## Consequences
+
+- Sharing music with friends is redistribution; rooms are private, reached
+  by invite, and no server is run for anyone else.
+- A listener hears the host's track a moment after the host, the time the
+  change takes to arrive and the track to start; the drift correction keeps
+  them together after that.
+
+## Verification
+
+- `together` (`go test` in `together/`): rooms, passwords and invites;
+  state kept and long-polled; listeners gone and rooms idle swept.
+- `engine-together`: a host and a listener engine, each with the album: the
+  listener plays the host's track at the host's position; a seek, a pause
+  and the next track followed; a track it lacks said.

@@ -1,0 +1,95 @@
+# Listening together
+
+Friends hear the same album at the same moment, each at home on their own
+speakers ([ADR-0302](adr/0302-listening-together.md)). One of them hosts a
+room; the others join it with an invite. The host's engine says what it
+plays -- each track, seek and pause -- and every listener's engine plays the
+same track from its own library, where the host is.
+
+For now each listener plays their **own copy**: a track a friend does not
+have is said in their panel, and they wait for the next. Sending the host's
+copy to those without one, a web page for friends without Melody, and a party
+mode with suggestions and votes come next.
+
+## The server
+
+`melody-together` is a small program one of the friends runs, on a machine
+everyone can reach, behind a web proxy that gives it a name and TLS. It is Go,
+one static binary with nothing else to install:
+
+```sh
+cd together && CGO_ENABLED=0 go build -o melody-together .
+scp melody-together server:/usr/local/bin/
+```
+
+On the server, a password -- whoever hosts needs it; listeners need only an
+invite -- and the program:
+
+```sh
+openssl rand -hex 16 > /etc/melody-together/password
+melody-together -password-file /etc/melody-together/password
+# listens on 127.0.0.1:6099; -listen HOST:PORT for elsewhere
+```
+
+A systemd unit:
+
+```ini
+[Unit]
+Description=melody-together
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/melody-together -password-file /etc/melody-together/password
+DynamicUser=yes
+LoadCredential=password:/etc/melody-together/password
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+(With `LoadCredential`, point `-password-file` at
+`${CREDENTIALS_DIRECTORY}/password` instead.)
+
+And Caddy in front:
+
+```
+together.example.org {
+    reverse_proxy 127.0.0.1:6099
+}
+```
+
+A room no one has touched for twelve hours is closed. The server keeps
+nothing on disk.
+
+## Hosting and joining
+
+In Melody, enable **Listen together** under Settings → Plugins and open its
+**Settings…**:
+
+- **To host:** set the server (`https://together.example.org`) and its
+  password, then Workspace › Run › **Host a listening room**. The invite shows
+  in the **Listening together** panel: send it to your friends.
+- **To join:** paste the invite you were sent, and the name to be known by,
+  then Workspace › Run › **Join the listening room**.
+
+**Leave the listening room** leaves -- and, as its host, closes the room.
+The panel shows what plays, who listens and anything wrong.
+
+From a terminal, the same:
+
+```sh
+MELODY_TOGETHER_PASSWORD=… melody-cli together host https://together.example.org
+melody-cli together join 'https://together.example.org/rooms/ROOM#KEY' Ana
+melody-cli together status
+melody-cli together leave
+```
+
+The session is the engine's: it goes on with Melody's window closed, and
+plays through whatever speakers the engine plays on.
+
+## How a listener finds the track
+
+By its MusicBrainz track id, when both copies are tagged with one; else by
+title and artist, and album where it is there. A listener whose engine keeps
+the library elsewhere follows on that engine.

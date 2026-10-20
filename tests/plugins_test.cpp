@@ -36,6 +36,7 @@ class PluginsTest final : public QObject {
     void providersAreReadAndTheirLyricsToo();
     void triggersAreReadAndTold();
     void theScriptsPluginRunsTheCommandsSet();
+    void theTogetherPluginAsksTheEngine();
 
   private:
     // Settings of this test's own, not in the config folder of whoever runs it.
@@ -1048,6 +1049,96 @@ void PluginsTest::triggersAreReadAndTold() {
 
 // The official Scripts plugin: the command set for a trigger, run with sh,
 // told what started it; for new albums once each, {} its folder.
+// ADR-0302: the official Listen together plugin asks the engine through
+// melody-cli -- here a stand-in that writes down what it was asked -- and
+// shows the room in its panel.
+void PluginsTest::theTogetherPluginAsksTheEngine() {
+    const QString folder = QStringLiteral(MELODY_SOURCE_DIR "/plugins/together");
+    QFile manifest_file{folder + QStringLiteral("/plugin.json")};
+    QVERIFY(manifest_file.open(QIODevice::ReadOnly));
+    QString problem;
+    const auto together = parsePluginManifest(manifest_file.readAll(), folder, &problem);
+    QVERIFY2(together.has_value(), qPrintable(problem));
+    QCOMPARE(together->triggers.size(), std::size_t{3U});
+    QCOMPARE(together->panels.size(), std::size_t{1U});
+    const auto trigger = [&together](const QString& id) {
+        return *std::ranges::find(together->triggers, id, &PluginTrigger::id);
+    };
+
+    QTemporaryDir bin;
+    QVERIFY(bin.isValid());
+    const auto asked = bin.filePath(QStringLiteral("asked"));
+    writeFile(bin.filePath(QStringLiteral("melody-cli")),
+              QStringLiteral(R"sh(#!/bin/sh
+echo "$*|$MELODY_SERVER|$MELODY_TOGETHER_PASSWORD" >> '%1'
+case "$3" in
+  host) echo '{"invite":"https://t.example/rooms/r#k"}' ;;
+  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":""}' ;;
+esac
+)sh")
+                  .arg(asked)
+                  .toUtf8(),
+              true);
+    const auto path = qgetenv("PATH");
+    qputenv("PATH", QFile::encodeName(bin.path()) + ":" + path);
+    const PluginEngine nas{.name = QStringLiteral("gemenon"),
+                           .address = QStringLiteral("gemenon:6603"),
+                           .here = false};
+
+    // Hosting: the server and its password from the settings, to the engine
+    // the plugin is told of.
+    QJsonObject settings{{QStringLiteral("server"), QStringLiteral("https://t.example")},
+                         {QStringLiteral("password"), QStringLiteral("friends")},
+                         {QStringLiteral("invite"), QString{}},
+                         {QStringLiteral("name"), QStringLiteral("Bo")}};
+    const auto hosted = runTrigger(
+        *together, trigger(QStringLiteral("host")),
+        pluginTriggerInput(trigger(QStringLiteral("host")), PluginTrigger::When::hand, nas, {}, {},
+                           settings));
+    QVERIFY2(hosted.succeeded, qPrintable(hosted.text));
+    QVERIFY(hosted.text.contains(QStringLiteral("https://t.example/rooms/r#k")));
+    // Joining needs an invite set first; set, it joins by the name given.
+    const auto unset = runTrigger(
+        *together, trigger(QStringLiteral("join")),
+        pluginTriggerInput(trigger(QStringLiteral("join")), PluginTrigger::When::hand, nas, {}, {},
+                           settings));
+    QVERIFY(!unset.succeeded && unset.text.contains(QStringLiteral("invite")));
+    settings[QStringLiteral("invite")] = QStringLiteral("https://t.example/rooms/r#k");
+    const auto joined = runTrigger(
+        *together, trigger(QStringLiteral("join")),
+        pluginTriggerInput(trigger(QStringLiteral("join")), PluginTrigger::When::hand, nas, {}, {},
+                           settings));
+    QVERIFY2(joined.succeeded, qPrintable(joined.text));
+    QFile lines{asked};
+    QVERIFY(lines.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(lines.readAll()),
+             QStringLiteral("--json together host https://t.example|gemenon:6603|friends\n"
+                            "--json together join https://t.example/rooms/r#k Bo|gemenon:6603|\n"));
+
+    // The panel: what plays, who listens, the invite.
+    const auto shown = run(*together,
+                           PluginAction{.id = QStringLiteral("room"),
+                                        .label = QStringLiteral("Room"),
+                                        .scope = PluginAction::Scope::tracks,
+                                        .run = together->panels.front().run,
+                                        .result = PluginAction::Result::none,
+                                        .timeout_seconds = 15},
+                           pluginPanelInput(together->panels.front(), nas, std::nullopt,
+                                            std::nullopt, {}, settings));
+    QVERIFY2(shown.succeeded, qPrintable(shown.text));
+    const auto drawn = parsePluginPanel(shown.text.toUtf8(), &problem);
+    QVERIFY2(drawn.has_value(), qPrintable(problem));
+    QCOMPARE(drawn->title, QStringLiteral("Hosting"));
+    const auto said = [&drawn](const QString& text) {
+        return std::ranges::any_of(drawn->parts,
+                                   [&text](const auto& part) { return part.text == text; });
+    };
+    QVERIFY(said(QStringLiteral("Royal Thunder — Time Machine")));
+    QVERIFY(said(QStringLiteral("Ana")));
+    QVERIFY(said(QStringLiteral("https://t.example/rooms/r#k")));
+    qputenv("PATH", path);
+}
+
 void PluginsTest::theScriptsPluginRunsTheCommandsSet() {
     const QString folder = QStringLiteral(MELODY_SOURCE_DIR "/plugins/scripts");
     QFile manifest_file{folder + QStringLiteral("/plugin.json")};

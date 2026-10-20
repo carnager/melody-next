@@ -159,6 +159,14 @@ void usage(std::ostream& out) {
            "  albumrating [0-10]          the same, for the playing track's album\n"
            "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
            "                              SIZE pixels across at most if given\n"
+           "  together host SERVER        a room on a melody-together server, this\n"
+           "                              engine its host (ADR-0302); prints the invite\n"
+           "                              to send to friends. The server's password is\n"
+           "                              $MELODY_TOGETHER_PASSWORD, else the first line\n"
+           "                              of ~/.config/melody/together-password\n"
+           "  together join INVITE [NAME] listen along, as NAME (default: $USER)\n"
+           "  together leave              out of the room; as its host, closing it\n"
+           "  together status             the room: who listens, what plays\n"
            "  love | unlove               the playing track, on Last.fm\n"
            "  fav | unfav                 the playing track into the Favorites playlist,\n"
            "                              or out of it (ADR-0297)\n"
@@ -1663,6 +1671,89 @@ int run(const Options& options) {
         }
         if (!options.json) {
             std::cout << target.string() << "\n";
+        }
+    } else if (command == "together") {
+        // ADR-0302: the engine hosts or follows; this only asks it to.
+        const auto what = words.size() > 1U ? words[1] : std::string{"status"};
+        const auto show_room = [&options](const Json& room) {
+            if (options.json) {
+                std::cout << room.dump() << "\n";
+                return;
+            }
+            const auto role = text_of(room, "role");
+            std::cout << (role.empty() ? "not in a room" : role == "host" ? "hosting" : "listening")
+                      << "\n";
+            if (!text_of(room, "invite").empty() && role == "host") {
+                std::cout << "invite: " << text_of(room, "invite") << "\n";
+            }
+            if (!text_of(room, "track").empty()) {
+                std::cout << "playing: " << text_of(room, "track") << "\n";
+            }
+            std::string listeners;
+            for (const auto& name : room.value("listeners", Json::array())) {
+                if (name.is_string()) {
+                    listeners += (listeners.empty() ? "" : ", ") + name.get<std::string>();
+                }
+            }
+            if (!listeners.empty()) {
+                std::cout << "listening: " << listeners << "\n";
+            }
+            if (!text_of(room, "message").empty()) {
+                std::cout << text_of(room, "message") << "\n";
+            }
+        };
+        if (what == "host") {
+            if (words.size() != 3U) {
+                fail("together host wants the server's address: https://together.example.org");
+            }
+            std::string password;
+            if (const char* given = trackknife::core::environment_variable("MELODY_TOGETHER_PASSWORD");
+                given != nullptr) {
+                password = given;
+            } else if (const char* home = trackknife::core::environment_variable("HOME");
+                       home != nullptr) {
+                const char* config = trackknife::core::environment_variable("XDG_CONFIG_HOME");
+                const std::filesystem::path base =
+                    config != nullptr && *config != '\0'
+                        ? std::filesystem::path{config}
+                        : std::filesystem::path{home} / ".config";
+                if (auto read = trackknife::protocol::read_password_file(
+                        base / "melody" / "together-password")) {
+                    password = *read;
+                }
+            }
+            if (password.empty()) {
+                fail("the server's password: $MELODY_TOGETHER_PASSWORD, or "
+                     "~/.config/melody/together-password");
+            }
+            const auto answer =
+                call(*client, "together.host", Json{{"server", words[2]}, {"password", password}});
+            if (options.json) {
+                std::cout << answer.dump() << "\n";
+            } else {
+                std::cout << text_of(answer, "invite") << "\n";
+            }
+        } else if (what == "join") {
+            if (words.size() < 3U || words.size() > 4U) {
+                fail("together join wants the invite a friend sent, and a name to be known by");
+            }
+            std::string name = words.size() == 4U ? words[3] : std::string{};
+            if (const char* user = trackknife::core::environment_variable("USER");
+                name.empty() && user != nullptr) {
+                name = user;
+            }
+            static_cast<void>(
+                call(*client, "together.join", Json{{"invite", words[2]}, {"name", name}}));
+            show_room(call(*client, "together.state"));
+        } else if (what == "leave") {
+            static_cast<void>(call(*client, "together.leave"));
+            if (!options.json) {
+                std::cout << "left the room\n";
+            }
+        } else if (what == "status") {
+            show_room(call(*client, "together.state"));
+        } else {
+            fail("together is host, join, leave or status");
         }
     } else if (command == "love" || command == "unlove") {
         const auto track = now_playing(*client, state());

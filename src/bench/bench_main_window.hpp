@@ -40,6 +40,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QThreadPool>
+#include <QUrl>
 
 #include <cstdint>
 #include <deque>
@@ -206,6 +207,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // ADR-0302: a melody:// link -- an invite to listen together, opened in
     // a browser. False when it is no melody:// link.
     bool openLink(const QString& link);
+    // The same, for QDesktopServices: a melody:// link a panel opens.
+    Q_INVOKABLE void openLinkUrl(const QUrl& url) { openLink(url.toString()); }
     void openLocalPaths(std::vector<std::string> raw_paths) {
         workspace_.openLocalPaths(std::move(raw_paths));
     }

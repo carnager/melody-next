@@ -65,6 +65,25 @@ def panel(given):
                                    "It opens the room in their browser, or in their Melody."})
         # A button, not the address itself: an invite is too long to show.
         parts.append({"link": "Open the room", "detail": room["invite"], "url": room["invite"]})
+    if room.get("party"):
+        # ADR-0302 phase 4: what the room suggests, most wanted first.
+        parts.append({"heading": "Suggested"})
+        suggestions = room.get("suggestions") or []
+        if not suggestions:
+            parts.append({"paragraph": "A party: anyone may suggest a track -- right-click it, "
+                                       "Suggest to the listening room -- and vote."})
+        for each in suggestions:
+            votes = each.get("votes", 0)
+            detail = " · ".join(p for p in (
+                each.get("name", ""), "%d vote%s" % (votes, "" if votes == 1 else "s"),
+                "" if each.get("ready") else "its copy on its way") if p)
+            parts.append({"text": " — ".join(p for p in (each.get("artist"), each.get("title")) if p),
+                          "detail": detail})
+            target = "melody://together/%s?id=%d" % ("remove" if role == "host" else "vote",
+                                                     each.get("id", 0))
+            label = ("Remove" if role == "host"
+                     else "Take back my vote" if each.get("voted") else "Vote")
+            parts.append({"link": label, "detail": each.get("title", ""), "url": target})
     if room.get("message"):
         parts.append({"paragraph": room["message"]})
     print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",
@@ -72,8 +91,9 @@ def panel(given):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("host", "join", "leave", "panel"):
-        fail("usage: together host|join|leave|panel")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("host", "join", "leave", "panel", "party",
+                                                 "suggest"):
+        fail("usage: together host|join|leave|panel|party|suggest")
     given = json.load(sys.stdin)
     settings = given.get("settings") or {}
     what = sys.argv[1]
@@ -94,6 +114,17 @@ def main():
         name = str(settings.get("name") or "").strip() or os.environ.get("USER", "a friend")
         room = cli(given, "together", "join", invite, name)
         print("Listening along%s" % (": " + room["track"] if room.get("track") else ""))
+    elif what == "party":
+        on = not cli(given, "together", "status").get("party")
+        cli(given, "together", "party", "on" if on else "off")
+        print("A party: friends may suggest tracks and vote" if on else "The party is over")
+    elif what == "suggest":
+        paths = [track.get("path") for album in given.get("albums") or []
+                 for track in album.get("tracks") or [] if track.get("path")]
+        if not paths:
+            fail("no tracks chosen")
+        cli(given, "together", "suggest", *paths)
+        print("Suggested to the room: %d track%s" % (len(paths), "" if len(paths) == 1 else "s"))
     else:
         cli(given, "together", "leave")
         print("Left the listening room")

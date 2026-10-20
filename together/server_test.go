@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -299,6 +301,78 @@ func TestMascot(t *testing.T) {
 	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "image/svg+xml" ||
 		!strings.Contains(string(body), "<svg") {
 		t.Fatal("the blackbird is there for the page")
+	}
+}
+
+// Phase 4: in a party, friends suggest tracks and vote; the host takes
+// the most wanted. A listener sends a copy only for a suggestion of the
+// party's.
+func TestParty(t *testing.T) {
+	rooms := newRooms("pw")
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 200 * time.Millisecond}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	made, _ := rooms.make("pw")
+	base := "/rooms/" + made.Room
+	offer := func(who, title string) (int, map[string]any) {
+		return c.do("POST", base+"/suggestions", made.Invite,
+			`{"name":"`+who+`","track":{"title":"`+title+`","artist":"A"}}`)
+	}
+	if status, _ := offer("Ana", "One"); status != 409 {
+		t.Fatal("no suggestions but in a party")
+	}
+	if status, _ := c.do("PUT", base+"/party", made.Invite, `{"party":true}`); status != 403 {
+		t.Fatal("only the host makes a party")
+	}
+	if status, _ := c.do("PUT", base+"/party", made.HostKey, `{"party":true}`); status != 200 {
+		t.Fatal("the host does")
+	}
+	_, first := offer("Ana", "One")
+	_, second := offer("Bo", "Two")
+	offer("Ana", "Three")
+	offer("Ana", "Four")
+	if status, _ := offer("Ana", "Five"); status != 409 {
+		t.Fatal("three of one friend's wait at most")
+	}
+	// A listener's copy: of a suggestion, and nothing else.
+	if status, _ := c.do("PUT", base+"/tracks/e1", made.Invite, "OggS"); status != 403 {
+		t.Fatal("a listener sends no track of the host's")
+	}
+	if status, _ := c.do("PUT", base+"/tracks/"+second["file"].(string), made.Invite, "OggS"); status != 200 {
+		t.Fatal("but the copy of a suggestion")
+	}
+	// Votes order the list; a vote given again is taken back.
+	twoID := strconv.Itoa(int(second["id"].(float64)))
+	c.do("POST", base+"/suggestions/"+twoID+"/vote", made.Invite, `{"name":"Cy"}`)
+	c.do("POST", base+"/suggestions/"+twoID+"/vote", made.Invite, `{"name":"Di"}`)
+	c.do("POST", base+"/suggestions/"+twoID+"/vote", made.Invite, `{"name":"Di"}`)
+	_, state := c.do("GET", base+"/state?after=0", made.HostKey, "")
+	if state["party"] != true {
+		t.Fatal("the room says it is a party")
+	}
+	listed := state["suggestions"].([]any)
+	top := listed[0].(map[string]any)
+	if len(listed) != 4 || top["id"] != second["id"] || len(top["votes"].([]any)) != 1 || top["ready"] != true {
+		t.Fatalf("the most wanted first, its copy there: %v", listed)
+	}
+	if listed[1].(map[string]any)["id"] != first["id"] || listed[1].(map[string]any)["ready"] != false {
+		t.Fatal("then the oldest, its copy not yet sent")
+	}
+	// The host takes it to play; its copy stays.
+	if status, taken := c.do("POST", base+"/suggestions/"+twoID+"/take", made.HostKey, ""); status != 200 || taken["file"] != second["file"] {
+		t.Fatal("the host takes the most wanted")
+	}
+	if status, _ := c.do("POST", base+"/suggestions/"+twoID+"/take", made.Invite, ""); status != 403 {
+		t.Fatal("only the host takes")
+	}
+	_, state = c.do("GET", base+"/state?after=0", made.HostKey, "")
+	if len(state["suggestions"].([]any)) != 3 || !slices.Contains(state["files"].([]any), any(second["file"])) {
+		t.Fatal("gone from the list, its copy kept")
+	}
+	// The party over, what waited is gone.
+	c.do("PUT", base+"/party", made.HostKey, `{"party":false}`)
+	if _, state = c.do("GET", base+"/state?after=0", made.HostKey, ""); len(state["suggestions"].([]any)) != 0 {
+		t.Fatal("no party, no suggestions")
 	}
 }
 

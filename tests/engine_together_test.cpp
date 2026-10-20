@@ -3,7 +3,8 @@
 // ADR-0302: two engines listening together through a melody-together server
 // -- the real one -- each with its own copy of the album. The host plays,
 // seeks and pauses; the listener follows, where the host is, from its own
-// library -- or, for a track it lacks, from the host's copy.
+// library -- or, for a track it lacks, from the host's copy; and, at a
+// party, the room plays a track the friend suggested, from her copy.
 
 #include "trackknife/core/posix.hpp"
 #include "trackknife/engine/catalogue.hpp"
@@ -265,6 +266,38 @@ struct Engine final {
     [[nodiscard]] std::int64_t position() const { return player->state().position_ms; }
 };
 
+// A second of silence as WAV, untagged: a track no other library has.
+void write_wave(const std::filesystem::path& path) {
+    constexpr std::uint32_t rate = 44'100;
+    constexpr std::uint32_t frames = rate * 2U;
+    constexpr std::uint32_t data = frames * 4U;
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out{path, std::ios::binary};
+    const auto u32 = [&out](std::uint32_t value) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            out.put(static_cast<char>((value >> shift) & 0xFFU));
+        }
+    };
+    const auto u16 = [&out](std::uint16_t value) {
+        out.put(static_cast<char>(value & 0xFFU));
+        out.put(static_cast<char>(value >> 8U));
+    };
+    out << "RIFF";
+    u32(36U + data);
+    out << "WAVEfmt ";
+    u32(16U);
+    u16(1U);
+    u16(2U);
+    u32(rate);
+    u32(rate * 4U);
+    u16(4U);
+    u16(16U);
+    out << "data";
+    u32(data);
+    const std::string silence(data, '\0');
+    out.write(silence.data(), static_cast<std::streamsize>(silence.size()));
+}
+
 void invites_and_queries() {
     const auto invite = engine::Together::parse_invite(
         "https://together.example.org/rooms/abc123#key456\n");
@@ -298,6 +331,7 @@ int main(int argc, char** argv) {
     materialize(fixtures, "rich-metadata-flac.b64", directory / "host/music/Album/01.flac");
     materialize(fixtures, "tagged-tone-flac.b64", directory / "host/music/Other/01.flac");
     materialize(fixtures, "rich-metadata-flac.b64", directory / "friend/music/Copy/track.flac");
+    write_wave(directory / "friend/music/Mine/only-hers.wav");
     TogetherServer server{argv[2], directory};
     Engine host{directory / "host"};
     Engine friend_{directory / "friend"};
@@ -384,6 +418,40 @@ int main(int argc, char** argv) {
     require(host.player->seek_ms(120'000).has_value(), "and goes on");
     require(eventually([&] { return std::abs(friend_.position() - host.position()) < 400; }),
             "the friend still following");
+
+    // Phase 4, a party: the friend suggests a track only she has. Once the
+    // host's own next track has begun, the room's turn is next: the host
+    // plays her copy, and she her own.
+    require(host.together->party(true).has_value(), "the host makes it a party");
+    require(!friend_.together->party(true).has_value(), "a listener does not");
+    require(eventually([&] { return friend_.together->status().party; }), "she sees the party");
+    const auto hers = (directory / "friend/music/Mine/only-hers.wav").string();
+    const auto suggested = friend_.together->suggest(hers);
+    require(suggested.has_value(), "she suggests a track of hers");
+    require(friend_.together->vote(*suggested).has_value(), "and votes for it");
+    require(eventually(
+                [&] {
+                    const auto room = host.together->status();
+                    return room.suggestions.size() == 1U && room.suggestions.front().ready &&
+                           room.suggestions.front().votes == 1U;
+                },
+                30s),
+            "the host sees it, voted for, its copy come");
+    engine::QueueEntry own;
+    own.source.raw_path = album.source.raw_path;
+    own.duration_ms = 600'000;
+    host.player->replace_queue({own});
+    require(host.player->play_entry(own.entry_id).has_value(), "the host's own track begins");
+    require(eventually([&] { return !host.player->request_entries().empty(); }, 30s),
+            "her suggestion is next");
+    require(eventually([&] { return host.together->status().suggestions.empty(); }),
+            "taken from the list");
+    require(host.player->step(1).has_value(), "the host's track ends");
+    const auto host_downloads = (directory / "host/together/downloads").string();
+    require(eventually([&] { return host.audition.loaded().starts_with(host_downloads); }),
+            "the host plays her copy");
+    require(eventually([&] { return friend_.audition.loaded() == hers; }),
+            "and she her own, in the room");
 
     // Leaving, and the room closing.
     friend_.together->leave();

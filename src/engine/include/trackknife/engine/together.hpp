@@ -45,6 +45,17 @@ class Together final {
     // then without the album.
     [[nodiscard]] static std::vector<std::string> track_queries(const protocol::Json& track);
 
+    // ADR-0302 phase 4: a track a friend suggested in a party room.
+    struct Suggestion final {
+        std::uint64_t id{0};
+        std::string name; // who suggested it
+        std::string title;
+        std::string artist;
+        std::size_t votes{0};
+        bool voted{false}; // by this engine's listener
+        bool ready{false}; // its copy has come, so it can play
+    };
+
     struct Status final {
         std::string role; // "", "host" or "listener"
         std::string invite;
@@ -54,6 +65,9 @@ class Together final {
         // Something to say: a track not in this library, the room closed, the
         // server not reached.
         std::string message;
+        bool party{false};
+        // Most wanted first.
+        std::vector<Suggestion> suggestions;
     };
 
     // `directory`: where a listener keeps the host's copies it fetched, and
@@ -81,6 +95,16 @@ class Together final {
     void resume();
     [[nodiscard]] Status status() const;
 
+    // Phase 4. The host makes the room a party, or ends it.
+    [[nodiscard]] core::Result<void> party(bool on);
+    // A listener suggests a track of its library -- its copy sent, the
+    // suggestion's number answered.
+    [[nodiscard]] core::Result<std::uint64_t> suggest(const std::string& raw_path);
+    // A listener's vote for a suggestion, or taken back.
+    [[nodiscard]] core::Result<void> vote(std::uint64_t id);
+    // The host removes a suggestion.
+    [[nodiscard]] core::Result<void> remove(std::uint64_t id);
+
   private:
     struct Session;
     // Ends the session there is, if any; under control_. Leaving, the room
@@ -104,6 +128,13 @@ class Together final {
     [[nodiscard]] std::string library_copy(Session& session, const std::string& entry,
                                            const protocol::Json& track);
     [[nodiscard]] protocol::Json describe(Session& session, const QueueEntry& entry);
+    [[nodiscard]] protocol::Json describe_file(const std::string& raw_path);
+    // What the room says besides what plays: whether it is a party, and the
+    // suggestions.
+    void read_room(Session& session, const protocol::Json& answer);
+    // The host's: the room's turn, when its own track has begun.
+    void take_turn(Session& session, const Player::State& state);
+    [[nodiscard]] std::shared_ptr<Session> current() const;
     void keep_in_step(Session& session);
     [[nodiscard]] core::Result<void> measure_clock(Session& session);
     void changed();

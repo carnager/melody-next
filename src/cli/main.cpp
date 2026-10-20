@@ -166,7 +166,12 @@ void usage(std::ostream& out) {
            "                              of ~/.config/melody/together-password\n"
            "  together join INVITE [NAME] listen along, as NAME (default: $USER)\n"
            "  together leave              out of the room; as its host, closing it\n"
-           "  together status             the room: who listens, what plays\n"
+           "  together status             the room: who listens, what plays, and at a\n"
+           "                              party what is suggested\n"
+           "  together party on|off       as host: friends may suggest tracks and vote\n"
+           "  together suggest FILE...    at a party: tracks of your library, suggested\n"
+           "  together vote N             for suggestion N, or the vote taken back\n"
+           "  together remove N           as host: suggestion N, gone\n"
            "  love | unlove               the playing track, on Last.fm\n"
            "  fav | unfav                 the playing track into the Favorites playlist,\n"
            "                              or out of it (ADR-0297)\n"
@@ -1698,6 +1703,17 @@ int run(const Options& options) {
             if (!listeners.empty()) {
                 std::cout << "listening: " << listeners << "\n";
             }
+            if (room.value("party", false)) {
+                std::cout << "a party\n";
+                for (const auto& each : room.value("suggestions", Json::array())) {
+                    std::cout << "  " << each.value("id", 0) << ". " << text_of(each, "artist")
+                              << " \u2014 " << text_of(each, "title") << " (" << text_of(each, "name")
+                              << ", " << each.value("votes", 0) << " votes"
+                              << (each.value("voted", false) ? ", yours" : "")
+                              << (each.value("ready", false) ? "" : ", its copy on its way")
+                              << ")\n";
+                }
+            }
             if (!text_of(room, "message").empty()) {
                 std::cout << text_of(room, "message") << "\n";
             }
@@ -1752,8 +1768,41 @@ int run(const Options& options) {
             }
         } else if (what == "status") {
             show_room(call(*client, "together.state"));
+        } else if (what == "party") {
+            if (words.size() != 3U || (words[2] != "on" && words[2] != "off")) {
+                fail("together party is on or off");
+            }
+            show_room(call(*client, "together.party", Json{{"party", words[2] == "on"}}));
+        } else if (what == "suggest") {
+            if (words.size() < 3U) {
+                fail("together suggest wants the files to suggest");
+            }
+            for (std::size_t index = 2; index < words.size(); ++index) {
+                // As the shell gave it, a path of this machine's.
+                const auto absolute = std::filesystem::absolute(words[index]).string();
+                const auto answer = call(*client, "together.suggest",
+                                         Json{{"path", trackknife::protocol::encode_raw_path(absolute)}});
+                if (options.json) {
+                    std::cout << answer.dump() << "\n";
+                } else {
+                    std::cout << "suggested " << answer.value("id", 0) << ": " << words[index]
+                              << "\n";
+                }
+            }
+        } else if (what == "vote" || what == "remove") {
+            std::uint64_t id = 0;
+            if (words.size() != 3U ||
+                std::from_chars(words[2].data(), words[2].data() + words[2].size(), id).ec !=
+                    std::errc{}) {
+                fail("together " + what + " wants a suggestion's number");
+            }
+            static_cast<void>(call(*client, what == "vote" ? "together.vote" : "together.remove",
+                                   Json{{"id", id}}));
+            if (!options.json) {
+                std::cout << (what == "vote" ? "voted\n" : "removed\n");
+            }
         } else {
-            fail("together is host, join, leave or status");
+            fail("together is host, join, leave, status, party, suggest, vote or remove");
         }
     } else if (command == "love" || command == "unlove") {
         const auto track = now_playing(*client, state());

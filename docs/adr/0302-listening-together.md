@@ -3,9 +3,9 @@
 ## Status
 
 Accepted, 2026-10-20. Phase 1 -- everyone plays their own copy -- is built
-with this record; phase 2 -- the host's copy for those without one -- and
+with this record; phase 2 -- the host's copy for those without one --
 phase 3 -- a web page for friends without Melody, with the room's chat --
-after it. Phase 4 -- party mode, suggestions and votes -- and the phone are
+and phase 4 -- a party: suggestions and votes -- after it. The phone is
 its direction.
 
 ## Context
@@ -67,12 +67,19 @@ its direction.
    server's: the last hundred lines, carried by the same long poll. It is
    the page's alone: Melody listeners chat there too, and Melody shows no
    chat of its own (2026-10-20).
-7. **Phase 4: party mode.** A room the host opens as a party lets anyone
-   suggest a track -- from their own library, or the host's -- and vote for
-   the suggestions; the host's engine takes the most wanted into its Up Next
-   as each track ends. A suggestion only its friend has is sent as phase 2
-   sends the host's: once, by whoever has the file. A room not a party
-   stays the host's alone.
+7. **Phase 4: party mode.** The host makes a room a party, or ends it,
+   and with it what waits. At a party a listener suggests tracks of their
+   library -- three waiting at most each -- and their engine sends each one's
+   copy, as the host sends its own: once, the one upload a listener may
+   make. Anyone votes, in Melody or on the page; a vote given again is taken
+   back; the most wanted come first, the oldest among as wanted. The room
+   and the host take turns: once one of the host's own tracks has begun,
+   its engine takes the most wanted suggestion whose copy has come into Up
+   Next -- its own copy when it has the track, else its friend's, fetched --
+   and when the host has nothing left to play, the next plays at once. A
+   suggestion's copy goes by its own name in the room; the host names it
+   with what plays, and its friend plays the file they suggested. A room
+   not a party stays the host's alone.
 8. **Driven by melody-cli and an official plugin.** `melody-cli together
    host|join|leave|status`; the "Listen together" plugin starts, joins and
    leaves from Workspace › Run and shows the room -- who listens, the invite
@@ -98,9 +105,14 @@ its direction.
 - `together` (`go test` in `together/`): rooms, passwords and invites;
   state kept and long-polled; listeners gone and rooms idle swept; the chat;
   the page and the blackbird served.
+- `together`: a party -- suggestions refused elsewhere, three each, the
+  listener's one upload, votes ordering them, the host taking and removing.
+- `engine-together`: at a party, a track only the friend has, suggested and
+  voted for, taken into the host's Up Next once its own track begins, the
+  host playing her copy and she her file.
 - By hand, in headless Chromium against a local server: the page joins,
-  plays within 60 ms of the room, follows a seek and a pause, and chats
-  both ways.
+  plays within 60 ms of the room, follows a seek and a pause, chats both
+  ways, and votes at a party.
 - `engine-together`: a host and a listener engine, each with the album: the
   listener plays the host's track at the host's position; a seek, a drift
   and a pause followed; a track it lacks played from the host's copy, where

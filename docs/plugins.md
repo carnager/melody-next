@@ -249,7 +249,8 @@ and answers what to show, in parts Melody draws:
 
 The title is the panel's heading; a heading opens a section; a paragraph
 longer than six lines is folded, More beneath it. Links are `http` or
-`https`. Melody fetches nothing for a panel: an image is
+`https` -- or Melody's own `melody://together/…`, a vote at a listening
+party (ADR-0302), which Melody opens itself. Melody fetches nothing for a panel: an image is
 the plugin's to download and keep. `timeout` is 1 to 300 seconds, 30 by
 default.
 

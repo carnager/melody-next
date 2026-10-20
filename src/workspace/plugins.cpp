@@ -671,10 +671,12 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                 return fail(QStringLiteral("a part has an unknown key \"%1\"").arg(key));
             }
         }
-        // A link is a web page's: nothing else is opened from a plugin.
+        // A link is a web page's -- or, ADR-0302, one of Melody's own, a vote
+        // at a listening party: nothing else is opened from a plugin.
         if (!read.url.isEmpty() && !read.url.startsWith(QStringLiteral("https://")) &&
-            !read.url.startsWith(QStringLiteral("http://"))) {
-            return fail(QStringLiteral("a link is not http or https: %1").arg(read.url));
+            !read.url.startsWith(QStringLiteral("http://")) &&
+            !read.url.startsWith(QStringLiteral("melody://"))) {
+            return fail(QStringLiteral("a link is not http, https or melody: %1").arg(read.url));
         }
         content.parts.push_back(std::move(read));
     }

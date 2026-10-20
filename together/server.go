@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ import (
 //	                                      the next state  (the invite, or the host key),
 //	                                      waited for MS at most (25 s)
 //	POST   /rooms/ROOM/chat               a line said: {name, text} (the invite)
+//	PUT    /rooms/ROOM/party              {party: bool}: suggestions and votes (the host key)
+//	POST   /rooms/ROOM/suggestions        {name, track} -> {id, file}: a track suggested,
+//	                                      its copy then sent as TRACK=file (the invite; a party)
+//	POST   /rooms/ROOM/suggestions/N/vote {name}: a vote, or taken back (the invite)
+//	POST   /rooms/ROOM/suggestions/N/take the most wanted, taken to play (the host key)
+//	DELETE /rooms/ROOM/suggestions/N      one removed (the host key)
 //	POST   /rooms/ROOM/leave?name=WHO     a listener goes (the invite)
 //	PUT    /rooms/ROOM/tracks/TRACK       the host's copy of a track (the host key)
 //	GET    /rooms/ROOM/tracks/TRACK       that copy, for whoever lacks one (the invite,
@@ -71,6 +78,12 @@ func bearer(r *http.Request) string {
 	}
 	// A browser's <audio> sends no header: the key in the address instead.
 	return r.URL.Query().Get("key")
+}
+
+func validName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && len(name) <= 64 &&
+		strings.IndexFunc(name, func(c rune) bool { return !unicode.IsPrint(c) }) < 0
 }
 
 // A listener's name as the others see it: printable, and short.
@@ -152,11 +165,23 @@ func (s *server) handler() http.Handler {
 			}
 			return
 		}
+		files := s.tracks.names(room)
+		// Each suggestion says whether its copy has come: only then can it play.
+		type offered struct {
+			suggestion
+			Ready bool `json:"ready"`
+		}
+		suggestions := make([]offered, 0, len(found.Suggestions))
+		for _, each := range found.Suggestions {
+			suggestions = append(suggestions, offered{each, slices.Contains(files, each.File)})
+		}
+		found.Suggestions = nil
 		answer(w, http.StatusOK, struct {
 			seen
-			Files []string `json:"files"`
-			Ms    int64    `json:"ms"`
-		}{found, s.tracks.names(room), serverMs()})
+			Suggestions []offered `json:"suggestions"`
+			Files       []string  `json:"files"`
+			Ms          int64     `json:"ms"`
+		}{found, suggestions, files, serverMs()})
 	}))
 	mux.HandleFunc("POST /rooms/{room}/chat", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		var line struct {
@@ -181,6 +206,75 @@ func (s *server) handler() http.Handler {
 		}
 		answer(w, http.StatusOK, map[string]bool{"said": true})
 	}))
+	mux.HandleFunc("PUT /rooms/{room}/party", s.opened(host, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		var party struct {
+			Party bool `json:"party"`
+		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<10))
+		if json.Unmarshal(body, &party) != nil {
+			refuse(w, http.StatusBadRequest, "party is true or false")
+			return
+		}
+		if err := s.rooms.setParty(room, party.Party); err != nil {
+			refuse(w, http.StatusNotFound, err.Error())
+			return
+		}
+		answer(w, http.StatusOK, map[string]bool{"party": party.Party})
+	}))
+	mux.HandleFunc("POST /rooms/{room}/suggestions", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		var offer struct {
+			Name  string          `json:"name"`
+			Track json.RawMessage `json:"track"`
+		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+		if json.Unmarshal(body, &offer) != nil || !validName(offer.Name) ||
+			!strings.HasPrefix(strings.TrimSpace(string(offer.Track)), "{") {
+			refuse(w, http.StatusBadRequest, "a suggestion is {name, track}")
+			return
+		}
+		made, err := s.rooms.suggest(room, strings.TrimSpace(offer.Name), offer.Track)
+		switch {
+		case errors.Is(err, errNoParty), errors.Is(err, errTooMany):
+			refuse(w, http.StatusConflict, err.Error())
+		case err != nil:
+			refuse(w, http.StatusNotFound, err.Error())
+		default:
+			answer(w, http.StatusOK, map[string]any{"id": made.ID, "file": made.File})
+		}
+	}))
+	mux.HandleFunc("POST /rooms/{room}/suggestions/{id}/vote", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		var voter struct {
+			Name string `json:"name"`
+		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<10))
+		id, bad := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		if bad != nil || json.Unmarshal(body, &voter) != nil || !validName(voter.Name) {
+			refuse(w, http.StatusBadRequest, "a vote is {name}, for a suggestion's number")
+			return
+		}
+		if err := s.rooms.vote(room, id, strings.TrimSpace(voter.Name)); err != nil {
+			refuse(w, http.StatusNotFound, err.Error())
+			return
+		}
+		answer(w, http.StatusOK, map[string]bool{"voted": true})
+	}))
+	// The host takes a suggestion to play, or removes it: either way it
+	// leaves the list -- its copy kept for the room's hour.
+	unsuggest := func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		id, bad := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		if bad != nil {
+			refuse(w, http.StatusBadRequest, "a suggestion's number")
+			return
+		}
+		gone, err := s.rooms.unsuggest(room, id)
+		if err != nil {
+			refuse(w, http.StatusNotFound, err.Error())
+			return
+		}
+		answer(w, http.StatusOK, gone)
+	}
+	mux.HandleFunc("POST /rooms/{room}/suggestions/{id}/take", s.opened(host, unsuggest))
+	mux.HandleFunc("DELETE /rooms/{room}/suggestions/{id}", s.opened(host, unsuggest))
 	mux.HandleFunc("POST /rooms/{room}/leave", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		if name, ok := listenerName(r); ok && name != "" {
 			s.rooms.leave(room, name)
@@ -200,7 +294,12 @@ func (s *server) handler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(mascot)
 	})
-	mux.HandleFunc("PUT /rooms/{room}/tracks/{track}", s.opened(host, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+	mux.HandleFunc("PUT /rooms/{room}/tracks/{track}", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, who holder) {
+		// A listener sends only the copy of a suggestion waiting in a party.
+		if who != host && !s.rooms.awaits(room, r.PathValue("track")) {
+			refuse(w, http.StatusForbidden, "only the host sends tracks, but for a suggestion")
+			return
+		}
 		err := s.tracks.put(room, r.PathValue("track"), r.Body)
 		switch {
 		case errors.Is(err, errTooLarge):

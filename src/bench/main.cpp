@@ -12,6 +12,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -207,6 +208,9 @@ int main(int argc, char** argv) {
     }
     startSoakLog(&application);
     trackknife::bench::BenchMainWindow window;
+    // ADR-0302: melody:// links opened inside Melody -- a vote in a panel --
+    // are its own, not the desktop's to hand to a second Melody.
+    QDesktopServices::setUrlHandler(QStringLiteral("melody"), &window, "openLinkUrl");
     window.show();
     if (instance) {
         QObject::connect(&*instance, &trackknife::bench::SingleInstance::asked, &window,

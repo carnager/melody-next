@@ -7,6 +7,20 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 22 (2026-10-20)
+
+ADR-0302 phase 4: a listening party.
+
+- `together.party {party}` -> the state: the host makes its room a party,
+  or ends it.
+- `together.suggest {path}` -> `{id}`: a listener suggests a track of its
+  library, its copy then sent.
+- `together.vote {id}` -> `{voted}`: a listener's vote, or taken back.
+- `together.remove {id}` -> `{removed}`: the host removes a suggestion.
+- `together.state` and the event `together.changed` also carry `party` and
+  `suggestions` -- `[{id, name, title, artist, votes, voted, ready}]`, most
+  wanted first.
+
 ### Level 21 (2026-10-20)
 
 ADR-0302: listening together, through a melody-together server.

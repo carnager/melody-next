@@ -119,6 +119,22 @@
     color: #fff; font-weight: 700; font-size: .8rem;
   }
   .you { color: var(--faint); font-size: .8rem; }
+  .party-badge {
+    font-size: .75rem; font-weight: 700; color: var(--accent); background: var(--accent-soft);
+    border-radius: 999px; padding: 2px 9px; margin-left: 6px; text-transform: none; letter-spacing: 0;
+  }
+  .suggestions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .suggestions li { display: flex; align-items: center; gap: 12px; }
+  .suggestions .what { flex: 1; min-width: 0; }
+  .suggestions .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggestions .by { color: var(--faint); font-size: .85rem; }
+  .vote {
+    display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; cursor: pointer;
+    padding: 6px 12px; font-weight: 700; background: var(--ground); color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--line); font-variant-numeric: tabular-nums;
+  }
+  .vote.mine { background: var(--accent); color: #fff; box-shadow: none; }
+  .party-note { color: var(--faint); font-size: .88rem; margin: 0; }
   .chat { display: flex; flex-direction: column; min-height: 360px; }
   .lines {
     flex: 1; overflow-y: auto; margin: 0 -6px; padding: 0 6px; list-style: none;
@@ -204,6 +220,11 @@
     <section class="card">
       <h2>Listening</h2>
       <ul class="people" id="people"></ul>
+    </section>
+    <section class="card" id="party" hidden>
+      <h2>Suggested <span class="party-badge">Party</span></h2>
+      <p class="party-note" id="party-note">Friends in Melody suggest tracks; vote for what plays next.</p>
+      <ol class="suggestions" id="suggestions"></ol>
     </section>
     <section class="card chat">
       <h2>Chat</h2>
@@ -303,6 +324,43 @@ function renderPeople(listeners) {
   }
 }
 
+// ADR-0302 phase 4: at a party, what friends suggested -- most wanted first
+// -- and a vote for each, given or taken back.
+function renderParty(answer) {
+  $("party").hidden = !answer.party;
+  const list = $("suggestions");
+  list.replaceChildren();
+  const suggestions = answer.suggestions || [];
+  $("party-note").hidden = suggestions.length > 0;
+  for (const each of suggestions) {
+    const track = each.track || {};
+    const item = document.createElement("li");
+    const what = document.createElement("div");
+    what.className = "what";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = [track.title, track.artist || track.albumartist].filter(Boolean).join(" — ");
+    const by = document.createElement("div");
+    by.className = "by";
+    by.textContent = `${each.name}${each.ready ? "" : " · on its way"}`;
+    what.append(title, by);
+    const votes = each.votes || [];
+    const vote = document.createElement("button");
+    vote.type = "button";
+    vote.className = "vote" + (votes.includes(name) ? " mine" : "");
+    vote.textContent = `▲ ${votes.length}`;
+    vote.title = votes.length ? `Voted: ${votes.join(", ")}` : "Vote for it";
+    vote.addEventListener("click", () => {
+      fetch(`/rooms/${encodeURIComponent(room)}/suggestions/${each.id}/vote`, {
+        method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).catch(() => {});
+    });
+    item.append(what, vote);
+    list.append(item);
+  }
+}
+
 function renderChat(lines) {
   const list = $("lines");
   const fresh = (lines || []).filter((line) => line.id > seenChat);
@@ -359,7 +417,8 @@ function keepInStep() {
     $("ring").style.setProperty("--progress", "0deg");
     return;
   }
-  const entry = state.entry;
+  // A suggestion's copy goes by its own name; the host's by its entry.
+  const entry = state.file || state.entry;
   const duration = track.duration_ms || (audio.duration ? audio.duration * 1000 : 0);
   const at = target();
   $("elapsed").textContent = clock(Math.min(at, duration || at));
@@ -367,7 +426,7 @@ function keepInStep() {
   $("ring").style.setProperty("--progress", duration ? `${Math.min(360, (at / duration) * 360)}deg` : "0deg");
 
   // What follows, fetched ahead.
-  const next = state.next && state.next.entry;
+  const next = state.next && (state.next.file || state.next.entry);
   if (next && files.has(next) && upcoming.dataset.entry !== next) {
     upcoming.dataset.entry = next;
     upcoming.src = trackUrl(next);
@@ -409,6 +468,7 @@ function apply(answer) {
   files = new Set(answer.files || []);
   renderTrack();
   renderPeople(answer.listeners);
+  renderParty(answer);
   renderChat(answer.chat);
   status(state.track ? (state.paused ? "Paused" : "Live") : "Waiting for the host", state.track && !state.paused);
   keepInStep();

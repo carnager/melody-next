@@ -100,6 +100,19 @@ melody-cli together leave
 The session is the engine's: it goes on with Melody's window closed, and
 plays through whatever speakers the engine plays on.
 
+## A party
+
+The host makes the room a party -- Workspace › Run › **Party mode on/off**,
+or `melody-cli together party on`. Then anyone listening in Melody suggests
+tracks of their own -- right-click them, **Suggest to the listening room**,
+or `melody-cli together suggest FILE…` -- three waiting at most each, and
+everyone votes: in the panel, on the page, or `melody-cli together vote N`.
+The host's tracks and the room's take turns: once one of the host's own
+begins, the most wanted suggestion is next; with the host's queue run out,
+the suggestions go on by themselves. A suggestion only its friend has is
+played from their copy, sent once. The host removes one with **Remove** in
+the panel; ending the party clears what waits.
+
 ## How a listener finds the track
 
 By its MusicBrainz track id, when both copies are tagged with one; else by

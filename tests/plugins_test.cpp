@@ -1060,8 +1060,9 @@ void PluginsTest::theTogetherPluginAsksTheEngine() {
     QString problem;
     const auto together = parsePluginManifest(manifest_file.readAll(), folder, &problem);
     QVERIFY2(together.has_value(), qPrintable(problem));
-    QCOMPARE(together->triggers.size(), std::size_t{3U});
+    QCOMPARE(together->triggers.size(), std::size_t{4U});
     QCOMPARE(together->panels.size(), std::size_t{1U});
+    QCOMPARE(together->actions.size(), std::size_t{1U});
     const auto trigger = [&together](const QString& id) {
         return *std::ranges::find(together->triggers, id, &PluginTrigger::id);
     };
@@ -1074,7 +1075,8 @@ void PluginsTest::theTogetherPluginAsksTheEngine() {
 echo "$*|$MELODY_SERVER|$MELODY_TOGETHER_PASSWORD" >> '%1'
 case "$3" in
   host) echo '{"invite":"https://t.example/rooms/r#k"}' ;;
-  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":""}' ;;
+  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":2,"voted":false,"ready":true}]}' ;;
+  suggest) echo '{"id":8}' ;;
 esac
 )sh")
                   .arg(asked)
@@ -1145,6 +1147,31 @@ esac
                part.url == QStringLiteral("https://t.example/rooms/r#k");
     }));
     QVERIFY(!said(QStringLiteral("https://t.example/rooms/r#k")));
+    // ADR-0302 phase 4: at a party, the suggestions -- as host, each with
+    // Remove, one of Melody's own links.
+    QVERIFY(said(QStringLiteral("Royal Thunder — Glow")));
+    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::link &&
+               part.text == QStringLiteral("Remove") &&
+               part.url == QStringLiteral("melody://together/remove?id=7");
+    }));
+    // Suggesting, from the tracks chosen: their paths, as the engine has them.
+    const auto suggest = together->actions.front();
+    const auto albums = pluginAlbums({PluginTrack{.path = "/srv/music/A/B/01.flac",
+                                                  .title = {},
+                                                  .artist = "A",
+                                                  .album = "B",
+                                                  .album_artist = "A",
+                                                  .date = {},
+                                                  .track_number = {}}},
+                                     {"/srv/music"});
+    const auto suggested =
+        run(*together, suggest, pluginInput(suggest, nas, albums, {"/srv/music"}, settings));
+    QVERIFY2(suggested.succeeded, qPrintable(suggested.text));
+    QFile again{asked};
+    QVERIFY(again.open(QIODevice::ReadOnly));
+    QVERIFY(QString::fromUtf8(again.readAll())
+                .contains(QStringLiteral("--json together suggest /srv/music/A/B/01.flac|gemenon:6603|")));
     qputenv("PATH", path);
 }
 

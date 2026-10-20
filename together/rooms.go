@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -21,8 +23,12 @@ import (
 // wakes whoever waits for the next.
 
 var (
-	errRefused = errors.New("the server's password is not that")
-	errNoRoom  = errors.New("there is no such room")
+	errRefused  = errors.New("the server's password is not that")
+	errNoRoom   = errors.New("there is no such room")
+	errNoParty  = errors.New("the room is no party: only the host chooses")
+	errTooMany  = errors.New("three suggestions of yours are waiting already")
+	errNoSuch   = errors.New("there is no such suggestion")
+	maximumWait = 3
 )
 
 // Listeners not heard from for this long have gone; a room no one has
@@ -55,6 +61,9 @@ type seen struct {
 	Listeners []string        `json:"listeners"`
 	Chat      []said          `json:"chat"`
 	Closed    bool            `json:"closed"`
+	Party     bool            `json:"party"`
+	// Most wanted first; the oldest first among as wanted.
+	Suggestions []suggestion `json:"suggestions"`
 }
 
 // A line of the room's chat: who, what, when on the server's clock.
@@ -68,6 +77,21 @@ type said struct {
 // The chat a room keeps: enough to read back on arriving.
 const keptChat = 100
 
+// ADR-0302 phase 4: a track a friend suggests in a party room -- described
+// as the host's tracks are, its copy sent by whoever suggested it, played
+// in turn with the host's by the votes it has.
+type suggestion struct {
+	ID    uint64          `json:"id"`
+	Name  string          `json:"name"`
+	Track json.RawMessage `json:"track"`
+	// The name its copy is kept by, among the room's tracks.
+	File  string   `json:"file"`
+	Votes []string `json:"votes"`
+	Ms    int64    `json:"ms"`
+}
+
+func suggestionFile(id uint64) string { return "s" + strconv.FormatUint(id, 10) }
+
 type room struct {
 	hostKey   string
 	invite    string
@@ -78,6 +102,9 @@ type room struct {
 	closed    bool
 	chat      []said
 	chatID    uint64
+	party     bool
+	suggested []suggestion
+	suggestID uint64
 	// Closed, and a new one made, whenever the room changes: whoever waits
 	// on it wakes.
 	changed chan struct{}
@@ -171,8 +198,16 @@ func (found *room) seen() seen {
 	sort.Strings(names)
 	chat := make([]said, len(found.chat))
 	copy(chat, found.chat)
+	suggested := make([]suggestion, len(found.suggested))
+	copy(suggested, found.suggested)
+	sort.SliceStable(suggested, func(a, b int) bool {
+		if len(suggested[a].Votes) != len(suggested[b].Votes) {
+			return len(suggested[a].Votes) > len(suggested[b].Votes)
+		}
+		return suggested[a].ID < suggested[b].ID
+	})
 	return seen{Revision: found.revision, State: found.state, Listeners: names, Chat: chat,
-		Closed: found.closed}
+		Closed: found.closed, Party: found.party, Suggestions: suggested}
 }
 
 // The host's: a new state, numbered and handed to everyone waiting.
@@ -260,6 +295,113 @@ func (r *rooms) say(name, who, text string) error {
 	found.touched = r.now()
 	found.moved()
 	return nil
+}
+
+// The host makes the room a party, or ends it -- and with it what waits.
+func (r *rooms) setParty(name string, on bool) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return errNoRoom
+	}
+	found.party = on
+	if !on {
+		found.suggested = nil
+	}
+	found.touched = r.now()
+	found.moved()
+	return nil
+}
+
+// A friend's suggestion: the name its copy goes by.
+func (r *rooms) suggest(name, who string, track json.RawMessage) (suggestion, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return suggestion{}, errNoRoom
+	}
+	if !found.party {
+		return suggestion{}, errNoParty
+	}
+	waiting := 0
+	for _, each := range found.suggested {
+		if each.Name == who {
+			waiting++
+		}
+	}
+	if waiting >= maximumWait {
+		return suggestion{}, errTooMany
+	}
+	found.suggestID++
+	made := suggestion{ID: found.suggestID, Name: who, Track: track, File: suggestionFile(found.suggestID),
+		Votes: []string{}, Ms: r.now().UnixMilli()}
+	found.suggested = append(found.suggested, made)
+	found.touched = r.now()
+	found.moved()
+	return made, nil
+}
+
+// A vote for a suggestion, or -- given again -- taken back.
+func (r *rooms) vote(name string, id uint64, who string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return errNoRoom
+	}
+	for index := range found.suggested {
+		each := &found.suggested[index]
+		if each.ID != id {
+			continue
+		}
+		if at := slices.Index(each.Votes, who); at >= 0 {
+			each.Votes = slices.Delete(each.Votes, at, at+1)
+		} else {
+			each.Votes = append(each.Votes, who)
+		}
+		found.touched = r.now()
+		found.moved()
+		return nil
+	}
+	return errNoSuch
+}
+
+// A suggestion gone from the list: taken by the host to play, or removed.
+func (r *rooms) unsuggest(name string, id uint64) (suggestion, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return suggestion{}, errNoRoom
+	}
+	for index, each := range found.suggested {
+		if each.ID == id {
+			found.suggested = slices.Delete(found.suggested, index, index+1)
+			found.touched = r.now()
+			found.moved()
+			return each, nil
+		}
+	}
+	return suggestion{}, errNoSuch
+}
+
+// Whether `file` is the copy of a suggestion waiting in a party: the one
+// upload a listener may make.
+func (r *rooms) awaits(name, file string) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed || !found.party {
+		return false
+	}
+	for _, each := range found.suggested {
+		if each.File == file {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *rooms) leave(name, who string) {

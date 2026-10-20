@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,11 +21,15 @@ import (
 
 const (
 	maximumTrack = 64 << 20
+	// A cover is shown no larger than a phone's screen: the host's engine
+	// sends it fitted, well within this.
+	maximumCover = 1 << 20
 	keptFor      = time.Hour
 )
 
 var (
-	errTooLarge  = errors.New("a track is at most 64 MB")
+	errTooLarge  = errors.New("a track is at most 64 MB, a cover 1 MB")
+	errNoImage   = errors.New("a cover is a JPEG, PNG or WebP image")
 	errBadTrack  = errors.New("a track's name is letters, digits, - and _")
 	trackPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
@@ -35,11 +40,16 @@ type kept struct {
 	added time.Time
 }
 
+// The copies a room's tracks have -- and, a store of their own, their
+// covers -- kept alike: an hour, a folder a room.
 type tracks struct {
 	directory string
 	capacity  int64
-	now       func() time.Time
-	mutex     sync.Mutex
+	// What each file ends in, and the most one may take.
+	suffix  string
+	maximum int64
+	now     func() time.Time
+	mutex   sync.Mutex
 	// By room, then track.
 	files map[string]map[string]kept
 }
@@ -47,11 +57,20 @@ type tracks struct {
 // The tracks kept in `directory`, a folder each room, those a previous run
 // kept among them: rooms outlive a restart, and so do their copies.
 func newTracks(directory string, capacity int64) (*tracks, error) {
+	return newStore(directory, capacity, ".opus", maximumTrack)
+}
+
+// The covers of the tracks, kept as the tracks are.
+func newCovers(directory string, capacity int64) (*tracks, error) {
+	return newStore(directory, capacity, ".img", maximumCover)
+}
+
+func newStore(directory string, capacity int64, suffix string, maximum int64) (*tracks, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
-	found := &tracks{directory: directory, capacity: capacity, now: time.Now,
-		files: map[string]map[string]kept{}}
+	found := &tracks{directory: directory, capacity: capacity, suffix: suffix, maximum: maximum,
+		now: time.Now, files: map[string]map[string]kept{}}
 	rooms, err := os.ReadDir(directory)
 	if err != nil {
 		return nil, err
@@ -64,9 +83,9 @@ func newTracks(directory string, capacity int64) (*tracks, error) {
 		}
 		copies, _ := os.ReadDir(filepath.Join(directory, room.Name()))
 		for _, copy := range copies {
-			track, isOpus := strings.CutSuffix(copy.Name(), ".opus")
+			track, isOurs := strings.CutSuffix(copy.Name(), found.suffix)
 			info, err := copy.Info()
-			if !isOpus || err != nil || !trackPattern.MatchString(track) {
+			if !isOurs || err != nil || !trackPattern.MatchString(track) {
 				continue
 			}
 			if found.files[room.Name()] == nil {
@@ -81,7 +100,7 @@ func newTracks(directory string, capacity int64) (*tracks, error) {
 }
 
 func (t *tracks) path(room, track string) string {
-	return filepath.Join(t.directory, room, track+".opus")
+	return filepath.Join(t.directory, room, track+t.suffix)
 }
 
 // Keeps what `body` holds as the room's track, replacing one of that name.
@@ -94,15 +113,19 @@ func (t *tracks) put(room, track string, body io.Reader) error {
 		return err
 	}
 	defer os.Remove(partial.Name())
-	written, err := io.Copy(partial, io.LimitReader(body, maximumTrack+1))
+	written, err := io.Copy(partial, io.LimitReader(body, t.maximum+1))
 	if closed := partial.Close(); err == nil {
 		err = closed
 	}
 	if err != nil {
 		return err
 	}
-	if written > maximumTrack {
+	if written > t.maximum {
 		return errTooLarge
+	}
+	// A cover is an image a browser shows, and nothing else served as one.
+	if t.suffix == ".img" && imageType(partial.Name()) == "" {
+		return errNoImage
 	}
 	target := t.path(room, track)
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
@@ -187,4 +210,22 @@ func (t *tracks) sweep() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.evictLocked()
+}
+
+// What image a kept cover is, from its first bytes: one of those a page
+// shows, or "".
+func imageType(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	head := make([]byte, 512)
+	read, _ := io.ReadFull(file, head)
+	switch kind := http.DetectContentType(head[:read]); kind {
+	case "image/jpeg", "image/png", "image/webp":
+		return kind
+	default:
+		return ""
+	}
 }

@@ -13,9 +13,16 @@ however many listen -- and a listener lacking it fetches it before it is
 due.
 
 A friend **without Melody** listens in the browser: the invite opens the
-room's page, which asks their name and plays the host's copy, in step, with
-who listens and the room's chat beside Melody's blackbird. A party mode
-with suggestions and votes comes next.
+room's page, which shows what plays before they join, asks their name and
+plays the host's copy, in step, with who listens and the room's chat. The
+host's engine sends each track's cover beside its copy, fitted to a phone's
+screen: the page shows it large, washed blurred behind everything, and on
+every row of the room's tracks. Melody's blackbird sits on the cover's corner
+and listens along -- moving with how loud the music is, hopping on a beat,
+dozing while the host has paused, greeting whoever comes in. Reactions --
+🔥 ❤️ 😂 🤘 👏 🎉 -- float up on every page, and the last one shows in
+Melody's Listening room panel for a minute. A party room takes suggestions
+and votes from friends in Melody.
 
 ## The server
 

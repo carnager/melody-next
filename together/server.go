@@ -27,6 +27,8 @@ import (
 //	                                      the next state  (the invite, or the host key),
 //	                                      waited for MS at most (25 s)
 //	POST   /rooms/ROOM/chat               a line said: {name, text} (the invite)
+//	POST   /rooms/ROOM/react              {name, emoji}: a reaction to what plays, one of a
+//	                                      few emoji (the invite)
 //	PUT    /rooms/ROOM/party              {party: bool}: suggestions and votes (the host key)
 //	POST   /rooms/ROOM/suggestions        {name, track} -> {id, file}: a track suggested,
 //	                                      its copy then sent as TRACK=file (the invite; a party)
@@ -37,6 +39,9 @@ import (
 //	PUT    /rooms/ROOM/tracks/TRACK       the host's copy of a track (the host key)
 //	GET    /rooms/ROOM/tracks/TRACK       that copy, for whoever lacks one (the invite,
 //	                                      as a header or ?key=); ranges honoured
+//	PUT    /rooms/ROOM/covers/TRACK       a track's cover: JPEG, PNG or WebP, sent as its
+//	                                      copy is (the host key; a suggestion's, the invite)
+//	GET    /rooms/ROOM/covers/TRACK       that cover (the invite, as a header or ?key=)
 //	GET    /rooms/ROOM                    the invite, opened in a browser: the room to
 //	                                      listen in, or the way into Melody
 //	GET    /assets/mascot.svg             Melody's blackbird
@@ -100,6 +105,8 @@ func listenerName(r *http.Request) (string, bool) {
 type server struct {
 	rooms  *rooms
 	tracks *tracks
+	// The tracks' covers; none kept when nil.
+	covers *tracks
 	// How long a listener's ask for the next state is held.
 	wait time.Duration
 }
@@ -195,12 +202,17 @@ func (s *server) handler() http.Handler {
 			suggestions = append(suggestions, offered{each, slices.Contains(files, each.File)})
 		}
 		found.Suggestions = nil
+		covers := []string{}
+		if s.covers != nil {
+			covers = s.covers.names(room)
+		}
 		answer(w, http.StatusOK, struct {
 			seen
 			Suggestions []offered `json:"suggestions"`
 			Files       []string  `json:"files"`
+			Covers      []string  `json:"covers"`
 			Ms          int64     `json:"ms"`
-		}{found, suggestions, files, serverMs()})
+		}{found, suggestions, files, covers, serverMs()})
 	}))
 	mux.HandleFunc("POST /rooms/{room}/chat", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		var line struct {
@@ -224,6 +236,23 @@ func (s *server) handler() http.Handler {
 			return
 		}
 		answer(w, http.StatusOK, map[string]bool{"said": true})
+	}))
+	mux.HandleFunc("POST /rooms/{room}/react", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		var sent struct {
+			Name  string `json:"name"`
+			Emoji string `json:"emoji"`
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<10))
+		if err != nil || json.Unmarshal(body, &sent) != nil || !validName(sent.Name) ||
+			!slices.Contains(reactions, sent.Emoji) {
+			refuse(w, http.StatusBadRequest, "a reaction is {name, emoji}, one of "+strings.Join(reactions, " "))
+			return
+		}
+		if err := s.rooms.react(room, strings.TrimSpace(sent.Name), sent.Emoji); err != nil {
+			refuse(w, http.StatusNotFound, err.Error())
+			return
+		}
+		answer(w, http.StatusOK, map[string]bool{"sent": true})
 	}))
 	mux.HandleFunc("PUT /rooms/{room}/party", s.opened(host, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		var party struct {
@@ -344,9 +373,55 @@ func (s *server) handler() http.Handler {
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 		http.ServeContent(w, r, "", added, file)
 	}))
+	mux.HandleFunc("PUT /rooms/{room}/covers/{track}", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, who holder) {
+		if s.covers == nil {
+			refuse(w, http.StatusNotFound, "this server keeps no covers")
+			return
+		}
+		if who != host && !s.rooms.awaits(room, r.PathValue("track")) {
+			refuse(w, http.StatusForbidden, "only the host sends covers, but for a suggestion")
+			return
+		}
+		err := s.covers.put(room, r.PathValue("track"), r.Body)
+		switch {
+		case errors.Is(err, errTooLarge):
+			refuse(w, http.StatusRequestEntityTooLarge, err.Error())
+		case errors.Is(err, errBadTrack), errors.Is(err, errNoImage):
+			refuse(w, http.StatusBadRequest, err.Error())
+		case err != nil:
+			refuse(w, http.StatusInternalServerError, "the cover could not be kept")
+		default:
+			s.rooms.touch(room)
+			answer(w, http.StatusOK, map[string]bool{"kept": true})
+		}
+	}))
+	mux.HandleFunc("GET /rooms/{room}/covers/{track}", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		if s.covers == nil {
+			refuse(w, http.StatusNotFound, "this server keeps no covers")
+			return
+		}
+		file, added, err := s.covers.open(room, r.PathValue("track"))
+		if err != nil {
+			refuse(w, http.StatusNotFound, "no cover was sent for that track")
+			return
+		}
+		defer file.Close()
+		kind := imageType(file.Name())
+		if kind == "" {
+			refuse(w, http.StatusNotFound, "no cover was sent for that track")
+			return
+		}
+		w.Header().Set("Content-Type", kind)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		http.ServeContent(w, r, "", added, file)
+	}))
 	mux.HandleFunc("DELETE /rooms/{room}", s.opened(host, func(w http.ResponseWriter, _ *http.Request, room string, _ holder) {
 		s.rooms.close(room)
 		s.tracks.forget(room)
+		if s.covers != nil {
+			s.covers.forget(room)
+		}
 		answer(w, http.StatusOK, map[string]bool{"closed": true})
 	}))
 	return mux

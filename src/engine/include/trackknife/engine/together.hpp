@@ -78,6 +78,9 @@ class Together final {
         // The room's name and the server's address.
         std::string room;
         std::string server;
+        // The last reaction sent from the room's web page within the last
+        // minute, "Name Emoji"; empty when none.
+        std::string reaction;
     };
 
     // `directory`: where a listener keeps the host's copies it fetched, and

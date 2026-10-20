@@ -140,8 +140,10 @@ def panel(given):
         buttons.append({"text": "Web page", "url": room["invite"], "role": "quiet"})
     buttons.append({"text": "Stop" if hosting else "Leave",
                     "action": "stop" if hosting else "leave", "role": "quiet"})
+    # The last reaction from the web page, while it is fresh.
+    detail = " · ".join(p for p in ("%d listening" % len(listeners), room.get("reaction")) if p)
     parts.append({"status": "Hosting" if hosting else "Listening along",
-                  "detail": "%d listening" % len(listeners), "live": True, "buttons": buttons})
+                  "detail": detail, "live": True, "buttons": buttons})
     if hosting:
         parts.append({"toggle": "party", "label": "Party",
                       "detail": "Friends suggest tracks and vote on them",

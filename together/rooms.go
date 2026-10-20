@@ -69,7 +69,23 @@ type seen struct {
 	Suggestions []suggestion `json:"suggestions"`
 	// Newest first.
 	History []played `json:"history"`
+	// The last few, oldest first: a page floats each up once.
+	Reactions []reaction `json:"reactions"`
 }
+
+// A reaction to what plays: one of a few emoji, who sent it, and when on the
+// server's clock. Not kept over a restart: it is gone in seconds anyway.
+type reaction struct {
+	ID    uint64 `json:"id"`
+	Name  string `json:"name"`
+	Emoji string `json:"emoji"`
+	Ms    int64  `json:"ms"`
+}
+
+// The reactions there are, and how many a room keeps.
+var reactions = []string{"🔥", "❤️", "😂", "🤘", "👏", "🎉"}
+
+const keptReactions = 20
 
 // A line of the room's chat: who, what, when on the server's clock.
 type said struct {
@@ -115,6 +131,9 @@ type room struct {
 	history []played
 	playing string
 	current played
+	// ADR-0302: the last reactions.
+	reactions  []reaction
+	reactionID uint64
 	// Closed, and a new one made, whenever the room changes: whoever waits
 	// on it wakes.
 	changed chan struct{}
@@ -248,8 +267,11 @@ func (found *room) seen() seen {
 	})
 	history := make([]played, len(found.history))
 	copy(history, found.history)
+	reacted := make([]reaction, len(found.reactions))
+	copy(reacted, found.reactions)
 	return seen{Revision: found.revision, State: found.state, Listeners: names, Chat: chat,
-		Closed: found.closed, Party: found.party, Suggestions: suggested, History: history}
+		Closed: found.closed, Party: found.party, Suggestions: suggested, History: history,
+		Reactions: reacted}
 }
 
 // The host's: a new state, numbered and handed to everyone waiting.
@@ -362,6 +384,25 @@ func (r *rooms) say(name, who, text string) error {
 	found.chat = append(found.chat, said{ID: found.chatID, Name: who, Text: text, Ms: r.now().UnixMilli()})
 	if len(found.chat) > keptChat {
 		found.chat = found.chat[len(found.chat)-keptChat:]
+	}
+	found.touched = r.now()
+	found.moved()
+	return nil
+}
+
+// A reaction to what plays, floated up on everyone's page.
+func (r *rooms) react(name, who, emoji string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return errNoRoom
+	}
+	found.reactionID++
+	found.reactions = append(found.reactions,
+		reaction{ID: found.reactionID, Name: who, Emoji: emoji, Ms: r.now().UnixMilli()})
+	if len(found.reactions) > keptReactions {
+		found.reactions = found.reactions[len(found.reactions)-keptReactions:]
 	}
 	found.touched = r.now()
 	found.moved()

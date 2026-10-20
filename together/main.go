@@ -53,11 +53,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "melody-together: the folder for tracks:", err)
 		os.Exit(1)
 	}
+	covers, err := newCovers(filepath.Join(*data, "covers"), 256<<20)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "melody-together: the folder for covers:", err)
+		os.Exit(1)
+	}
 	// Stopping ends whoever waits on a long poll at once.
 	stopping, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	served := &http.Server{
-		Handler: (&server{rooms: rooms, tracks: kept, wait: 25 * time.Second}).handler(),
+		Handler: (&server{rooms: rooms, tracks: kept, covers: covers, wait: 25 * time.Second}).handler(),
 		// A track's upload or download takes as long as the line allows.
 		ReadTimeout:       0,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -78,8 +83,10 @@ func main() {
 			case <-sweeping.C:
 				for _, gone := range rooms.sweep() {
 					kept.forget(gone)
+					covers.forget(gone)
 				}
 				kept.sweep()
+				covers.sweep()
 			case <-keeping.C:
 				if err := rooms.keep(roomsFile); err != nil {
 					fmt.Fprintln(os.Stderr, "melody-together: keeping the rooms:", err)

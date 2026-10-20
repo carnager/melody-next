@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "trackknife/engine/together.hpp"
+#include "trackknife/engine/cover_fitting.hpp"
+#include "trackknife/formats/artwork.hpp"
 
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -214,6 +216,23 @@ void long_transfer(CURL* curl, const std::atomic_bool& stop) {
            status == 200;
 }
 
+// A track's cover for the room's web page: fitted to a phone's screen,
+// sent beside its copy. A server that keeps no covers says so, and that is
+// all: the page shows the mascot instead.
+void put_cover(const std::string& url, const std::string& key, const std::string& raw_path) {
+    const auto image = formats::load_track_artwork(raw_path);
+    if (image.empty()) {
+        return;
+    }
+    const auto fitted = fit_cover(image, 600);
+    if (!fitted || fitted->empty()) {
+        return;
+    }
+    static_cast<void>(request(
+        "PUT", url, key,
+        std::string{reinterpret_cast<const char*>(fitted->data()), fitted->size()}, 15'000L));
+}
+
 std::size_t write_file(char* data, const std::size_t size, const std::size_t count, void* into) {
     return std::fwrite(data, size, count, static_cast<std::FILE*>(into)) * size;
 }
@@ -319,7 +338,7 @@ class Errands final {
                 {"suggestions", suggestions}, {"by", now.by},
                 {"next", now.next},         {"history", now.history},
                 {"upcoming", now.upcoming}, {"room", now.room},
-                {"server", now.server}};
+                {"server", now.server},     {"reaction", now.reaction}};
 }
 
 [[nodiscard]] core::Result<std::uint64_t> suggestion_id(const Json& params) {
@@ -538,7 +557,7 @@ void Together::resume() {
                           .invite = text(document, "invite"),
                           .listeners = {},
                           .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
 }
 
 void Together::gone(Session& session, std::string message) {
@@ -631,7 +650,7 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     const auto invite = invite_text(shared);
     remember(*session, invite);
     begin(session,
-          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
+          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
     return invite;
 }
 
@@ -666,7 +685,7 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     }
     remember(*session, invite);
     begin(session, Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
     return {};
 }
 
@@ -1077,6 +1096,9 @@ void Together::send(Session& session, const QueueEntry& entry) {
                          .sample_rate_cap = std::nullopt});
         const bool kept = file && put_file(session.url("/tracks/" + id), session.invite.key,
                                            *file, session.stopping);
+        if (kept) {
+            put_cover(session.url("/covers/" + id), session.invite.key, source.raw_path);
+        }
         const std::lock_guard guard{session.copies};
         session.sending.erase(id);
         if (kept) {
@@ -1220,11 +1242,22 @@ void Together::read_room(Session& session, const Json& answer) {
             history.push_back(shown(each.value("track", Json::object())));
         }
     }
+    // The last reaction, while it is fresh: the server's clock against the
+    // server's, so this one's need not agree.
+    std::string reaction;
+    if (const auto reactions = answer.value("reactions", Json::array());
+        reactions.is_array() && !reactions.empty() && reactions.back().is_object()) {
+        const auto& last = reactions.back();
+        if (number(answer, "ms") - number(last, "ms") < 60'000) {
+            reaction = text(last, "name") + " " + text(last, "emoji");
+        }
+    }
     bool different = false;
     {
         const std::lock_guard guard{mutex_};
-        different = status_.history != history;
+        different = status_.history != history || status_.reaction != reaction;
         status_.history = std::move(history);
+        status_.reaction = std::move(reaction);
         const auto ids = [](const std::vector<Suggestion>& of) {
             std::vector<std::tuple<std::uint64_t, std::size_t, bool, bool>> keys;
             for (const auto& each : of) {
@@ -1419,7 +1452,9 @@ core::Result<std::uint64_t> Together::suggest(const std::string& raw_path) {
         if (!made || !put_file(session->url("/tracks/" + file), session->invite.key, *made,
                                session->stopping)) {
             say("the suggestion's copy could not be sent");
+            return;
         }
+        put_cover(session->url("/covers/" + file), session->invite.key, raw_path);
     });
     return offered->body.value("id", std::uint64_t{0});
 }

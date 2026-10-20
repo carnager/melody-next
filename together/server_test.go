@@ -495,3 +495,74 @@ func TestSweep(t *testing.T) {
 		t.Fatal("an idle room is closed")
 	}
 }
+
+// A track's cover, sent by the host, listed with the room's state and shown
+// to whoever has the invite -- an image, and nothing else served as one.
+func TestCovers(t *testing.T) {
+	rooms := newRooms("pw")
+	covers, err := newCovers(filepath.Join(t.TempDir(), "covers"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), covers: covers, wait: 100 * time.Millisecond}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	made, _ := rooms.make("pw", "", "")
+	cover := "/rooms/" + made.Room + "/covers/entry-1"
+	jpeg := "\xff\xd8\xff\xe0\x00\x10JFIF\x00" + strings.Repeat("x", 200)
+
+	if status, _ := c.do("PUT", cover, made.Invite, jpeg); status != 403 {
+		t.Fatal("a listener sends no covers")
+	}
+	if status, _ := c.do("PUT", cover, made.HostKey, "<html><script>alert(1)</script>"); status != 400 {
+		t.Fatalf("a cover is an image: %d", status)
+	}
+	if status, _ := c.do("PUT", cover, made.HostKey, jpeg); status != 200 {
+		t.Fatal("the host sends one")
+	}
+	if _, state := c.do("GET", "/rooms/"+made.Room+"/state?after=0", made.Invite, ""); len(state["covers"].([]any)) != 1 || state["covers"].([]any)[0] != "entry-1" {
+		t.Fatalf("listed with the room: %v", state["covers"])
+	}
+	response, err := http.Get(served.URL + cover + "?key=" + made.Invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "image/jpeg" ||
+		response.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("shown as what it is: %d %s", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	if status, _ := c.do("DELETE", "/rooms/"+made.Room, made.HostKey, ""); status != 200 {
+		t.Fatal("closed")
+	}
+	if len(covers.names(made.Room)) != 0 {
+		t.Fatal("a closed room's covers go")
+	}
+}
+
+// A reaction: one of a few emoji, floated up on every page.
+func TestReactions(t *testing.T) {
+	rooms := newRooms("pw")
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 100 * time.Millisecond}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	made, _ := rooms.make("pw", "", "")
+	react := "/rooms/" + made.Room + "/react"
+	if status, _ := c.do("POST", react, made.Invite, `{"name":"Ana","emoji":"<b>"}`); status != 400 {
+		t.Fatal("only the room's emoji")
+	}
+	if status, _ := c.do("POST", react, made.Invite, `{"name":"","emoji":"🔥"}`); status != 400 {
+		t.Fatal("from someone")
+	}
+	for range keptReactions + 3 {
+		if status, _ := c.do("POST", react, made.Invite, `{"name":"Ana","emoji":"🔥"}`); status != 200 {
+			t.Fatal("a reaction")
+		}
+	}
+	_, state := c.do("GET", "/rooms/"+made.Room+"/state?after=0", made.Invite, "")
+	kept := state["reactions"].([]any)
+	if len(kept) != keptReactions || kept[0].(map[string]any)["emoji"] != "🔥" ||
+		kept[len(kept)-1].(map[string]any)["id"].(float64) != keptReactions+3 {
+		t.Fatalf("the last few, oldest first: %v", kept)
+	}
+}

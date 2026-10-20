@@ -393,7 +393,13 @@ int main(int argc, char** argv) {
             "and the friend with it, together");
 
     // A track only the host has: its copy, sent once by the host's engine and
-    // fetched by the friend's, played where the host is.
+    // fetched by the friend's, played where the host is -- and its cover, the
+    // folder's, sent beside it for the room's web page.
+    {
+        static constexpr char png[] = "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0d\x49\x44\x41\x54\x78\xda\x63\xfc\xcf\xc0\x50\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c\x21\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+        std::ofstream cover{directory / "host/music/Other/cover.png", std::ios::binary};
+        cover.write(png, sizeof png - 1);
+    }
     engine::QueueEntry other;
     other.source.raw_path = (directory / "host/music/Other/01.flac").string();
     other.duration_ms = 600'000;
@@ -405,6 +411,19 @@ int main(int argc, char** argv) {
     require(eventually([&] { return std::abs(friend_.position() - host.position()) < 400; }),
             "where the host is");
     require(friend_.together->status().message.empty(), "and nothing is wrong");
+    require(eventually([&] {
+                std::error_code missing;
+                for (std::filesystem::recursive_directory_iterator each{
+                         directory / "server-data/covers", missing};
+                     !missing && each != std::filesystem::recursive_directory_iterator{};
+                     each.increment(missing)) {
+                    if (each->path().extension() == ".img") {
+                        return true;
+                    }
+                }
+                return false;
+            }),
+            "the track's cover is sent to the room");
 
     // An engine restarting -- an update -- comes back into its room: the
     // friend's, in step again; the host's, with the room still its own.

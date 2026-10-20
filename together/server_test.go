@@ -137,6 +137,27 @@ func TestRooms(t *testing.T) {
 	}
 }
 
+// An invite opened in a browser is a page saying how to join -- the same
+// for any room, real or not.
+func TestInvitePage(t *testing.T) {
+	served := httptest.NewServer((&server{rooms: newRooms("pw"), wait: time.Second}).handler())
+	defer served.Close()
+	for _, room := range []string{"real", "made-up"} {
+		response, err := http.Get(served.URL + "/rooms/" + room)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != 200 || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") {
+			t.Fatalf("an invite opens a page: %d %s", response.StatusCode, response.Header.Get("Content-Type"))
+		}
+		if !strings.Contains(string(page), "Join the listening room") {
+			t.Fatal("which says how to join")
+		}
+	}
+}
+
 func TestNoPasswordNoRooms(t *testing.T) {
 	if _, err := newRooms("").make(""); err == nil {
 		t.Fatal("a server without a password makes no rooms")

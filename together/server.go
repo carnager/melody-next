@@ -3,6 +3,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,9 +24,17 @@ import (
 //	                                      the next state  (the invite, or the host key),
 //	                                      waited for MS at most (25 s)
 //	POST   /rooms/ROOM/leave?name=WHO     a listener goes (the invite)
+//	GET    /rooms/ROOM                    the invite, opened in a browser: how to join
 //	DELETE /rooms/ROOM                    the room closes (the host key)
 //
 // Each key travels as "Authorization: Bearer KEY"; every answer is JSON.
+
+// What an invite opens in a browser: how to join with it. The key is after
+// the #, so the server never sees it, and the page is the same for every
+// room -- which says nothing of whether there is one.
+//
+//go:embed invite.html
+var invitePage []byte
 
 // A state is a track's description; anything near this is not one.
 const maximumState = 256 << 10
@@ -136,6 +145,13 @@ func (s *server) handler() http.Handler {
 		}
 		answer(w, http.StatusOK, map[string]bool{"left": true})
 	}))
+	mux.HandleFunc("GET /rooms/{room}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+		_, _ = w.Write(invitePage)
+	})
 	mux.HandleFunc("DELETE /rooms/{room}", s.opened(host, func(w http.ResponseWriter, _ *http.Request, room string, _ holder) {
 		s.rooms.close(room)
 		answer(w, http.StatusOK, map[string]bool{"closed": true})

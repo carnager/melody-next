@@ -28,7 +28,10 @@ Accepted, 2026-10-20. Extends the panels of ADR-0291 and ADR-0303.
      dot in the accent while it is live, its buttons at the right;
    - `{"people": [NAME, …]}` -- people as chips, each with an initial in a
      colour of its own, the same colour the listening room's web page
-     gives that name.
+     gives that name;
+   - `{"filters": [{"text", "action", "value", "on"}, …]}` -- badges in a
+     row, those on drawn as chosen, pressed as any button is: what the list
+     beneath shows, the plugin keeping the choice.
 2. **A button has a role**: `"role": "primary"` (the accent: the one to
    press), `"normal"`, or `"quiet"` (flat: Stop, Leave). On a row, a quiet
    button is a bare glyph shown only under the pointer, keeping its place
@@ -52,7 +55,9 @@ Accepted, 2026-10-20. Extends the panels of ADR-0291 and ADR-0303.
   playing too, it is not about the playing track, and does not name it
   under its title.
 - The official About panel draws the playing album and the missing albums
-  as rows, with their covers from the Cover Art Archive or Discogs.
+  as rows, with their covers from the Cover Art Archive or Discogs, and
+  badges above them to show or hide the albums and the EPs -- the choice
+  kept in About's state folder.
 - Every old part still works as it did.
 
 ## Verification

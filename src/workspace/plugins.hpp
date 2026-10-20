@@ -260,6 +260,8 @@ struct PluginPanelContent {
             track,
             status,
             people,
+            // Badges in a row, each on or off: what a list beneath shows.
+            filters,
         };
         Kind kind{Kind::item};
         QString text;
@@ -278,7 +280,8 @@ struct PluginPanelContent {
         bool secret{false};
         // A toggle's state; a track that plays; a status that is live.
         bool on{false};
-        // An item's or a track's buttons, at its right.
+        // An item's or a track's buttons, at its right; a filters part's
+        // badges.
         std::vector<Button> buttons;
         // ADR-0304. A track's artist, under its title (`text`).
         QString artist;

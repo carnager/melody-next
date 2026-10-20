@@ -25,7 +25,9 @@ among the artist's albums in the library, which Melody tells the panel
 MusicBrainz does not know, Discogs's, with a Discogs token. What MusicBrainz
 and Discogs list is kept a day; the library is told anew every time.
 
-Albums are drawn as Melody draws a track's row (ADR-0304), with their
+Badges above the missing albums show or hide the albums and the EPs, the
+choice kept in the state folder. Albums are drawn as Melody draws a track's
+row (ADR-0304), with their
 covers: the Cover Art Archive's for a release group, Discogs's thumbnail
 for a master. Covers are fetched side by side for a few seconds at most and
 kept a week -- and so is knowing there is none.
@@ -46,6 +48,12 @@ import urllib.request
 AGENT = "Melody-about/1 (https://github.com/carnager/melody-next)"
 KEPT = 7 * 24 * 3600
 LISTED = 24 * 3600
+# What is chosen to be shown -- the missing albums' filters -- kept apart
+# from the cache, which may be cleared.
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                     "melody", "plugins", "about")
+# The kinds the missing albums are filtered by, and their badges.
+KINDS = (("album", "Albums"), ("ep", "EPs"))
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                      "melody", "plugins", "about")
 TRIES = 4
@@ -146,6 +154,30 @@ def keep(name, value):
     with open(path + ".partial", "w", encoding="utf-8") as kept:
         json.dump(value, kept)
     os.replace(path + ".partial", path)
+
+
+def shown_kinds():
+    """The kinds of missing album chosen to be shown: every one, until a
+    badge is pressed."""
+    try:
+        with open(os.path.join(STATE, "filters.json"), encoding="utf-8") as kept:
+            hidden = set(json.load(kept).get("hidden") or [])
+    except (OSError, ValueError, AttributeError):
+        hidden = set()
+    return {kind for kind, _ in KINDS if kind not in hidden}
+
+
+def keep_shown(shown):
+    os.makedirs(STATE, exist_ok=True)
+    path = os.path.join(STATE, "filters.json")
+    with open(path + ".partial", "w", encoding="utf-8") as kept:
+        json.dump({"hidden": [kind for kind, _ in KINDS if kind not in shown]}, kept)
+    os.replace(path + ".partial", path)
+
+
+def kind_of(album):
+    # Discogs's masters say no kind: albums.
+    return "ep" if (album.get("kind") or "").casefold() == "ep" else "album"
 
 
 def cover_file(url):
@@ -466,6 +498,21 @@ def missing_albums(artist_id, artist, owned, settings):
         return [{"heading": "Missing albums"},
                 {"paragraph": "Every album and EP %s lists is in the library."
                               % ("MusicBrainz" if artist_id else "Discogs")}]
+    # Badges for the kinds there are, each with how many; pressed, the panel
+    # is asked again (ADR-0303) and the choice kept.
+    shown = shown_kinds()
+    counts = {kind: sum(1 for a in missing if kind_of(a) == kind) for kind, _ in KINDS}
+    parts = [{"heading": "Missing albums (%d)" % len(missing)}]
+    if sum(1 for count in counts.values() if count) > 1:
+        parts.append({"filters": [
+            {"text": "%s %d" % (label, counts[kind]), "action": "filter", "value": kind,
+             "on": kind in shown}
+            for kind, label in KINDS if counts[kind]]})
+    else:
+        shown = set(counts)
+    missing = [a for a in missing if kind_of(a) in shown]
+    if not missing:
+        return parts + [{"paragraph": "Hidden by the filters above."}]
     covers = covers_of(group_cover(a["id"]) if a["id"] else a.get("thumb") for a in missing)
     rows = []
     for a in missing:
@@ -477,11 +524,17 @@ def missing_albums(artist_id, artist, owned, settings):
         if cover:
             row["cover"] = cover
         rows.append(row)
-    return [{"heading": "Missing albums (%d)" % len(missing)}] + rows
+    return parts + rows
 
 
 def main():
     given = json.load(sys.stdin)
+    # A filter's badge pressed: that kind shown or hidden from now on.
+    action = given.get("action") or {}
+    if action.get("id") == "filter" and action.get("value") in dict(KINDS):
+        shown = shown_kinds()
+        shown ^= {action["value"]}
+        keep_shown(shown)
     playing = given.get("playing") or {}
     settings = given.get("settings") or {}
     artist = (playing.get("album_artist") or playing.get("artist") or "").strip()

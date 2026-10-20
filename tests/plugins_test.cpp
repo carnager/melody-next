@@ -523,20 +523,80 @@ void PluginsTest::theExamplePluginReads() {
     QVERIFY(section != missing_drawn->parts.end());
     // Oldest first, each a row opening its MusicBrainz page, with its
     // cover where one is kept -- none fetched here.
-    QVERIFY(std::next(section)->kind == PluginPanelContent::Part::Kind::track);
-    QCOMPARE(std::next(section)->text, QStringLiteral("Trial by Fire"));
-    QCOMPARE(std::next(section)->detail, QStringLiteral("1988 · EP"));
-    QVERIFY(std::next(section)->cover.isEmpty());
-    QCOMPARE(std::next(section, 2)->text, QStringLiteral("The New Order"));
-    QCOMPARE(std::next(section, 2)->url,
+    // Badges first: the albums and the EPs, both shown.
+    const auto& badges = *std::next(section);
+    QVERIFY(badges.kind == PluginPanelContent::Part::Kind::filters);
+    QCOMPARE(badges.buttons.size(), std::size_t{2U});
+    QCOMPARE(badges.buttons[0].text, QStringLiteral("Albums 1"));
+    QCOMPARE(badges.buttons[1].text, QStringLiteral("EPs 1"));
+    QVERIFY(badges.buttons[0].on && badges.buttons[1].on);
+    QVERIFY(std::next(section, 2)->kind == PluginPanelContent::Part::Kind::track);
+    QCOMPARE(std::next(section, 2)->text, QStringLiteral("Trial by Fire"));
+    QCOMPARE(std::next(section, 2)->detail, QStringLiteral("1988 · EP"));
+    QVERIFY(std::next(section, 2)->cover.isEmpty());
+    QCOMPARE(std::next(section, 3)->text, QStringLiteral("The New Order"));
+    QCOMPARE(std::next(section, 3)->url,
              QStringLiteral("https://musicbrainz.org/release-group/rg-new"));
-    QCOMPARE(std::next(section, 2)->cover, new_order_cover);
-    QCOMPARE(std::distance(section, missing_drawn->parts.end()), 3);
+    QCOMPARE(std::next(section, 3)->cover, new_order_cover);
+    QCOMPARE(std::distance(section, missing_drawn->parts.end()), 4);
     // The album by its id, though the tags name it otherwise.
     QVERIFY(std::ranges::any_of(missing_drawn->parts, [](const auto& part) {
         return part.kind == PluginPanelContent::Part::Kind::track &&
                part.text == QStringLiteral("The Legacy");
     }));
+    // The EPs' badge pressed: hidden -- and still, asked again without it.
+    const auto missing_input = [&](std::optional<PluginPanelAction> action) {
+        return pluginPanelInput(about_panel->panels.front(), PluginEngine{},
+                                PluginTrack{.path = "/srv/music/Testament/01.flac",
+                                            .title = "Over the Wall",
+                                            .artist = "Testament",
+                                            .album = "Legacy (Remaster)",
+                                            .album_artist = "Testament",
+                                            .date = "1987",
+                                            .track_number = "1"},
+                                std::nullopt, {}, pluginSettings(*about_panel), library,
+                                std::move(action));
+    };
+    const auto shown_after = [&](std::optional<PluginPanelAction> action) {
+        const auto filtered = run(*about_panel,
+                                  PluginAction{.id = QStringLiteral("about"),
+                                               .label = QStringLiteral("About"),
+                                               .scope = PluginAction::Scope::tracks,
+                                               .run = about_panel->panels.front().run,
+                                               .result = PluginAction::Result::none,
+                                               .timeout_seconds = 30},
+                                  missing_input(std::move(action)));
+        QStringList shown;
+        const auto read = parsePluginPanel(filtered.text.toUtf8(), nullptr);
+        if (read) {
+            const auto at = std::ranges::find_if(read->parts, [](const auto& part) {
+                return part.kind == PluginPanelContent::Part::Kind::heading &&
+                       part.text.startsWith(QStringLiteral("Missing"));
+            });
+            for (auto each = at; each != read->parts.end(); ++each) {
+                if (each->kind == PluginPanelContent::Part::Kind::track) {
+                    shown << each->text;
+                }
+                if (each->kind == PluginPanelContent::Part::Kind::filters) {
+                    for (const auto& badge : each->buttons) {
+                        shown << QStringLiteral("%1:%2").arg(badge.value, badge.on ? "on" : "off");
+                    }
+                }
+            }
+        }
+        return shown;
+    };
+    const auto ep = PluginPanelAction{.id = QStringLiteral("filter"),
+                                      .value = QStringLiteral("ep"),
+                                      .inputs = {}};
+    QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:off"),
+                                           QStringLiteral("The New Order")}));
+    QCOMPARE(shown_after(std::nullopt),
+             (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:off"),
+                          QStringLiteral("The New Order")}));
+    QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:on"),
+                                           QStringLiteral("Trial by Fire"),
+                                           QStringLiteral("The New Order")}));
     qunsetenv("http_proxy");
     qunsetenv("https_proxy");
 
@@ -718,6 +778,8 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
         {"status": "Hosting", "detail": "2 listening", "live": true,
          "buttons": [{"text": "Web page", "url": "https://t.example/r", "role": "quiet"}]},
         {"people": ["Ana", " ", "Bo"]},
+        {"filters": [{"text": "Albums 4", "action": "filter", "value": "album", "on": true},
+                     {"text": "EPs 2", "action": "filter", "value": "ep"}]},
         {"button": "Start", "action": "start", "role": "primary"},
         {"button": "Stop", "action": "stop", "role": "quiet"},
         {"button": "Old", "action": "old", "primary": true}]})",
@@ -726,7 +788,7 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
     using Kind = PluginPanelContent::Part::Kind;
     using Role = PluginPanelContent::Role;
     const auto& parts = panel->parts;
-    QCOMPARE(parts.size(), std::size_t{7U});
+    QCOMPARE(parts.size(), std::size_t{8U});
     QVERIFY(parts[0].kind == Kind::track && parts[0].text == QStringLiteral("Time Machine") &&
             parts[0].artist == QStringLiteral("Royal Thunder") && parts[0].on &&
             parts[0].cover == QStringLiteral("/covers/a.jpg"));
@@ -742,16 +804,21 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
             parts[2].buttons[0].action.isEmpty());
     QVERIFY(parts[3].kind == Kind::people &&
             parts[3].people == (std::vector<QString>{QStringLiteral("Ana"), QStringLiteral("Bo")}));
-    QVERIFY(parts[4].role == Role::primary && parts[4].on);
-    QVERIFY(parts[5].role == Role::quiet && !parts[5].on);
+    QVERIFY(parts[4].kind == Kind::filters && parts[4].buttons.size() == 2U &&
+            parts[4].buttons[0].on && !parts[4].buttons[1].on &&
+            parts[4].buttons[1].value == QStringLiteral("ep"));
+    QVERIFY(parts[5].role == Role::primary && parts[5].on);
+    QVERIFY(parts[6].role == Role::quiet && !parts[6].on);
     // ADR-0303's `primary: true` is the primary role.
-    QVERIFY(parts[6].role == Role::primary);
+    QVERIFY(parts[7].role == Role::primary);
     for (const auto* broken :
          {R"({"parts": [{"track": "x", "cover": "a.jpg"}]})",
           R"({"parts": [{"track": "x", "colour": "red"}]})",
           R"({"parts": [{"button": "x", "action": "y", "role": "loud"}]})",
           R"({"parts": [{"track": "x", "buttons": [{"text": "y", "action": "z", "role": "big"}]}]})",
           R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})",
+          R"({"parts": [{"filters": "Albums"}]})",
+          R"({"parts": [{"filters": [{"text": "Albums"}]}]})",
           R"({"parts": [{"status": "x", "buttons": [{"text": "y", "url": "file:///etc"}]}]})",
           R"({"parts": [{"status": "x", "buttons": [{"text": "y"}]}]})",
           R"({"parts": [{"status": "x", "buttons": [{"text": "y", "action": "a",

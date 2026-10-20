@@ -669,9 +669,9 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
         return std::nullopt;
     };
     // An item's or a track's buttons; false when one is not a button.
-    const auto read_buttons = [&role_of](const QJsonObject& part,
-                                         PluginPanelContent::Part& read) {
-        for (const auto& listed : part.value(QStringLiteral("buttons")).toArray()) {
+    const auto read_buttons = [&role_of](const QJsonObject& part, PluginPanelContent::Part& read,
+                                         const QString& key = QStringLiteral("buttons")) {
+        for (const auto& listed : part.value(key).toArray()) {
             const auto button = listed.toObject();
             const auto role = role_of(button);
             PluginPanelContent::Button made{
@@ -802,6 +802,14 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                 return fail(QStringLiteral(
                     "a status's button is {text, action or url, value?, on?, role?}"));
             }
+        } else if (part.contains(QStringLiteral("filters"))) {
+            // ADR-0304: badges that say what the list beneath shows.
+            read.kind = Kind::filters;
+            allowed = {QStringLiteral("filters")};
+            if (!part.value(QStringLiteral("filters")).isArray() ||
+                !read_buttons(part, read, QStringLiteral("filters"))) {
+                return fail(QStringLiteral("filters are a list of {text, action, value?, on?}"));
+            }
         } else if (part.contains(QStringLiteral("people"))) {
             read.kind = Kind::people;
             allowed = {QStringLiteral("people")};
@@ -830,7 +838,7 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             }
         } else {
             return fail(QStringLiteral("a part is a heading, paragraph, text, track, status, "
-                                       "people, link, image, input, toggle or button"));
+                                       "people, filters, link, image, input, toggle or button"));
         }
         for (const auto& key : part.keys()) {
             if (!allowed.contains(key)) {

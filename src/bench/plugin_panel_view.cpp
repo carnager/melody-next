@@ -745,6 +745,20 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             add(line);
             break;
         }
+        case Kind::filters: {
+            // Badges in a row, those on drawn as chosen.
+            auto* row = new QWidget(parts_);
+            row->setObjectName(QStringLiteral("bench-plugin-panel-filters"));
+            auto* flow = new FlowLayout(row);
+            for (const auto& each : part.buttons) {
+                auto* button = rowButton(each, row);
+                button->setObjectName(QStringLiteral("bench-plugin-panel-filter"));
+                run_on_press(button, each);
+                flow->addWidget(button);
+            }
+            add(row);
+            break;
+        }
         case Kind::people: {
             auto* row = new QWidget(parts_);
             row->setObjectName(QStringLiteral("bench-plugin-panel-people"));

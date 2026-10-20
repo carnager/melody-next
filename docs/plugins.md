@@ -216,6 +216,7 @@ Some parts say what they are, and Melody draws them as it draws its own
 | Track | `track` -- its title -- `artist`, `detail`, `cover` (an image's absolute path), `url`, `playing` (tinted in the accent), `buttons` |
 | Status | `status` -- its text -- `detail`, `live` (a dot in the accent), `buttons` at its right |
 | People | `people` -- a list of names, drawn as chips with coloured initials |
+| Filters | `filters` -- badges in a row, `[{"text", "action", "value", "on"}]`, those on drawn as chosen; pressed, the panel runs again -- what it shows, and keeping the choice, are the plugin's |
 
 A button's `role` is `primary` (the accent), `normal`, or `quiet` (flat; on a
 row, shown only under the pointer). A row's or a status's button may open a

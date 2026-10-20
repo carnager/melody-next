@@ -400,6 +400,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
     void aNotificationWaitsForItsCover();
+    void aPluginPanelIsToldWhatAnotherClientStarted();
     void theRemoteTabTakesTheNameItsEngineAnnounces();
     void anUnreachableRemoteDoesNotHoldTheWindow();
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();

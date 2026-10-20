@@ -70,6 +70,13 @@ class EnginePlayback final : public QObject {
     using QueueAnswer = std::function<void(std::vector<LocalTrackRow>)>;
     void queueEntries(QueueAnswer answer);
 
+    // What plays, as the engine reads it from its library: the tags of the
+    // file whichever list it came from, one this client holds or not -- a
+    // queue another client replaced arrives here after the entry does.
+    // Empty when nothing plays or there is no answer.
+    using NowPlayingAnswer = std::function<void(std::optional<LocalTrackRow>)>;
+    void nowPlaying(NowPlayingAnswer answer);
+
     // What the engine last told us. Cached so painting transport does not
     // make a blocking call on the UI thread, and refreshed by events.
     struct State final {

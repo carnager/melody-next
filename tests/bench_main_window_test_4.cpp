@@ -2063,6 +2063,75 @@ void BenchMainWindowTest::aNotificationWaitsForItsCover() {
     QVERIFY(QFileInfo::exists(window.notifier_->lastImage()));
 }
 
+// An album melody-cli queued and played is in no list of the window's until
+// its queue has come, after the entry that plays: a panel asked then was told
+// no tags, and the About plugin said the track names no artist. What plays is
+// the engine's to say.
+void BenchMainWindowTest::aPluginPanelIsToldWhatAnotherClientStarted() {
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/about");
+    QVERIFY(QDir{}.mkpath(folder));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "About", "panels": [{"id": "artist",
+                          "label": "About the artist", "run": ["./about"]}]})");
+        QFile script{folder + QStringLiteral("/about")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"sh(#!/bin/sh
+artist=$(cat | grep -o '"artist":"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+printf '{"title": "About %s", "parts": []}' "$artist"
+)sh");
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("about")), true);
+
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto path = media.filePath(QStringLiteral("track.wav"));
+    write_wave(path, wave_sample_rate * 60U);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-about-artist"));
+    QVERIFY(dock != nullptr);
+    if (dock->isHidden()) {
+        window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+    }
+    QTRY_VERIFY(dock->isVisible());
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto entry = core::StableId::random().to_string();
+    auto entries = protocol::Json::array();
+    entries.push_back(
+        protocol::Json{{"entry", entry},
+                       {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
+                       {"title", "Over the Wall"},
+                       {"group", protocol::Json{{"artist", "Testament"},
+                                                {"album", "The Legacy"},
+                                                {"date", "1987"}}}});
+    QVERIFY((*other)
+                ->call("playback.replace_queue", protocol::Json{{"entries", std::move(entries)}})
+                .has_value());
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", entry}}).has_value());
+
+    QLabel* title = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (title = dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title"))) != nullptr,
+        10'000);
+    // Its first answer, not one asked again once the queue had come.
+    QCOMPARE(title->text(), QStringLiteral("About Testament"));
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

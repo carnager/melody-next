@@ -281,16 +281,53 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
         return;
     }
     auto told = pluginPlaying(state);
-    const auto& playing = told.track;
+    showPluginPanelSubject(slot, told.track);
+    slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
+    auto* context = new QObject(this);
+    slot.run = context;
+    auto* raw = &slot;
+    // What plays is the engine's to say: the window's lists may not hold it
+    // yet -- an album another client started is in none until its queue has
+    // come -- and told no tags, the plugin would say the track has none.
+    // Where the engine does not answer, the list's row is what there is.
+    if (transport_ == nullptr || !transport_->active()) {
+        runPluginPanelWith(*raw, context, std::move(told));
+        return;
+    }
+    transport_->nowPlaying([this, raw, guard = QPointer<QObject>{context}, entry,
+                            told = std::move(told)](std::optional<LocalTrackRow> engine) mutable {
+        // Asked again since, or gone: this answer is not wanted.
+        if (guard.isNull() || raw->run != guard.data()) {
+            return;
+        }
+        if (engine && QString::fromStdString(engine->entry_id.to_string()) == entry) {
+            told.track = PluginTrack{.path = std::move(engine->raw_path),
+                                     .title = std::move(engine->title),
+                                     .artist = std::move(engine->artist),
+                                     .album = std::move(engine->album),
+                                     .album_artist = std::move(engine->album_artist),
+                                     .date = std::move(engine->date),
+                                     .track_number = std::move(engine->track_number)};
+            if (engine->duration_ms) {
+                told.duration_ms = engine->duration_ms;
+            }
+            showPluginPanelSubject(*raw, told.track);
+        }
+        runPluginPanelWith(*raw, guard.data(), std::move(told));
+    });
+}
+
+void BenchMainWindow::showPluginPanelSubject(PluginPanelDock& slot, const PluginTrack& playing) {
     const auto artist = QString::fromStdString(playing.album_artist.empty() ? playing.artist
                                                                             : playing.album_artist);
     slot.view->setSubject(
         artist.isEmpty()
             ? QString::fromStdString(playing.title)
             : QStringLiteral("%1 \u2014 %2").arg(artist, QString::fromStdString(playing.title)));
-    slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
-    auto* context = new QObject(this);
-    slot.run = context;
+}
+
+void BenchMainWindow::runPluginPanelWith(PluginPanelDock& slot, QObject* context,
+                                         PluginPlaying told) {
     auto* raw = &slot;
     runPluginPanel(
         slot.plugin, slot.panel,

@@ -380,6 +380,47 @@ void EnginePlayback::queueEntries(QueueAnswer answer) {
             });
 }
 
+void EnginePlayback::nowPlaying(NowPlayingAnswer answer) {
+    request(QStringLiteral("playback.now_playing"), protocol::Json::object(),
+            [answer = std::move(answer)](const core::Result<protocol::Json>& result) {
+                if (!result || !result->is_object()) {
+                    answer(std::nullopt);
+                    return;
+                }
+                const auto track = result->find("track");
+                if (track == result->end() || !track->is_object()) {
+                    answer(std::nullopt);
+                    return;
+                }
+                const auto text = [&track](const char* key) {
+                    const auto found = track->find(key);
+                    return found != track->end() && found->is_string() ? found->get<std::string>()
+                                                                       : std::string{};
+                };
+                auto decoded = protocol::decode_raw_path(text("path"));
+                const auto identity = core::StableId::parse(text("entry"));
+                if (!decoded || !identity) {
+                    answer(std::nullopt);
+                    return;
+                }
+                LocalTrackRow row;
+                row.entry_id = *identity;
+                row.raw_path = std::move(*decoded);
+                row.title = text("title");
+                row.artist = text("artist");
+                row.album = text("album");
+                row.album_artist = text("album_artist");
+                row.date = text("date");
+                row.track_number = text("track_number");
+                if (const auto duration = track->find("duration_ms");
+                    duration != track->end() && duration->is_number_integer() &&
+                    duration->get<std::int64_t>() > 0) {
+                    row.duration_ms = duration->get<std::int64_t>();
+                }
+                answer(std::move(row));
+            });
+}
+
 std::vector<LocalTrackRow> EnginePlayback::queueRows(const protocol::Json& answer) {
     if (!answer.contains("entries")) {
         return {};

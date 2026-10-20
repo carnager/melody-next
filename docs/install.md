@@ -18,7 +18,8 @@ Name the packages you want: `yay -S melodyd-git melody-agent-git`.
 `melody-git`; installing `melody-git` alone installs only an empty
 metapackage, and leaves an engine already installed as it was. `-git`
 packages are rebuilt when their repository moves on with
-`yay -Syu --devel`.
+`yay -Syu --devel`. With `sccache` installed (`pacman -S sccache`), such a
+rebuild compiles only what the new commits changed.
 
 The recipes are in [`packaging/arch/`](../packaging/arch/README.md), one
 directory each; the engine and the agent are both in `melody-git`:
@@ -123,6 +124,7 @@ Relevant build switches are:
 | `MELODY_ENABLE_UPNP` | `AUTO` | Builds SSDP discovery and UPnP playback when libupnp is installed, and leaves them out when it is not. `ON` requires libupnp; `OFF` builds no UPnP code. |
 | `MELODY_ENABLE_LOCAL_AUDIO` | On on Linux and macOS | Builds PipeWire on Linux or CoreAudio on macOS. |
 | `MELODY_BUILD_WATCH` | On on Linux; off elsewhere | Builds the inotify-based `melody-watch` utility. |
+| `MELODY_COMPILER_CACHE` | `AUTO` | Compiles through `sccache` or `ccache` when one is installed, so a rebuild -- an AUR package's, from scratch every time -- compiles only what changed. `OFF` never does. A `CMAKE_CXX_COMPILER_LAUNCHER` given is kept. |
 
 UPnP also has a runtime switch: the desktop setting is off initially, and a
 headless engine discovers renderers only when started with `--upnp`.

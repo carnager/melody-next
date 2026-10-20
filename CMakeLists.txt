@@ -61,9 +61,31 @@ elseif(MELODY_LINKER STREQUAL "AUTO" AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND N
     endif()
 endif()
 
+# Every build -- a package's above all, from scratch each time -- compiles the
+# five hundred files again, though a commit changes a few: a compiler cache
+# hands back the rest. sccache or ccache, where one is installed; a launcher
+# given on the command line is kept.
+set(MELODY_COMPILER_CACHE AUTO CACHE STRING "Compiler cache: AUTO uses sccache or ccache where found")
+set_property(CACHE MELODY_COMPILER_CACHE PROPERTY STRINGS AUTO OFF)
+if(MELODY_COMPILER_CACHE STREQUAL "AUTO" AND NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER
+   AND NOT MELODY_ENABLE_CLANG_TIDY)
+    find_program(MELODY_CACHE_PROGRAM NAMES sccache ccache)
+    if(MELODY_CACHE_PROGRAM)
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${MELODY_CACHE_PROGRAM}")
+        if(APPLE)
+            set(CMAKE_OBJCXX_COMPILER_LAUNCHER "${MELODY_CACHE_PROGRAM}")
+        endif()
+        message(STATUS "Compiling through ${MELODY_CACHE_PROGRAM}")
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# No C++ modules here: CMake would scan every file for them all the same, a
+# step of its own each, and build with -fmodules-ts -- which no compiler cache
+# caches.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)

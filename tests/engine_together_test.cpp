@@ -332,6 +332,7 @@ int main(int argc, char** argv) {
     materialize(fixtures, "tagged-tone-flac.b64", directory / "host/music/Other/01.flac");
     materialize(fixtures, "rich-metadata-flac.b64", directory / "friend/music/Copy/track.flac");
     write_wave(directory / "friend/music/Mine/only-hers.wav");
+    write_wave(directory / "friend/music/Mine/also-hers.wav");
     TogetherServer server{argv[2], directory};
     Engine host{directory / "host"};
     Engine friend_{directory / "friend"};
@@ -419,39 +420,64 @@ int main(int argc, char** argv) {
     require(eventually([&] { return std::abs(friend_.position() - host.position()) < 400; }),
             "the friend still following");
 
-    // Phase 4, a party: the friend suggests a track only she has. Once the
-    // host's own next track has begun, the room's turn is next: the host
-    // plays her copy, and she her own.
+    // Phase 4, a party: the friend suggests two tracks only she has, and
+    // votes for the second. The room's turn is decided as the host's own
+    // track ends, so the votes cast while it played count: the second plays,
+    // the host from her copy, she from her file.
     require(host.together->party(true).has_value(), "the host makes it a party");
     require(!friend_.together->party(true).has_value(), "a listener does not");
     require(eventually([&] { return friend_.together->status().party; }), "she sees the party");
-    const auto hers = (directory / "friend/music/Mine/only-hers.wav").string();
-    const auto suggested = friend_.together->suggest(hers);
-    require(suggested.has_value(), "she suggests a track of hers");
-    require(friend_.together->vote(*suggested).has_value(), "and votes for it");
+    const auto first = (directory / "friend/music/Mine/only-hers.wav").string();
+    const auto second = (directory / "friend/music/Mine/also-hers.wav").string();
+    require(friend_.together->suggest(first).has_value(), "she suggests a track of hers");
+    const auto wanted = friend_.together->suggest(second);
+    require(wanted.has_value(), "and another");
+    require(friend_.together->vote(*wanted).has_value(), "and votes for the second");
     require(eventually(
                 [&] {
                     const auto room = host.together->status();
-                    return room.suggestions.size() == 1U && room.suggestions.front().ready &&
-                           room.suggestions.front().votes == 1U;
+                    return room.suggestions.size() == 2U && room.suggestions.front().ready &&
+                           room.suggestions.front().id == *wanted && room.suggestions.back().ready;
                 },
                 30s),
-            "the host sees it, voted for, its copy come");
+            "the host sees both, the second leading, their copies come");
     engine::QueueEntry own;
     own.source.raw_path = album.source.raw_path;
     own.duration_ms = 600'000;
     host.player->replace_queue({own});
     require(host.player->play_entry(own.entry_id).has_value(), "the host's own track begins");
+    std::this_thread::sleep_for(4s);
+    require(host.player->request_entries().empty() && host.together->status().suggestions.size() == 2U,
+            "nothing taken while it plays: the votes still count");
+    require(host.player->seek_ms(600'000 - 15'000).has_value(), "the host's track nears its end");
     require(eventually([&] { return !host.player->request_entries().empty(); }, 30s),
-            "her suggestion is next");
-    require(eventually([&] { return host.together->status().suggestions.empty(); }),
-            "taken from the list");
+            "the room's turn is next");
+    require(eventually([&] {
+                const auto left = host.together->status().suggestions;
+                return left.size() == 1U && left.front().id != *wanted;
+            }),
+            "the most wanted taken, the other waiting");
     require(host.player->step(1).has_value(), "the host's track ends");
     const auto host_downloads = (directory / "host/together/downloads").string();
     require(eventually([&] { return host.audition.loaded().starts_with(host_downloads); }),
             "the host plays her copy");
-    require(eventually([&] { return friend_.audition.loaded() == hers; }),
-            "and she her own, in the room");
+    require(eventually([&] { return friend_.audition.loaded() == second; }),
+            "and she her own file of it, in the room");
+    // The host is one of the guests: its pick waits for votes like hers.
+    require(host.together->suggest((directory / "host/music/Other/01.flac").string()).has_value(),
+            "the host suggests one of its own");
+    require(eventually([&] {
+                // Hers, two seconds long, are each taken as the last ends.
+                const auto room = friend_.together->status().suggestions;
+                return std::ranges::any_of(room,
+                                           [](const auto& each) { return each.name == "the host"; });
+            }),
+            "and she sees it among hers");
+    // As a suggestion ends -- anyone's, not only the host's own tracks -- the
+    // next most wanted follows: hers, two seconds long, near their end as they
+    // begin.
+    require(eventually([&] { return !host.player->request_entries().empty(); }, 30s),
+            "the next is chosen as the suggestion playing ends");
 
     // Leaving, and the room closing.
     friend_.together->leave();

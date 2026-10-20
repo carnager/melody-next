@@ -40,6 +40,9 @@ constexpr std::int64_t seek_lead_ms = 120;
 constexpr std::int64_t moved_ms = 750;
 constexpr auto clock_again = std::chrono::minutes{5};
 constexpr auto presence_every = std::chrono::seconds{5};
+// How long before the end of the host's own track the room's turn is taken:
+// time enough to queue it, late enough for the votes to have been cast.
+constexpr std::int64_t turn_before_ms = 20'000;
 
 [[nodiscard]] core::Error together_error(std::string message,
                                          const core::ErrorCode code = core::ErrorCode::backend) {
@@ -559,7 +562,8 @@ core::Result<void> Together::measure_clock(Session& session) {
     return {};
 }
 
-core::Result<std::string> Together::host(const std::string& server, const std::string& password) {
+core::Result<std::string> Together::host(const std::string& server, const std::string& password,
+                                         const std::string& name) {
     const std::lock_guard control{control_};
     end();
     auto session = std::make_shared<Session>();
@@ -569,6 +573,9 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     }
     session->invite.server = base;
     session->hosting = true;
+    // At a party the host is one of the guests: suggesting and voting as
+    // this name.
+    session->name = name.empty() ? std::string{"the host"} : name;
     // A suggestion only its friend has is fetched to play, as a listener does.
     session->downloads = directory_ / "downloads";
     std::error_code unmade;
@@ -1160,6 +1167,13 @@ void Together::take_turn(Session& session, const Player::State& state) {
     if (session.coming) {
         auto& coming = *session.coming;
         if (coming.path.empty()) {
+            // The host's own suggestion: the file it suggested.
+            const std::lock_guard guard{session.copies};
+            if (const auto found = session.mine.find(coming.file); found != session.mine.end()) {
+                coming.path = found->second;
+            }
+        }
+        if (coming.path.empty()) {
             coming.path = library_copy(session, "file:" + coming.file, coming.track);
         }
         if (coming.path.empty()) {
@@ -1196,12 +1210,17 @@ void Together::take_turn(Session& session, const Player::State& state) {
     if (!session.party) {
         return;
     }
-    // The room's turn: once the host's own track has begun, or the host has
-    // nothing left to play.
-    const bool own = (state.status == "playing" || state.status == "paused") &&
-                     !session.suggestion_files.contains(state.entry.to_string());
+    // At a party the room's votes choose what plays next -- the host's
+    // picks among them -- decided as each track ends, so the votes cast
+    // while it played count; at once, nothing playing. The host's own queue
+    // plays on only when nothing is suggested.
+    const bool sounding = state.status == "playing" || state.status == "paused";
     const auto key = state.entry.to_string() + "/" + std::to_string(state.instance);
-    if (!(own && key != session.turn_for) && state.status != "stopped") {
+    if (!(sounding && key != session.turn_for) && state.status != "stopped") {
+        return;
+    }
+    // Something chosen already waits in Up Next: the room's turn is that.
+    if (sounding && !player_->request_entries().empty()) {
         return;
     }
     // The most wanted whose copy has come: the room lists it first.
@@ -1209,6 +1228,23 @@ void Together::take_turn(Session& session, const Player::State& state) {
         return each.is_object() && each.value("ready", false);
     });
     if (ready == session.suggestions.end()) {
+        return;
+    }
+    const bool ending = state.status == "stopped" || state.duration_ms <= 0 ||
+                        state.duration_ms - state.position_ms <= turn_before_ms;
+    if (!ending) {
+        // Not yet: what leads now is fetched ahead, where this library lacks
+        // it, so it is here should it still lead when the turn comes.
+        const auto file = text(*ready, "file");
+        bool its_own = false;
+        {
+            const std::lock_guard guard{session.copies};
+            its_own = session.mine.contains(file);
+        }
+        if (!its_own &&
+            library_copy(session, "file:" + file, ready->value("track", Json::object())).empty()) {
+            fetch(session, file);
+        }
         return;
     }
     const auto id = ready->value("id", std::uint64_t{0});
@@ -1270,10 +1306,9 @@ core::Result<void> Together::party(const bool on) {
 
 core::Result<std::uint64_t> Together::suggest(const std::string& raw_path) {
     const auto session = current();
-    if (!session || session->hosting) {
-        return std::unexpected(together_error(
-            session ? "the host plays what it likes: Up Next" : "not in a listening room",
-            core::ErrorCode::invalid_argument));
+    if (!session) {
+        return std::unexpected(
+            together_error("not in a listening room", core::ErrorCode::invalid_argument));
     }
     const auto track = describe_file(raw_path);
     auto offered = request("POST", session->url("/suggestions"), session->invite.key,
@@ -1308,9 +1343,9 @@ core::Result<std::uint64_t> Together::suggest(const std::string& raw_path) {
 
 core::Result<void> Together::vote(const std::uint64_t id) {
     const auto session = current();
-    if (!session || session->hosting) {
-        return std::unexpected(together_error("only a listener votes",
-                                              core::ErrorCode::invalid_argument));
+    if (!session) {
+        return std::unexpected(
+            together_error("not in a listening room", core::ErrorCode::invalid_argument));
     }
     auto voted = request("POST", session->url("/suggestions/" + std::to_string(id) + "/vote"),
                          session->invite.key, Json{{"name", session->name}}.dump(), 5'000L);
@@ -1416,8 +1451,8 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
                           return std::unexpected(together_error(
                               "the server's address is needed", core::ErrorCode::invalid_argument));
                       }
-                      auto invite =
-                          together.host(server, params.value("password", std::string{}));
+                      auto invite = together.host(server, params.value("password", std::string{}),
+                                                  params.value("name", std::string{}));
                       if (!invite) {
                           return std::unexpected(invite.error());
                       }

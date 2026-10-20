@@ -79,11 +79,13 @@ def panel(given):
                 "" if each.get("ready") else "its copy on its way") if p)
             parts.append({"text": " — ".join(p for p in (each.get("artist"), each.get("title")) if p),
                           "detail": detail})
-            target = "melody://together/%s?id=%d" % ("remove" if role == "host" else "vote",
-                                                     each.get("id", 0))
-            label = ("Remove" if role == "host"
-                     else "Take back my vote" if each.get("voted") else "Vote")
-            parts.append({"link": label, "detail": each.get("title", ""), "url": target})
+            # Everyone votes, the host as a guest; the host alone removes.
+            parts.append({"link": "Take back my vote" if each.get("voted") else "Vote",
+                          "detail": each.get("title", ""),
+                          "url": "melody://together/vote?id=%d" % each.get("id", 0)})
+            if role == "host":
+                parts.append({"link": "Remove", "detail": each.get("title", ""),
+                              "url": "melody://together/remove?id=%d" % each.get("id", 0)})
     if room.get("message"):
         parts.append({"paragraph": room["message"]})
     print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",
@@ -104,7 +106,8 @@ def main():
         password = str(settings.get("password") or "").strip()
         if not server or not password:
             fail("Set the server and its password under Settings › Plugins › Listen together")
-        answer = cli(given, "together", "host", server, password=password)
+        name = str(settings.get("name") or "").strip() or os.environ.get("USER", "the host")
+        answer = cli(given, "together", "host", server, name, password=password)
         # Just the invite: it goes onto the clipboard, to paste to friends.
         print(answer.get("invite", ""))
     elif what == "join":

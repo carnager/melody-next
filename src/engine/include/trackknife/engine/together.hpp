@@ -83,7 +83,8 @@ class Together final {
     // A room on `server`, made with its password; this engine its host. The
     // invite to send to friends.
     [[nodiscard]] core::Result<std::string> host(const std::string& server,
-                                                 const std::string& password);
+                                                 const std::string& password,
+                                                 const std::string& name = {});
     // Into the room an invite names, as `name`.
     [[nodiscard]] core::Result<void> join(const std::string& invite, const std::string& name);
     // Out of the room -- closing it, as its host.
@@ -97,10 +98,10 @@ class Together final {
 
     // Phase 4. The host makes the room a party, or ends it.
     [[nodiscard]] core::Result<void> party(bool on);
-    // A listener suggests a track of its library -- its copy sent, the
-    // suggestion's number answered.
+    // Anyone in a party -- the host too -- suggests a track of its library:
+    // its copy sent, the suggestion's number answered.
     [[nodiscard]] core::Result<std::uint64_t> suggest(const std::string& raw_path);
-    // A listener's vote for a suggestion, or taken back.
+    // A vote for a suggestion, or taken back -- the host's as anyone's.
     [[nodiscard]] core::Result<void> vote(std::uint64_t id);
     // The host removes a suggestion.
     [[nodiscard]] core::Result<void> remove(std::uint64_t id);

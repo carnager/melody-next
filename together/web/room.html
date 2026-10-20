@@ -1,7 +1,9 @@
 <!doctype html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- ADR-0302 phase 3: a listening room in the browser, for friends without
-     Melody -- and the way into Melody for those with it. -->
+     Melody -- and the way into Melody for those with it. Laid out as a
+     record's sleeve: the cover is the page, its colour the room's, the
+     tracks a running order, and Melody's blackbird walks the song. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -10,407 +12,323 @@
 <title>Listen together</title>
 <link rel="icon" href="/assets/mascot.svg">
 <style>
+  /* The room's colour: a hue and a saturation, taken from the cover. */
   :root {
-    --ground: #f4eee4; --ground-deep: #ebe1cf; --card: #fffdf9; --raised: #f6f1e8; --text: #201f1d;
-    --soft: #6f685d; --faint: #a39a8b; --line: rgba(32,31,29,.09);
-    --accent: #f15a13; --accent-soft: rgba(241,90,19,.11); --halo: #fff3d5;
-    --shadow: 0 14px 40px rgba(60,40,20,.12); --radius: 20px;
+    --h: 24; --s: 30%;
+    --ground: hsl(var(--h) calc(var(--s) * .45) 93%);
+    --ink: hsl(var(--h) 25% 11%);
+    --soft: hsl(var(--h) 12% 34%);
+    --faint: hsl(var(--h) 8% 52%);
+    --rule: hsl(var(--h) 20% 20% / .14);
+    --accent: hsl(var(--h) max(62%, var(--s)) 38%);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Noto Serif", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --ground: #141217; --ground-deep: #1c1920; --card: #211e26; --raised: #2a2630; --text: #f1ece4;
-      --soft: #b3aa9d; --faint: #7d756b; --line: rgba(255,255,255,.07);
-      --accent: #ff7a3d; --accent-soft: rgba(255,122,61,.15); --halo: #f4e6c8;
-      --disc: radial-gradient(circle, #f4e6c8 62%, transparent 64%);
-      --shadow: 0 14px 40px rgba(0,0,0,.45);
+      --ground: hsl(var(--h) calc(var(--s) * .55) 10%);
+      --ink: hsl(var(--h) 18% 91%);
+      --soft: hsl(var(--h) 10% 68%);
+      --faint: hsl(var(--h) 8% 50%);
+      --rule: hsl(var(--h) 20% 90% / .13);
+      --accent: hsl(var(--h) max(62%, var(--s)) 64%);
     }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
+  html, body { margin: 0; }
   body {
-    color: var(--text); display: flex; flex-direction: column;
-    background: radial-gradient(1400px 800px at 20% -20%, var(--ground-deep), var(--ground));
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  button, input { font: inherit; color: inherit; }
-  .button {
-    border: 0; border-radius: 12px; padding: 11px 18px; font-weight: 650; cursor: pointer;
-    background: var(--accent); color: #fff; text-decoration: none; display: inline-block;
-  }
-  .button.quiet { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
-  .button:disabled { opacity: .5; cursor: default; }
-  h2 {
-    margin: 0 0 10px; font-size: .74rem; text-transform: uppercase; letter-spacing: .09em;
-    color: var(--faint); display: flex; align-items: center; gap: 8px;
-  }
-  .card {
-    background: color-mix(in srgb, var(--card) 88%, transparent); border-radius: var(--radius);
-    box-shadow: var(--shadow); min-height: 0;
-    -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2);
+    min-height: 100vh; color: var(--ink); background: var(--ground);
+    font: 15px/1.5 var(--sans); transition: background-color 1.2s ease, color 1.2s ease;
   }
   body.arriving { overflow: hidden; }
+  button, input { font: inherit; color: inherit; }
+  a { color: inherit; }
+  [hidden] { display: none !important; }
 
-  /* Behind everything: what plays, its cover blurred to a wash of colour. */
-  .backdrop { position: fixed; inset: -120px; z-index: -1; pointer-events: none; }
-  .backdrop div {
-    position: absolute; inset: 0; background-size: cover; background-position: center;
-    filter: blur(80px) saturate(1.5); opacity: 0; transition: opacity 1.4s ease;
-  }
-  .backdrop div.shown { opacity: var(--wash, .42); }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wash: .3; } }
-
-  /* Across the top: the room, and how it sounds here. */
-  .top { display: flex; align-items: center; gap: 16px; padding: 14px 22px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
-  .brand img { width: 32px; height: 32px; }
-  .brand img, .welcome img { border-radius: 50%; background: var(--disc, transparent); }
-  .room-name { color: var(--soft); font-weight: 600; }
-  .badge {
-    font-size: .72rem; font-weight: 700; color: var(--accent); background: var(--accent-soft);
-    border-radius: 999px; padding: 2px 9px; letter-spacing: 0; text-transform: none;
-  }
-  .spacer { flex: 1; }
-  .status { color: var(--soft); font-size: .9rem; display: flex; align-items: center; gap: 8px; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
-  .dot.live { background: #2fbf71; box-shadow: 0 0 0 4px rgba(47,191,113,.18); }
-  .volume { display: flex; align-items: center; gap: 8px; }
-  .volume button { background: none; border: 0; cursor: pointer; font-size: 1.1rem; padding: 2px; }
-  input[type=range] { accent-color: var(--accent); width: 120px; }
-
-  /* Three columns: what plays, the room's tracks, the people and their chat. */
+  /* The sleeve: the cover as large as the window allows, the liner notes
+     beside it, the room's talk in the margin. */
   main {
-    flex: 1; min-height: 0; padding: 0 22px 22px;
-    display: grid; gap: 18px; grid-template-columns: 340px minmax(0, 1fr) 380px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(260px, 22rem);
+    min-height: 100vh;
   }
-  @media (max-width: 1180px) {
-    body { height: auto; min-height: 100%; }
-    main { grid-template-columns: 300px minmax(0, 1fr); grid-template-rows: auto auto; }
-    .queue { max-height: 640px; }
-    .social { grid-column: 1 / -1; height: 60vh; min-height: 420px; }
+  .sleeve {
+    position: sticky; top: 0; height: 100vh; aspect-ratio: 1; max-width: 46vw;
+    background: hsl(var(--h) calc(var(--s) * .6) 50% / .18);
   }
-  @media (max-width: 760px) {
-    body { height: auto; }
-    main { display: flex; flex-direction: column; padding: 0 12px 16px; }
-    .top { padding: 12px 14px; }
-    .queue .scroll { max-height: none; }
-    .social { min-height: 75vh; }
+  .sleeve img.art { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sleeve img.art { animation: develop 1.2s ease; }
+  @keyframes develop { from { opacity: 0; } }
+  /* No cover: the blackbird, large, on the room's colour. */
+  .sleeve .stand-in { position: absolute; inset: 22%; width: 56%; height: 56%; opacity: .9; }
+  .liner { position: relative; padding: 40px 56px 64px; min-width: 0; }
+  .margin {
+    border-left: 1px solid var(--rule); padding: 40px 28px 24px;
+    display: flex; flex-direction: column; height: 100vh; position: sticky; top: 0;
+  }
+  /* The margin beside the notes only where both have room; beneath them
+     otherwise. */
+  @media (max-width: 1720px) {
+    main { grid-template-columns: auto minmax(0, 1fr); }
+    .margin {
+      grid-column: 2; height: auto; position: static; border-left: 0;
+      border-top: 1px solid var(--rule); margin: 0 56px; padding: 28px 0 40px;
+    }
+    .margin .lines { max-height: 50vh; }
+  }
+  @media (max-width: 860px) {
+    main { display: block; }
+    .sleeve { position: relative; height: auto; width: 100%; max-width: none; }
+    .liner { padding: 24px 18px 40px; }
+    .margin { margin: 0 18px; }
   }
 
-  .now {
-    position: relative; padding: 26px 22px 20px; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center; overflow: hidden;
+  /* The top line: which room, whether it is live, how loud here. */
+  .room-line {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    color: var(--soft); font-size: .92rem;
   }
-  .stage { position: relative; width: min(280px, 72vw); aspect-ratio: 1; margin: 6px 0 22px; }
-  .halo {
-    position: absolute; inset: 6%; border-radius: 50%;
-    background: radial-gradient(circle at 50% 45%, var(--halo), transparent 70%);
+  .room-line .name { font-family: var(--serif); font-style: italic; font-size: 1.1rem; color: var(--ink); }
+  .room-line .spacer { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .dot.live { background: var(--accent); animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
+  .volume { display: inline-flex; align-items: center; gap: 6px; }
+  .volume button { background: none; border: 0; cursor: pointer; padding: 0; color: var(--soft); font-size: .92rem; }
+  input[type=range] { accent-color: var(--accent); width: 96px; }
+
+  /* What plays, as a sleeve names it. */
+  .now { margin-top: 9vh; position: relative; }
+  .now h1 {
+    font-family: var(--serif); font-weight: 600; font-size: clamp(2.2rem, 4.4vw, 4.4rem);
+    line-height: 1.04; margin: 0; letter-spacing: -.01em; overflow-wrap: break-word; hyphens: auto;
   }
-  /* The cover, when the host's Melody sent one; the blackbird then sits on
-     its corner and listens along. */
-  .cover {
-    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-    border-radius: 18px; box-shadow: 0 18px 44px rgba(0,0,0,.28);
-    animation: arrive .6s cubic-bezier(.2,.8,.2,1);
-  }
-  @keyframes arrive { from { opacity: 0; transform: scale(.94); } }
-  body.has-cover .halo { display: none; }
+  .now .artist { font-family: var(--serif); font-size: clamp(1.1rem, 1.7vw, 1.5rem); margin: 10px 0 0; color: var(--soft); }
+  .now .by { margin: 6px 0 0; color: var(--accent); font-style: italic; min-height: 1.5em; }
+
+  /* The song as a line, and the blackbird walking it. */
+  .walk { position: relative; margin: 72px 0 0; height: 2px; background: var(--rule); }
+  .walk .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ink); transition: width .25s linear; }
   .perch {
-    position: absolute; inset: 10%; transition: inset .5s cubic-bezier(.2,.8,.2,1);
-    transform-origin: 50% 90%;
+    position: absolute; bottom: 1px; left: 0; width: 54px; height: 54px; margin-left: -27px;
+    transition: left .25s linear;
   }
-  body.has-cover .perch { inset: auto -14% -12% auto; width: 44%; height: 44%; }
-  .bird {
-    width: 100%; height: 100%; transform-origin: 50% 85%; display: block;
-    filter: drop-shadow(0 6px 10px rgba(0,0,0,.25));
+  .perch.jump { transition: none; }
+  .bird { width: 100%; height: 100%; display: block; transform-origin: 50% 90%; }
+  /* A black bird on a dark room: a faint edge of light to be seen by. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .bird { filter: drop-shadow(0 0 1px hsl(var(--h) 20% 85% / .6)); }
   }
-  body.playing:not(.listening) .bird { animation: bob 2.6s ease-in-out infinite; }
-  /* Asleep while nothing plays, or the host has paused. */
-  body.dozing .perch { transform: rotate(-9deg) translateY(4%); filter: saturate(.55); }
+  body.playing:not(.listening) .bird { animation: sway 2.6s ease-in-out infinite; }
+  @keyframes sway { 50% { transform: rotate(3deg) translateY(-2px); } }
+  /* Asleep on the line while the host has paused. */
+  body.dozing .perch { transform: rotate(-8deg) translateY(4px); filter: saturate(.5); }
   .zzz span {
-    position: absolute; top: 18%; right: 14%; font-weight: 800; color: var(--soft);
-    opacity: 0; pointer-events: none;
+    position: absolute; bottom: 70%; left: 60%; font-family: var(--serif); font-style: italic;
+    color: var(--soft); opacity: 0; pointer-events: none;
   }
-  body.has-cover .zzz span { top: auto; bottom: 26%; right: -10%; }
   body.dozing .zzz span { animation: doze 3s ease-out infinite; }
-  .zzz span:nth-child(2) { animation-delay: 1s !important; font-size: 1.2rem; }
-  .zzz span:nth-child(3) { animation-delay: 2s !important; font-size: 1.5rem; }
-  @keyframes doze {
-    0% { transform: translate(0, 0); opacity: 0; }
-    20% { opacity: .8; }
-    100% { transform: translate(18px, -60px); opacity: 0; }
-  }
-  /* What the blackbird says: who came in. */
-  .bubble {
-    position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
-    background: var(--card); color: var(--text); font-weight: 650; font-size: .9rem;
-    padding: 7px 13px; border-radius: 14px; box-shadow: var(--shadow); white-space: nowrap;
-    animation: pop .35s cubic-bezier(.2,1.4,.4,1); z-index: 1;
-  }
-  /* On the cover, said from the blackbird's corner, inward. */
-  body.has-cover .bubble { top: auto; bottom: 34%; left: auto; right: 14%; transform: none; }
-  body.has-cover .bubble::after {
-    content: ""; position: absolute; right: -6px; bottom: 10px; border: 7px solid transparent;
-    border-left-color: var(--card); border-right: 0;
-  }
-  @keyframes pop { from { opacity: 0; transform: translateX(-50%) scale(.6); } }
-  body.has-cover .bubble { animation-name: pop-side; }
-  @keyframes pop-side { from { opacity: 0; transform: scale(.6); } }
+  .zzz span:nth-child(2) { animation-delay: 1s !important; font-size: 1.15rem; }
+  .zzz span:nth-child(3) { animation-delay: 2s !important; font-size: 1.35rem; }
+  @keyframes doze { 20% { opacity: .8; } to { transform: translate(14px, -46px); opacity: 0; } }
   .hop { animation: hop .7s ease-in-out !important; }
-  @keyframes hop { 45% { transform: translateY(-9%) rotate(-3deg); } }
-  @keyframes bob {
-    0%, 100% { transform: translateY(0) rotate(-1.5deg); }
-    50% { transform: translateY(-4px) rotate(1.5deg); }
+  @keyframes hop { 45% { transform: translateY(-14px) rotate(-3deg); } }
+  .bubble {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-12px); margin-bottom: 4px;
+    font-family: var(--serif); font-style: italic; white-space: nowrap; color: var(--ink);
+    animation: say .3s ease;
   }
-  .notes span {
-    position: absolute; bottom: 44%; right: 8%; font-size: 1.5rem; color: var(--accent);
-    opacity: 0; pointer-events: none;
-  }
-  body.has-cover .notes span { bottom: 18%; right: -12%; }
-  body.playing .notes span { animation: rise 2.7s ease-out infinite; }
-  .notes span:nth-child(2) { right: 0; animation-delay: .9s !important; font-size: 1.2rem; }
-  .notes span:nth-child(3) { right: 15%; animation-delay: 1.8s !important; font-size: 1.35rem; }
-  @keyframes rise {
-    0% { transform: translate(0, 0) rotate(-8deg); opacity: 0; }
-    15% { opacity: .95; }
-    100% { transform: translate(24px, -110px) rotate(14deg); opacity: 0; }
+  @keyframes say { from { opacity: 0; transform: translate(-12px, 6px); } }
+  .times {
+    display: flex; justify-content: space-between; margin-top: 10px;
+    color: var(--faint); font-variant-numeric: tabular-nums; font-size: .85rem;
   }
   @media (prefers-reduced-motion: reduce) {
-    body.playing .bird, body.playing .notes span, body.dozing .zzz span, .hop, .cover { animation: none !important; }
+    .bird, .zzz span, .hop, .dot.live, .sleeve img.art { animation: none !important; }
   }
-  .now h1 { margin: 0; font-size: 1.45rem; line-height: 1.25; overflow-wrap: anywhere; }
-  .now .artist { margin: 4px 0 0; color: var(--soft); }
-  .now .by { margin: 8px 0 0; font-size: .85rem; color: var(--accent); min-height: 1.3em; }
-  .progress { width: 100%; margin-top: 18px; }
-  .bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
-  .fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .25s linear; }
-  .times {
-    display: flex; justify-content: space-between; margin-top: 6px;
-    color: var(--faint); font-variant-numeric: tabular-nums; font-size: .82rem;
-  }
-  .hint {
-    margin: 16px 0 0; padding: 8px 14px; border-radius: 12px;
-    background: var(--accent-soft); font-size: .9rem;
-  }
-  .hint:empty { display: none; }
 
-  /* Reactions: sent with a tap, floated up on every page. */
-  .reactions { display: flex; gap: 6px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+  /* Reactions: plain, under the line; sent, they float up. */
+  .reactions { display: flex; gap: 2px; margin-top: 18px; }
   .reactions button {
-    border: 0; background: var(--raised); border-radius: 999px; width: 42px; height: 42px;
-    font-size: 1.25rem; cursor: pointer; box-shadow: inset 0 0 0 1px var(--line);
-    transition: transform .12s ease;
+    border: 0; background: none; cursor: pointer; font-size: 1.15rem; padding: 4px 6px;
+    border-radius: 6px; filter: grayscale(.6); opacity: .75; transition: filter .15s, opacity .15s, transform .15s;
   }
-  .reactions button:hover { transform: translateY(-2px) scale(1.08); }
-  .reactions button:active { transform: scale(.92); }
-  .floats { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+  .reactions button:hover { filter: none; opacity: 1; transform: translateY(-2px); }
+  .floats { position: absolute; inset: -40vh 0 0; pointer-events: none; overflow: hidden; }
   .float {
-    position: absolute; top: var(--from, 70%); display: flex; flex-direction: column; align-items: center;
-    animation: float 3.2s cubic-bezier(.25,.6,.4,1) forwards;
+    position: absolute; top: var(--from, 80%); display: flex; flex-direction: column; align-items: center;
+    animation: float 3.4s cubic-bezier(.25,.6,.4,1) forwards;
   }
-  .float b { font-size: 2.1rem; line-height: 1; }
-  .float small {
-    font-size: .72rem; font-weight: 700; color: var(--soft); background: var(--card);
-    border-radius: 99px; padding: 1px 7px; margin-top: 2px; box-shadow: var(--shadow);
-  }
+  .float b { font-size: 1.9rem; line-height: 1; }
+  .float small { font-family: var(--serif); font-style: italic; color: var(--soft); }
   @keyframes float {
-    0% { transform: translate(0, 20px) scale(.4); opacity: 0; }
-    12% { transform: translate(0, 0) scale(1.15); opacity: 1; }
-    70% { opacity: 1; }
-    100% { transform: translate(var(--drift, 20px), -340px) scale(.9); opacity: 0; }
+    0% { transform: translateY(10px); opacity: 0; }
+    12% { opacity: 1; }
+    75% { opacity: 1; }
+    100% { transform: translate(var(--drift, 16px), -300px); opacity: 0; }
   }
-  .gone { color: var(--accent); font-weight: 600; }
+  .hint { margin: 18px 0 0; font-style: italic; color: var(--soft); }
+  .hint:empty { display: none; }
+  .gone { color: var(--accent); }
 
-  /* The room's tracks. */
-  .queue { display: flex; flex-direction: column; padding: 20px 8px 8px 20px; }
-  .queue > h2 { padding-right: 12px; }
-  .scroll { flex: 1; overflow-y: auto; padding-right: 12px; min-height: 0; }
-  .group { margin: 4px 0 18px; }
-  .group h3 {
-    margin: 0 0 6px; font-size: .78rem; font-weight: 700; color: var(--faint);
-    display: flex; align-items: center; gap: 8px;
+  /* The running order, as on the back of a sleeve. */
+  .order { margin-top: 64px; }
+  .order h2 {
+    font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 1.05rem;
+    color: var(--soft); margin: 28px 0 4px;
   }
+  .order h2 .aside { font-size: .9rem; color: var(--faint); }
+  .order h2:first-child { margin-top: 0; }
   .row {
-    display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px;
-    padding: 8px 10px; border-radius: 12px;
+    display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) auto; align-items: baseline;
+    gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--rule);
   }
-  .row + .row { margin-top: 2px; }
-  .row:hover { background: var(--raised); }
-  .row.current { background: var(--accent-soft); }
-  .row .mark {
-    position: relative; width: 42px; height: 42px; border-radius: 9px; display: grid; place-items: center;
-    background: var(--raised) center / cover no-repeat; color: var(--faint); font-size: .85rem; font-weight: 700;
+  .row .n {
+    font-family: var(--serif); font-style: italic; color: var(--faint); text-align: right;
+    font-variant-numeric: tabular-nums;
   }
-  .row { grid-template-columns: 42px minmax(0, 1fr) auto; }
-  .row.current .mark { background-color: var(--accent); color: #fff; }
-  /* A cover in the mark: a rank as a small badge on its corner, what
-     plays as bars moving over it. */
-  .row .mark.art { color: transparent; box-shadow: 0 2px 6px rgba(0,0,0,.18); }
-  .row .mark .rank {
-    position: absolute; right: -5px; bottom: -5px; min-width: 18px; height: 18px; padding: 0 4px;
-    border-radius: 99px; background: var(--card); color: var(--text); font-size: .68rem;
-    display: grid; place-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.25);
-  }
-  .bars { display: flex; gap: 2px; align-items: flex-end; height: 14px; }
-  .bars i { width: 3px; background: #fff; border-radius: 1px; height: 30%; }
-  .mark.art .bars { background: rgba(0,0,0,.35); padding: 5px; border-radius: 6px; height: 24px; }
-  body.playing .bars i { animation: bar .9s ease-in-out infinite alternate; }
-  .bars i:nth-child(2) { animation-delay: -.3s !important; }
-  .bars i:nth-child(3) { animation-delay: -.6s !important; }
-  @keyframes bar { from { height: 25%; } to { height: 100%; } }
-  .more {
-    border: 0; background: none; color: var(--accent); font-weight: 650; cursor: pointer;
-    padding: 6px 10px; font-size: .85rem;
-  }
-  .row .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .sub { color: var(--soft); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .meta { color: var(--faint); font-size: .8rem; font-variant-numeric: tabular-nums; text-align: right; }
+  .row .title { font-weight: 600; }
+  .row .sub { color: var(--soft); }
+  .row .meta { color: var(--faint); font-size: .88rem; font-variant-numeric: tabular-nums; }
+  .row.current .title, .row.current .n { color: var(--accent); }
+  .row.current .n { font-style: normal; }
+  .row .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vote {
-    display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; cursor: pointer;
-    padding: 6px 12px; font-weight: 700; background: var(--raised); color: var(--text);
-    box-shadow: inset 0 0 0 1px var(--line); font-variant-numeric: tabular-nums;
+    border: 0; background: none; cursor: pointer; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--soft); padding: 2px 4px; border-bottom: 2px solid transparent;
   }
-  .vote.mine { background: var(--accent); color: #fff; box-shadow: none; }
-  .empty { color: var(--faint); font-size: .9rem; padding: 8px 10px; }
+  .vote:hover { color: var(--ink); }
+  .vote.mine { color: var(--accent); border-bottom-color: var(--accent); }
+  .empty { color: var(--faint); font-style: italic; padding: 8px 0; }
+  .more {
+    border: 0; background: none; cursor: pointer; color: var(--soft); padding: 10px 0;
+    font-family: var(--serif); font-style: italic; text-decoration: underline; text-underline-offset: 3px;
+  }
 
-  /* People, and their chat. */
-  .social { display: flex; flex-direction: column; padding: 20px; }
-  .people { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; padding: 0; list-style: none; }
-  .people li {
-    display: flex; align-items: center; gap: 7px; padding: 4px 11px 4px 4px; border-radius: 999px;
-    background: var(--raised); font-size: .88rem;
-  }
-  .avatar {
-    flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-    color: #fff; font-weight: 700; font-size: .78rem;
-  }
-  .you { color: var(--faint); font-size: .76rem; }
+  /* The margin: who is here, and what they say. */
+  .with { margin: 0; color: var(--soft); }
+  .with b { font-weight: 600; }
+  .with .you { color: var(--faint); font-style: italic; }
   .lines {
-    flex: 1; min-height: 160px; overflow-y: auto; margin: 0 -8px; padding: 0 8px; list-style: none;
+    list-style: none; margin: 22px 0 0; padding: 0; flex: 1; min-height: 120px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 12px;
   }
-  .lines li { display: flex; gap: 10px; align-items: flex-start; }
-  .lines .who { font-weight: 650; font-size: .88rem; }
-  .lines .when { color: var(--faint); font-size: .74rem; margin-left: 6px; }
-  .lines .what { overflow-wrap: anywhere; }
-  .lines .empty { margin: auto; }
-  form.say { display: flex; gap: 8px; margin-top: 14px; }
+  .lines li { line-height: 1.4; }
+  .lines .who { font-weight: 650; }
+  .lines .when { color: var(--faint); font-size: .78rem; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .lines .what { display: block; overflow-wrap: anywhere; }
+  .lines .empty { margin-top: auto; }
+  form.say { display: flex; gap: 10px; margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 12px; }
   form.say input, .welcome input {
-    flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 11px 14px;
-    background: var(--raised); box-shadow: inset 0 0 0 1px var(--line);
+    flex: 1; min-width: 0; border: 0; border-bottom: 1px solid var(--rule); background: none;
+    padding: 8px 0; outline: none;
   }
-  form.say input:focus, .welcome input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  form.say input:focus, .welcome input:focus { border-bottom-color: var(--accent); }
+  .button {
+    border: 0; border-radius: 3px; padding: 9px 16px; cursor: pointer; font-weight: 650;
+    background: var(--ink); color: var(--ground); text-decoration: none; display: inline-block;
+  }
+  .button:disabled { opacity: .5; cursor: default; }
+  .link { background: none; border: 0; color: var(--soft); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
-  /* Arriving. */
+  /* Arriving: the cover and what plays, the name, and in. */
   .welcome {
-    position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; z-index: 2;
-    background: radial-gradient(1400px 800px at 20% -20%, var(--ground-deep), var(--ground));
+    position: fixed; inset: 0; z-index: 3; background: var(--ground);
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center;
   }
-  .welcome .card { width: min(30rem, 100%); padding: 30px; text-align: center; }
-  .welcome img { width: 150px; height: 150px; margin: -6px auto 4px; display: block; }
-  .preview {
-    display: flex; align-items: center; gap: 12px; text-align: left; margin: 14px 0 4px;
-    padding: 10px; border-radius: 14px; background: var(--raised);
+  .welcome .art-side { height: 100vh; position: relative; background: hsl(var(--h) calc(var(--s) * .6) 50% / .18); }
+  .welcome .art-side img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .welcome .art-side img.stand-in { position: absolute; inset: 25%; width: 50%; height: 50%; object-fit: contain; }
+  .welcome .words { padding: 48px 8vw 48px 64px; max-width: 40rem; }
+  .welcome h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: 1.05; margin: 0; }
+  .welcome p { color: var(--soft); margin: 14px 0 0; }
+  .welcome .playing { font-family: var(--serif); font-size: 1.15rem; color: var(--ink); }
+  .welcome .playing i { color: var(--soft); }
+  .welcome form { display: flex; flex-direction: column; gap: 18px; margin-top: 32px; max-width: 24rem; }
+  .welcome .choices { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  details { margin-top: 28px; color: var(--soft); font-size: .9rem; max-width: 30rem; }
+  summary { cursor: pointer; }
+  code { font-size: .85em; }
+  code.invite { display: block; margin: 6px 0; padding: 8px 0; word-break: break-all; color: var(--ink); }
+  @media (max-width: 860px) {
+    .welcome { grid-template-columns: 1fr; align-content: start; overflow-y: auto; }
+    .welcome .art-side { height: 42vh; }
+    .welcome .words { padding: 28px 20px 40px; }
   }
-  .preview .art {
-    flex: none; width: 52px; height: 52px; border-radius: 9px; background: var(--card) center / cover;
-    display: grid; place-items: center; font-size: 1.3rem; color: var(--accent);
-  }
-  .preview .what { min-width: 0; }
-  .preview .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 700; }
-  .preview .title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .preview .sub { color: var(--soft); font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .welcome h1 { margin: 0 0 6px; font-size: 1.7rem; }
-  .welcome p { color: var(--soft); margin: 8px 0; }
-  .welcome form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
-  .welcome .row-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  .welcome .row-buttons .button { flex: 1 1 10rem; }
-  details { margin-top: 18px; color: var(--soft); text-align: left; font-size: .9rem; }
-  summary { cursor: pointer; text-align: center; }
-  code { background: var(--raised); padding: 1px 6px; border-radius: 6px; }
-  code.invite { display: block; margin: 6px 0; padding: 8px 10px; word-break: break-all; }
-  [hidden] { display: none !important; }
 </style>
 </head>
 <body class="arriving">
-<div class="backdrop" aria-hidden="true"><div id="wash-a"></div><div id="wash-b"></div></div>
 <div class="welcome" id="welcome">
-  <div class="card">
-    <img src="/assets/mascot.svg" alt="">
+  <div class="art-side">
+    <img class="stand-in" id="preview-art" src="/assets/mascot.svg" alt="">
+  </div>
+  <div class="words">
     <h1>Listen together</h1>
     <p id="welcome-text">A friend invited you to listen along, at the same moment, wherever you are.</p>
-    <div class="preview" id="preview" hidden>
-      <div class="art" id="preview-art">♪</div>
-      <div class="what">
-        <div class="label">Playing now</div>
-        <div class="title" id="preview-title"></div>
-        <div class="sub" id="preview-sub"></div>
-      </div>
-    </div>
+    <p class="playing" id="preview" hidden></p>
     <form id="join">
       <input id="name" maxlength="64" autocomplete="nickname" placeholder="Your name" required>
-      <div class="row-buttons">
+      <div class="choices">
         <button class="button" id="listen" type="submit">Listen here</button>
-        <a class="button quiet" id="open" href="#">Open in Melody</a>
+        <a class="link" id="open" href="#">Open in Melody</a>
       </div>
     </form>
     <details>
       <summary>Melody does not open?</summary>
       <p>Copy the invite: <code class="invite" id="invite"></code></p>
-      <p>In Melody, enable <strong>Listen together</strong> under Settings › Plugins, open its
-         <strong>Settings…</strong> and paste it; then Workspace › Run › <strong>Join the listening
-         room</strong>.</p>
+      <p>In Melody, enable <strong>Listen together</strong> under Settings › Plugins, and join
+         from its panel with the room's name and password.</p>
     </details>
   </div>
 </div>
 
-<header class="top">
-  <div class="brand"><img src="/assets/mascot.svg" alt="">Listen together</div>
-  <span class="room-name" id="room-name"></span>
-  <span class="badge" id="party-badge" hidden>Party</span>
-  <span class="spacer"></span>
-  <div class="status"><span class="dot" id="dot"></span><span id="status">Joining…</span></div>
-  <div class="volume">
-    <button id="mute" type="button" aria-label="Mute">🔊</button>
-    <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
-  </div>
-</header>
 <main>
-  <section class="card now">
-    <div class="floats" id="floats" aria-hidden="true"></div>
-    <div class="stage">
-      <div class="halo"></div>
-      <img class="cover" id="cover" alt="" hidden>
-      <div class="perch" id="perch">
-        <img class="bird" id="bird" src="/assets/mascot.svg" alt="Melody's blackbird">
+  <div class="sleeve">
+    <img class="art" id="cover" alt="" hidden>
+    <img class="stand-in" id="stand-in" src="/assets/mascot.svg" alt="">
+  </div>
+
+  <section class="liner">
+    <div class="room-line">
+      <span class="name" id="room-name"></span>
+      <span id="party-badge" hidden>· a party</span>
+      <span class="spacer"></span>
+      <span class="live"><span class="dot" id="dot"></span><span id="status">Joining…</span></span>
+      <span class="volume">
+        <button id="mute" type="button" aria-label="Mute">Sound on</button>
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+      </span>
+    </div>
+
+    <div class="now">
+      <div class="floats" id="floats" aria-hidden="true"></div>
+      <h1 id="title">Nothing is playing yet</h1>
+      <p class="artist" id="artist"></p>
+      <p class="by" id="by"></p>
+      <div class="walk">
+        <div class="fill" id="fill"></div>
+        <div class="perch" id="perch">
+          <img class="bird" id="bird" src="/assets/mascot.svg" alt="Melody's blackbird">
+          <div class="zzz" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
+          <div class="bubble" id="bubble" hidden></div>
+        </div>
       </div>
-      <div class="notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></div>
-      <div class="zzz" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
-      <div class="bubble" id="bubble" hidden></div>
-    </div>
-    <h1 id="title">Nothing is playing yet</h1>
-    <p class="artist" id="artist"></p>
-    <p class="by" id="by"></p>
-    <div class="progress">
-      <div class="bar"><div class="fill" id="fill"></div></div>
       <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+      <div class="reactions" id="reactions" role="group" aria-label="React"></div>
+      <p class="hint" id="hint"></p>
     </div>
-    <div class="reactions" id="reactions" role="group" aria-label="React"></div>
-    <p class="hint" id="hint"></p>
+
+    <div class="order" id="queue"></div>
   </section>
-  <section class="card queue">
-    <h2>The room's tracks</h2>
-    <div class="scroll" id="queue"></div>
-  </section>
-  <section class="card social">
-    <h2>Listening</h2>
-    <ul class="people" id="people"></ul>
-    <h2>Chat</h2>
+
+  <aside class="margin">
+    <p class="with" id="people"></p>
     <ol class="lines" id="lines"><li class="empty">Say hello.</li></ol>
     <form class="say" id="say">
       <input id="text" maxlength="500" placeholder="Say something…" autocomplete="off">
-      <button class="button" type="submit">Send</button>
+      <button class="link" type="submit">Send</button>
     </form>
-  </section>
+  </aside>
 </main>
 <audio id="audio" preload="auto"></audio>
 <audio id="next" preload="auto"></audio>
@@ -475,12 +393,6 @@ function colour(of) {
   return `hsl(${hash % 360} 55% 48%)`;
 }
 
-function avatar(of) {
-  const dot = element("span", "avatar", [...of][0].toUpperCase());
-  dot.style.background = colour(of);
-  return dot;
-}
-
 function status(text, live) {
   $("status").textContent = text;
   $("dot").classList.toggle("live", !!live);
@@ -503,16 +415,59 @@ async function measureClock() {
   offset = best.offset;
 }
 
-function renderPeople(listeners) {
-  const list = $("people");
-  list.replaceChildren();
-  for (const who of listeners || []) {
-    const item = element("li");
-    item.append(avatar(who), document.createTextNode(who));
-    if (who === name) item.append(element("span", "you", "you"));
-    list.append(item);
+// The room's colour, from its cover: the hue its colourful pixels share
+// most, and how colourful the cover is. A grey cover gives a grey room.
+function tint(image) {
+  const root = document.documentElement.style;
+  if (!image) {
+    root.removeProperty("--h");
+    root.removeProperty("--s");
+    return;
   }
-  if (!list.children.length) list.append(element("li", "empty", "Nobody yet"));
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 32;
+    const drawn = canvas.getContext("2d", { willReadFrequently: true });
+    drawn.drawImage(image, 0, 0, 32, 32);
+    const pixels = drawn.getImageData(0, 0, 32, 32).data;
+    const weight = new Array(24).fill(0);
+    let colourful = 0;
+    for (let at = 0; at < pixels.length; at += 4) {
+      const [r, g, b] = [pixels[at] / 255, pixels[at + 1] / 255, pixels[at + 2] / 255];
+      const high = Math.max(r, g, b), low = Math.min(r, g, b);
+      const chroma = high - low, lightness = (high + low) / 2;
+      if (chroma < 0.12 || lightness < 0.08 || lightness > 0.95) continue;
+      const hue = high === r ? ((g - b) / chroma + 6) % 6 : high === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
+      weight[Math.floor(hue * 4) % 24] += chroma;
+      colourful++;
+    }
+    const best = weight.indexOf(Math.max(...weight));
+    // How much of the cover is colour at all: a grey sleeve, a grey room.
+    const share = colourful / (pixels.length / 4);
+    root.setProperty("--h", String(best * 15 + 7));
+    root.setProperty("--s", `${Math.round(share < 0.04 ? 4 : Math.min(55, 18 + share * 60))}%`);
+  } catch {
+    root.removeProperty("--h");
+    root.removeProperty("--s");
+  }
+}
+
+function renderPeople(listeners) {
+  const line = $("people");
+  line.replaceChildren();
+  if (!listeners || !listeners.length) {
+    line.append(element("span", "you", "Nobody here yet."));
+    return;
+  }
+  line.append("With ");
+  listeners.forEach((who, index) => {
+    if (index) line.append(index === listeners.length - 1 ? " and " : ", ");
+    const shown = element("b", "", who);
+    shown.style.color = colour(who);
+    line.append(shown);
+    if (who === name) line.append(" ", element("span", "you", "(you)"));
+  });
+  line.append(".");
 }
 
 function vote(id) {
@@ -522,89 +477,74 @@ function vote(id) {
   }).catch(() => {});
 }
 
-// A row of the room's tracks: its cover -- else a mark -- the track, and
-// what is said of it. A number stays on the cover as a badge; what plays
-// shows bars moving.
-function row(mark, track, sub, meta, current, file) {
+// A line of the running order: its number, the track and its artist, and
+// what is said of it.
+function row(number, track, sub, meta, current) {
   const item = element("div", "row" + (current ? " current" : ""));
-  const what = element("div");
-  what.append(element("div", "title", track.title || "Untitled"),
-              element("div", "sub", [artistOf(track), sub].filter(Boolean).join(" · ")));
-  const shown = element("div", "mark", current ? "" : mark);
-  if (current) {
-    const bars = element("span", "bars");
-    bars.append(element("i"), element("i"), element("i"));
-    shown.append(bars);
-  }
-  if (file && covers.has(file)) {
-    shown.classList.add("art");
-    shown.style.backgroundImage = `url("${coverUrl(file)}")`;
-    if (/^\d+$/.test(mark)) shown.append(element("span", "rank", mark));
-  }
-  item.append(shown, what, meta || element("span"));
+  const what = element("div", "what");
+  what.append(element("span", "title", track.title || "Untitled"));
+  const said = [artistOf(track), sub].filter(Boolean).join(" · ");
+  if (said) what.append(element("span", "sub", "  " + said));
+  item.append(element("span", "n", number), what, meta || element("span"));
   return item;
 }
 
-function group(title, badge) {
-  const made = element("div", "group");
-  const heading = element("h3", "", title);
-  if (badge) heading.append(element("span", "badge", badge));
-  made.append(heading);
+function heading(text, aside) {
+  const made = element("h2", "", text);
+  if (aside) made.append(" ", element("span", "aside", aside));
   return made;
 }
 
-// The room's tracks: what plays, what is next, at a party what is
-// suggested -- most wanted first, a vote for each -- and what played.
+// The room's tracks as one running order: what plays, what is next, at a
+// party what is suggested -- most wanted first, a vote for each -- and what
+// played.
 function renderQueue() {
-  const queue = $("queue");
-  queue.replaceChildren();
-  const now = group("Now playing");
+  const order = $("queue");
+  order.replaceChildren();
+  order.append(heading("Now"));
   if (state.track) {
-    now.append(row("▶", state.track, state.by ? `suggested by ${state.by}` : "",
-                   element("span", "meta", clock(state.track.duration_ms)), true, fileOf(state)));
+    order.append(row("▸", state.track, state.by ? `suggested by ${state.by}` : "",
+                     element("span", "meta", clock(state.track.duration_ms)), true));
   } else {
-    now.append(element("div", "empty", "Nothing, for now."));
+    order.append(element("div", "empty", "Nothing, for now."));
   }
-  queue.append(now);
+  let number = 1;
   if (state.next && state.next.track) {
-    const next = group("Up next");
-    next.append(row("1", state.next.track, room_seen.party ? "decided" : "",
-                    element("span", "meta", clock(state.next.track.duration_ms)), false, fileOf(state.next)));
-    queue.append(next);
+    order.append(heading("Next"));
+    order.append(row(String(number++), state.next.track, "",
+                     element("span", "meta", clock(state.next.track.duration_ms))));
   }
   if (room_seen.party) {
-    const suggested = group("Suggested", "the most votes plays next");
+    order.append(heading("Suggested", "— the most votes plays next"));
     const suggestions = room_seen.suggestions || [];
     if (!suggestions.length) {
-      suggested.append(element("div", "empty", "Nothing suggested yet: friends in Melody suggest tracks of theirs."));
+      order.append(element("div", "empty", "Nothing yet: friends in Melody suggest tracks of theirs."));
     }
-    suggestions.forEach((each, index) => {
+    for (const each of suggestions) {
       const votes = each.votes || [];
-      const button = element("button", "vote" + (votes.includes(name) ? " mine" : ""), `▲ ${votes.length}`);
+      const button = element("button", "vote" + (votes.includes(name) ? " mine" : ""), `+${votes.length}`);
       button.type = "button";
-      button.title = votes.length ? `Voted: ${votes.join(", ")}` : "Vote for it";
+      button.title = votes.includes(name) ? "Take your vote back"
+                   : votes.length ? `Voted: ${votes.join(", ")}` : "Vote for it";
       button.addEventListener("click", () => vote(each.id));
-      suggested.append(row(String(index + 1), each.track || {},
-                           `${each.name}${each.ready ? "" : " · on its way"}`, button, false, each.file));
-    });
-    queue.append(suggested);
+      order.append(row(String(number++), each.track || {},
+                       `from ${each.name}${each.ready ? "" : ", on its way"}`, button));
+    }
   }
   const history = room_seen.history || [];
   if (history.length) {
-    // A few, the rest behind Show all: the room's tracks stay in view.
-    const played = group("Played");
-    const shown = playedOpen ? history : history.slice(0, 4);
+    order.append(heading("Played"));
+    const shown = playedOpen ? history : history.slice(0, 5);
     for (const each of shown) {
       const when = new Date(each.ms - offset).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      played.append(row("♪", each.track || {}, "", element("span", "meta", when), false, each.file));
+      order.append(row("", each.track || {}, "", element("span", "meta", when)));
     }
-    if (history.length > 4) {
-      const more = element("button", "more", playedOpen ? "Show fewer" : `Show all ${history.length}`);
+    if (history.length > 5) {
+      const more = element("button", "more", playedOpen ? "fewer" : `all ${history.length}`);
       more.type = "button";
       more.addEventListener("click", () => { playedOpen = !playedOpen; renderQueue(); });
-      played.append(more);
+      order.append(more);
     }
-    queue.append(played);
   }
 }
 
@@ -616,41 +556,32 @@ function renderChat(lines) {
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   for (const line of fresh) {
     const item = element("li");
-    const body = element("div");
     const when = new Date(line.ms - offset).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    body.append(element("span", "who", line.name), element("span", "when", when),
-                element("div", "what", line.text));
-    item.append(avatar(line.name), body);
+    const who = element("span", "who", line.name);
+    who.style.color = colour(line.name);
+    item.append(who, element("span", "when", when), element("span", "what", line.text));
     list.append(item);
     seenChat = Math.max(seenChat, line.id);
   }
   if (atBottom || fresh.some((line) => line.name === name)) list.scrollTop = list.scrollHeight;
 }
 
-// The cover large, and blurred behind the page -- crossfaded, so a new
-// track washes in rather than blinking.
-let washShown = "";
+// The cover as the sleeve, its colour the room's.
 function renderCover() {
   const file = fileOf(state);
   const url = state.track && file && covers.has(file) ? coverUrl(file) : "";
   const cover = $("cover");
-  document.body.classList.toggle("has-cover", !!url);
+  $("stand-in").hidden = !!url;
   if (!url) {
+    if (cover.dataset.url) tint(null);
     cover.hidden = true;
     cover.removeAttribute("src");
+    cover.dataset.url = "";
   } else if (cover.dataset.url !== url) {
     cover.dataset.url = url;
+    cover.onload = () => tint(cover);
     cover.src = url;
     cover.hidden = false;
-  }
-  if (url === washShown) return;
-  washShown = url;
-  const [a, b] = [$("wash-a"), $("wash-b")];
-  const [into, out] = a.classList.contains("shown") ? [b, a] : [a, b];
-  out.classList.remove("shown");
-  if (url) {
-    into.style.backgroundImage = `url("${url}")`;
-    into.classList.add("shown");
   }
 }
 
@@ -676,6 +607,12 @@ function target() {
   return state.paused ? state.position_ms : serverNow() - state.anchor_ms;
 }
 
+// The blackbird where the song is.
+function walk(fraction) {
+  $("fill").style.width = `${fraction * 100}%`;
+  $("perch").style.left = `${fraction * 100}%`;
+}
+
 // Kept in step with the room, a few times a second.
 function keepInStep() {
   const track = state.track;
@@ -685,7 +622,7 @@ function keepInStep() {
   if (!track) {
     if (!audio.paused) audio.pause();
     $("hint").textContent = "";
-    $("fill").style.width = "0";
+    walk(0);
     return;
   }
   // A suggestion's copy goes by its own name; the host's by its entry.
@@ -694,7 +631,7 @@ function keepInStep() {
   const at = target();
   $("elapsed").textContent = clock(Math.min(at, duration || at));
   $("duration").textContent = clock(duration);
-  $("fill").style.width = duration ? `${Math.min(100, (at / duration) * 100)}%` : "0";
+  walk(duration ? Math.max(0, Math.min(1, at / duration)) : 0);
 
   // What follows, fetched ahead.
   const next = state.next && (state.next.file || state.next.entry);
@@ -718,11 +655,11 @@ function keepInStep() {
   }
   if (state.paused) {
     if (!audio.paused) audio.pause();
-    $("hint").textContent = "Paused by the host";
+    $("hint").textContent = "Paused by the host.";
   } else {
     $("hint").textContent = "";
     if (audio.paused && audio.readyState >= 2) {
-      audio.play().catch(() => { $("hint").textContent = "Tap anywhere to start the sound"; });
+      audio.play().catch(() => { $("hint").textContent = "Tap anywhere to start the sound."; });
     }
   }
   if (audio.readyState >= 1 && at >= 0 && (!duration || at < duration)) {
@@ -734,9 +671,9 @@ function keepInStep() {
   }
 }
 
-// The blackbird, listening: it moves with how loud the music is, and hops
-// on a beat -- measured here, from the sound itself. Where the browser
-// cannot, it bobs as before.
+// The blackbird, listening: it sways with how loud the music is and nods
+// on a clear beat -- measured here, from the sound itself. Where the
+// browser cannot, it sways on its own.
 function startListening() {
   try {
     const Context = window.AudioContext || window.webkitAudioContext;
@@ -801,7 +738,7 @@ function greet(listeners) {
   if (knownListeners) {
     const arrived = listeners.filter((who) => !knownListeners.has(who) && who !== name);
     if (arrived.length) {
-      speak(`Hi ${arrived.join(", ")}!`);
+      speak(`hi, ${arrived.join(" and ")}`);
       hop();
     }
   }
@@ -818,6 +755,7 @@ function sendReaction(emoji) {
 
 // Each reaction floated up once; those from before this page came, not.
 function renderReactions(reactions) {
+  const floats = $("floats");
   for (const each of reactions) {
     const id = `${each.ms}-${each.id}`;
     if (seenReactions.has(id)) continue;
@@ -825,12 +763,13 @@ function renderReactions(reactions) {
     if (serverNow() - each.ms > 6000) continue;
     const float = element("div", "float");
     float.append(element("b", "", each.emoji), element("small", "", each.name));
-    // Up from the reactions, across the cover.
-    float.style.setProperty("--from", `${$("reactions").offsetTop - 30}px`);
-    float.style.left = `${12 + Math.random() * 70}%`;
-    float.style.setProperty("--drift", `${Math.round(Math.random() * 60 - 30)}px`);
+    // Up from the reactions, over the title.
+    const from = $("reactions").getBoundingClientRect().top - floats.getBoundingClientRect().top;
+    float.style.setProperty("--from", `${from - 20}px`);
+    float.style.left = `${Math.random() * 60}%`;
+    float.style.setProperty("--drift", `${Math.round(Math.random() * 50 - 25)}px`);
     float.addEventListener("animationend", () => float.remove());
-    $("floats").append(float);
+    floats.append(float);
   }
 }
 
@@ -840,7 +779,15 @@ function apply(answer) {
   room_seen = answer;
   files = new Set(answer.files || []);
   covers = new Set(answer.covers || []);
-  if (state.track && fileOf(state) !== before && before !== undefined) hop();
+  // A new track: back to the start of the line, with a hop.
+  if (state.track && fileOf(state) !== before && before !== undefined) {
+    const perch = $("perch");
+    perch.classList.add("jump");
+    walk(0);
+    void perch.offsetWidth;
+    perch.classList.remove("jump");
+    hop();
+  }
   greet(answer.listeners || []);
   renderReactions(answer.reactions || []);
   $("party-badge").hidden = !answer.party;
@@ -848,7 +795,7 @@ function apply(answer) {
   renderQueue();
   renderPeople(answer.listeners);
   renderChat(answer.chat);
-  status(state.track ? (state.paused ? "Paused" : "Live") : "Waiting for the host", state.track && !state.paused);
+  status(state.track ? (state.paused ? "paused" : "live") : "waiting for the host", state.track && !state.paused);
   keepInStep();
 }
 
@@ -874,7 +821,7 @@ async function follow() {
       revision = Math.max(revision, seen.revision);
       apply(seen);
     } catch {
-      status("Reconnecting…", false);
+      status("reconnecting…", false);
       await sleep(2000);
     }
   }
@@ -918,6 +865,30 @@ async function say(event) {
   }).catch(() => { $("text").value = text; });
 }
 
+// Arriving: what the room is playing, before joining it -- its cover, its
+// colour.
+async function preview() {
+  try {
+    const answer = await fetch(`/rooms/${encodeURIComponent(room)}/state?after=0&wait=0`,
+                               { headers: headers(), cache: "no-store" });
+    if (!answer.ok) return;
+    const seen = await answer.json();
+    const track = seen.state && seen.state.track;
+    if (!track || listening) return;
+    const playing = $("preview");
+    playing.replaceChildren(element("i", "", "Playing now: "),
+                            document.createTextNode([track.title || "Untitled", artistOf(track)].filter(Boolean).join(" — ")));
+    playing.hidden = false;
+    const file = fileOf(seen.state);
+    if (file && (seen.covers || []).includes(file)) {
+      const art = $("preview-art");
+      art.onload = () => tint(art);
+      art.className = "";
+      art.src = coverUrl(file);
+    }
+  } catch {}
+}
+
 // Arriving: the name from last time, the way into Melody, the invite to copy.
 $("invite").textContent = invite;
 $("room-name").textContent = room;
@@ -926,6 +897,7 @@ if (!key) {
   $("join").hidden = true;
 } else {
   $("open").href = "melody://together/join?invite=" + encodeURIComponent(invite);
+  preview();
 }
 try { $("name").value = localStorage.getItem("melody-together-name") || ""; } catch {}
 $("join").addEventListener("submit", listen);
@@ -933,11 +905,11 @@ $("say").addEventListener("submit", say);
 $("volume").addEventListener("input", () => {
   audio.volume = Number($("volume").value);
   audio.muted = false;
-  $("mute").textContent = audio.volume === 0 ? "🔇" : "🔊";
+  $("mute").textContent = audio.volume === 0 ? "Muted" : "Sound on";
 });
 $("mute").addEventListener("click", () => {
   audio.muted = !audio.muted;
-  $("mute").textContent = audio.muted ? "🔇" : "🔊";
+  $("mute").textContent = audio.muted ? "Muted" : "Sound on";
 });
 document.addEventListener("click", () => {
   if (audioContext && audioContext.state === "suspended") audioContext.resume().catch(() => {});
@@ -950,27 +922,6 @@ for (const emoji of REACTIONS) {
   button.addEventListener("click", () => sendReaction(emoji));
   $("reactions").append(button);
 }
-
-// Arriving: what the room is playing, before joining it.
-async function preview() {
-  try {
-    const answer = await fetch(`/rooms/${encodeURIComponent(room)}/state?after=0&wait=0`,
-                               { headers: headers(), cache: "no-store" });
-    if (!answer.ok) return;
-    const seen = await answer.json();
-    const track = seen.state && seen.state.track;
-    if (!track || listening) return;
-    $("preview-title").textContent = track.title || "Untitled";
-    $("preview-sub").textContent = [artistOf(track), track.album].filter(Boolean).join(" — ");
-    const file = fileOf(seen.state);
-    if (file && (seen.covers || []).includes(file)) {
-      $("preview-art").style.backgroundImage = `url("${coverUrl(file)}")`;
-      $("preview-art").textContent = "";
-    }
-    $("preview").hidden = false;
-  } catch {}
-}
-if (key) preview();
 audio.addEventListener("loadedmetadata", () => { lastSeek = 0; keepInStep(); });
 // Leaving says so, the key in the address since a beacon sends no header.
 addEventListener("pagehide", () => {

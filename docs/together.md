@@ -78,24 +78,22 @@ invite's key after `#` is what keeps it among friends.
 
 ## Hosting and joining
 
-In Melody, enable **Listen together** under Settings → Plugins, and once, in
-its **Settings…**, set the server (`https://together.example.org`) and its
-password.
+In Melody, enable **Listen together** under Settings → Plugins and, once, in
+its **Settings…**, set the server (`https://together.example.org`) and your
+name. Everything else is the **Listening room** panel:
 
-- **To host:** Workspace › Run › **Host a listening room**. The invite is on
-  your clipboard -- paste it to your friends -- and in the **Listening
-  together** panel, with who listens. A friend arriving or leaving is said.
-- **To join:** open the invite you were sent. Its page has **Open in
-  Melody**: Melody joins the room, as your login name or the name set in
-  the plugin's settings. (Or paste the invite into the plugin's settings and
-  Workspace › Run › **Join the listening room**.)
+- **To start a room:** its name and password -- yours to choose, or left
+  empty to have them made -- then **Start room**. Send your friends the
+  room's name and password, or the room's page: `…/rooms/NAME#PASSWORD`,
+  which opens the room in their browser or their Melody.
+- **To join:** the room's name and password, then **Join room** -- or open
+  the page a friend sent.
 
-The **Listening room** panel is the room's own queue: what plays and
-whose it is, what is next, at a party the suggestions with Vote, who
-listens and what played. Your tabs stay yours.
-
-**Leave the listening room** leaves -- and, as its host, closes the room.
-An engine that restarts -- an update -- comes back into its room by itself.
+In a room the panel is the room itself: **Stop room** or **Leave room**, the
+host's **Party** toggle, the queue -- what plays and whose it is, what is
+next, at a party the suggestions with **▲** to vote and, for the host,
+**✕** to remove -- what played and who listens. Your tabs stay yours. An
+engine that restarts comes back into its room by itself.
 
 From a terminal, the same:
 
@@ -111,16 +109,14 @@ plays through whatever speakers the engine plays on.
 
 ## A party
 
-A room is a radio the host programs -- or a party, a jukebox the room
-votes. The host makes it one with Workspace › Run › **Party mode on/off**,
-or `melody-cli together party on`. Then everyone in Melody, the host too,
+A room is a radio its host programs -- or a party, a jukebox the room
+votes: the host's **Party** toggle. Then everyone in Melody, the host too,
 suggests tracks of their own -- right-click them, **Suggest to the listening
 room**, or `melody-cli together suggest FILE…` -- three waiting at most each,
-and everyone votes: in the panel, on the page, or `melody-cli together vote
-N`. As each track ends, the most wanted suggestion plays next; the host's
-own queue plays on only when nothing is suggested. A suggestion only its
-friend has is played from their copy, sent once. The host removes one with
-**Remove** in the panel; ending the party clears what waits.
+and everyone votes: **▲** in the panel, on the page, or `melody-cli together
+vote N`. As each track ends, the most wanted suggestion plays next; the
+host's own queue plays on only when nothing is suggested. A suggestion only
+its friend has is played from their copy, sent once.
 
 ## How a listener finds the track
 

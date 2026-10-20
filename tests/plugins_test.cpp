@@ -1111,9 +1111,11 @@ void PluginsTest::triggersAreReadAndTold() {
 
 // The official Scripts plugin: the command set for a trigger, run with sh,
 // told what started it; for new albums once each, {} its folder.
-// ADR-0302: the official Listen together plugin asks the engine through
-// melody-cli -- here a stand-in that writes down what it was asked -- and
-// shows the room in its panel.
+// ADR-0302, ADR-0303: the official Listen together plugin is one panel --
+// a room's name and password to start or join one; in a room, the party,
+// the queue with a vote for each suggestion, what played, who listens --
+// asking the engine through melody-cli, here a stand-in that writes down
+// what it was asked.
 void PluginsTest::theTogetherPluginAsksTheEngine() {
     const QString folder = QStringLiteral(MELODY_SOURCE_DIR "/plugins/together");
     QFile manifest_file{folder + QStringLiteral("/plugin.json")};
@@ -1121,26 +1123,34 @@ void PluginsTest::theTogetherPluginAsksTheEngine() {
     QString problem;
     const auto together = parsePluginManifest(manifest_file.readAll(), folder, &problem);
     QVERIFY2(together.has_value(), qPrintable(problem));
-    QCOMPARE(together->triggers.size(), std::size_t{4U});
-    QCOMPARE(together->panels.size(), std::size_t{1U});
+    // Nothing in menus but suggesting; the panel is the rest.
+    QVERIFY(together->triggers.empty());
     QCOMPARE(together->actions.size(), std::size_t{1U});
-    const auto trigger = [&together](const QString& id) {
-        return *std::ranges::find(together->triggers, id, &PluginTrigger::id);
-    };
+    QCOMPARE(together->panels.size(), std::size_t{1U});
+    const auto& room_panel = together->panels.front();
+    QVERIFY(room_panel.always && room_panel.refresh_room);
+    QCOMPARE(together->settings.size(), std::size_t{3U});
 
     QTemporaryDir bin;
     QVERIFY(bin.isValid());
     const auto asked = bin.filePath(QStringLiteral("asked"));
+    const auto in_room = bin.filePath(QStringLiteral("in-room"));
     writeFile(bin.filePath(QStringLiteral("melody-cli")),
               QStringLiteral(R"sh(#!/bin/sh
 echo "$*|$MELODY_SERVER|$MELODY_TOGETHER_PASSWORD" >> '%1'
 case "$3" in
-  host) echo '{"invite":"https://t.example/rooms/r#k"}' ;;
-  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":2,"voted":false,"ready":true}],"by":"Ana","next":"Royal Thunder — Forget You","history":["Royal Thunder — Wake Up"]}' ;;
+  host|join) touch '%2'; echo '{"invite":"https://t.example/rooms/friday-doom#letmein"}' ;;
+  leave) rm -f '%2' ;;
+  status)
+    if [ -e '%2' ]; then
+      echo '{"role":"host","room":"friday-doom","invite":"https://t.example/rooms/friday-doom#letmein","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":2,"voted":true,"ready":true}],"by":"Ana","next":"Royal Thunder — Forget You","history":["Royal Thunder — Wake Up"],"upcoming":[]}'
+    else
+      echo '{"role":"","message":""}'
+    fi ;;
   suggest) echo '{"id":8}' ;;
 esac
 )sh")
-                  .arg(asked)
+                  .arg(asked, in_room)
                   .toUtf8(),
               true);
     const auto path = qgetenv("PATH");
@@ -1148,82 +1158,94 @@ esac
     const PluginEngine nas{.name = QStringLiteral("gemenon"),
                            .address = QStringLiteral("gemenon:6603"),
                            .here = false};
+    const QJsonObject settings{{QStringLiteral("server"), QStringLiteral("https://t.example")},
+                               {QStringLiteral("name"), QStringLiteral("Bo")},
+                               {QStringLiteral("server_password"), QString{}}};
+    const auto show = [&](const std::optional<PluginPanelAction>& action) {
+        const auto shown = run(*together,
+                               PluginAction{.id = QStringLiteral("room"),
+                                            .label = QStringLiteral("Room"),
+                                            .scope = PluginAction::Scope::tracks,
+                                            .run = room_panel.run,
+                                            .result = PluginAction::Result::none,
+                                            .timeout_seconds = 15},
+                               pluginPanelInput(room_panel, nas, std::nullopt, std::nullopt, {},
+                                                settings, {}, action));
+        QString why;
+        auto drawn = parsePluginPanel(shown.text.toUtf8(), &why);
+        if (!shown.succeeded || !drawn) {
+            qWarning() << shown.text << why;
+        }
+        return drawn.value_or(PluginPanelContent{});
+    };
+    using Kind = PluginPanelContent::Part::Kind;
+    const auto has = [](const PluginPanelContent& drawn, const auto& match) {
+        return std::ranges::any_of(drawn.parts, match);
+    };
 
-    // Hosting: the server and its password from the settings, to the engine
-    // the plugin is told of.
-    QJsonObject settings{{QStringLiteral("server"), QStringLiteral("https://t.example")},
-                         {QStringLiteral("password"), QStringLiteral("friends")},
-                         {QStringLiteral("invite"), QString{}},
-                         {QStringLiteral("name"), QStringLiteral("Bo")}};
-    const auto hosted = runTrigger(
-        *together, trigger(QStringLiteral("host")),
-        pluginTriggerInput(trigger(QStringLiteral("host")), PluginTrigger::When::hand, nas, {}, {},
-                           settings));
-    QVERIFY2(hosted.succeeded, qPrintable(hosted.text));
-    QCOMPARE(hosted.text.trimmed(), QStringLiteral("https://t.example/rooms/r#k"));
-    // Said, and onto the clipboard, to paste to a friend.
-    QVERIFY(trigger(QStringLiteral("host")).notify && trigger(QStringLiteral("host")).copy);
-    QVERIFY(!trigger(QStringLiteral("join")).copy);
-    // Joining needs an invite set first; set, it joins by the name given.
-    const auto unset = runTrigger(
-        *together, trigger(QStringLiteral("join")),
-        pluginTriggerInput(trigger(QStringLiteral("join")), PluginTrigger::When::hand, nas, {}, {},
-                           settings));
-    QVERIFY(!unset.succeeded && unset.text.contains(QStringLiteral("invite")));
-    settings[QStringLiteral("invite")] = QStringLiteral("https://t.example/rooms/r#k");
-    const auto joined = runTrigger(
-        *together, trigger(QStringLiteral("join")),
-        pluginTriggerInput(trigger(QStringLiteral("join")), PluginTrigger::When::hand, nas, {}, {},
-                           settings));
-    QVERIFY2(joined.succeeded, qPrintable(joined.text));
+    // Out of a room: its name and password, Start and Join.
+    auto drawn = show(std::nullopt);
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::input && part.key == QStringLiteral("password") && part.secret;
+    }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::button && part.action == QStringLiteral("start") && part.on;
+    }));
+    // Join, its password missing: said, nothing asked.
+    drawn = show(PluginPanelAction{.id = QStringLiteral("join"),
+                                   .value = {},
+                                   .inputs = QJsonObject{{QStringLiteral("room"),
+                                                          QStringLiteral("friday-doom")}}});
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::paragraph && part.text.contains(QStringLiteral("password"));
+    }));
+
+    // Started, as typed: the room's name and password, the name set.
+    drawn = show(PluginPanelAction{.id = QStringLiteral("start"),
+                                   .value = {},
+                                   .inputs = QJsonObject{{QStringLiteral("room"),
+                                                          QStringLiteral("Friday-Doom")},
+                                                         {QStringLiteral("password"),
+                                                          QStringLiteral("letmein")}}});
     QFile lines{asked};
     QVERIFY(lines.open(QIODevice::ReadOnly));
-    QCOMPARE(QString::fromUtf8(lines.readAll()),
-             QStringLiteral("--json together host https://t.example - Bo|gemenon:6603|friends\n"
-                            "--json together join https://t.example/rooms/r#k Bo|gemenon:6603|\n"));
-
-    // The panel: what plays, who listens, the invite.
-    const auto shown = run(*together,
-                           PluginAction{.id = QStringLiteral("room"),
-                                        .label = QStringLiteral("Room"),
-                                        .scope = PluginAction::Scope::tracks,
-                                        .run = together->panels.front().run,
-                                        .result = PluginAction::Result::none,
-                                        .timeout_seconds = 15},
-                           pluginPanelInput(together->panels.front(), nas, std::nullopt,
-                                            std::nullopt, {}, settings));
-    QVERIFY2(shown.succeeded, qPrintable(shown.text));
-    const auto drawn = parsePluginPanel(shown.text.toUtf8(), &problem);
-    QVERIFY2(drawn.has_value(), qPrintable(problem));
-    // The room's own queue, asked again as the room changes.
-    QVERIFY(together->panels.front().refresh_room);
-    QCOMPARE(drawn->title, QStringLiteral("r · hosting"));
-    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
-        return part.text == QStringLiteral("Royal Thunder — Time Machine") &&
+    QVERIFY(QString::fromUtf8(lines.readAll())
+                .contains(QStringLiteral("--json together host https://t.example friday-doom "
+                                         "letmein Bo|gemenon:6603|")));
+    // In the room: the party, Stop, the queue -- what plays and whose, what
+    // is next, the suggestion with its vote, chosen, and Remove -- what
+    // played, who listens.
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::toggle && part.key == QStringLiteral("party") && part.on;
+    }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::button && part.action == QStringLiteral("stop");
+    }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.text == QStringLiteral("▶  Royal Thunder — Time Machine") &&
                part.detail == QStringLiteral("suggested by Ana");
     }));
-    const auto said = [&drawn](const QString& text) {
-        return std::ranges::any_of(drawn->parts,
-                                   [&text](const auto& part) { return part.text == text; });
-    };
-    QVERIFY(said(QStringLiteral("Royal Thunder — Time Machine")));
-    QVERIFY(said(QStringLiteral("Ana")));
-    QVERIFY(said(QStringLiteral("Royal Thunder — Forget You")));
-    QVERIFY(said(QStringLiteral("Royal Thunder — Wake Up")));
-    // The invite as a button opening it -- too long to show as text.
-    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
-        return part.kind == PluginPanelContent::Part::Kind::link &&
-               part.url == QStringLiteral("https://t.example/rooms/r#k");
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.text == QStringLiteral("Royal Thunder — Glow") && part.buttons.size() == 2U &&
+               part.buttons[0].text == QStringLiteral("▲ 2") && part.buttons[0].on &&
+               part.buttons[0].value == QStringLiteral("7") &&
+               part.buttons[1].action == QStringLiteral("remove");
     }));
-    QVERIFY(!said(QStringLiteral("https://t.example/rooms/r#k")));
-    // ADR-0302 phase 4: at a party, the suggestions -- as host, each with
-    // Remove, one of Melody's own links.
-    QVERIFY(said(QStringLiteral("Royal Thunder — Glow")));
-    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
-        return part.kind == PluginPanelContent::Part::Kind::link &&
-               part.text == QStringLiteral("Remove") &&
-               part.url == QStringLiteral("melody://together/remove?id=7");
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.text == QStringLiteral("Royal Thunder — Wake Up");
     }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::paragraph && part.text == QStringLiteral("Ana");
+    }));
+    // A vote, pressed.
+    static_cast<void>(show(PluginPanelAction{.id = QStringLiteral("vote"),
+                                             .value = QStringLiteral("7"),
+                                             .inputs = {}}));
+    QFile again{asked};
+    QVERIFY(again.open(QIODevice::ReadOnly));
+    QVERIFY(QString::fromUtf8(again.readAll())
+                .contains(QStringLiteral("--json together vote 7|gemenon:6603|")));
+
     // Suggesting, from the tracks chosen: their paths, as the engine has them.
     const auto suggest = together->actions.front();
     const auto albums = pluginAlbums({PluginTrack{.path = "/srv/music/A/B/01.flac",
@@ -1237,9 +1259,9 @@ esac
     const auto suggested =
         run(*together, suggest, pluginInput(suggest, nas, albums, {"/srv/music"}, settings));
     QVERIFY2(suggested.succeeded, qPrintable(suggested.text));
-    QFile again{asked};
-    QVERIFY(again.open(QIODevice::ReadOnly));
-    QVERIFY(QString::fromUtf8(again.readAll())
+    QFile third{asked};
+    QVERIFY(third.open(QIODevice::ReadOnly));
+    QVERIFY(QString::fromUtf8(third.readAll())
                 .contains(QStringLiteral("--json together suggest /srv/music/A/B/01.flac|gemenon:6603|")));
     qputenv("PATH", path);
 }

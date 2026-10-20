@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Melody plugin (ADR-0302): listening together, from Workspace › Run and a
-panel.
+"""Melody plugin (ADR-0302, ADR-0303): listening together, in one panel.
 
 The engine hosts a room or follows one; this asks it to, through melody-cli
--- MELODY_SERVER when the engine is elsewhere, as the Scripts plugin does --
-and shows the room in a panel: what plays, who listens, the invite to send.
+-- MELODY_SERVER when the engine is elsewhere -- and is its panel: a room's
+name and password to start or join one; in a room, Stop or Leave, the party,
+the room's queue with a vote for each suggestion, what played and who
+listens. Settings are the server and a name, nothing more.
 """
 import json
 import os
 import subprocess
 import sys
+
+
+class Refused(Exception):
+    pass
 
 
 def cli(given, *words, password=None):
@@ -24,12 +29,12 @@ def cli(given, *words, password=None):
         done = subprocess.run(["melody-cli", "--json", *words], env=env, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=25)
     except FileNotFoundError:
-        fail("melody-cli is not installed beside Melody")
+        raise Refused("melody-cli is not installed beside Melody")
     except subprocess.TimeoutExpired:
-        fail("the engine did not answer")
+        raise Refused("the engine did not answer")
     if done.returncode != 0:
         said = done.stderr.strip().splitlines()
-        fail(said[-1].removeprefix("melody-cli: ") if said else "the engine refused")
+        raise Refused(said[-1].removeprefix("melody-cli: ") if said else "the engine refused")
     try:
         return json.loads(done.stdout.strip().splitlines()[-1]) if done.stdout.strip() else {}
     except ValueError:
@@ -41,118 +46,150 @@ def fail(message):
     sys.exit(1)
 
 
-def room_name(invite):
-    return invite.split("/rooms/", 1)[-1].split("#", 1)[0] if "/rooms/" in invite else ""
+def settings_of(given):
+    settings = given.get("settings") or {}
+    server = str(settings.get("server") or "").strip()
+    name = str(settings.get("name") or "").strip() or os.environ.get("USER", "a friend")
+    return server, name, str(settings.get("server_password") or "").strip()
+
+
+def act(given, action):
+    """What was pressed, done; what to say of it, if anything."""
+    server, name, server_password = settings_of(given)
+    inputs = given.get("inputs") or {}
+    what, value = action.get("id", ""), action.get("value", "")
+    room = str(inputs.get("room") or "").strip().lower()
+    password = str(inputs.get("password") or "").strip()
+    if what in ("start", "join"):
+        if not server:
+            return "Set your server first: Settings › Plugins › Listen together."
+        if what == "start":
+            cli(given, "together", "host", server, room or "-", password or "-", name,
+                password=server_password)
+        else:
+            if not room or not password:
+                return "To join, the room's name and its password."
+            cli(given, "together", "join", server, room, password, name)
+    elif what in ("stop", "leave"):
+        cli(given, "together", "leave")
+    elif what == "party":
+        cli(given, "together", "party", "on" if value == "on" else "off")
+    elif what in ("vote", "remove"):
+        cli(given, "together", what, value)
+    return ""
+
+
+def track_line(text, detail="", buttons=None):
+    line = {"text": text}
+    if detail:
+        line["detail"] = detail
+    if buttons:
+        line["buttons"] = buttons
+    return line
 
 
 def panel(given):
-    """The room as its own queue: what plays, what is next, what the room
-    suggests and votes for, who listens, what played -- apart from this
-    Melody's own lists, which stay this Melody's."""
-    room = cli(given, "together", "status")
-    role = room.get("role") or ""
-    if not role:
-        parts = [{"paragraph": room.get("message") or
-                  "Not in a listening room. Host one, or open an invite a friend sent you."}]
-        print(json.dumps({"title": "Listening room", "parts": parts}))
+    said = ""
+    if given.get("action"):
+        try:
+            said = act(given, given["action"])
+        except Refused as refused:
+            said = str(refused)
+    try:
+        room = cli(given, "together", "status")
+    except Refused as refused:
+        print(json.dumps({"title": "Listening room", "parts": [{"paragraph": str(refused)}]}))
         return
+    role = room.get("role") or ""
+    server, _, _ = settings_of(given)
     parts = []
-    if room.get("message"):
-        parts.append({"paragraph": room["message"]})
-    parts.append({"heading": "Now playing"})
+    if said or room.get("message"):
+        parts.append({"paragraph": said or room["message"]})
+
+    if not role:
+        # Out of a room: start one, or join a friend's.
+        if not server:
+            parts.append({"paragraph": "Set your server under Settings › Plugins › Listen "
+                                       "together, and your name."})
+        parts += [
+            {"input": "room", "label": "Room", "placeholder": "friday-doom", "action": "join"},
+            {"input": "password", "label": "Password", "secret": True, "action": "join"},
+            {"button": "Start room", "action": "start", "primary": True},
+            {"button": "Join room", "action": "join"},
+            {"paragraph": "Start a room of your own — its name and password yours to choose, "
+                          "or made for you — or join a friend's by its name and password."},
+        ]
+        print(json.dumps({"title": "Start or join a room", "parts": parts}))
+        return
+
+    hosting = role == "host"
+    listeners = room.get("listeners") or []
+    parts.append({"paragraph": "%s · %d listening" % ("Hosting" if hosting else "Listening along",
+                                                     len(listeners))})
+    if hosting:
+        parts.append({"toggle": "party", "label": "Party: friends suggest tracks and vote",
+                      "on": bool(room.get("party"))})
+    parts.append({"button": "Stop room" if hosting else "Leave room",
+                  "action": "stop" if hosting else "leave"})
+    if room.get("invite"):
+        parts.append({"link": "The room's page", "detail": room["invite"], "url": room["invite"]})
+
+    # The room's queue, as one list: what plays, what is next, then -- a
+    # party -- the suggestions by their votes, or the host's own tracks.
+    parts.append({"heading": "Queue"})
     if room.get("track"):
         by = room.get("by")
-        parts.append({"text": room["track"],
-                      "detail": "suggested by %s" % by if by else
-                                "the host's" if room.get("party") else "on the radio"})
+        parts.append(track_line("▶  " + room["track"],
+                                "suggested by %s" % by if by else "now playing"))
     else:
-        parts.append({"paragraph": "Nothing, for now."})
-    if room.get("next"):
-        parts.append({"heading": "Up next"})
-        parts.append({"text": room["next"], "detail": "decided"})
+        parts.append({"paragraph": "Nothing plays yet."})
     if room.get("party"):
-        # ADR-0302 phase 4: what the room suggests, most wanted first.
-        parts.append({"heading": "Suggested — the most votes plays next"})
-        suggestions = room.get("suggestions") or []
-        if not suggestions:
-            parts.append({"paragraph": "Nothing yet: right-click a track, Suggest to the "
-                                       "listening room."})
-        for each in suggestions:
+        if room.get("next"):
+            parts.append(track_line(room["next"], "next"))
+        for each in room.get("suggestions") or []:
             votes = each.get("votes", 0)
-            detail = " · ".join(p for p in (
-                each.get("name", ""), "%d vote%s" % (votes, "" if votes == 1 else "s"),
-                "" if each.get("ready") else "its copy on its way") if p)
-            parts.append({"text": " — ".join(p for p in (each.get("artist"), each.get("title")) if p),
-                          "detail": detail})
-            # Everyone votes, the host as a guest; the host alone removes.
-            parts.append({"link": "Take back my vote" if each.get("voted") else "Vote",
-                          "detail": each.get("title", ""),
-                          "url": "melody://together/vote?id=%d" % each.get("id", 0)})
-            if role == "host":
-                parts.append({"link": "Remove", "detail": each.get("title", ""),
-                              "url": "melody://together/remove?id=%d" % each.get("id", 0)})
-    listeners = room.get("listeners") or []
-    parts.append({"heading": "Listening"})
-    if listeners:
-        parts += [{"text": name} for name in listeners]
+            buttons = [{"text": "▲ %d" % votes, "action": "vote", "value": str(each.get("id", 0)),
+                        "on": bool(each.get("voted"))}]
+            if hosting:
+                buttons.append({"text": "✕", "action": "remove", "value": str(each.get("id", 0))})
+            parts.append(track_line(
+                " — ".join(p for p in (each.get("artist"), each.get("title")) if p),
+                each.get("name", "") + ("" if each.get("ready") else " · on its way"), buttons))
+        if not room.get("suggestions"):
+            parts.append({"paragraph": "Suggest a track: right-click it, Suggest to the "
+                                       "listening room."})
     else:
-        parts.append({"paragraph": "Nobody yet." if role == "host" else "Just you, and the host."})
-    history = (room.get("history") or [])[:5]
+        for track in room.get("upcoming") or []:
+            parts.append(track_line(track))
+    history = (room.get("history") or [])[:8]
     if history:
         parts.append({"heading": "Played"})
-        parts += [{"text": track} for track in history]
-    if role == "host" and room.get("invite"):
-        parts.append({"heading": "Invite"})
-        parts.append({"paragraph": "On your clipboard since you hosted: send it to your friends. "
-                                   "It opens the room in their browser, or in their Melody."})
-        # A button, not the address itself: an invite is too long to show.
-        parts.append({"link": "Open the room", "detail": room["invite"], "url": room["invite"]})
-    name = room_name(room.get("invite") or "")
-    print(json.dumps({"title": "%s%s" % (name or "Listening room",
-                                         " · hosting" if role == "host" else " · listening"),
-                      "parts": parts}))
+        parts += [track_line(track) for track in history]
+    parts.append({"heading": "Listening"})
+    parts.append({"paragraph": ", ".join(listeners) if listeners else "Nobody yet."})
+    print(json.dumps({"title": room.get("room") or "Listening room", "parts": parts}))
+
+
+def suggest(given):
+    paths = [track.get("path") for album in given.get("albums") or []
+             for track in album.get("tracks") or [] if track.get("path")]
+    if not paths:
+        fail("no tracks chosen")
+    try:
+        cli(given, "together", "suggest", *paths)
+    except Refused as refused:
+        fail(str(refused))
+    print("Suggested to the room: %d track%s" % (len(paths), "" if len(paths) == 1 else "s"))
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("host", "join", "leave", "panel", "party",
-                                                 "suggest"):
-        fail("usage: together host|join|leave|panel|party|suggest")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("panel", "suggest"):
+        fail("usage: together panel|suggest")
     given = json.load(sys.stdin)
-    settings = given.get("settings") or {}
-    what = sys.argv[1]
-    if what == "panel":
+    if sys.argv[1] == "panel":
         panel(given)
-    elif what == "host":
-        server = str(settings.get("server") or "").strip()
-        password = str(settings.get("password") or "").strip()
-        if not server or not password:
-            fail("Set the server and its password under Settings › Plugins › Listen together")
-        name = str(settings.get("name") or "").strip() or os.environ.get("USER", "the host")
-        room = str(settings.get("room") or "").strip().lower() or "-"
-        answer = cli(given, "together", "host", server, room, name, password=password)
-        # Just the invite: it goes onto the clipboard, to paste to friends.
-        print(answer.get("invite", ""))
-    elif what == "join":
-        invite = str(settings.get("invite") or "").strip()
-        if not invite:
-            fail("Paste the invite under Settings › Plugins › Listen together first")
-        name = str(settings.get("name") or "").strip() or os.environ.get("USER", "a friend")
-        room = cli(given, "together", "join", invite, name)
-        print("Listening along%s" % (": " + room["track"] if room.get("track") else ""))
-    elif what == "party":
-        on = not cli(given, "together", "status").get("party")
-        cli(given, "together", "party", "on" if on else "off")
-        print("A party: friends may suggest tracks and vote" if on else "The party is over")
-    elif what == "suggest":
-        paths = [track.get("path") for album in given.get("albums") or []
-                 for track in album.get("tracks") or [] if track.get("path")]
-        if not paths:
-            fail("no tracks chosen")
-        cli(given, "together", "suggest", *paths)
-        print("Suggested to the room: %d track%s" % (len(paths), "" if len(paths) == 1 else "s"))
     else:
-        cli(given, "together", "leave")
-        print("Left the listening room")
+        suggest(given)
 
 
 if __name__ == "__main__":

@@ -2829,6 +2829,89 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0302, ADR-0303: the official Listen together panel, drawn -- out of
+// a room, a room's name and password to start one; started, the room's
+// queue with its votes -- against a stand-in for melody-cli.
+void BenchMainWindowTest::theListeningRoomPanelIsTheRoom() {
+    QTemporaryDir bin;
+    QVERIFY(bin.isValid());
+    const auto in_room = bin.filePath(QStringLiteral("in-room"));
+    {
+        QFile cli{bin.filePath(QStringLiteral("melody-cli"))};
+        QVERIFY(cli.open(QIODevice::WriteOnly));
+        cli.write(QStringLiteral(R"sh(#!/bin/sh
+case "$3" in
+  host|join) touch '%1'; echo '{}' ;;
+  leave) rm -f '%1' ;;
+  status)
+    if [ -e '%1' ]; then
+      echo '{"role":"host","room":"friday-doom","invite":"https://t.example/rooms/friday-doom#letmein","listeners":["Ana","Bo","Cy"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":3,"voted":true,"ready":true},{"id":8,"name":"Cy","title":"Wake Up","artist":"Royal Thunder","votes":1,"voted":false,"ready":false}],"by":"Ana","next":"Royal Thunder — Forget You","history":["Royal Thunder — One Day","Royal Thunder — Floor"],"upcoming":[]}'
+    else
+      echo '{"role":"","message":""}'
+    fi ;;
+esac
+)sh")
+                      .arg(in_room)
+                      .toUtf8());
+        cli.close();
+        cli.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    const auto path = qgetenv("PATH");
+    qputenv("PATH", QFile::encodeName(bin.path()) + ":" + path);
+    // The official plugin, as installed.
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/together");
+    QVERIFY(QDir{}.mkpath(folder));
+    for (const auto* name : {"plugin.json", "together"}) {
+        QFile::remove(folder + QLatin1Char('/') + QLatin1String(name));
+        QVERIFY(QFile::copy(QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/../../../plugins/together/") + QLatin1String(name),
+                            folder + QLatin1Char('/') + QLatin1String(name)));
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("together")), true);
+    QSettings{}.setValue(pluginSettingKey(QStringLiteral("together"), QStringLiteral("server")),
+                         QStringLiteral("https://t.example"));
+
+    BenchMainWindow window;
+    window.resize(1400, 900);
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-together-room"));
+    QVERIFY(dock != nullptr);
+    if (dock->isHidden()) {
+        window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+    }
+    QTRY_VERIFY(dock->isVisible());
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    window.refreshPluginPanels(EnginePlayback::State{});
+    QLineEdit* room = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((room = dock->findChild<QLineEdit*>(
+                                  QStringLiteral("bench-plugin-panel-input-room"))) != nullptr,
+                             10'000);
+    const auto shot = [&dock](const QString& name) {
+        if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+            !directory.isEmpty()) {
+            QVERIFY(dock->grab().save(directory + QLatin1Char('/') + name));
+        }
+    };
+    shot(QStringLiteral("room-panel-out.png"));
+    QTest::keyClicks(room, QStringLiteral("friday-doom"));
+    for (auto* button : dock->findChildren<QPushButton*>(QStringLiteral("bench-plugin-panel-button"))) {
+        if (button->property("action").toString() == QStringLiteral("start")) {
+            button->click();
+        }
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(
+        dock->findChild<QCheckBox*>(QStringLiteral("bench-plugin-panel-toggle-party")) != nullptr,
+        10'000);
+    QCOMPARE(dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button")).size(),
+             4);
+    QTest::qWait(300);
+    shot(QStringLiteral("room-panel-in.png"));
+    qputenv("PATH", path);
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 // ADR-0303: a panel of controls, asked with nothing playing; a button
 // pressed runs it again, told what was pressed and what was typed -- which
 // stays typed when it answers.

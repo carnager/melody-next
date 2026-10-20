@@ -69,17 +69,20 @@ hour, and none past their room.
 
 ## Hosting and joining
 
-In Melody, enable **Listen together** under Settings → Plugins and open its
-**Settings…**:
+In Melody, enable **Listen together** under Settings → Plugins, and once, in
+its **Settings…**, set the server (`https://together.example.org`) and its
+password.
 
-- **To host:** set the server (`https://together.example.org`) and its
-  password, then Workspace › Run › **Host a listening room**. The invite shows
-  in the **Listening together** panel: send it to your friends.
-- **To join:** paste the invite you were sent, and the name to be known by,
-  then Workspace › Run › **Join the listening room**.
+- **To host:** Workspace › Run › **Host a listening room**. The invite is on
+  your clipboard -- paste it to your friends -- and in the **Listening
+  together** panel, with who listens. A friend arriving or leaving is said.
+- **To join:** open the invite you were sent. Its page has **Open in
+  Melody**: Melody joins the room, as your login name or the name set in
+  the plugin's settings. (Or paste the invite into the plugin's settings and
+  Workspace › Run › **Join the listening room**.)
 
 **Leave the listening room** leaves -- and, as its host, closes the room.
-The panel shows what plays, who listens and anything wrong.
+An engine that restarts -- an update -- comes back into its room by itself.
 
 From a terminal, the same:
 

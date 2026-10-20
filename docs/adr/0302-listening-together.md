@@ -72,6 +72,13 @@ direction.
    host|join|leave|status`; the "Listen together" plugin starts, joins and
    leaves from Workspace › Run and shows the room -- who listens, the invite
    -- in a panel.
+9. **Few steps.** Hosting puts the invite on the clipboard (a trigger's
+   `result` may now copy). The invite's page opens Melody by a
+   `melody://together/join?invite=…` link, registered by a desktop entry of
+   its own, and Melody asks its engine to join -- as the name set in the
+   plugin, else the login's. A friend arriving or leaving is said. An engine
+   keeps its session in its state folder and, restarted, comes back into the
+   room; only leaving, or the room gone, forgets it.
 
 ## Consequences
 

@@ -292,7 +292,7 @@ it changes, every so often, when Melody starts, or from **Workspace › Run**
 | `on` | One or more of `albums-added`, `library-changed` (once the library has been still half a minute), `every`, `start`, `hand`. |
 | `every` | With `every`: minutes, 1 to 10080 -- or the key of a setting that holds them. |
 | `label` | With `hand`: its entry under Workspace › Run. |
-| `result` | `none` (the default) or `notify`: what it prints, as a notification. |
+| `result` | `none` (the default), `notify` -- what it prints, as a notification -- `copy`, onto the clipboard, or `notify-and-copy` (ADR-0302). |
 | `timeout` | 1 to 21600 seconds, 600 by default. |
 
 Its program is given what started it, the engine holding the library and its

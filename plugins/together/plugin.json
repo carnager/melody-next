@@ -4,7 +4,7 @@
   "description": "Listen along with friends: host a room on a melody-together server, or join one with an invite",
   "triggers": [
     {"id": "host", "label": "Host a listening room", "on": "hand", "run": ["./together", "host"],
-     "result": "notify", "timeout": 30},
+     "result": "notify-and-copy", "timeout": 60},
     {"id": "join", "label": "Join the listening room", "on": "hand", "run": ["./together", "join"],
      "result": "notify", "timeout": 30},
     {"id": "leave", "label": "Leave the listening room", "on": "hand", "run": ["./together", "leave"],

@@ -14,6 +14,7 @@ qt_add_library(
     bench_playlists.cpp
     bench_plugins.cpp
     bench_plugin_triggers.cpp
+    bench_together.cpp
     bench_favorites.cpp
     plugin_list_window.cpp
     plugin_panel_view.cpp
@@ -143,6 +144,10 @@ set_target_properties(trackknife PROPERTIES OUTPUT_NAME melody)
 
 # Packaged as "app": the window, its desktop entry, and the documents.
 install(TARGETS trackknife RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
+# ADR-0302: and melody:// links -- an invite to listen together -- apart,
+# so opening files is as it was.
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/melody-link.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT app)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/melody.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT app)
 # ADR-0288: the official plugins, found under the system's data folder and

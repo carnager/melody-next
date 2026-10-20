@@ -2829,6 +2829,27 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0302: an invite opened in a browser hands Melody a melody:// link, and
+// Melody asks its engine to join -- told here of a server not there.
+void BenchMainWindowTest::aTogetherLinkAsksTheEngineToJoin() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().playback != nullptr &&
+                                 window.localEngine().playback->active(),
+                             10'000);
+    QVERIFY(!window.openLink(QStringLiteral("https://example.org/rooms/r#k")));
+    QVERIFY(window.openLink(QStringLiteral("melody://together/join")));
+    QTRY_VERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("no invite")));
+    // Port 9 on this machine: nothing answers.
+    QVERIFY(window.openLink(QStringLiteral("melody://together/join?invite=") +
+                            QString::fromLatin1(QUrl::toPercentEncoding(
+                                QStringLiteral("http://127.0.0.1:9/rooms/r#k")))));
+    QTRY_VERIFY_WITH_TIMEOUT(window.statusBar()->currentMessage().startsWith(
+                                 QStringLiteral("Could not join the listening room")),
+                             15'000);
+}
+
 // ADR-0301: a panel is told every tag the library has of what plays, and,
 // asking for them, the artist's albums there -- by the album artist's
 // MusicBrainz id and name, one for each release group.

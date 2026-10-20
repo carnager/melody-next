@@ -9,6 +9,8 @@
 #include "workspace/plugins.hpp"
 
 #include <QAction>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QMenu>
 #include <QMenuBar>
 #include <QSet>
@@ -200,8 +202,14 @@ void BenchMainWindow::runPluginTrigger(PluginTriggerRun& slot, const PluginTrigg
                                         QStringLiteral("%1 failed: %2").arg(label, outcome.text));
                 }
             } else {
+                if (raw->trigger.copy && !outcome.text.isEmpty()) {
+                    QGuiApplication::clipboard()->setText(outcome.text);
+                }
                 if (raw->trigger.notify && notifier_ != nullptr && !outcome.text.isEmpty()) {
-                    notifier_->announce(raw->plugin.title, outcome.text);
+                    notifier_->announce(raw->plugin.title,
+                                        raw->trigger.copy
+                                            ? QStringLiteral("%1 (copied)").arg(outcome.text)
+                                            : outcome.text);
                 }
                 if (by_hand) {
                     showMessage(outcome.text.isEmpty()

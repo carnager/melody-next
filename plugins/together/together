@@ -62,8 +62,8 @@ def panel(given):
     if role == "host" and room.get("invite"):
         parts.append({"heading": "Invite"})
         parts.append({"paragraph": room["invite"]})
-        parts.append({"paragraph": "Send it to a friend: they paste it under Listen together's "
-                                   "settings, then Workspace › Run › Join the listening room."})
+        parts.append({"paragraph": "On your clipboard when you hosted: send it to a friend. "
+                                   "Opened in their browser, it opens their Melody in the room."})
     if room.get("message"):
         parts.append({"paragraph": room["message"]})
     print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",
@@ -84,8 +84,8 @@ def main():
         if not server or not password:
             fail("Set the server and its password under Settings › Plugins › Listen together")
         answer = cli(given, "together", "host", server, password=password)
-        print("Hosting. The invite, also in the Listening together panel: %s"
-              % answer.get("invite", ""))
+        # Just the invite: it goes onto the clipboard, to paste to friends.
+        print(answer.get("invite", ""))
     elif what == "join":
         invite = str(settings.get("invite") or "").strip()
         if not invite:

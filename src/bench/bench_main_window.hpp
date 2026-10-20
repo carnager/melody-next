@@ -203,6 +203,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     BenchMainWindow& operator=(const BenchMainWindow&) = delete;
 
     void importM3u8Path(std::string raw_path);
+    // ADR-0302: a melody:// link -- an invite to listen together, opened in
+    // a browser. False when it is no melody:// link.
+    bool openLink(const QString& link);
     void openLocalPaths(std::vector<std::string> raw_paths) {
         workspace_.openLocalPaths(std::move(raw_paths));
     }

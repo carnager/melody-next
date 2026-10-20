@@ -367,6 +367,24 @@ int main(int argc, char** argv) {
             "where the host is");
     require(friend_.together->status().message.empty(), "and nothing is wrong");
 
+    // An engine restarting -- an update -- comes back into its room: the
+    // friend's, in step again; the host's, with the room still its own.
+    friend_.together->suspend();
+    require(friend_.together->status().role.empty(), "the friend's engine stops");
+    friend_.together->resume();
+    require(friend_.together->status().role == "listener", "and is back in the room");
+    require(eventually([&] {
+                return friend_.player->state().status == "playing" &&
+                       std::abs(friend_.position() - host.position()) < 400;
+            }),
+            "in step again");
+    host.together->suspend();
+    host.together->resume();
+    require(host.together->status().role == "host", "the host's engine comes back as host");
+    require(host.player->seek_ms(120'000).has_value(), "and goes on");
+    require(eventually([&] { return std::abs(friend_.position() - host.position()) < 400; }),
+            "the friend still following");
+
     // Leaving, and the room closing.
     friend_.together->leave();
     require(friend_.together->status().role.empty(), "she has left");

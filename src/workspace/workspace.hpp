@@ -745,6 +745,9 @@ class Workspace final : public QObject {
     // ADR-0237: whether an engine does the file tools' work, asked each time
     // it connects; one that does is handed this workspace's naming layouts.
     void watchFileWork(EngineLink& link);
+    // ADR-0302: a friend arriving in, or leaving, the room an engine is in,
+    // said.
+    void watchTogether(EngineLink& link);
     void pushLayouts(std::vector<core::StableId> removed = {});
     // ADR-0233: a file moved here, told to every engine's lists; kept in
     // Settings until each has taken it.

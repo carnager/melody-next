@@ -14,6 +14,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QThreadPool>
 #include <QTimer>
 
@@ -304,6 +305,9 @@ class EnginePlayback final : public QObject {
     // ADR-0282: a listen of this file was recorded.
     void listened(const std::string& raw_path);
     void ratingChanged(const QString& hash, unsigned rating);
+    // ADR-0302: who listens in the room this engine is in; `role` is "host",
+    // "listener" or empty.
+    void togetherChanged(const QStringList& listeners, const QString& role);
     // ADR-0233: a list on this engine was written or deleted, by any client
     // -- this one included. Emitted on this object's thread.
     void listChanged(const QString& id, quint64 revision, bool deleted);

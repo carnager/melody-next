@@ -339,6 +339,7 @@ class BenchMainWindowTest final : public QObject {
     void aTaggerUndoesItsWriteUntilClosed();
     void aPluginPanelShowsWhatItSaysAboutThePlayingTrack();
     void aPluginPanelIsToldTheLibrary();
+    void aTogetherLinkAsksTheEngineToJoin();
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
     void applyReadsAgainAFileChangedElsewhere();

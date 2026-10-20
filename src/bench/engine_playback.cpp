@@ -116,6 +116,27 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
             }
             return;
         }
+        // ADR-0302: the room this engine listens in -- who is there.
+        if (event.name == "together.changed") {
+            QStringList listeners;
+            for (const auto& name : event.data.value("listeners", protocol::Json::array())) {
+                if (name.is_string()) {
+                    listeners << QString::fromStdString(name.get<std::string>());
+                }
+            }
+            const auto role = QString::fromStdString(event.data.value("role", std::string{}));
+            if (self) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, listeners, role] {
+                        if (self) {
+                            emit self->togetherChanged(listeners, role);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "catalogue.rating_changed") {
             const auto hash = QString::fromStdString(event.data.value("hash", std::string{}));
             const auto rating = event.data.value("rating", 0U);

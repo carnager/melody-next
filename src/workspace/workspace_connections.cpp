@@ -46,6 +46,7 @@ void Workspace::connectLocalEngine() {
     localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
     sayVersion(*localEngine().playback);
     watchFileWork(localEngine());
+    watchTogether(localEngine());
     followContinuations(localEngine());
     transport_ = localPlayback();
     connect(localPlayback(), &EnginePlayback::changed, this, [this] {
@@ -267,6 +268,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
     auto* link = added.get();
     engines_.push_back(std::move(added));
     watchFileWork(*link);
+    watchTogether(*link);
     if (list_sync_ != nullptr) {
         list_sync_->setEngine(link->key, link->playback);
         connect(link->playback, &EnginePlayback::listChanged, this,
@@ -567,6 +569,43 @@ void Workspace::adoptEngineRating(const EngineKey& engine, const QString& hash,
         }
     }
     view_->engineRatingsChanged(engine, ratings);
+}
+
+void Workspace::watchTogether(EngineLink& link) {
+    if (link.playback == nullptr) {
+        return;
+    }
+    struct Seen {
+        QStringList listeners;
+        QString role;
+    };
+    auto seen = std::make_shared<Seen>();
+    connect(link.playback, &EnginePlayback::togetherChanged, this,
+            [this, seen](const QStringList& listeners, const QString& role) {
+                // Only within one room: whoever was there on joining is no news.
+                if (!role.isEmpty() && role == seen->role) {
+                    QStringList said;
+                    for (const auto& name : listeners) {
+                        if (!seen->listeners.contains(name)) {
+                            said << QStringLiteral("%1 is listening along").arg(name);
+                        }
+                    }
+                    for (const auto& name : seen->listeners) {
+                        if (!listeners.contains(name)) {
+                            said << QStringLiteral("%1 left").arg(name);
+                        }
+                    }
+                    if (!said.isEmpty()) {
+                        const auto text = said.join(QStringLiteral("; "));
+                        view_->showMessage(text, 8'000);
+                        if (notifier_ != nullptr) {
+                            notifier_->announce(QStringLiteral("Listen together"), text);
+                        }
+                    }
+                }
+                seen->listeners = listeners;
+                seen->role = role;
+            });
 }
 
 void Workspace::watchFileWork(EngineLink& link) {

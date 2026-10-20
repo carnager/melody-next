@@ -22,8 +22,13 @@
   ol { padding-left: 1.2rem; margin: 12px 0 20px; }
   li { margin: 6px 0; }
   code { background: rgba(127,127,127,.15); padding: 1px 6px; border-radius: 6px; }
-  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px;
-           background: var(--accent); color: #fff; cursor: pointer; }
+  button, .button { font: inherit; font-weight: 600; border: 0; border-radius: 10px;
+           padding: 10px 16px; background: var(--accent); color: #fff; cursor: pointer;
+           text-decoration: none; display: inline-block; }
+  .quiet { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+  details { margin-top: 16px; color: var(--soft); }
+  summary { cursor: pointer; }
   .invite { display: block; margin: 8px 0 16px; padding: 10px; word-break: break-all; }
   .missing { color: var(--accent); }
 </style>
@@ -32,15 +37,22 @@
 <main>
   <h1>Listen together</h1>
   <p>You were invited to listen along with a friend, in Melody.</p>
-  <ol>
-    <li>In Melody, enable <strong>Listen together</strong> under Settings › Plugins.</li>
-    <li>Open its <strong>Settings…</strong> and paste this invite:</li>
-  </ol>
-  <code class="invite" id="invite"></code>
-  <button id="copy" type="button">Copy the invite</button>
-  <p>Then Workspace › Run › <strong>Join the listening room</strong>. Your Melody plays each
-     track from your own library, where your friend is.</p>
-  <p>Or in a terminal: <code>melody-cli together join 'INVITE' YOUR-NAME</code></p>
+  <p class="actions">
+    <a class="button" id="open" href="#">Open in Melody</a>
+    <button id="copy" type="button" class="quiet">Copy the invite</button>
+  </p>
+  <p>Melody joins the room and plays each track where your friend is — from your own
+     library, or your friend's copy when you do not have it.</p>
+  <details>
+    <summary>Melody does not open?</summary>
+    <ol>
+      <li>Copy the invite: <code class="invite" id="invite"></code></li>
+      <li>In Melody, enable <strong>Listen together</strong> under Settings › Plugins, open its
+          <strong>Settings…</strong> and paste it.</li>
+      <li>Then Workspace › Run › <strong>Join the listening room</strong>.</li>
+    </ol>
+    <p>Or in a terminal: <code>melody-cli together join 'INVITE' YOUR-NAME</code></p>
+  </details>
 </main>
 <script>
   // The key is after the #: it stays in this browser and never reaches the
@@ -49,10 +61,14 @@
   const shown = document.getElementById("invite");
   if (location.hash.length > 1) {
     shown.textContent = invite;
+    // Melody, given the invite by its melody:// link (ADR-0302).
+    document.getElementById("open").href =
+      "melody://together/join?invite=" + encodeURIComponent(invite);
   } else {
-    shown.textContent = "This link has lost its key -- the part after #. Ask for the invite again.";
+    shown.textContent = "This link has lost its key — the part after #. Ask for the invite again.";
     shown.classList.add("missing");
     document.getElementById("copy").hidden = true;
+    document.getElementById("open").hidden = true;
   }
   document.getElementById("copy").addEventListener("click", async (event) => {
     try {

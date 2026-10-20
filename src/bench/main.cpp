@@ -56,6 +56,22 @@ void filtered_message_handler(const QtMsgType type, const QMessageLogContext& co
 // lateness — so gradual degradation over long sessions becomes measurable
 // instead of anecdotal.
 namespace {
+// What a start was given: files to open, and melody:// links -- an invite
+// to listen together -- to follow.
+void openGiven(trackknife::bench::BenchMainWindow& window, std::vector<std::string> given) {
+    std::vector<std::string> paths;
+    for (auto& each : given) {
+        if (each.starts_with("melody://")) {
+            window.openLink(QString::fromStdString(each));
+        } else {
+            paths.push_back(std::move(each));
+        }
+    }
+    if (!paths.empty()) {
+        window.openLocalPaths(std::move(paths));
+    }
+}
+
 void startSoakLog(QObject* parent) {
     const auto path = qEnvironmentVariable("MELODY_SOAK_LOG");
     if (path.isEmpty()) {
@@ -163,6 +179,8 @@ int main(int argc, char** argv) {
             trackknife::ui::enableDebugLogging();
             continue;
         }
+        // ADR-0302: a melody:// link -- an invite from a browser -- travels
+        // with the files to the Melody already running, and is opened there.
         const auto encoded = QFile::encodeName(arguments.at(index));
         raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
     }
@@ -198,9 +216,7 @@ int main(int argc, char** argv) {
                              }
                              window.raise();
                              window.activateWindow();
-                             if (!paths.empty()) {
-                                 window.openLocalPaths(std::move(paths));
-                             }
+                             openGiven(window, std::move(paths));
                          });
     }
     if (!restore_notice.isEmpty()) {
@@ -209,7 +225,7 @@ int main(int argc, char** argv) {
         });
     }
     if (!raw_paths.empty()) {
-        window.openLocalPaths(std::move(raw_paths));
+        openGiven(window, std::move(raw_paths));
     }
     if (!screenshot_path.isEmpty()) {
         if (!open_for_screenshot.isEmpty()) {

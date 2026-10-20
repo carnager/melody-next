@@ -1008,8 +1008,9 @@ void PluginsTest::triggersAreReadAndTold() {
     QVERIFY(refused(
         QStringLiteral(R"({"id": "x", "on": "every", "every": "nothing", "run": ["./x"]})")));
     QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start"})")));
+    // ADR-0302: a trigger may copy what it prints; a list is an action's.
     QVERIFY(
-        refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "result": "copy"})")));
+        refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "result": "list"})")));
     QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "timeout": 0})")));
     QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"], "x": 1})")));
     QVERIFY(refused(QStringLiteral(R"({"id": "x", "on": "start", "run": ["./x"]},
@@ -1096,7 +1097,10 @@ esac
         pluginTriggerInput(trigger(QStringLiteral("host")), PluginTrigger::When::hand, nas, {}, {},
                            settings));
     QVERIFY2(hosted.succeeded, qPrintable(hosted.text));
-    QVERIFY(hosted.text.contains(QStringLiteral("https://t.example/rooms/r#k")));
+    QCOMPARE(hosted.text.trimmed(), QStringLiteral("https://t.example/rooms/r#k"));
+    // Said, and onto the clipboard, to paste to a friend.
+    QVERIFY(trigger(QStringLiteral("host")).notify && trigger(QStringLiteral("host")).copy);
+    QVERIFY(!trigger(QStringLiteral("join")).copy);
     // Joining needs an invite set first; set, it joins by the name given.
     const auto unset = runTrigger(
         *together, trigger(QStringLiteral("join")),

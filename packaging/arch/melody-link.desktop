@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Melody
+Comment=Opens melody:// links: an invite to listen together
+Exec=melody %u
+Icon=melody
+NoDisplay=true
+MimeType=x-scheme-handler/melody;
+Terminal=false

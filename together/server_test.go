@@ -153,8 +153,9 @@ func TestInvitePage(t *testing.T) {
 		if response.StatusCode != 200 || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") {
 			t.Fatalf("an invite opens a page: %d %s", response.StatusCode, response.Header.Get("Content-Type"))
 		}
-		if !strings.Contains(string(page), "Join the listening room") {
-			t.Fatal("which says how to join")
+		if !strings.Contains(string(page), "Join the listening room") ||
+			!strings.Contains(string(page), "melody://together/join?invite=") {
+			t.Fatal("which opens Melody, or says how to join by hand")
 		}
 	}
 }

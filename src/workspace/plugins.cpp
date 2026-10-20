@@ -164,10 +164,15 @@ constexpr int max_trigger_seconds = 6 * 3600;
             return QStringLiteral("trigger \"%1\" has nothing to run").arg(trigger.id);
         }
         const auto result = entry.value(QStringLiteral("result")).toString(QStringLiteral("none"));
-        if (result != QStringLiteral("none") && result != QStringLiteral("notify")) {
-            return QStringLiteral("trigger \"%1\": \"result\" is none or notify").arg(trigger.id);
+        if (!QStringList{QStringLiteral("none"), QStringLiteral("notify"), QStringLiteral("copy"),
+                         QStringLiteral("notify-and-copy")}
+                 .contains(result)) {
+            return QStringLiteral(
+                       "trigger \"%1\": \"result\" is none, notify, copy or notify-and-copy")
+                .arg(trigger.id);
         }
-        trigger.notify = result == QStringLiteral("notify");
+        trigger.notify = result.startsWith(QStringLiteral("notify"));
+        trigger.copy = result.endsWith(QStringLiteral("copy"));
         if (entry.contains(QStringLiteral("timeout"))) {
             const auto seconds = entry.value(QStringLiteral("timeout")).toInt(0);
             if (seconds < 1 || seconds > max_trigger_seconds) {

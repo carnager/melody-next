@@ -77,6 +77,8 @@ struct PluginTrigger {
     QStringList run;
     // What it prints, said as a notification; else only a failure is said.
     bool notify{false};
+    // ADR-0302: and put on the clipboard -- an invite, to paste to a friend.
+    bool copy{false};
     int timeout_seconds{600};
 };
 // How a trigger's `on` is written: "albums-added", "library-changed", ….

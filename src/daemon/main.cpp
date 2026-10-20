@@ -960,6 +960,8 @@ int main(int argc, char** argv) {
     trackknife::engine::Together together{*player, catalogue, sink, state_directory / "together",
                                           transcodes.get()};
     trackknife::engine::register_together_methods(dispatcher, together);
+    // Back into the room it was in when it stopped -- an update, a restart.
+    together.resume();
 
     // Another engine on these speakers, through an agent built in: newest
     // wins them (ADR-0228).
@@ -1144,7 +1146,8 @@ int main(int argc, char** argv) {
         watcher->stop();
     }
     lastfm.stop();
-    together.leave();
+    // Kept, not left: an engine restarting comes back into its room.
+    together.suspend();
     if (streams) {
         streams->stop();
     }

@@ -74,12 +74,23 @@ class Together final {
     [[nodiscard]] core::Result<void> join(const std::string& invite, const std::string& name);
     // Out of the room -- closing it, as its host.
     void leave();
+    // The engine stops: the session ends here without a word to the room, and
+    // is kept -- resume() takes it up again when the engine starts.
+    void suspend();
+    // Back into the room this engine was in when it stopped, if any.
+    void resume();
     [[nodiscard]] Status status() const;
 
   private:
     struct Session;
-    // Ends the session there is, if any; under control_.
-    void end();
+    // Ends the session there is, if any; under control_. Leaving, the room
+    // is told and the session forgotten; else it is kept for resume().
+    void end(bool leaving = true);
+    void begin(std::shared_ptr<Session> session, Status status);
+    void remember(const Session& session, const std::string& invite) const;
+    void forget() const;
+    // The room is gone: the session ends, and is not taken up again.
+    void gone(Session& session, std::string message);
     void run(std::shared_ptr<Session> session);
     void host_round(Session& session);
     void listen_round(Session& session);

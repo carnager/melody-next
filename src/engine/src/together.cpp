@@ -5,12 +5,15 @@
 #include "trackknife/query/tkq.hpp"
 
 #include <curl/curl.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <set>
@@ -385,11 +388,101 @@ Together::Together(Player& player, Catalogue& catalogue, EventSink sink,
     }
 }
 
-Together::~Together() { leave(); }
+Together::~Together() { suspend(); }
 
 void Together::leave() {
     const std::lock_guard control{control_};
     end();
+}
+
+void Together::suspend() {
+    const std::lock_guard control{control_};
+    end(false);
+}
+
+void Together::remember(const Session& session, const std::string& invite) const {
+    const Json document{{"version", 1},
+                        {"role", session.hosting ? "host" : "listener"},
+                        {"server", session.invite.server},
+                        {"room", session.invite.room},
+                        {"key", session.invite.key},
+                        {"invite", invite},
+                        {"name", session.name}};
+    // The keys are the room's: private from the first byte, whole or not at
+    // all.
+    std::error_code ignored;
+    std::filesystem::create_directories(directory_, ignored);
+    const auto file = directory_ / "session.json";
+    const auto temporary = file.string() + ".new";
+    const auto descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        return;
+    }
+    const auto text = document.dump();
+    const bool written =
+        ::write(descriptor, text.data(), text.size()) == static_cast<ssize_t>(text.size()) &&
+        ::fsync(descriptor) == 0;
+    ::close(descriptor);
+    if (written) {
+        static_cast<void>(::rename(temporary.c_str(), file.c_str()));
+    }
+}
+
+void Together::forget() const {
+    std::error_code ignored;
+    std::filesystem::remove(directory_ / "session.json", ignored);
+}
+
+void Together::begin(std::shared_ptr<Session> session, Status status) {
+    {
+        const std::lock_guard guard{mutex_};
+        session_ = session;
+        status_ = std::move(status);
+    }
+    worker_ = std::thread{[this, session] { run(session); }};
+    changed();
+}
+
+void Together::resume() {
+    const std::lock_guard control{control_};
+    std::ifstream file{directory_ / "session.json"};
+    const auto document = file ? Json::parse(file, nullptr, false) : Json{};
+    if (!document.is_object() || text(document, "server").empty() ||
+        text(document, "room").empty() || text(document, "key").empty()) {
+        return;
+    }
+    auto session = std::make_shared<Session>();
+    session->invite = Invite{.server = text(document, "server"),
+                             .room = text(document, "room"),
+                             .key = text(document, "key")};
+    session->hosting = text(document, "role") == "host";
+    session->name = text(document, "name");
+    if (!session->hosting) {
+        session->downloads = directory_ / "downloads";
+        std::error_code unmade;
+        std::filesystem::create_directories(session->downloads, unmade);
+    }
+    // The clock is measured on the first round, the room asked then: a room
+    // gone while the engine was away ends the session there.
+    begin(session, Status{.role = session->hosting ? "host" : "listener",
+                          .invite = text(document, "invite"),
+                          .listeners = {},
+                          .track = {},
+                          .message = {}});
+}
+
+void Together::gone(Session& session, std::string message) {
+    session.ended = true;
+    if (!session.hosting && session.found && player_->state().entry == session.ours) {
+        static_cast<void>(player_->stop());
+    }
+    forget();
+    {
+        const std::lock_guard guard{mutex_};
+        status_.role.clear();
+        status_.message = std::move(message);
+    }
+    changed();
 }
 
 core::Result<void> Together::measure_clock(Session& session) {
@@ -446,14 +539,9 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
         return std::unexpected(measured.error());
     }
     const auto invite = invite_text(shared);
-    {
-        const std::lock_guard guard{mutex_};
-        session_ = session;
-        status_ = Status{.role = "host", .invite = invite, .listeners = {}, .track = {},
-                         .message = {}};
-    }
-    worker_ = std::thread{[this, session] { run(session); }};
-    changed();
+    remember(*session, invite);
+    begin(session,
+          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}});
     return invite;
 }
 
@@ -486,18 +574,13 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     if (auto measured = measure_clock(*session); !measured) {
         return std::unexpected(measured.error());
     }
-    {
-        const std::lock_guard guard{mutex_};
-        session_ = session;
-        status_ = Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
-                         .message = {}};
-    }
-    worker_ = std::thread{[this, session] { run(session); }};
-    changed();
+    remember(*session, invite);
+    begin(session, Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
+                          .message = {}});
     return {};
 }
 
-void Together::end() {
+void Together::end(const bool leaving) {
     std::shared_ptr<Session> session;
     {
         const std::lock_guard guard{mutex_};
@@ -514,6 +597,13 @@ void Together::end() {
         return;
     }
     session->errands.stop();
+    if (!leaving) {
+        // Kept, room and all, for when the engine starts again.
+        const std::lock_guard guard{mutex_};
+        status_ = Status{};
+        return;
+    }
+    forget();
     // Said to the room on the way out, never waited on for long.
     if (session->hosting) {
         static_cast<void>(request("DELETE", session->url(""), session->invite.key, {}, 3'000L));
@@ -670,6 +760,9 @@ void Together::host_round(Session& session) {
                                         : std::string{};
             }
             changed();
+        } else if (put && (put->status == 404 || put->status == 403)) {
+            gone(session, "the room is gone");
+            return;
         } else {
             say(put ? "the server refused what plays (" + std::to_string(put->status) + ")"
                     : put.error().message);
@@ -718,8 +811,14 @@ void Together::listen_round(Session& session) {
                         session.url("/state?after=" + std::to_string(session.revision) +
                                     "&wait=1000&name=" + escaped(session.name)),
                         session.invite.key, {}, 10'000L);
+    if (seen && (seen->status == 404 || seen->status == 403)) {
+        // The server restarted, or the room was closed while this engine was
+        // away: nothing to come back to.
+        gone(session, "the room is gone");
+        return;
+    }
     if (!seen || seen->status != 200) {
-        say(seen ? (seen->status == 404 ? "the room is gone" : "the room refused this listener")
+        say(seen ? "the room refused this listener (" + std::to_string(seen->status) + ")"
                  : seen.error().message);
         // Not reached: a moment before asking again.
         static_cast<void>(session.pause.wait(milliseconds{2'000}));
@@ -733,16 +832,7 @@ void Together::listen_round(Session& session) {
         }
     }
     if (seen->body.value("closed", false)) {
-        session.ended = true;
-        if (session.found && player_->state().entry == session.ours) {
-            static_cast<void>(player_->stop());
-        }
-        {
-            const std::lock_guard guard{mutex_};
-            status_.role.clear();
-            status_.message = "the host closed the room";
-        }
-        changed();
+        gone(session, "the host closed the room");
         return;
     }
     if (revision > session.revision) {

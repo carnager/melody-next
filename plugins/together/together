@@ -41,37 +41,42 @@ def fail(message):
     sys.exit(1)
 
 
+def room_name(invite):
+    return invite.split("/rooms/", 1)[-1].split("#", 1)[0] if "/rooms/" in invite else ""
+
+
 def panel(given):
+    """The room as its own queue: what plays, what is next, what the room
+    suggests and votes for, who listens, what played -- apart from this
+    Melody's own lists, which stay this Melody's."""
     room = cli(given, "together", "status")
     role = room.get("role") or ""
     if not role:
         parts = [{"paragraph": room.get("message") or
-                  "Not in a listening room. Host one, or join one with an invite, from "
-                  "Workspace › Run."}]
-        print(json.dumps({"title": "Listening together", "parts": parts}))
+                  "Not in a listening room. Host one, or open an invite a friend sent you."}]
+        print(json.dumps({"title": "Listening room", "parts": parts}))
         return
     parts = []
+    if room.get("message"):
+        parts.append({"paragraph": room["message"]})
+    parts.append({"heading": "Now playing"})
     if room.get("track"):
-        parts.append({"text": room["track"], "detail": "playing in the room"})
-    listeners = room.get("listeners") or []
-    parts.append({"heading": "Listening along" if role == "host" else "In the room"})
-    if listeners:
-        parts += [{"text": name} for name in listeners]
+        by = room.get("by")
+        parts.append({"text": room["track"],
+                      "detail": "suggested by %s" % by if by else
+                                "the host's" if room.get("party") else "on the radio"})
     else:
-        parts.append({"paragraph": "Nobody yet." if role == "host" else "Just you, and the host."})
-    if role == "host" and room.get("invite"):
-        parts.append({"heading": "Invite"})
-        parts.append({"paragraph": "On your clipboard since you hosted: send it to your friends. "
-                                   "It opens the room in their browser, or in their Melody."})
-        # A button, not the address itself: an invite is too long to show.
-        parts.append({"link": "Open the room", "detail": room["invite"], "url": room["invite"]})
+        parts.append({"paragraph": "Nothing, for now."})
+    if room.get("next"):
+        parts.append({"heading": "Up next"})
+        parts.append({"text": room["next"], "detail": "decided"})
     if room.get("party"):
         # ADR-0302 phase 4: what the room suggests, most wanted first.
-        parts.append({"heading": "Suggested"})
+        parts.append({"heading": "Suggested — the most votes plays next"})
         suggestions = room.get("suggestions") or []
         if not suggestions:
-            parts.append({"paragraph": "A party: anyone may suggest a track -- right-click it, "
-                                       "Suggest to the listening room -- and vote."})
+            parts.append({"paragraph": "Nothing yet: right-click a track, Suggest to the "
+                                       "listening room."})
         for each in suggestions:
             votes = each.get("votes", 0)
             detail = " · ".join(p for p in (
@@ -86,9 +91,25 @@ def panel(given):
             if role == "host":
                 parts.append({"link": "Remove", "detail": each.get("title", ""),
                               "url": "melody://together/remove?id=%d" % each.get("id", 0)})
-    if room.get("message"):
-        parts.append({"paragraph": room["message"]})
-    print(json.dumps({"title": "Hosting" if role == "host" else "Listening along",
+    listeners = room.get("listeners") or []
+    parts.append({"heading": "Listening"})
+    if listeners:
+        parts += [{"text": name} for name in listeners]
+    else:
+        parts.append({"paragraph": "Nobody yet." if role == "host" else "Just you, and the host."})
+    history = (room.get("history") or [])[:5]
+    if history:
+        parts.append({"heading": "Played"})
+        parts += [{"text": track} for track in history]
+    if role == "host" and room.get("invite"):
+        parts.append({"heading": "Invite"})
+        parts.append({"paragraph": "On your clipboard since you hosted: send it to your friends. "
+                                   "It opens the room in their browser, or in their Melody."})
+        # A button, not the address itself: an invite is too long to show.
+        parts.append({"link": "Open the room", "detail": room["invite"], "url": room["invite"]})
+    name = room_name(room.get("invite") or "")
+    print(json.dumps({"title": "%s%s" % (name or "Listening room",
+                                         " · hosting" if role == "host" else " · listening"),
                       "parts": parts}))
 
 

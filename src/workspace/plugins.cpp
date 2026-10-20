@@ -376,7 +376,7 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     }
     static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
                                         QStringLiteral("run"), QStringLiteral("timeout"),
-                                        QStringLiteral("library")};
+                                        QStringLiteral("library"), QStringLiteral("refresh")};
     for (const auto& value : panels.toArray()) {
         if (!value.isObject()) {
             return fail(QStringLiteral("a panel is not an object"));
@@ -427,6 +427,20 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             }
             if (!asked.isArray()) {
                 return fail(QStringLiteral("panel \"%1\": \"library\" is a list").arg(panel.id));
+            }
+        }
+        if (entry.contains(QStringLiteral("refresh"))) {
+            const auto asked = entry.value(QStringLiteral("refresh"));
+            if (!asked.isArray()) {
+                return fail(QStringLiteral("panel \"%1\": \"refresh\" is a list").arg(panel.id));
+            }
+            for (const auto& when : asked.toArray()) {
+                if (when.toString() != QStringLiteral("listening-room")) {
+                    return fail(QStringLiteral("panel \"%1\": \"refresh\" is a list of when it is "
+                                               "asked again: listening-room")
+                                    .arg(panel.id));
+                }
+                panel.refresh_room = true;
             }
         }
         plugin.panels.push_back(std::move(panel));

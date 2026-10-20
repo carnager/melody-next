@@ -47,6 +47,9 @@ struct PluginPanel {
     // ADR-0301: `"library": ["artist-albums"]` -- told the playing
     // artist's albums in the library.
     bool artist_albums{false};
+    // ADR-0302: `"refresh": ["listening-room"]` -- asked again whenever the
+    // listening room changes, not only with the track.
+    bool refresh_room{false};
 };
 
 // ADR-0293: something a plugin finds for Melody when Melody has none --

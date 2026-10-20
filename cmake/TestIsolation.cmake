@@ -21,6 +21,8 @@ function(melody_isolate_tests)
         set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
             "XDG_DATA_HOME=${home}/data"
             "XDG_CACHE_HOME=${home}/cache"
+            # And state: melody-together keeps its rooms there.
+            "XDG_STATE_HOME=${home}/state"
             # Plugins of its own: on macOS the data folders are not XDG's.
             "MELODY_PLUGIN_PATH=${home}/plugins"
             # Engines a test starts are announced under a service of its own:

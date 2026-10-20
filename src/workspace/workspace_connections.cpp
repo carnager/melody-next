@@ -605,6 +605,7 @@ void Workspace::watchTogether(EngineLink& link) {
                 }
                 seen->listeners = listeners;
                 seen->role = role;
+                view_->listeningRoomChanged();
             });
 }
 

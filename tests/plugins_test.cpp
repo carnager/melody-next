@@ -539,7 +539,13 @@ void PluginsTest::panelsAreToldTheLibrary() {
     const auto plain = parsePluginManifest(with(R"({"id": "a", "label": "A", "run": ["x"]})"),
                                            QStringLiteral("/p/told"), &problem);
     QVERIFY(plain.has_value() && !plain->panels.front().artist_albums);
+    const auto refreshed = parsePluginManifest(
+        with(R"({"id": "a", "label": "A", "run": ["x"], "refresh": ["listening-room"]})"),
+        QStringLiteral("/p/told"), &problem);
+    QVERIFY2(refreshed.has_value() && refreshed->panels.front().refresh_room, qPrintable(problem));
+    QVERIFY(!plain->panels.front().refresh_room);
     for (const auto* broken : {R"({"id": "a", "label": "A", "run": ["x"], "library": ["all"]})",
+                               R"({"id": "a", "label": "A", "run": ["x"], "refresh": ["time"]})",
                                R"({"id": "a", "label": "A", "run": ["x"],
                                    "library": "artist-albums"})"}) {
         problem.clear();
@@ -1075,7 +1081,7 @@ void PluginsTest::theTogetherPluginAsksTheEngine() {
 echo "$*|$MELODY_SERVER|$MELODY_TOGETHER_PASSWORD" >> '%1'
 case "$3" in
   host) echo '{"invite":"https://t.example/rooms/r#k"}' ;;
-  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":2,"voted":false,"ready":true}]}' ;;
+  join|status) echo '{"role":"host","invite":"https://t.example/rooms/r#k","listeners":["Ana"],"track":"Royal Thunder — Time Machine","message":"","party":true,"suggestions":[{"id":7,"name":"Ana","title":"Glow","artist":"Royal Thunder","votes":2,"voted":false,"ready":true}],"by":"Ana","next":"Royal Thunder — Forget You","history":["Royal Thunder — Wake Up"]}' ;;
   suggest) echo '{"id":8}' ;;
 esac
 )sh")
@@ -1134,13 +1140,21 @@ esac
     QVERIFY2(shown.succeeded, qPrintable(shown.text));
     const auto drawn = parsePluginPanel(shown.text.toUtf8(), &problem);
     QVERIFY2(drawn.has_value(), qPrintable(problem));
-    QCOMPARE(drawn->title, QStringLiteral("Hosting"));
+    // The room's own queue, asked again as the room changes.
+    QVERIFY(together->panels.front().refresh_room);
+    QCOMPARE(drawn->title, QStringLiteral("r · hosting"));
+    QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
+        return part.text == QStringLiteral("Royal Thunder — Time Machine") &&
+               part.detail == QStringLiteral("suggested by Ana");
+    }));
     const auto said = [&drawn](const QString& text) {
         return std::ranges::any_of(drawn->parts,
                                    [&text](const auto& part) { return part.text == text; });
     };
     QVERIFY(said(QStringLiteral("Royal Thunder — Time Machine")));
     QVERIFY(said(QStringLiteral("Ana")));
+    QVERIFY(said(QStringLiteral("Royal Thunder — Forget You")));
+    QVERIFY(said(QStringLiteral("Royal Thunder — Wake Up")));
     // The invite as a button opening it -- too long to show as text.
     QVERIFY(std::ranges::any_of(drawn->parts, [](const auto& part) {
         return part.kind == PluginPanelContent::Part::Kind::link &&

@@ -87,8 +87,12 @@ its direction.
    suggestions, and ending the party clears what waits.
 8. **Driven by melody-cli and an official plugin.** `melody-cli together
    host|join|leave|status`; the "Listen together" plugin starts, joins and
-   leaves from Workspace › Run and shows the room -- who listens, the invite
-   -- in a panel.
+   leaves from Workspace › Run. Its panel is the room's own queue -- what
+   plays and whose it is, what is next, the suggestions with their votes,
+   who listens, what played -- apart from Melody's lists, which stay this
+   Melody's: a listener's or host's tabs never pretend to be the room. It is
+   asked again as the room changes (a panel's `"refresh":
+   ["listening-room"]`).
 9. **Few steps.** Hosting puts the invite on the clipboard (a trigger's
    `result` may now copy). The invite's page opens Melody by a
    `melody://together/join?invite=…` link, registered by a desktop entry of

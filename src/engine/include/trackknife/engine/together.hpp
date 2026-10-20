@@ -68,6 +68,11 @@ class Together final {
         bool party{false};
         // Most wanted first.
         std::vector<Suggestion> suggestions;
+        // Who suggested what plays, at a party; what is next, decided; and
+        // what played before, newest first -- each "Artist — Title".
+        std::string by;
+        std::string next;
+        std::vector<std::string> history;
     };
 
     // `directory`: where a listener keeps the host's copies it fetched, and

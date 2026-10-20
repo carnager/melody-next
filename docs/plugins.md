@@ -192,6 +192,10 @@ missing albums, a biography, credits ([ADR-0291](adr/0291-plugin-panels.md)):
 "panels": [{"id": "artist", "label": "About the artist", "run": ["./about"]}]
 ```
 
+A panel that shows a listening room says `"refresh": ["listening-room"]`,
+and is asked again whenever the room changes -- a vote, a friend arriving --
+not only with the track ([ADR-0302](adr/0302-listening-together.md)).
+
 A plugin needs actions, panels, or both. Enabled, its panel is beside
 Lyrics, shown and hidden with the other side panels by **Panels**
 ([ADR-0299](adr/0299-the-side-panels-show-together.md)). It asks only while

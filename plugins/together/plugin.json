@@ -51,12 +51,15 @@
   "panels": [
     {
       "id": "room",
-      "label": "Listening together",
+      "label": "Listening room",
       "run": [
         "./together",
         "panel"
       ],
-      "timeout": 15
+      "timeout": 15,
+      "refresh": [
+        "listening-room"
+      ]
     }
   ],
   "settings": [

@@ -2829,6 +2829,73 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0302: a panel showing the listening room is asked again as the room
+// changes -- a vote, a friend arriving -- coalesced; one that did not ask
+// for it is not.
+void BenchMainWindowTest::aRoomPanelIsAskedAgainAsTheRoomChanges() {
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const auto write_plugin = [&out](const QString& name, const QString& refresh) {
+        const auto folder = pluginFolders().value(0) + QLatin1Char('/') + name;
+        QDir{}.mkpath(folder);
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QStringLiteral(R"({"schema": 1, "name": "%1", "panels": [{"id": "p",
+                          "label": "%1", "run": ["./p"]%2}]})")
+                           .arg(name, refresh)
+                           .toUtf8());
+        QFile script{folder + QStringLiteral("/p")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(QStringLiteral("#!/bin/sh\ncat > /dev/null\necho x >> '%1'\n"
+                                    "printf '{\"title\": \"%2\", \"parts\": []}'\n")
+                         .arg(out.filePath(name), name)
+                         .toUtf8());
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QSettings{}.setValue(pluginEnabledKey(name), true);
+    };
+    write_plugin(QStringLiteral("room"), QStringLiteral(R"(, "refresh": ["listening-room"])"));
+    write_plugin(QStringLiteral("plain"), QString{});
+    const auto asked = [&out](const QString& name) {
+        QFile file{out.filePath(name)};
+        return file.open(QIODevice::ReadOnly) ? file.readAll().count('\n') : 0;
+    };
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    for (const auto* name : {"room", "plain"}) {
+        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-%1-p")
+                                                        .arg(QLatin1String(name)));
+        QVERIFY(dock != nullptr);
+        if (dock->isHidden()) {
+            window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+        }
+        QTRY_VERIFY(dock->isVisible());
+    }
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    EnginePlayback::State state;
+    state.status = QStringLiteral("playing");
+    state.entry = QStringLiteral("e1");
+    state.path = QStringLiteral("/srv/music/a.flac");
+    window.refreshPluginPanels(state);
+    QTRY_VERIFY_WITH_TIMEOUT(asked(QStringLiteral("room")) >= 1 && asked(QStringLiteral("plain")) >= 1,
+                             10'000);
+    QTest::qWait(300);
+    const auto room_before = asked(QStringLiteral("room"));
+    const auto plain_before = asked(QStringLiteral("plain"));
+    window.listeningRoomChanged();
+    window.listeningRoomChanged();
+    QTRY_VERIFY_WITH_TIMEOUT(asked(QStringLiteral("room")) == room_before + 1, 5'000);
+    QTest::qWait(800);
+    QCOMPARE(asked(QStringLiteral("room")), room_before + 1);
+    QCOMPARE(asked(QStringLiteral("plain")), plain_before);
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{pluginFolders().value(0) + QStringLiteral("/room")}.removeRecursively();
+    QDir{pluginFolders().value(0) + QStringLiteral("/plain")}.removeRecursively();
+}
+
 // ADR-0302: an invite opened in a browser hands Melody a melody:// link, and
 // Melody asks its engine to join -- told here of a server not there.
 void BenchMainWindowTest::aTogetherLinkAsksTheEngineToJoin() {

@@ -6,10 +6,12 @@
 
 #include "bench/bench_main_window.hpp"
 
+#include "bench/animated_panel_dock.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "workspace/plugins.hpp"
 
 #include <QSettings>
+#include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 
@@ -91,6 +93,24 @@ bool BenchMainWindow::openLink(const QString& link) {
                         }
                     });
     return true;
+}
+
+void BenchMainWindow::listeningRoomChanged() {
+    if (room_panels_timer_ == nullptr) {
+        room_panels_timer_ = new QTimer(this);
+        room_panels_timer_->setSingleShot(true);
+        room_panels_timer_->setInterval(500);
+        connect(room_panels_timer_, &QTimer::timeout, this, [this] {
+            for (auto& slot : plugin_panels_) {
+                if (slot->panel.refresh_room && !slot->dock->isHidden()) {
+                    askPluginPanel(*slot);
+                }
+            }
+        });
+    }
+    if (!room_panels_timer_->isActive()) {
+        room_panels_timer_->start();
+    }
 }
 
 } // namespace trackknife::bench

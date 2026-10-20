@@ -147,6 +147,16 @@ struct Answer final {
     return found != object.end() && found->is_number() ? found->get<std::int64_t>() : 0;
 }
 
+// A track as a person reads it: "Artist — Title".
+[[nodiscard]] std::string shown(const Json& track) {
+    auto artist = text(track, "artist");
+    if (artist.empty()) {
+        artist = text(track, "albumartist");
+    }
+    const auto title = text(track, "title");
+    return artist.empty() ? title : artist + " — " + title;
+}
+
 // The name a track's copy is kept by in the room: a suggestion's own, else
 // the host's entry.
 [[nodiscard]] std::string file_of(const Json& described) {
@@ -306,7 +316,8 @@ class Errands final {
     return Json{{"role", now.role},         {"invite", now.invite},
                 {"listeners", now.listeners}, {"track", now.track},
                 {"message", now.message},   {"party", now.party},
-                {"suggestions", suggestions}};
+                {"suggestions", suggestions}, {"by", now.by},
+                {"next", now.next},         {"history", now.history}};
 }
 
 [[nodiscard]] core::Result<std::uint64_t> suggestion_id(const Json& params) {
@@ -367,11 +378,14 @@ struct Together::Session final {
     Json suggestions = Json::array();
     std::map<std::string, std::string> suggestion_files;
     std::map<std::string, Json> suggestion_tracks;
+    // By entry, who suggested it.
+    std::map<std::string, std::string> suggestion_by;
     std::string turn_for;
     struct Coming final {
         std::string file;
         Json track;
         std::string path;
+        std::string by;
     };
     std::optional<Coming> coming;
     // Last: stopped first, before anything its errands use is gone.
@@ -520,7 +534,7 @@ void Together::resume() {
                           .invite = text(document, "invite"),
                           .listeners = {},
                           .track = {},
-                          .message = {}, .party = false, .suggestions = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
 }
 
 void Together::gone(Session& session, std::string message) {
@@ -605,7 +619,7 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     const auto invite = invite_text(shared);
     remember(*session, invite);
     begin(session,
-          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}});
+          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
     return invite;
 }
 
@@ -640,7 +654,7 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     }
     remember(*session, invite);
     begin(session, Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
-                          .message = {}, .party = false, .suggestions = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
     return {};
 }
 
@@ -813,6 +827,7 @@ void Together::host_round(Session& session) {
             };
             if (const auto file = file_for(*current); !file.empty()) {
                 said["file"] = file;
+                said["by"] = session.suggestion_by[current->entry_id.to_string()];
             }
             if (following) {
                 said["next"] = Json{{"entry", following->entry_id.to_string()},
@@ -833,8 +848,10 @@ void Together::host_round(Session& session) {
             say({});
             {
                 const std::lock_guard guard{mutex_};
-                status_.track = current ? text(track, "artist") + " — " + text(track, "title")
-                                        : std::string{};
+                status_.track = current ? shown(track) : std::string{};
+                status_.by = text(said, "by");
+                status_.next = said.contains("next") ? shown(said["next"].value("track", Json::object()))
+                                                     : std::string{};
             }
             changed();
         } else if (put && (put->status == 404 || put->status == 403)) {
@@ -940,6 +957,14 @@ void Together::listen_round(Session& session) {
 
 void Together::follow(Session& session, const Json& state) {
     session.desired = state;
+    {
+        const std::lock_guard guard{mutex_};
+        status_.by = text(state, "by");
+        const auto next = state.find("next");
+        status_.next = next != state.end() && next->is_object()
+                           ? shown(next->value("track", Json::object()))
+                           : std::string{};
+    }
     const auto track = state.find("track");
     if (track == state.end() || !track->is_object()) {
         if (session.found && player_->state().entry == session.ours) {
@@ -1145,9 +1170,17 @@ void Together::read_room(Session& session, const Json& answer) {
                                          }),
             .ready = each.value("ready", false)});
     }
+    std::vector<std::string> history;
+    for (const auto& each : answer.value("history", Json::array())) {
+        if (each.is_object() && history.size() < 10U) {
+            history.push_back(shown(each.value("track", Json::object())));
+        }
+    }
     bool different = false;
     {
         const std::lock_guard guard{mutex_};
+        different = status_.history != history;
+        status_.history = std::move(history);
         const auto ids = [](const std::vector<Suggestion>& of) {
             std::vector<std::tuple<std::uint64_t, std::size_t, bool, bool>> keys;
             for (const auto& each : of) {
@@ -1155,7 +1188,8 @@ void Together::read_room(Session& session, const Json& answer) {
             }
             return keys;
         };
-        different = status_.party != session.party || ids(status_.suggestions) != ids(listed);
+        different = different || status_.party != session.party ||
+                    ids(status_.suggestions) != ids(listed);
         status_.party = session.party;
         status_.suggestions = std::move(listed);
     }
@@ -1203,6 +1237,7 @@ void Together::take_turn(Session& session, const Player::State& state) {
         const auto id = entry.entry_id.to_string();
         session.suggestion_files[id] = coming.file;
         session.suggestion_tracks[id] = coming.track;
+        session.suggestion_by[id] = coming.by;
         player_->enqueue({entry});
         // The host's queue ran out: it plays now; else it is next.
         static_cast<void>(state.status == "stopped" ? player_->play_entry(entry.entry_id)
@@ -1259,7 +1294,8 @@ void Together::take_turn(Session& session, const Player::State& state) {
     session.turn_for = key;
     session.coming = Session::Coming{.file = text(taken->body, "file"),
                                      .track = taken->body.value("track", Json::object()),
-                                     .path = {}};
+                                     .path = {},
+                                     .by = text(taken->body, "name")};
 }
 
 Json Together::describe_file(const std::string& raw_path) {

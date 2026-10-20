@@ -197,8 +197,10 @@ class TogetherServer final {
         child_ = ::fork();
         require(child_ >= 0, "the server starts");
         if (child_ == 0) {
+            // Its rooms kept in the test's folder, never the real home's.
+            const auto data = (directory / "server-data").string();
             ::execl(binary.c_str(), binary.c_str(), "-listen", listen.c_str(), "-password-file",
-                    password.c_str(), static_cast<char*>(nullptr));
+                    password.c_str(), "-data", data.c_str(), static_cast<char*>(nullptr));
             ::_exit(127);
         }
         // Listening once a connection is taken.
@@ -464,6 +466,11 @@ int main(int argc, char** argv) {
             "the host plays her copy");
     require(eventually([&] { return friend_.audition.loaded() == second; }),
             "and she her own file of it, in the room");
+    require(eventually([&] {
+                const auto room = friend_.together->status();
+                return room.by == "Ana" && !room.history.empty();
+            }),
+            "the room says whose it is, and what played before");
     // The host is one of the guests: its pick waits for votes like hers.
     require(host.together->suggest((directory / "host/music/Other/01.flac").string()).has_value(),
             "the host suggests one of its own");

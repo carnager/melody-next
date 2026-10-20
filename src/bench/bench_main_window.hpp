@@ -461,6 +461,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         QPointer<QObject> run;
     };
     std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
+    // ADR-0302: the panels showing a listening room, asked again as it
+    // changes -- at most twice a second.
+    void listeningRoomChanged() override;
+    QTimer* room_panels_timer_{nullptr};
     EnginePlayback::State plugin_panel_state_;
     void buildPluginPanels();
     // ADR-0299: whether the side panels show, as Panels left them.

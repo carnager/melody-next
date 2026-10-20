@@ -36,6 +36,9 @@ class WorkspaceView {
     // albums came into it, each once whole. For what runs on them.
     virtual void libraryChanged() {}
     virtual void albumsAdded(const std::vector<AlbumArrival>& /*albums*/) {}
+    // ADR-0302: the listening room an engine is in changed -- who listens,
+    // what is suggested, a vote. For the panels that show it.
+    virtual void listeningRoomChanged() {}
 
     // The lists as the window shows them. A list added is drawn, and shown
     // at once when `select`; the list on show is the current one.

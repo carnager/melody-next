@@ -87,6 +87,10 @@ password.
   the plugin's settings. (Or paste the invite into the plugin's settings and
   Workspace › Run › **Join the listening room**.)
 
+The **Listening room** panel is the room's own queue: what plays and
+whose it is, what is next, at a party the suggestions with Vote, who
+listens and what played. Your tabs stay yours.
+
 **Leave the listening room** leaves -- and, as its host, closes the room.
 An engine that restarts -- an update -- comes back into its room by itself.
 

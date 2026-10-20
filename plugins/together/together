@@ -79,13 +79,23 @@ def act(given, action):
     return ""
 
 
-def track_line(text, detail="", buttons=None):
-    line = {"text": text}
+def track_row(shown, detail="", buttons=None, playing=False, artist=None, title=None):
+    # ADR-0304: a track's row, its title over its artist. The engine tells a
+    # track as "Artist — Title"; a suggestion tells both.
+    if title is None:
+        artist, _, title = shown.partition(" — ")
+        if not title:
+            artist, title = "", shown
+    row = {"track": title or "Unknown track"}
+    if artist:
+        row["artist"] = artist
     if detail:
-        line["detail"] = detail
+        row["detail"] = detail
+    if playing:
+        row["playing"] = True
     if buttons:
-        line["buttons"] = buttons
-    return line
+        row["buttons"] = buttons
+    return row
 
 
 def panel(given):
@@ -114,7 +124,7 @@ def panel(given):
         parts += [
             {"input": "room", "label": "Room", "placeholder": "friday-doom", "action": "join"},
             {"input": "password", "label": "Password", "secret": True, "action": "join"},
-            {"button": "Start room", "action": "start", "primary": True},
+            {"button": "Start room", "action": "start", "role": "primary"},
             {"button": "Join room", "action": "join"},
             {"paragraph": "Start a room of your own — its name and password yours to choose, "
                           "or made for you — or join a friend's by its name and password."},
@@ -124,13 +134,13 @@ def panel(given):
 
     hosting = role == "host"
     listeners = room.get("listeners") or []
-    parts.append({"paragraph": "%s · %d listening" % ("Hosting" if hosting else "Listening along",
-                                                     len(listeners))})
+    parts.append({"status": "Hosting" if hosting else "Listening along",
+                  "detail": "%d listening" % len(listeners), "live": True})
     if hosting:
         parts.append({"toggle": "party", "label": "Party: friends suggest tracks and vote",
                       "on": bool(room.get("party"))})
     parts.append({"button": "Stop room" if hosting else "Leave room",
-                  "action": "stop" if hosting else "leave"})
+                  "action": "stop" if hosting else "leave", "role": "quiet"})
     if room.get("invite"):
         parts.append({"link": "The room's page", "detail": room["invite"], "url": room["invite"]})
 
@@ -139,34 +149,38 @@ def panel(given):
     parts.append({"heading": "Queue"})
     if room.get("track"):
         by = room.get("by")
-        parts.append(track_line("▶  " + room["track"],
-                                "suggested by %s" % by if by else "now playing"))
+        parts.append(track_row(room["track"], "suggested by %s" % by if by else "", playing=True))
     else:
         parts.append({"paragraph": "Nothing plays yet."})
     if room.get("party"):
         if room.get("next"):
-            parts.append(track_line(room["next"], "next"))
+            parts.append(track_row(room["next"], "next"))
         for each in room.get("suggestions") or []:
             votes = each.get("votes", 0)
             buttons = [{"text": "▲ %d" % votes, "action": "vote", "value": str(each.get("id", 0)),
                         "on": bool(each.get("voted"))}]
             if hosting:
-                buttons.append({"text": "✕", "action": "remove", "value": str(each.get("id", 0))})
-            parts.append(track_line(
-                " — ".join(p for p in (each.get("artist"), each.get("title")) if p),
-                each.get("name", "") + ("" if each.get("ready") else " · on its way"), buttons))
+                buttons.append({"text": "✕", "action": "remove", "value": str(each.get("id", 0)),
+                                "role": "quiet"})
+            parts.append(track_row(
+                "", " · ".join(p for p in (each.get("name", ""),
+                                           "" if each.get("ready") else "on its way") if p),
+                buttons, artist=each.get("artist") or "", title=each.get("title") or ""))
         if not room.get("suggestions"):
             parts.append({"paragraph": "Suggest a track: right-click it, Suggest to the "
                                        "listening room."})
     else:
         for track in room.get("upcoming") or []:
-            parts.append(track_line(track))
+            parts.append(track_row(track))
     history = (room.get("history") or [])[:8]
     if history:
         parts.append({"heading": "Played"})
-        parts += [track_line(track) for track in history]
+        parts += [track_row(track) for track in history]
     parts.append({"heading": "Listening"})
-    parts.append({"paragraph": ", ".join(listeners) if listeners else "Nobody yet."})
+    if listeners:
+        parts.append({"people": listeners})
+    else:
+        parts.append({"paragraph": "Nobody yet."})
     print(json.dumps({"title": room.get("room") or "Listening room", "parts": parts}))
 
 

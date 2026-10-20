@@ -230,6 +230,9 @@ struct PluginList {
 // image (a file the plugin keeps, a link on it) or a link alone -- links side
 // by side are drawn as a row of small buttons, what each is about their tip.
 struct PluginPanelContent {
+    // ADR-0304: how a button is drawn -- the one to press in the accent, an
+    // ordinary one, or a quiet one that keeps out of the way (Stop, Remove).
+    enum class Role : std::uint8_t { normal, primary, quiet };
     // ADR-0303: a button a panel's program answers, run again when it is
     // pressed: `action` and `value` are what it is told.
     struct Button {
@@ -238,9 +241,24 @@ struct PluginPanelContent {
         QString value;
         // Drawn as chosen -- a vote of one's own -- or as the one to press.
         bool on{false};
+        Role role{Role::normal};
     };
     struct Part {
-        enum class Kind : std::uint8_t { heading, paragraph, item, image, link, input, toggle, button };
+        enum class Kind : std::uint8_t {
+            heading,
+            paragraph,
+            item,
+            image,
+            link,
+            input,
+            toggle,
+            button,
+            // ADR-0304: drawn as Melody draws its own -- a track's row, a
+            // status line, the people somewhere.
+            track,
+            status,
+            people,
+        };
         Kind kind{Kind::item};
         QString text;
         QString detail;
@@ -256,9 +274,18 @@ struct PluginPanelContent {
         QString placeholder;
         QString action;
         bool secret{false};
+        // A toggle's state; a track that plays; a status that is live.
         bool on{false};
-        // An item's buttons, at its right.
+        // An item's or a track's buttons, at its right.
         std::vector<Button> buttons;
+        // ADR-0304. A track's artist, under its title (`text`).
+        QString artist;
+        // A track's cover, an absolute path on this computer.
+        QString cover;
+        // The people a `people` part names.
+        std::vector<QString> people;
+        // A button's.
+        Role role{Role::normal};
     };
     QString title;
     std::vector<Part> parts;

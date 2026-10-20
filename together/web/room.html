@@ -317,7 +317,8 @@ function clock(ms) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-// A colour of its own for each name, from the name.
+// A colour of its own for each name, from the name -- Melody's panel gives
+// the same (src/bench/plugin_panel_view.cpp, personColour).
 function colour(of) {
   let hash = 0;
   for (const c of of) hash = (hash * 31 + c.codePointAt(0)) >>> 0;

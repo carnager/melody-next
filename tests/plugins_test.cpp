@@ -34,6 +34,7 @@ class PluginsTest final : public QObject {
     void panelsAreReadAndTheirAnswersToo();
     void panelsAreToldTheLibrary();
     void panelsHaveControls();
+    void panelsHaveMelodysOwnParts();
     void providersAreReadAndTheirLyricsToo();
     void triggersAreReadAndTold();
     void theScriptsPluginRunsTheCommandsSet();
@@ -685,6 +686,52 @@ void PluginsTest::panelsHaveControls() {
              QStringLiteral("x"));
 }
 
+// ADR-0304: parts drawn as Melody draws its own -- a track's row, a status
+// line, people -- and buttons by their role.
+void PluginsTest::panelsHaveMelodysOwnParts() {
+    QString problem;
+    const auto panel = parsePluginPanel(R"({"parts": [
+        {"track": "Time Machine", "artist": "Royal Thunder", "detail": "suggested by Ana",
+         "cover": "/covers/a.jpg", "playing": true,
+         "buttons": [{"text": "▲ 3", "action": "vote", "value": "7", "on": true},
+                     {"text": "✕", "action": "remove", "value": "7", "role": "quiet"}]},
+        {"track": "Glow"},
+        {"status": "Hosting", "detail": "2 listening", "live": true},
+        {"people": ["Ana", " ", "Bo"]},
+        {"button": "Start", "action": "start", "role": "primary"},
+        {"button": "Stop", "action": "stop", "role": "quiet"},
+        {"button": "Old", "action": "old", "primary": true}]})",
+                                        &problem);
+    QVERIFY2(panel.has_value(), qPrintable(problem));
+    using Kind = PluginPanelContent::Part::Kind;
+    using Role = PluginPanelContent::Role;
+    const auto& parts = panel->parts;
+    QCOMPARE(parts.size(), std::size_t{7U});
+    QVERIFY(parts[0].kind == Kind::track && parts[0].text == QStringLiteral("Time Machine") &&
+            parts[0].artist == QStringLiteral("Royal Thunder") && parts[0].on &&
+            parts[0].cover == QStringLiteral("/covers/a.jpg"));
+    QCOMPARE(parts[0].buttons.size(), std::size_t{2U});
+    QVERIFY(parts[0].buttons[0].role == Role::normal && parts[0].buttons[0].on);
+    QVERIFY(parts[0].buttons[1].role == Role::quiet);
+    QVERIFY(parts[1].kind == Kind::track && !parts[1].on && parts[1].artist.isEmpty());
+    QVERIFY(parts[2].kind == Kind::status && parts[2].on &&
+            parts[2].detail == QStringLiteral("2 listening"));
+    QVERIFY(parts[3].kind == Kind::people &&
+            parts[3].people == (std::vector<QString>{QStringLiteral("Ana"), QStringLiteral("Bo")}));
+    QVERIFY(parts[4].role == Role::primary && parts[4].on);
+    QVERIFY(parts[5].role == Role::quiet && !parts[5].on);
+    // ADR-0303's `primary: true` is the primary role.
+    QVERIFY(parts[6].role == Role::primary);
+    for (const auto* broken :
+         {R"({"parts": [{"track": "x", "cover": "a.jpg"}]})",
+          R"({"parts": [{"track": "x", "colour": "red"}]})",
+          R"({"parts": [{"button": "x", "action": "y", "role": "loud"}]})",
+          R"({"parts": [{"track": "x", "buttons": [{"text": "y", "action": "z", "role": "big"}]}]})",
+          R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})"}) {
+        QVERIFY2(!parsePluginPanel(broken, &problem), broken);
+    }
+}
+
 // What a `list` action answers: a heading and rows of text, detail and a
 // web link -- nothing else opened from a plugin.
 void PluginsTest::aListIsReadOrRefused() {
@@ -1222,20 +1269,31 @@ esac
         return part.kind == Kind::button && part.action == QStringLiteral("stop");
     }));
     QVERIFY(has(drawn, [](const auto& part) {
-        return part.text == QStringLiteral("▶  Royal Thunder — Time Machine") &&
+        return part.kind == Kind::status && part.on;
+    }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::button && part.action == QStringLiteral("stop") &&
+               part.role == PluginPanelContent::Role::quiet;
+    }));
+    QVERIFY(has(drawn, [](const auto& part) {
+        return part.kind == Kind::track && part.text == QStringLiteral("Time Machine") &&
+               part.artist == QStringLiteral("Royal Thunder") && part.on &&
                part.detail == QStringLiteral("suggested by Ana");
     }));
     QVERIFY(has(drawn, [](const auto& part) {
-        return part.text == QStringLiteral("Royal Thunder — Glow") && part.buttons.size() == 2U &&
+        return part.kind == Kind::track && part.text == QStringLiteral("Glow") &&
+               part.artist == QStringLiteral("Royal Thunder") && part.buttons.size() == 2U &&
                part.buttons[0].text == QStringLiteral("▲ 2") && part.buttons[0].on &&
                part.buttons[0].value == QStringLiteral("7") &&
-               part.buttons[1].action == QStringLiteral("remove");
+               part.buttons[1].action == QStringLiteral("remove") &&
+               part.buttons[1].role == PluginPanelContent::Role::quiet;
     }));
     QVERIFY(has(drawn, [](const auto& part) {
-        return part.text == QStringLiteral("Royal Thunder — Wake Up");
+        return part.kind == Kind::track && part.text == QStringLiteral("Wake Up") && !part.on;
     }));
     QVERIFY(has(drawn, [](const auto& part) {
-        return part.kind == Kind::paragraph && part.text == QStringLiteral("Ana");
+        return part.kind == Kind::people &&
+               part.people == std::vector<QString>{QStringLiteral("Ana")};
     }));
     // A vote, pressed.
     static_cast<void>(show(PluginPanelAction{.id = QStringLiteral("vote"),

@@ -198,15 +198,29 @@ A panel may hold controls ([ADR-0303](adr/0303-panels-with-controls.md)):
 | --- | --- |
 | Input | `input` -- its key -- `label`, `value`, `placeholder`, `secret` (shown as dots), `action` (run on Enter) |
 | Toggle | `toggle` -- its key -- `label`, `on` |
-| Button | `button` -- its text -- `action`, `value`, `primary`; buttons side by side are a row |
+| Button | `button` -- its text -- `action`, `value`, `role`; buttons side by side are a row |
 
-and an item may carry `"buttons": [{"text", "action", "value", "on"}]` at its
-right -- a vote, one that is on drawn as chosen. Pressed, the panel's program
+and an item may carry `"buttons": [{"text", "action", "value", "on", "role"}]`
+at its right -- a vote, one that is on drawn as chosen. Pressed, the panel's program
 runs again, told `"action": {"id", "value"}` -- a toggle's key and `on` or
 `off` -- and `"inputs"`, every input's text; its answer is the panel's new
 content. What was typed stays unless the answer gives the input a new value.
 A panel of controls says `"always": true` and is asked with nothing playing
 too, `playing` then null.
+
+Some parts say what they are, and Melody draws them as it draws its own
+([ADR-0304](adr/0304-panels-drawn-as-melody.md)):
+
+| Part | Keys |
+| --- | --- |
+| Track | `track` -- its title -- `artist`, `detail`, `cover` (an image's absolute path), `url`, `playing` (tinted in the accent), `buttons` |
+| Status | `status` -- its text -- `detail`, `live` (a dot in the accent) |
+| People | `people` -- a list of names, drawn as chips with coloured initials |
+
+A button's `role` is `primary` (the accent), `normal`, or `quiet` (flat; on a
+row, shown only under the pointer). `"primary": true` is the primary role. A
+toggle is drawn as a switch. There is no CSS and no colour of a plugin's own:
+a panel looks like the rest of Melody under every colour scheme.
 
 A panel that shows a listening room says `"refresh": ["listening-room"]`,
 and is asked again whenever the room changes -- a vote, a friend arriving --

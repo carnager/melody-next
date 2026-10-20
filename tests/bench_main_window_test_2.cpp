@@ -2901,10 +2901,29 @@ esac
         }
     }
     QTRY_VERIFY_WITH_TIMEOUT(
-        dock->findChild<QCheckBox*>(QStringLiteral("bench-plugin-panel-toggle-party")) != nullptr,
+        dock->findChild<QAbstractButton*>(QStringLiteral("bench-plugin-panel-toggle-party")) !=
+            nullptr,
         10'000);
+    QVERIFY(dock->findChild<QAbstractButton*>(QStringLiteral("bench-plugin-panel-toggle-party"))
+                ->isChecked());
     QCOMPARE(dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button")).size(),
              4);
+    // ADR-0304: drawn as Melody's -- what plays, the next, two suggestions,
+    // two played; the status; the people.
+    const auto tracks = dock->findChildren<QWidget*>(QStringLiteral("bench-plugin-panel-track"));
+    QCOMPARE(tracks.size(), 6);
+    QVERIFY(tracks.front()->property("playing").toBool());
+    QCOMPARE(tracks.front()
+                 ->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-track-title"))
+                 ->text(),
+             QStringLiteral("Time Machine"));
+    QVERIFY(dock->findChild<QWidget*>(QStringLiteral("bench-plugin-panel-status")) != nullptr);
+    QCOMPARE(dock->findChildren<QWidget*>(QStringLiteral("bench-plugin-panel-person")).size(), 3);
+    // The host's remove, quiet: shown only under the pointer.
+    for (auto* button :
+         dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button"))) {
+        QCOMPARE(button->isVisibleTo(dock), button->property("role").toString().isEmpty());
+    }
     QTest::qWait(300);
     shot(QStringLiteral("room-panel-in.png"));
     qputenv("PATH", path);
@@ -3281,12 +3300,12 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
                  .text = {},
                  .detail = {},
                  .url = {},
-                 .image = photo_path, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = photo_path, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::item,
                  .text = QStringLiteral("Group from Berkeley, United States"),
                  .detail = QStringLiteral("since 1983"),
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::paragraph,
                  .text = QStringLiteral(
                      "Testament is an American thrash metal band from Berkeley, California. "
@@ -3297,67 +3316,67 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
                      "the Bay Area scene, credited with influencing many that followed."),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Wikipedia"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Official site"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("MusicBrainz"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::heading,
                  .text = QStringLiteral("The Legacy"),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::item,
                  .text = QStringLiteral("Album · 1987"),
                  .detail = QStringLiteral("Atlantic, Megaforce Worldwide"),
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::paragraph,
                  .text = QStringLiteral("The Legacy is the debut studio album by Testament."),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Wikipedia"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("MusicBrainz"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Discogs"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Bandcamp"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Rate Your Music"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("AllMusic"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}},
+                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
         };
         PluginPanelView shown{QStringLiteral("About"), nullptr};
         shown.resize(300, 900);

@@ -2,7 +2,7 @@
 
 #include "bench/plugin_panel_view.hpp"
 
-#include <QCheckBox>
+#include <QAbstractButton>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFrame>
@@ -22,6 +22,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 namespace trackknife::bench {
@@ -168,6 +169,291 @@ class FlowLayout final : public QLayout {
     }
     std::vector<QLayoutItem*> items_;
 };
+
+// ADR-0304: Melody's colours, mixed as its own rows mix them.
+[[nodiscard]] QColor mixed(const QColor& from, const QColor& to, const int percent) {
+    const auto mix = [percent](const int a, const int b) { return a + (b - a) * percent / 100; };
+    return QColor::fromRgb(mix(from.red(), to.red()), mix(from.green(), to.green()),
+                           mix(from.blue(), to.blue()));
+}
+
+[[nodiscard]] QFont smaller(QFont font) {
+    font.setPointSizeF(std::max(7.0, font.pointSizeF() - 1.0));
+    return font;
+}
+
+[[nodiscard]] QLabel* plainLabel(const QString& text, QWidget* parent) {
+    auto* label = new QLabel(text, parent);
+    label->setTextFormat(Qt::PlainText);
+    return label;
+}
+
+// A small round thing, painted: a status's dot, a person's initial.
+class Dot final : public QWidget {
+  public:
+    Dot(const int extent, QColor colour, QString letter, QWidget* parent)
+        : QWidget(parent), colour_(std::move(colour)), letter_(std::move(letter)) {
+        setFixedSize(extent, extent);
+    }
+
+  protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter{this};
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(colour_);
+        painter.drawEllipse(QRectF{rect()}.adjusted(0.5, 0.5, -0.5, -0.5));
+        if (!letter_.isEmpty()) {
+            auto font = this->font();
+            font.setWeight(QFont::DemiBold);
+            font.setPixelSize(std::max(7, height() * 11 / 20));
+            painter.setFont(font);
+            painter.setPen(Qt::white);
+            painter.drawText(rect(), Qt::AlignCenter, letter_);
+        }
+    }
+
+  private:
+    QColor colour_;
+    QString letter_;
+};
+
+// A person's colour, from the name: the same as the listening room's web
+// page gives it (together/web/room.html, colour()).
+[[nodiscard]] QColor personColour(const QString& name) {
+    std::uint32_t hash = 0;
+    for (const auto code : name.toUcs4()) {
+        hash = hash * 31U + code;
+    }
+    return QColor::fromHslF(static_cast<float>(hash % 360U) / 360.0F, 0.55F, 0.48F);
+}
+
+// A person, as a chip: a coloured initial and the name.
+class PersonChip final : public QWidget {
+  public:
+    PersonChip(const QString& name, QWidget* parent) : QWidget(parent) {
+        setObjectName(QStringLiteral("bench-plugin-panel-person"));
+        setToolTip(name);
+        auto* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(3, 3, 10, 3);
+        layout->setSpacing(6);
+        const auto extent = fontMetrics().height() + 2;
+        layout->addWidget(new Dot(extent, personColour(name), name.left(1).toUpper(), this));
+        auto* label = plainLabel(name, this);
+        label->setFont(smaller(font()));
+        layout->addWidget(label);
+    }
+
+  protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter{this};
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(mixed(palette().color(QPalette::Window),
+                               palette().color(QPalette::WindowText), 8));
+        const QRectF area{rect()};
+        painter.drawRoundedRect(area, area.height() / 2, area.height() / 2);
+    }
+};
+
+// ADR-0304: a toggle as a switch -- the accent when it is on.
+class PanelSwitch final : public QAbstractButton {
+  public:
+    explicit PanelSwitch(QWidget* parent) : QAbstractButton(parent) {
+        setCheckable(true);
+        setCursor(Qt::PointingHandCursor);
+        setFocusPolicy(Qt::TabFocus);
+    }
+    [[nodiscard]] QSize sizeHint() const override {
+        const auto height = fontMetrics().height() + 4;
+        return {height * 9 / 5, height};
+    }
+
+  protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter{this};
+        painter.setRenderHint(QPainter::Antialiasing);
+        const auto& colours = palette();
+        const QRectF track = QRectF{rect()}.adjusted(0.5, 0.5, -0.5, -0.5);
+        const auto radius = track.height() / 2;
+        const auto off = mixed(colours.color(QPalette::Window),
+                               colours.color(QPalette::WindowText), 28);
+        auto fill = isChecked() ? colours.color(QPalette::Highlight) : off;
+        if (underMouse()) {
+            fill = fill.lighter(108);
+        }
+        if (!isEnabled()) {
+            fill.setAlphaF(0.5);
+        }
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawRoundedRect(track, radius, radius);
+        const auto knob = track.height() - 4;
+        const auto x = isChecked() ? track.right() - 2 - knob : track.left() + 2;
+        painter.setBrush(Qt::white);
+        painter.drawEllipse(QRectF{x, track.top() + 2, knob, knob});
+        if (hasFocus()) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen{colours.color(QPalette::Highlight), 1.5});
+            painter.drawRoundedRect(track.adjusted(-1, -1, 1, 1), radius + 1, radius + 1);
+        }
+    }
+};
+
+// ADR-0304: a track's row, as Melody's own: a small cover, the title over
+// the artist, its buttons at the right -- what plays in the accent, quiet
+// buttons only under the pointer.
+class TrackRow final : public QWidget {
+  public:
+    TrackRow(const PluginPanelContent::Part& part, QWidget* parent)
+        : QWidget(parent), playing_(part.on), url_(part.url) {
+        setObjectName(QStringLiteral("bench-plugin-panel-track"));
+        setProperty("playing", playing_);
+        setAttribute(Qt::WA_Hover);
+        auto* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(6, 4, 6, 4);
+        layout->setSpacing(8);
+        const auto extent = fontMetrics().height() * 2 + 2;
+        if (!part.cover.isEmpty()) {
+            QImageReader reader{part.cover};
+            reader.setAutoTransform(true);
+            if (const auto size = reader.size(); size.isValid()) {
+                reader.setScaledSize(size.scaled(QSize{extent, extent} * devicePixelRatioF(),
+                                                 Qt::KeepAspectRatioByExpanding));
+            }
+            cover_ = reader.read();
+            auto* space = new QWidget(this);
+            space->setFixedSize(extent, extent);
+            space->setAttribute(Qt::WA_TransparentForMouseEvents);
+            cover_space_ = space;
+            layout->addWidget(space, 0, Qt::AlignVCenter);
+        }
+        auto* lines = new QVBoxLayout;
+        lines->setSpacing(0);
+        auto* title = plainLabel(part.text, this);
+        title->setObjectName(QStringLiteral("bench-plugin-panel-track-title"));
+        title->setWordWrap(true);
+        auto font = title->font();
+        if (playing_) {
+            font.setWeight(QFont::DemiBold);
+            auto colours = title->palette();
+            colours.setColor(QPalette::WindowText, palette().color(QPalette::Highlight));
+            title->setPalette(colours);
+        }
+        title->setFont(font);
+        lines->addWidget(title);
+        QStringList under;
+        for (const auto& each : {part.artist, part.detail}) {
+            if (!each.isEmpty()) {
+                under << each;
+            }
+        }
+        if (!under.isEmpty()) {
+            auto* below = plainLabel(under.join(QStringLiteral(" · ")), this);
+            below->setObjectName(QStringLiteral("bench-plugin-panel-track-artist"));
+            below->setWordWrap(true);
+            below->setFont(smaller(below->font()));
+            below->setForegroundRole(QPalette::PlaceholderText);
+            lines->addWidget(below);
+        }
+        layout->addLayout(lines, 1);
+        if (!url_.isEmpty()) {
+            setCursor(Qt::PointingHandCursor);
+            setToolTip(url_);
+        }
+    }
+    void addButton(QAbstractButton* button, const bool quiet) {
+        static_cast<QHBoxLayout*>(layout())->addWidget(button, 0, Qt::AlignVCenter);
+        if (quiet) {
+            // Kept in its place while hidden: the row does not shift.
+            auto policy = button->sizePolicy();
+            policy.setRetainSizeWhenHidden(true);
+            button->setSizePolicy(policy);
+            button->setVisible(false);
+            quiet_.push_back(button);
+        }
+    }
+
+  protected:
+    bool event(QEvent* event) override {
+        if (event->type() == QEvent::HoverEnter || event->type() == QEvent::HoverLeave) {
+            const bool shown = event->type() == QEvent::HoverEnter;
+            for (auto* button : quiet_) {
+                button->setVisible(shown);
+            }
+            update();
+        }
+        return QWidget::event(event);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter{this};
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        const auto window = palette().color(QPalette::Window);
+        const bool hovered = testAttribute(Qt::WA_UnderMouse);
+        if (playing_ || hovered) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(playing_ ? mixed(window, palette().color(QPalette::Highlight), 16)
+                                      : mixed(window, palette().color(QPalette::WindowText), 6));
+            painter.drawRoundedRect(QRectF{rect()}, 6, 6);
+        }
+        if (cover_space_ != nullptr) {
+            const QRectF area{cover_space_->geometry()};
+            QPainterPath rounded;
+            rounded.addRoundedRect(area, 3, 3);
+            if (cover_.isNull()) {
+                painter.fillPath(rounded, mixed(window, palette().color(QPalette::WindowText), 10));
+            } else {
+                painter.setClipPath(rounded);
+                // Filled, as a cover is: cut to a square around its middle.
+                const auto side = std::min(cover_.width(), cover_.height());
+                const QRect middle{(cover_.width() - side) / 2, (cover_.height() - side) / 2, side,
+                                   side};
+                painter.drawImage(area, cover_, middle);
+            }
+        }
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (!url_.isEmpty() && event->button() == Qt::LeftButton) {
+            QDesktopServices::openUrl(QUrl{url_});
+        }
+    }
+
+  private:
+    bool playing_{false};
+    QString url_;
+    QImage cover_;
+    QWidget* cover_space_{nullptr};
+    std::vector<QAbstractButton*> quiet_;
+};
+
+// An item's or a track's button: a pill -- a vote, its own drawn as chosen
+// -- or, quiet, a bare glyph.
+[[nodiscard]] QToolButton* rowButton(const PluginPanelContent::Button& each, QWidget* parent) {
+    auto* button = new QToolButton(parent);
+    button->setObjectName(QStringLiteral("bench-plugin-panel-item-button"));
+    button->setText(each.text);
+    button->setToolTip(each.text);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setProperty("action", each.action);
+    if (each.role == PluginPanelContent::Role::quiet) {
+        button->setAutoRaise(true);
+        button->setProperty("role", QStringLiteral("quiet"));
+        button->setStyleSheet(QStringLiteral(
+            "QToolButton { border: none; border-radius: 10px; padding: 2px 6px;"
+            " color: palette(placeholder-text); }"
+            "QToolButton:hover { background: palette(midlight); color: palette(window-text); }"));
+        return button;
+    }
+    button->setCheckable(true);
+    button->setChecked(each.on);
+    button->setStyleSheet(QStringLiteral(
+        "QToolButton { border: 1px solid palette(mid); border-radius: 11px;"
+        " padding: 2px 10px; font-weight: 600; }"
+        "QToolButton:checked { background: palette(highlight);"
+        " color: palette(highlighted-text); border-color: palette(highlight); }"));
+    return button;
+}
 
 // A paragraph folded to a few lines when it is long, More and Less beneath.
 class FoldingParagraph final : public QWidget {
@@ -323,13 +609,16 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             auto* section_layout = new QVBoxLayout(section);
             section_layout->setContentsMargins(0, 12, 0, 2);
             section_layout->setSpacing(3);
+            // ADR-0304: in small capitals, spaced, as a sidebar's sections.
             auto* heading = partLabel(part.text.toHtmlEscaped(), section);
             auto font = heading->font();
             font.setWeight(QFont::DemiBold);
-            font.setPointSizeF(font.pointSizeF() * 0.9);
+            font.setPointSizeF(font.pointSizeF() * 0.8);
+            font.setCapitalization(QFont::AllUppercase);
+            font.setLetterSpacing(QFont::PercentageSpacing, 108);
             heading->setFont(font);
             auto palette = heading->palette();
-            palette.setColor(QPalette::WindowText, faded(heading, 170));
+            palette.setColor(QPalette::WindowText, faded(heading, 150));
             heading->setPalette(palette);
             heading->setProperty("part", QStringLiteral("heading"));
             section_layout->addWidget(heading);
@@ -337,7 +626,7 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             rule->setFrameShape(QFrame::HLine);
             rule->setFrameShadow(QFrame::Plain);
             auto rule_palette = rule->palette();
-            rule_palette.setColor(QPalette::WindowText, faded(rule, 70));
+            rule_palette.setColor(QPalette::WindowText, faded(rule, 40));
             rule->setPalette(rule_palette);
             section_layout->addWidget(rule);
             add(section);
@@ -375,13 +664,73 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             break;
         }
         case Kind::toggle: {
-            auto* toggle = new QCheckBox(part.text, parts_);
+            // ADR-0304: its label, and a switch at the right.
+            auto* line = new QWidget(parts_);
+            auto* line_layout = new QHBoxLayout(line);
+            line_layout->setContentsMargins(0, 2, 0, 2);
+            line_layout->setSpacing(8);
+            auto* label = plainLabel(part.text, line);
+            label->setWordWrap(true);
+            line_layout->addWidget(label, 1);
+            auto* toggle = new PanelSwitch(line);
             toggle->setObjectName(QStringLiteral("bench-plugin-panel-toggle-%1").arg(part.key));
+            toggle->setAccessibleName(part.text);
+            toggle->setToolTip(part.text);
             toggle->setChecked(part.on);
-            connect(toggle, &QCheckBox::toggled, this, [this, key = part.key](const bool on) {
-                emit actionRequested(key, on ? QStringLiteral("on") : QStringLiteral("off"));
-            });
-            add(toggle);
+            label->setBuddy(toggle);
+            connect(toggle, &QAbstractButton::toggled, this,
+                    [this, key = part.key](const bool on) {
+                        emit actionRequested(key, on ? QStringLiteral("on") : QStringLiteral("off"));
+                    });
+            line_layout->addWidget(toggle, 0, Qt::AlignVCenter);
+            add(line);
+            break;
+        }
+        case Kind::status: {
+            // ADR-0304: a dot -- the accent while it is live -- and a line.
+            auto* line = new QWidget(parts_);
+            line->setObjectName(QStringLiteral("bench-plugin-panel-status"));
+            auto* line_layout = new QHBoxLayout(line);
+            line_layout->setContentsMargins(0, 2, 0, 2);
+            line_layout->setSpacing(7);
+            const auto dot_colour = part.on ? palette().color(QPalette::Highlight)
+                                            : faded(this, 90);
+            line_layout->addWidget(new Dot(8, dot_colour, {}, line), 0, Qt::AlignVCenter);
+            auto* text = plainLabel(part.text, line);
+            auto font = text->font();
+            font.setWeight(QFont::DemiBold);
+            text->setFont(font);
+            line_layout->addWidget(text);
+            if (!part.detail.isEmpty()) {
+                auto* detail = plainLabel(QStringLiteral("· %1").arg(part.detail), line);
+                detail->setForegroundRole(QPalette::PlaceholderText);
+                line_layout->addWidget(detail);
+            }
+            line_layout->addStretch(1);
+            add(line);
+            break;
+        }
+        case Kind::people: {
+            auto* row = new QWidget(parts_);
+            row->setObjectName(QStringLiteral("bench-plugin-panel-people"));
+            auto* flow = new FlowLayout(row);
+            for (const auto& name : part.people) {
+                flow->addWidget(new PersonChip(name, row));
+            }
+            add(row);
+            break;
+        }
+        case Kind::track: {
+            auto* row = new TrackRow(part, parts_);
+            for (const auto& each : part.buttons) {
+                auto* button = rowButton(each, row);
+                connect(button, &QToolButton::clicked, this,
+                        [this, action = each.action, value = each.value] {
+                            emit actionRequested(action, value);
+                        });
+                row->addButton(button, each.role == PluginPanelContent::Role::quiet);
+            }
+            add(row);
             break;
         }
         case Kind::button: {
@@ -392,7 +741,12 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
                 const auto& pressed = parts[index];
                 auto* button = new QPushButton(pressed.text, row);
                 button->setObjectName(QStringLiteral("bench-plugin-panel-button"));
-                button->setDefault(pressed.on);
+                // ADR-0304: the primary in the accent; a quiet one flat.
+                button->setDefault(pressed.role == PluginPanelContent::Role::primary);
+                button->setFlat(pressed.role == PluginPanelContent::Role::quiet);
+                button->setProperty("role", pressed.role == PluginPanelContent::Role::quiet
+                                                ? QStringLiteral("quiet")
+                                                : QString{});
                 button->setProperty("action", pressed.action);
                 connect(button, &QPushButton::clicked, this,
                         [this, action = pressed.action, value = pressed.value] {
@@ -434,18 +788,7 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             line_layout->setSpacing(6);
             line_layout->addWidget(item, 1);
             for (const auto& each : part.buttons) {
-                auto* button = new QToolButton(line);
-                button->setObjectName(QStringLiteral("bench-plugin-panel-item-button"));
-                button->setText(each.text);
-                button->setCheckable(true);
-                button->setChecked(each.on);
-                button->setCursor(Qt::PointingHandCursor);
-                button->setProperty("action", each.action);
-                button->setStyleSheet(QStringLiteral(
-                    "QToolButton { border: 1px solid palette(mid); border-radius: 11px;"
-                    " padding: 2px 10px; font-weight: 600; }"
-                    "QToolButton:checked { background: palette(highlight);"
-                    " color: palette(highlighted-text); border-color: palette(highlight); }"));
+                auto* button = rowButton(each, line);
                 connect(button, &QToolButton::clicked, this,
                         [this, action = each.action, value = each.value] {
                             emit actionRequested(action, value);

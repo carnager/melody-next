@@ -641,6 +641,40 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
     PluginPanelContent content;
     content.title = object.value(QStringLiteral("title")).toString().trimmed();
     using Kind = PluginPanelContent::Part::Kind;
+    using Role = PluginPanelContent::Role;
+    // ADR-0304: a button's role, normal when it names none.
+    const auto role_of = [](const QJsonObject& button) -> std::optional<Role> {
+        const auto role = button.value(QStringLiteral("role")).toString();
+        if (role.isEmpty() || role == QStringLiteral("normal")) {
+            return Role::normal;
+        }
+        if (role == QStringLiteral("primary")) {
+            return Role::primary;
+        }
+        if (role == QStringLiteral("quiet")) {
+            return Role::quiet;
+        }
+        return std::nullopt;
+    };
+    // An item's or a track's buttons; false when one is not a button.
+    const auto read_buttons = [&role_of](const QJsonObject& part,
+                                         PluginPanelContent::Part& read) {
+        for (const auto& listed : part.value(QStringLiteral("buttons")).toArray()) {
+            const auto button = listed.toObject();
+            const auto role = role_of(button);
+            PluginPanelContent::Button made{
+                .text = button.value(QStringLiteral("text")).toString(),
+                .action = button.value(QStringLiteral("action")).toString(),
+                .value = button.value(QStringLiteral("value")).toString(),
+                .on = button.value(QStringLiteral("on")).toBool(false),
+                .role = role.value_or(Role::normal)};
+            if (!listed.isObject() || !role || made.text.isEmpty() || made.action.isEmpty()) {
+                return false;
+            }
+            read.buttons.push_back(std::move(made));
+        }
+        return true;
+    };
     for (const auto& value : parts.toArray()) {
         if (!value.isObject()) {
             return fail(QStringLiteral("a part is not an object"));
@@ -709,9 +743,56 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.value = part.value(QStringLiteral("value")).toString();
             read.on = part.value(QStringLiteral("primary")).toBool(false);
             allowed = {QStringLiteral("button"), QStringLiteral("action"), QStringLiteral("value"),
-                       QStringLiteral("primary")};
+                       QStringLiteral("primary"), QStringLiteral("role")};
             if (read.action.isEmpty()) {
                 return fail(QStringLiteral("a button needs its action: %1").arg(read.text));
+            }
+            const auto role = role_of(part);
+            if (!role) {
+                return fail(QStringLiteral("a button's role is primary, normal or quiet"));
+            }
+            // `primary: true`, as ADR-0303 had it, is the primary role.
+            read.role = read.on && *role == Role::normal ? Role::primary : *role;
+            read.on = read.role == Role::primary;
+        } else if (part.contains(QStringLiteral("track"))) {
+            // ADR-0304: a track's row, its title over its artist, as Melody's.
+            read.kind = Kind::track;
+            read.text = part.value(QStringLiteral("track")).toString();
+            read.artist = part.value(QStringLiteral("artist")).toString();
+            read.detail = part.value(QStringLiteral("detail")).toString();
+            read.cover = part.value(QStringLiteral("cover")).toString();
+            read.url = part.value(QStringLiteral("url")).toString();
+            read.on = part.value(QStringLiteral("playing")).toBool(false);
+            allowed = {QStringLiteral("track"),  QStringLiteral("artist"), QStringLiteral("detail"),
+                       QStringLiteral("cover"),  QStringLiteral("url"),    QStringLiteral("playing"),
+                       QStringLiteral("buttons")};
+            if (!read.cover.isEmpty() && !QDir::isAbsolutePath(read.cover)) {
+                return fail(QStringLiteral("a cover is a file's absolute path: %1").arg(read.cover));
+            }
+            if (!read_buttons(part, read)) {
+                return fail(QStringLiteral(
+                    "a row's button is {text, action, value?, on?, role?}"));
+            }
+        } else if (part.contains(QStringLiteral("status"))) {
+            read.kind = Kind::status;
+            read.text = part.value(QStringLiteral("status")).toString();
+            read.detail = part.value(QStringLiteral("detail")).toString();
+            read.on = part.value(QStringLiteral("live")).toBool(false);
+            allowed = {QStringLiteral("status"), QStringLiteral("detail"), QStringLiteral("live")};
+        } else if (part.contains(QStringLiteral("people"))) {
+            read.kind = Kind::people;
+            allowed = {QStringLiteral("people")};
+            const auto named = part.value(QStringLiteral("people"));
+            if (!named.isArray()) {
+                return fail(QStringLiteral("people are a list of names"));
+            }
+            for (const auto& each : named.toArray()) {
+                if (!each.isString()) {
+                    return fail(QStringLiteral("people are a list of names"));
+                }
+                if (const auto name = each.toString().trimmed(); !name.isEmpty()) {
+                    read.people.push_back(name);
+                }
             }
         } else if (part.contains(QStringLiteral("text"))) {
             read.kind = Kind::item;
@@ -720,21 +801,13 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.url = part.value(QStringLiteral("url")).toString();
             allowed = {QStringLiteral("text"), QStringLiteral("detail"), QStringLiteral("url"),
                        QStringLiteral("buttons")};
-            for (const auto& listed : part.value(QStringLiteral("buttons")).toArray()) {
-                const auto button = listed.toObject();
-                PluginPanelContent::Button made{
-                    .text = button.value(QStringLiteral("text")).toString(),
-                    .action = button.value(QStringLiteral("action")).toString(),
-                    .value = button.value(QStringLiteral("value")).toString(),
-                    .on = button.value(QStringLiteral("on")).toBool(false)};
-                if (!listed.isObject() || made.text.isEmpty() || made.action.isEmpty()) {
-                    return fail(QStringLiteral("an item's button is {text, action, value?, on?}"));
-                }
-                read.buttons.push_back(std::move(made));
+            if (!read_buttons(part, read)) {
+                return fail(QStringLiteral(
+                    "an item's button is {text, action, value?, on?, role?}"));
             }
         } else {
-            return fail(QStringLiteral(
-                "a part is a heading, paragraph, text, link, image, input, toggle or button"));
+            return fail(QStringLiteral("a part is a heading, paragraph, text, track, status, "
+                                       "people, link, image, input, toggle or button"));
         }
         for (const auto& key : part.keys()) {
             if (!allowed.contains(key)) {

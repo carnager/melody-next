@@ -14,6 +14,16 @@ looked up every track; MusicBrainz is asked at most once a second, as it
 asks -- by every run together, the panel being run anew for each track --
 and a 503, its answer to being asked too often, is asked again after the
 wait it names.
+
+With Dropwatch support ticked, beneath them the artist's albums dropwatch
+(https://github.com/carnager/dropwatch) knows of that are not in the
+library -- the artist found by its MusicBrainz id, which dropwatch's are,
+else by name. dropwatch's address and API token are set with it, else
+DROPWATCH_URL and DROPWATCH_TOKEN from the environment or
+~/.config/dropwatch/client.env; a token alone is for a dropwatch at
+http://localhost:8080. dropwatch is asked anew every run, its answer
+changing as the library does; where it cannot be reached the panel says so
+and shows the rest.
 """
 import fcntl
 import hashlib
@@ -276,6 +286,93 @@ def about_album(mbid, language):
     return told
 
 
+def client_env():
+    values = {}
+    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "dropwatch", "client.env")
+    try:
+        with open(path, encoding="utf-8") as lines:
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return values
+
+
+def dropwatch_setting(settings, name, key):
+    """Melody's setting, else the environment's, else client.env's."""
+    return str(settings.get(name) or os.environ.get(key) or client_env().get(key) or "").strip()
+
+
+class Unreachable(Exception):
+    pass
+
+
+def dropwatch(base, token, path):
+    request = urllib.request.Request(base + path)
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise Unreachable("dropwatch wants an API token: create one under its settings -> "
+                              "Account and set it in Melody's Settings -> Plugins"
+                              if not token else "dropwatch refused the API token")
+        raise Unreachable("dropwatch answered %s" % error.code)
+    except (OSError, ValueError) as error:
+        raise Unreachable("dropwatch at %s: %s" % (base, getattr(error, "reason", error)))
+
+
+def folded(name):
+    return " ".join(name.casefold().split())
+
+
+def missing_albums(settings, artist_id, names):
+    """The parts for the albums dropwatch knows of the artist that are not in
+    the library, beneath a heading; none where no dropwatch is set."""
+    token = dropwatch_setting(settings, "token", "DROPWATCH_TOKEN")
+    # An address, or a token alone for a dropwatch where it is by default.
+    base = (dropwatch_setting(settings, "url", "DROPWATCH_URL")
+            or ("http://localhost:8080" if token else "")).rstrip("/")
+    if not base:
+        return []
+    try:
+        artists = dropwatch(base, token, "/api/artists").get("artists") or []
+        by_name = [folded(n) for n in names if n]
+        artist = next((a for a in artists if artist_id and a.get("id") == artist_id), None) \
+            or next((a for a in artists if folded(a.get("name") or "") in by_name), None)
+        if artist is None:
+            return [{"heading": "Missing albums"},
+                    {"paragraph": "dropwatch does not watch this artist."}]
+        page = "%s/#artist/%s" % (base, urllib.parse.quote(artist["id"]))
+        releases = dropwatch(base, token, "/api/artists/%s/releases?missing=only"
+                             % urllib.parse.quote(artist["id"])).get("releases") or []
+    except Unreachable as error:
+        return [{"heading": "Missing albums"}, {"paragraph": str(error)}]
+    if not releases:
+        return [{"heading": "Missing albums"},
+                {"text": "Nothing missing", "detail": "in dropwatch", "url": page}]
+    parts = [{"heading": "Missing albums (%d)" % len(releases)}]
+    for release in sorted(releases, key=lambda r: r.get("firstReleaseDate") or ""):
+        year = (release.get("firstReleaseDate") or "")[:4]
+        detail = " · ".join(p for p in (year, release.get("primaryType") or "") if p)
+        if release.get("mbid"):
+            url = "https://musicbrainz.org/release-group/" + release["mbid"]
+        elif release.get("discogsMasterId"):
+            url = "https://www.discogs.com/master/%s" % release["discogsMasterId"]
+        else:
+            url = page
+        parts.append({"text": release.get("title") or "?", "detail": detail, "url": url})
+    parts.append({"link": "dropwatch", "detail": artist.get("name") or "", "url": page})
+    return parts
+
+
 def main():
     given = json.load(sys.stdin)
     playing = given.get("playing") or {}
@@ -285,6 +382,7 @@ def main():
     language = str(settings.get("language") or "en").strip().lower() or "en"
     show_artist = settings.get("artist", True) is not False
     show_album = settings.get("album", True) is not False and bool(album)
+    show_missing = settings.get("dropwatch") is True
     if not artist:
         print(json.dumps({"title": album, "parts": [
             {"paragraph": "The track names no artist."}]}))
@@ -338,6 +436,8 @@ def main():
         order = ["Wikipedia", "MusicBrainz"] + [site for site, _, _ in SITES]
         parts += [{"link": site, "detail": name, "url": found[site]}
                   for site in order if site in found]
+    if show_missing:
+        parts += missing_albums(settings, artist_id, [artist])
     print(json.dumps({"title": title, "parts": parts}))
 
 

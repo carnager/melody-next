@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "About",
-  "description": "The playing artist and album from MusicBrainz and Wikipedia: a photo, summaries, the label and links",
+  "description": "The playing artist and album from MusicBrainz and Wikipedia: a photo, summaries, the label and links -- and, with dropwatch, the artist's albums missing from the library",
   "panels": [
     {
       "id": "about",
@@ -48,6 +48,27 @@
       ],
       "default": "en",
       "help": "Which Wikipedia to read. Where it has no article, the English one."
+    },
+    {
+      "key": "dropwatch",
+      "label": "Dropwatch support",
+      "kind": "toggle",
+      "default": false,
+      "help": "The artist's albums dropwatch knows of that are not in the library, beneath the rest",
+      "link": "https://github.com/carnager/dropwatch"
+    },
+    {
+      "key": "url",
+      "label": "Address",
+      "requires": "dropwatch",
+      "help": "Where dropwatch answers. Empty: http://localhost:8080 where a token is set"
+    },
+    {
+      "key": "token",
+      "label": "API token",
+      "kind": "secret",
+      "requires": "dropwatch",
+      "help": "dropwatch: settings -> Account"
     }
   ]
 }

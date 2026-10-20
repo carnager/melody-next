@@ -2,6 +2,7 @@
 
 #include "settings_dialog.hpp"
 #include "bench/desktop_notifier.hpp"
+#include "bench/plugin_settings_dialog.hpp"
 #include "bench/shortcut_settings.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/local_playback.hpp"
@@ -944,59 +945,18 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         about->setForegroundRole(QPalette::PlaceholderText);
         about->setTextInteractionFlags(Qt::TextSelectableByMouse);
         box_layout->addWidget(about);
-        // What it asks to be set, saved with the rest; a secret apart.
+        // ADR-0300: what it asks to be set, in a dialog of its own; saved
+        // with the rest, a secret apart.
         if (plugin.plugin && !plugin.plugin->settings.empty()) {
-            auto* form = new QFormLayout;
-            for (const auto& setting : plugin.plugin->settings) {
-                const auto current = pluginSettingValue(plugin.name, setting);
-                const auto name =
-                    QStringLiteral("bench-settings-plugin-%1-%2").arg(plugin.name, setting.key);
-                const auto setting_key = setting.kind == PluginSetting::Kind::secret
-                                             ? pluginSecretKey(plugin.name, setting.key)
-                                             : pluginSettingKey(plugin.name, setting.key);
-                QWidget* field = nullptr;
-                switch (setting.kind) {
-                case PluginSetting::Kind::text:
-                case PluginSetting::Kind::secret: {
-                    auto* edit = new QLineEdit(current.toString(), box);
-                    if (setting.kind == PluginSetting::Kind::secret) {
-                        edit->setEchoMode(QLineEdit::Password);
-                    } else {
-                        edit->setPlaceholderText(setting.fallback.toString());
-                    }
-                    connect(edit, &QLineEdit::textEdited, this,
-                            [this, setting_key](const QString& value) {
-                                session_->setValue(setting_key, value);
-                            });
-                    field = edit;
-                    break;
-                }
-                case PluginSetting::Kind::toggle: {
-                    auto* check = new QCheckBox(box);
-                    check->setChecked(current.toBool());
-                    connect(check, &QCheckBox::toggled, this, [this, setting_key](const bool on) {
-                        session_->setValue(setting_key, on);
-                    });
-                    field = check;
-                    break;
-                }
-                case PluginSetting::Kind::choice: {
-                    auto* combo = new QComboBox(box);
-                    combo->addItems(setting.choices);
-                    combo->setCurrentText(current.toString());
-                    connect(combo, &QComboBox::currentTextChanged, this,
-                            [this, setting_key](const QString& value) {
-                                session_->setValue(setting_key, value);
-                            });
-                    field = combo;
-                    break;
-                }
-                }
-                field->setObjectName(name);
-                field->setToolTip(setting.help);
-                form->addRow(setting.label + QLatin1Char(':'), field);
-            }
-            box_layout->addLayout(form);
+            auto* configure = new QPushButton(QStringLiteral("Settings\u2026"), box);
+            configure->setObjectName(
+                QStringLiteral("bench-settings-plugin-%1-settings").arg(plugin.name));
+            connect(configure, &QPushButton::clicked, this,
+                    [this, found = *plugin.plugin] { editPluginSettings(found); });
+            auto* configure_row = new QHBoxLayout;
+            configure_row->addWidget(configure);
+            configure_row->addStretch(1);
+            box_layout->addLayout(configure_row);
         }
         plugins_layout->addWidget(box);
     }
@@ -1124,6 +1084,33 @@ void SettingsDialog::bind(QComboBox* box, const std::vector<SettingsSession::Cho
     syncs_.push_back([this, box, name] {
         box->setCurrentIndex(std::max(0, box->findData(session_->value(name))));
     });
+}
+
+void SettingsDialog::editPluginSettings(const Plugin& plugin) {
+    // As the draft has them, else as they are saved.
+    QVariantMap current;
+    const auto keyOf = [](const QString& name, const PluginSetting& setting) {
+        return setting.kind == PluginSetting::Kind::secret ? pluginSecretKey(name, setting.key)
+                                                           : pluginSettingKey(name, setting.key);
+    };
+    for (const auto& setting : plugin.settings) {
+        const auto key = keyOf(plugin.name, setting);
+        current[setting.key] = session_->values().contains(key)
+                                   ? session_->value(key)
+                                   : pluginSettingValue(plugin.name, setting);
+    }
+    // Not held up for: the dialog answers when it closes.
+    auto* dialog = new PluginSettingsDialog(plugin, current, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &QDialog::accepted, this, [this, dialog, keyOf, plugin, current] {
+        for (const auto& setting : plugin.settings) {
+            const auto edited = dialog->values().value(setting.key);
+            if (edited != current.value(setting.key)) {
+                session_->setValue(keyOf(plugin.name, setting), edited);
+            }
+        }
+    });
+    dialog->open();
 }
 
 void SettingsDialog::sync() {

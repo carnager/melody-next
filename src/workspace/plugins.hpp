@@ -89,6 +89,11 @@ struct PluginSetting {
     // Its value until one is set: text, a choice, or on/off; a secret has none.
     QVariant fallback;
     QStringList choices;
+    // ADR-0300: the key of a toggle listed before it -- an optional feature
+    // -- without which it is greyed out; empty, it always applies.
+    QString needs;
+    // A page about it, http or https, shown beside it.
+    QString link;
 };
 
 struct Plugin {

@@ -13,6 +13,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -445,6 +447,83 @@ void PluginsTest::theExamplePluginReads() {
     QVERIFY(std::ranges::none_of(album_drawn->parts, [](const auto& part) {
         return part.text.contains(QStringLiteral("Berkeley"));
     }));
+    // Without Dropwatch support, nothing of dropwatch.
+    QVERIFY(std::ranges::none_of(drawn->parts, [](const auto& part) {
+        return part.text.startsWith(QStringLiteral("Missing albums"));
+    }));
+
+    // ADR-0300: with it, the artist's missing albums beneath the rest,
+    // dropwatch asked for the artist by its MusicBrainz id, with the token.
+    const auto options = std::ranges::find(about_panel->settings, QStringLiteral("url"),
+                                           &PluginSetting::key);
+    QVERIFY(options != about_panel->settings.end());
+    QCOMPARE(options->needs, QStringLiteral("dropwatch"));
+    QTcpServer dropwatch;
+    QVERIFY(dropwatch.listen(QHostAddress::LocalHost));
+    QStringList asked;
+    QObject::connect(&dropwatch, &QTcpServer::newConnection, &dropwatch, [&dropwatch, &asked, mbid] {
+        auto* peer = dropwatch.nextPendingConnection();
+        QObject::connect(peer, &QTcpSocket::readyRead, peer, [peer, &asked, mbid] {
+            const auto request = peer->readAll();
+            if (!request.contains("\r\n\r\n")) {
+                return;
+            }
+            const auto path = QString::fromLatin1(request.split(' ').value(1));
+            asked << path + (request.contains("Authorization: Bearer t0ken") ? "" : " untold");
+            const auto body =
+                path == QStringLiteral("/api/artists")
+                    ? QStringLiteral(R"({"artists": [{"id": "%1", "name": "Testament"}]})")
+                          .arg(mbid)
+                          .toUtf8()
+                    : QByteArray{R"({"releases": [
+                          {"title": "Souls of Black", "firstReleaseDate": "1990-10-01",
+                           "primaryType": "Album", "mbid": "2a05ffff"},
+                          {"title": "The New Order", "firstReleaseDate": "1988-05-05",
+                           "primaryType": "Album"}]})"};
+            peer->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: "
+                        "close\r\nContent-Length: " +
+                        QByteArray::number(body.size()) + "\r\n\r\n" + body);
+            peer->disconnectFromHost();
+        });
+    });
+    auto with_dropwatch = pluginSettings(*about_panel);
+    with_dropwatch[QStringLiteral("dropwatch")] = true;
+    with_dropwatch[QStringLiteral("url")] =
+        QStringLiteral("http://127.0.0.1:%1").arg(dropwatch.serverPort());
+    with_dropwatch[QStringLiteral("token")] = QStringLiteral("t0ken");
+    const auto missing = run(*about_panel,
+                             PluginAction{.id = QStringLiteral("about"),
+                                          .label = QStringLiteral("About"),
+                                          .scope = PluginAction::Scope::tracks,
+                                          .run = about_panel->panels.front().run,
+                                          .result = PluginAction::Result::none,
+                                          .timeout_seconds = 30},
+                             pluginPanelInput(about_panel->panels.front(), PluginEngine{},
+                                              PluginTrack{.path = "/srv/music/Testament/01.flac",
+                                                          .title = "Over the Wall",
+                                                          .artist = "Testament",
+                                                          .album = "The Legacy",
+                                                          .album_artist = "Testament",
+                                                          .date = "1987",
+                                                          .track_number = "1"},
+                                              std::nullopt, {}, with_dropwatch));
+    QVERIFY2(missing.succeeded, qPrintable(missing.text));
+    QCOMPARE(asked, (QStringList{QStringLiteral("/api/artists"),
+                                 QStringLiteral("/api/artists/%1/releases?missing=only").arg(mbid)}));
+    const auto missing_drawn = parsePluginPanel(missing.text.toUtf8(), &problem);
+    QVERIFY2(missing_drawn.has_value(), qPrintable(problem));
+    const auto section = std::ranges::find_if(missing_drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::heading &&
+               part.text == QStringLiteral("Missing albums (2)");
+    });
+    QVERIFY(section != missing_drawn->parts.end());
+    // Oldest first, each opening its MusicBrainz page, else dropwatch's.
+    QCOMPARE(std::next(section)->text, QStringLiteral("The New Order"));
+    QCOMPARE(std::next(section)->detail, QStringLiteral("1988 · Album"));
+    QCOMPARE(std::next(section, 2)->text, QStringLiteral("Souls of Black"));
+    QCOMPARE(std::next(section, 2)->url,
+             QStringLiteral("https://musicbrainz.org/release-group/2a05ffff"));
+    QVERIFY(std::next(section)->url.endsWith(QStringLiteral("/#artist/") + mbid));
 }
 
 // What a `list` action answers: a heading and rows of text, detail and a
@@ -500,10 +579,16 @@ void PluginsTest::settingsAreReadKeptAndHandedOn() {
                 {"key": "token", "label": "API token", "kind": "secret"},
                 {"key": "verbose", "label": "Say more", "kind": "toggle", "default": true},
                 {"key": "mode", "label": "Mode", "kind": "choice", "choices": ["a", "b"],
-                 "default": "b"})"),
+                 "default": "b"},
+                {"key": "server", "label": "Server", "requires": "verbose",
+                 "link": "https://example.org/watch"})"),
         QStringLiteral("/plugins/watch"), &problem);
     QVERIFY2(plugin.has_value(), qPrintable(problem));
-    QCOMPARE(plugin->settings.size(), 4U);
+    QCOMPARE(plugin->settings.size(), 5U);
+    // ADR-0300: an optional feature's setting, and a page about it.
+    QCOMPARE(plugin->settings[4].needs, QStringLiteral("verbose"));
+    QCOMPARE(plugin->settings[4].link, QStringLiteral("https://example.org/watch"));
+    QVERIFY(plugin->settings[0].needs.isEmpty() && plugin->settings[0].link.isEmpty());
     QCOMPARE(plugin->settings[0].kind, PluginSetting::Kind::text);
     QCOMPARE(plugin->settings[0].help, QStringLiteral("Where it is"));
     QCOMPARE(plugin->settings[1].kind, PluginSetting::Kind::secret);
@@ -519,7 +604,13 @@ void PluginsTest::settingsAreReadKeptAndHandedOn() {
           R"({"key": "a", "label": "x", "kind": "choice", "choices": ["b"], "default": "c"})",
           R"({"key": "a", "label": "x", "choices": ["b"]})",
           R"({"key": "a", "label": "x", "kind": "colour"})",
-          R"({"key": "a", "label": "x", "hidden": true})", R"("a")"}) {
+          R"({"key": "a", "label": "x", "hidden": true})",
+          R"({"key": "a", "label": "x", "requires": "b"})",
+          R"({"key": "b", "label": "x"}, {"key": "a", "label": "x", "requires": "b"})",
+          R"({"key": "a", "label": "x", "requires": "b"}, {"key": "b", "label": "x", "kind": "toggle"})",
+          R"({"key": "a", "label": "x", "kind": "toggle", "requires": "a"})",
+          R"({"key": "a", "label": "x", "link": "ftp://example.org"})",
+          R"({"key": "a", "label": "x", "link": "example.org"})", R"("a")"}) {
         problem.clear();
         QVERIFY2(
             !parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"), &problem),

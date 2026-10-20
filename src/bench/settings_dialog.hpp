@@ -37,6 +37,8 @@ class Browser;
 
 namespace trackknife::bench {
 
+struct Plugin;
+
 class OutputProfilesManager;
 
 // The application settings screen (ADR-0112, ADR-0185): a paged dialog —
@@ -96,6 +98,9 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
 
   private:
     void sync();
+    // ADR-0300: a plugin's settings, in a dialog of its own; what it sets
+    // goes into the draft on OK.
+    void editPluginSettings(const Plugin& plugin);
     void refreshEngines();
     void refreshEngineRows();
     void refreshFound();

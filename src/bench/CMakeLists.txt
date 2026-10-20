@@ -17,8 +17,10 @@ qt_add_library(
     bench_favorites.cpp
     plugin_list_window.cpp
     plugin_panel_view.cpp
+    plugin_settings_dialog.cpp
     plugin_list_window.hpp
     plugin_panel_view.hpp
+    plugin_settings_dialog.hpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
     themed_icon.cpp

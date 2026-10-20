@@ -66,7 +66,8 @@ Settings says why.
 ### Settings
 
 A plugin that needs an address or an account says so, and Melody asks for
-it under the plugin in **Settings → Plugins**:
+it behind the plugin's **Settings…** button in **Settings → Plugins**, in a
+dialog of its own ([ADR-0300](adr/0300-plugin-settings-and-optional-features.md)):
 
 ```json
 "settings": [
@@ -86,7 +87,22 @@ it under the plugin in **Settings → Plugins**:
 | `kind` | `text` (the default), `secret` (shown as dots), `toggle` (on or off), `choice` (one of `choices`). |
 | `default` | Its value until one is set: text, `true`/`false` for a toggle, one of the choices. A secret has none; a choice's is its first. |
 | `choices` | A choice's, as text. |
-| `help` | Said when the pointer is over it. |
+| `help` | Said beneath it, and when the pointer is over it. |
+| `requires` | The `key` of a toggle listed before it: an optional feature it belongs to. It stands beneath that toggle, indented, greyed until the toggle is ticked. |
+| `link` | A page about it, `http` or `https`, shown as a link beneath it -- for a feature, where to get what it works with. |
+
+An optional feature is a toggle and the settings that require it -- About's
+dropwatch support, its address and token beneath it:
+
+```json
+{"key": "dropwatch", "label": "Dropwatch support", "kind": "toggle",
+ "link": "https://github.com/carnager/dropwatch"},
+{"key": "url", "label": "Address", "requires": "dropwatch"},
+{"key": "token", "label": "API token", "kind": "secret", "requires": "dropwatch"}
+```
+
+The toggle is told like any other setting, and so are those requiring it,
+ticked or not: whether to use them is the program's to read from the toggle.
 
 Every run is given them all, set or not, as `"settings": {"url":
 "http://localhost:8080", "token": "…", "covers": true, "site":

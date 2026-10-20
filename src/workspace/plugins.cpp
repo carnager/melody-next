@@ -15,6 +15,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 
 #include <algorithm>
 #include <array>
@@ -185,7 +186,8 @@ constexpr int max_trigger_seconds = 6 * 3600;
                                                   std::vector<PluginSetting>& settings) {
     static const QStringList setting_keys{QStringLiteral("key"),     QStringLiteral("label"),
                                           QStringLiteral("kind"),    QStringLiteral("default"),
-                                          QStringLiteral("choices"), QStringLiteral("help")};
+                                          QStringLiteral("choices"), QStringLiteral("help"),
+                                          QStringLiteral("requires"), QStringLiteral("link")};
     static const QRegularExpression key_shape{QStringLiteral("^[a-z0-9][a-z0-9_-]*$")};
     for (const auto& value : listed) {
         if (!value.isObject()) {
@@ -253,6 +255,21 @@ constexpr int max_trigger_seconds = 6 * 3600;
         if (setting.kind != PluginSetting::Kind::choice &&
             entry.contains(QStringLiteral("choices"))) {
             return wrong("only a choice has choices");
+        }
+        if (entry.contains(QStringLiteral("requires"))) {
+            setting.needs = entry.value(QStringLiteral("requires")).toString();
+            const auto toggle = std::ranges::find(settings, setting.needs, &PluginSetting::key);
+            if (toggle == settings.end() || toggle->kind != PluginSetting::Kind::toggle) {
+                return wrong("\"requires\" is the key of a toggle listed before it");
+            }
+        }
+        if (entry.contains(QStringLiteral("link"))) {
+            setting.link = entry.value(QStringLiteral("link")).toString();
+            const QUrl url{setting.link};
+            if (!url.isValid() || url.host().isEmpty() ||
+                (url.scheme() != QStringLiteral("http") && url.scheme() != QStringLiteral("https"))) {
+                return wrong("its link is an http or https address");
+            }
         }
         settings.push_back(std::move(setting));
     }

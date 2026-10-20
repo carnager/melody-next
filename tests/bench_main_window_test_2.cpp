@@ -2607,7 +2607,10 @@ void BenchMainWindowTest::aPluginActionSharesWhatIsChosen() {
                            "run": ["./share", "list"], "result": "list"}],
                           "settings": [{"key": "server", "label": "Server",
                                         "default": "http://localhost"},
-                                       {"key": "token", "label": "Token", "kind": "secret"}]})");
+                                       {"key": "remote", "label": "Remote support",
+                                        "kind": "toggle", "link": "https://example.org/remote"},
+                                       {"key": "token", "label": "Token", "kind": "secret",
+                                        "requires": "remote"}]})");
         QFile script{folder + QStringLiteral("/share")};
         QVERIFY(script.open(QIODevice::WriteOnly));
         script.write(R"sh(#!/bin/sh
@@ -2743,17 +2746,61 @@ echo "shared:${relative:-$album}"
         auto* enabled = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-plugin-echo"));
         QVERIFY(enabled != nullptr && enabled->isChecked());
         QCOMPARE(enabled->text(), QStringLiteral("Echo"));
-        // ADR-0288: what it asks to be set, under it; a secret not shown.
-        auto* server =
-            dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server"));
-        auto* token =
-            dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-token"));
-        QVERIFY(server != nullptr && token != nullptr);
-        QCOMPARE(server->text(), QStringLiteral("http://localhost"));
-        QCOMPARE(token->echoMode(), QLineEdit::Password);
-        server->selectAll();
-        QTest::keyClicks(server, QStringLiteral("http://nas:6600"));
-        QTest::keyClicks(token, QStringLiteral("s3cret"));
+        // ADR-0300: what it asks to be set, behind its Settings button in a
+        // dialog of its own; a secret not shown.
+        QVERIFY(dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server")) ==
+                nullptr);
+        const auto edit = [dialog](const bool keep) {
+            dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-plugin-echo-settings"))
+                ->click();
+            QDialog* settings = nullptr;
+            QTRY_VERIFY((settings = dialog->findChild<QDialog*>(
+                             QStringLiteral("bench-plugin-settings-echo"))) != nullptr &&
+                        settings->isVisible());
+            auto* server =
+                settings->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server"));
+            auto* token =
+                settings->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-token"));
+            QVERIFY(server != nullptr && token != nullptr);
+            QCOMPARE(server->text(), QStringLiteral("http://localhost"));
+            QCOMPARE(token->echoMode(), QLineEdit::Password);
+            // The token needs Remote support: greyed until it is ticked.
+            auto* remote =
+                settings->findChild<QCheckBox*>(QStringLiteral("bench-settings-plugin-echo-remote"));
+            QVERIFY(remote != nullptr);
+            QCOMPARE(remote->text(), QStringLiteral("Remote support"));
+            QVERIFY(!remote->isChecked() && !token->isEnabled());
+            QVERIFY(settings
+                        ->findChild<QLabel*>(
+                            QStringLiteral("bench-settings-plugin-echo-remote-caption"))
+                        ->text()
+                        .contains(QStringLiteral("href=\"https://example.org/remote\"")));
+            remote->setChecked(true);
+            QVERIFY(token->isEnabled());
+            // For a look at them: the dialog, and the page it is opened from.
+            if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+                keep && !directory.isEmpty()) {
+                QVERIFY(settings->grab().save(directory + QStringLiteral("/plugin-settings.png")));
+                QVERIFY(dialog->grab().save(directory + QStringLiteral("/plugins-page.png")));
+            }
+            server->selectAll();
+            QTest::keyClicks(server, QStringLiteral("http://nas:6600"));
+            QTest::keyClicks(token, QStringLiteral("s3cret"));
+            QPointer<QDialog> open = settings;
+            settings->findChild<QDialogButtonBox*>(QStringLiteral("bench-plugin-settings-buttons"))
+                ->button(keep ? QDialogButtonBox::Ok : QDialogButtonBox::Cancel)
+                ->click();
+            QTRY_VERIFY(open.isNull());
+        };
+        // Cancelled, nothing it set is kept: the dialog opens as it was.
+        edit(false);
+        if (QTest::currentTestFailed()) {
+            return;
+        }
+        edit(true);
+        if (QTest::currentTestFailed()) {
+            return;
+        }
         enabled->setChecked(false);
         QPointer<SettingsDialog> lifetime = dialog;
         dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
@@ -2770,6 +2817,7 @@ echo "shared:${relative:-$album}"
     const auto told = pluginSettings(*found->plugin);
     QCOMPARE(told.value(QStringLiteral("server")).toString(), QStringLiteral("http://nas:6600"));
     QCOMPARE(told.value(QStringLiteral("token")).toString(), QStringLiteral("s3cret"));
+    QCOMPARE(told.value(QStringLiteral("remote")).toBool(), true);
     QSettings{}.sync();
     {
         QFile settings_file{QSettings{}.fileName()};

@@ -407,10 +407,12 @@ func TestNamedRooms(t *testing.T) {
 func TestHistory(t *testing.T) {
 	rooms := newRooms("pw")
 	made, _ := rooms.make("pw", "", "")
-	for index, title := range []string{"One", "Two", "Two", "Three"} {
-		// "Two" said twice -- a seek, a pause -- is one track.
+	for index, title := range []string{"One", "Two", "Two", "Two", "Three"} {
+		// "Two" said again -- a seek, a pause -- is one track; and so is
+		// "Two" begun again, a new instance of the same entry.
 		entry := map[string]string{"One": "e1", "Two": "e2", "Three": "e3"}[title]
-		_, _ = rooms.describe(made.Room, json.RawMessage(`{"entry":"`+entry+`","instance":1,"track":{"title":"`+title+`"},"position_ms":`+strconv.Itoa(index)+`}`))
+		instance := strconv.Itoa(1 + index/3)
+		_, _ = rooms.describe(made.Room, json.RawMessage(`{"entry":"`+entry+`","instance":`+instance+`,"track":{"title":"`+title+`"},"position_ms":`+strconv.Itoa(index)+`}`))
 	}
 	seen, _ := rooms.next(context.Background(), made.Room, 0, "", time.Millisecond)
 	if len(seen.History) != 2 || !strings.Contains(string(seen.History[0].Track), "Two") ||

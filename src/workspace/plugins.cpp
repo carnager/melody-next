@@ -616,6 +616,18 @@ std::optional<PluginList> parsePluginList(const QByteArray& json, QString* probl
     return list;
 }
 
+namespace {
+
+// A link is a web page's -- or, ADR-0302, one of Melody's own, a vote at a
+// listening party: nothing else is opened from a plugin.
+[[nodiscard]] bool openableUrl(const QString& url) {
+    return url.startsWith(QStringLiteral("https://")) ||
+           url.startsWith(QStringLiteral("http://")) ||
+           url.startsWith(QStringLiteral("melody://"));
+}
+
+} // namespace
+
 std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QString* problem) {
     const auto fail = [problem](QString why) -> std::optional<PluginPanelContent> {
         if (problem != nullptr) {
@@ -667,8 +679,12 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                 .action = button.value(QStringLiteral("action")).toString(),
                 .value = button.value(QStringLiteral("value")).toString(),
                 .on = button.value(QStringLiteral("on")).toBool(false),
-                .role = role.value_or(Role::normal)};
-            if (!listed.isObject() || !role || made.text.isEmpty() || made.action.isEmpty()) {
+                .role = role.value_or(Role::normal),
+                .url = button.value(QStringLiteral("url")).toString()};
+            // An action to run, or a page to open -- one Melody opens.
+            if (!listed.isObject() || !role || made.text.isEmpty() ||
+                made.action.isEmpty() == made.url.isEmpty() ||
+                (!made.url.isEmpty() && !openableUrl(made.url))) {
                 return false;
             }
             read.buttons.push_back(std::move(made));
@@ -731,8 +747,10 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.kind = Kind::toggle;
             read.key = part.value(QStringLiteral("toggle")).toString();
             read.text = part.value(QStringLiteral("label")).toString();
+            read.detail = part.value(QStringLiteral("detail")).toString();
             read.on = part.value(QStringLiteral("on")).toBool(false);
-            allowed = {QStringLiteral("toggle"), QStringLiteral("label"), QStringLiteral("on")};
+            allowed = {QStringLiteral("toggle"), QStringLiteral("label"), QStringLiteral("detail"),
+                       QStringLiteral("on")};
             if (read.key.isEmpty()) {
                 return fail(QStringLiteral("a toggle needs its key"));
             }
@@ -771,14 +789,19 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             }
             if (!read_buttons(part, read)) {
                 return fail(QStringLiteral(
-                    "a row's button is {text, action, value?, on?, role?}"));
+                    "a row's button is {text, action or url, value?, on?, role?}"));
             }
         } else if (part.contains(QStringLiteral("status"))) {
             read.kind = Kind::status;
             read.text = part.value(QStringLiteral("status")).toString();
             read.detail = part.value(QStringLiteral("detail")).toString();
             read.on = part.value(QStringLiteral("live")).toBool(false);
-            allowed = {QStringLiteral("status"), QStringLiteral("detail"), QStringLiteral("live")};
+            allowed = {QStringLiteral("status"), QStringLiteral("detail"), QStringLiteral("live"),
+                       QStringLiteral("buttons")};
+            if (!read_buttons(part, read)) {
+                return fail(QStringLiteral(
+                    "a status's button is {text, action or url, value?, on?, role?}"));
+            }
         } else if (part.contains(QStringLiteral("people"))) {
             read.kind = Kind::people;
             allowed = {QStringLiteral("people")};
@@ -803,7 +826,7 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                        QStringLiteral("buttons")};
             if (!read_buttons(part, read)) {
                 return fail(QStringLiteral(
-                    "an item's button is {text, action, value?, on?, role?}"));
+                    "an item's button is {text, action or url, value?, on?, role?}"));
             }
         } else {
             return fail(QStringLiteral("a part is a heading, paragraph, text, track, status, "
@@ -814,11 +837,7 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
                 return fail(QStringLiteral("a part has an unknown key \"%1\"").arg(key));
             }
         }
-        // A link is a web page's -- or, ADR-0302, one of Melody's own, a vote
-        // at a listening party: nothing else is opened from a plugin.
-        if (!read.url.isEmpty() && !read.url.startsWith(QStringLiteral("https://")) &&
-            !read.url.startsWith(QStringLiteral("http://")) &&
-            !read.url.startsWith(QStringLiteral("melody://"))) {
+        if (!read.url.isEmpty() && !openableUrl(read.url)) {
             return fail(QStringLiteral("a link is not http, https or melody: %1").arg(read.url));
         }
         content.parts.push_back(std::move(read));

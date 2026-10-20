@@ -24,13 +24,20 @@ among the artist's albums in the library, which Melody tells the panel
 (ADR-0301), matched by release group, else by title. For an artist
 MusicBrainz does not know, Discogs's, with a Discogs token. What MusicBrainz
 and Discogs list is kept a day; the library is told anew every time.
+
+Albums are drawn as Melody draws a track's row (ADR-0304), with their
+covers: the Cover Art Archive's for a release group, Discogs's thumbnail
+for a master. Covers are fetched side by side for a few seconds at most and
+kept a week -- and so is knowing there is none.
 """
 import fcntl
 import hashlib
 import json
 import os
+import queue
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -42,6 +49,10 @@ LISTED = 24 * 3600
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                      "melody", "plugins", "about")
 TRIES = 4
+# How long a run waits for covers it has not kept: those not there by then
+# are shown the next time it is asked.
+COVERS_WAIT = 6.0
+COVERS_UNTIL = None
 
 # Where else an album is, by the host of a MusicBrainz link -- and, where it
 # has none, a search there.
@@ -135,6 +146,77 @@ def keep(name, value):
     with open(path + ".partial", "w", encoding="utf-8") as kept:
         json.dump(value, kept)
     os.replace(path + ".partial", path)
+
+
+def cover_file(url):
+    """The cover at `url`, kept as a file, or None: fetched at most once a
+    week, a missing one too. Never fails the run -- a cover is not needed."""
+    name = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    folder = os.path.join(CACHE, "covers")
+    path = os.path.join(folder, name + ".jpg")
+    none = os.path.join(folder, name + ".none")
+    for there, answer in ((path, path), (none, None)):
+        try:
+            if time.time() - os.path.getmtime(there) < KEPT:
+                return answer
+        except OSError:
+            pass
+    os.makedirs(folder, exist_ok=True)
+    request = urllib.request.Request(url, headers={"User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=COVERS_WAIT + 4) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            open(none, "w").close()
+        return None
+    except Exception:
+        return None
+    if not body:
+        return None
+    partial = "%s.%d.partial" % (path, os.getpid())
+    with open(partial, "wb") as kept:
+        kept.write(body)
+    os.replace(partial, path)
+    return path
+
+
+def covers_of(urls):
+    """The covers of `urls`, by URL, those that came within COVERS_WAIT --
+    fetched side by side by a few threads; one still on its way when the
+    time is up is left to finish while the run ends, kept for the next."""
+    urls = list(dict.fromkeys(u for u in urls if u))
+    found = {}
+    waiting = queue.Queue()
+    for url in urls:
+        waiting.put(url)
+    done = threading.Semaphore(0)
+
+    def work():
+        while True:
+            try:
+                url = waiting.get_nowait()
+            except queue.Empty:
+                return
+            found[url] = cover_file(url)
+            done.release()
+
+    for _ in range(min(6, len(urls))):
+        threading.Thread(target=work, daemon=True).start()
+    # One wait for the run, however many times it asks: the album's cover
+    # and the missing albums' together.
+    global COVERS_UNTIL
+    if COVERS_UNTIL is None:
+        COVERS_UNTIL = time.monotonic() + COVERS_WAIT
+    until = COVERS_UNTIL
+    for _ in urls:
+        if not done.acquire(timeout=max(0.0, until - time.monotonic())):
+            break
+    return {url: path for url, path in dict(found).items() if path}
+
+
+def group_cover(group_id):
+    return "https://coverartarchive.org/release-group/%s/front-250" % group_id
 
 
 def quoted(text):
@@ -244,8 +326,9 @@ def about_artist(mbid, language):
     span = artist.get("life-span") or {}
     begun = (span.get("begin") or "")[:4]
     ended = (span.get("end") or "")[:4]
-    where = ", ".join(n for n in ((artist.get("begin-area") or {}).get("name"),
-                                  (artist.get("area") or {}).get("name")) if n)
+    # Where it began and where it is -- once, when they are the same.
+    where = ", ".join(dict.fromkeys(n for n in ((artist.get("begin-area") or {}).get("name"),
+                                                (artist.get("area") or {}).get("name")) if n))
     told = {
         "name": artist.get("name") or "",
         "kind": artist.get("type") or "",
@@ -351,7 +434,8 @@ def discogs_albums(artist, token):
         page = fetch("https://api.discogs.com/artists/%s/releases?sort=year&per_page=100"
                      % same[0]["id"], headers=headers) or {}
         albums = [{"id": "", "title": r.get("title") or "", "date": str(r.get("year") or ""),
-                   "kind": "", "url": "https://www.discogs.com/master/%s" % r["id"]}
+                   "kind": "", "url": "https://www.discogs.com/master/%s" % r["id"],
+                   "thumb": r.get("thumb") or ""}
                   for r in page.get("releases") or []
                   if r.get("type") == "master" and r.get("role") == "Main"]
     keep(key, albums)
@@ -382,10 +466,18 @@ def missing_albums(artist_id, artist, owned, settings):
         return [{"heading": "Missing albums"},
                 {"paragraph": "Every album and EP %s lists is in the library."
                               % ("MusicBrainz" if artist_id else "Discogs")}]
-    return [{"heading": "Missing albums (%d)" % len(missing)}] + [
-        {"text": a["title"] or "?",
-         "detail": " · ".join(p for p in (a["date"][:4], a["kind"]) if p), "url": a["url"]}
-        for a in missing]
+    covers = covers_of(group_cover(a["id"]) if a["id"] else a.get("thumb") for a in missing)
+    rows = []
+    for a in missing:
+        row = {"track": a["title"] or "?", "url": a["url"]}
+        detail = " · ".join(p for p in (a["date"][:4], a["kind"]) if p)
+        if detail:
+            row["detail"] = detail
+        cover = covers.get(group_cover(a["id"]) if a["id"] else a.get("thumb"))
+        if cover:
+            row["cover"] = cover
+        rows.append(row)
+    return [{"heading": "Missing albums (%d)" % len(missing)}] + rows
 
 
 def main():
@@ -436,14 +528,25 @@ def main():
         else:
             name, album_artist, found = album, artist, {}
         if show_artist:
-            parts.append({"heading": name})
+            parts.append({"heading": "Album"})
         else:
             title = name
+        # The album as Melody draws what plays: its cover, its title over
+        # its kind, year and label.
+        row = {"track": name, "playing": True}
         if album_id:
-            line = " · ".join(p for p in (told["kind"], told["date"][:4]) if p)
-            if line or told["label"]:
-                parts.append({"text": line or name,
-                              **({"detail": told["label"]} if told["label"] else {})})
+            row["artist"] = " · ".join(p for p in (told["kind"], told["date"][:4]) if p)
+            if told["label"]:
+                row["detail"] = told["label"]
+            if told.get("links", {}).get("MusicBrainz"):
+                row["url"] = told["links"]["MusicBrainz"]
+            cover = covers_of([group_cover(album_id)]).get(group_cover(album_id))
+            if cover:
+                row["cover"] = cover
+        elif album_artist:
+            row["artist"] = album_artist
+        parts.append(row)
+        if album_id:
             if told["summary"]:
                 parts.append({"paragraph": told["summary"]})
         else:

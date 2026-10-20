@@ -134,15 +134,18 @@ def panel(given):
 
     hosting = role == "host"
     listeners = room.get("listeners") or []
-    parts.append({"status": "Hosting" if hosting else "Listening along",
-                  "detail": "%d listening" % len(listeners), "live": True})
-    if hosting:
-        parts.append({"toggle": "party", "label": "Party: friends suggest tracks and vote",
-                      "on": bool(room.get("party"))})
-    parts.append({"button": "Stop room" if hosting else "Leave room",
-                  "action": "stop" if hosting else "leave", "role": "quiet"})
+    # One line: how one is in the room, its page, and the way out.
+    buttons = []
     if room.get("invite"):
-        parts.append({"link": "The room's page", "detail": room["invite"], "url": room["invite"]})
+        buttons.append({"text": "Web page", "url": room["invite"], "role": "quiet"})
+    buttons.append({"text": "Stop" if hosting else "Leave",
+                    "action": "stop" if hosting else "leave", "role": "quiet"})
+    parts.append({"status": "Hosting" if hosting else "Listening along",
+                  "detail": "%d listening" % len(listeners), "live": True, "buttons": buttons})
+    if hosting:
+        parts.append({"toggle": "party", "label": "Party",
+                      "detail": "Friends suggest tracks and vote on them",
+                      "on": bool(room.get("party"))})
 
     # The room's queue, as one list: what plays, what is next, then -- a
     # party -- the suggestions by their votes, or the host's own tracks.

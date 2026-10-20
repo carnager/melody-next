@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -271,7 +272,10 @@ func (r *rooms) describe(name string, state json.RawMessage) (uint64, error) {
 	if json.Unmarshal(state, &said) == nil && len(said.Track) > 0 && string(said.Track) != "null" {
 		playing := said.Entry + "/" + strconv.FormatUint(said.Instance, 10)
 		if playing != found.playing {
-			if found.playing != "" {
+			// The same entry begun again -- restarted, the host's Melody
+			// resuming -- is no track played before it.
+			again := found.playing != "" && strings.HasPrefix(found.playing, said.Entry+"/")
+			if found.playing != "" && !again {
 				found.history = append([]played{found.current}, found.history...)
 				if len(found.history) > keptHistory {
 					found.history = found.history[:keptHistory]

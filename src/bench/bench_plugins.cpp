@@ -362,6 +362,12 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
 }
 
 void BenchMainWindow::showPluginPanelSubject(PluginPanelDock& slot, const PluginTrack& playing) {
+    // ADR-0304: a panel asked with nothing playing too -- a listening room
+    // -- is not about the track, and does not say it.
+    if (slot.panel.always) {
+        slot.view->setSubject({});
+        return;
+    }
     const auto artist = QString::fromStdString(playing.album_artist.empty() ? playing.artist
                                                                             : playing.album_artist);
     slot.view->setSubject(

@@ -197,7 +197,7 @@ A panel may hold controls ([ADR-0303](adr/0303-panels-with-controls.md)):
 | Part | Keys |
 | --- | --- |
 | Input | `input` -- its key -- `label`, `value`, `placeholder`, `secret` (shown as dots), `action` (run on Enter) |
-| Toggle | `toggle` -- its key -- `label`, `on` |
+| Toggle | `toggle` -- its key -- `label`, `detail`, `on` |
 | Button | `button` -- its text -- `action`, `value`, `role`; buttons side by side are a row |
 
 and an item may carry `"buttons": [{"text", "action", "value", "on", "role"}]`
@@ -214,11 +214,13 @@ Some parts say what they are, and Melody draws them as it draws its own
 | Part | Keys |
 | --- | --- |
 | Track | `track` -- its title -- `artist`, `detail`, `cover` (an image's absolute path), `url`, `playing` (tinted in the accent), `buttons` |
-| Status | `status` -- its text -- `detail`, `live` (a dot in the accent) |
+| Status | `status` -- its text -- `detail`, `live` (a dot in the accent), `buttons` at its right |
 | People | `people` -- a list of names, drawn as chips with coloured initials |
 
 A button's `role` is `primary` (the accent), `normal`, or `quiet` (flat; on a
-row, shown only under the pointer). `"primary": true` is the primary role. A
+row, shown only under the pointer). A row's or a status's button may open a
+page, `"url"`, in place of an `action`. A toggle may say what it does beneath
+its label, `"detail"`. `"primary": true` is the primary role. A
 toggle is drawn as a switch. There is no CSS and no colour of a plugin's own:
 a panel looks like the rest of Melody under every colour scheme.
 

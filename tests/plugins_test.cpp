@@ -417,13 +417,17 @@ void PluginsTest::theExamplePluginReads() {
                part.text == QStringLiteral("Group from Berkeley, United States") &&
                part.detail == QStringLiteral("since 1983");
     }));
-    // The album beneath, under its name: when, what, on which label.
+    // The album beneath, as Melody draws what plays (ADR-0304): its name
+    // over when, what, on which label.
     const auto heading = std::ranges::find_if(drawn->parts, [](const auto& part) {
         return part.kind == PluginPanelContent::Part::Kind::heading &&
-               part.text == QStringLiteral("The Legacy");
+               part.text == QStringLiteral("Album");
     });
     QVERIFY(heading != drawn->parts.end());
-    QCOMPARE(std::next(heading)->text, QStringLiteral("Album · 1987"));
+    QVERIFY(std::next(heading)->kind == PluginPanelContent::Part::Kind::track &&
+            std::next(heading)->on);
+    QCOMPARE(std::next(heading)->text, QStringLiteral("The Legacy"));
+    QCOMPARE(std::next(heading)->artist, QStringLiteral("Album · 1987"));
     QCOMPARE(std::next(heading)->detail, QStringLiteral("Megaforce Worldwide"));
     QCOMPARE(std::next(heading, 2)->text,
              QStringLiteral("The Legacy is the debut studio album by Testament."));
@@ -482,6 +486,16 @@ void PluginsTest::theExamplePluginReads() {
     library.tags = {{"albumartist", {"Testament"}},
                     {"musicbrainzalbumartistid", {mbid.toStdString()}},
                     {"musicbrainzreleasegroupid", {group.toStdString()}}};
+    // A cover kept for one of them, by its address's hash.
+    const auto new_order_cover =
+        kept + QStringLiteral("/covers/") +
+        QString::fromLatin1(QCryptographicHash::hash(
+                                "https://coverartarchive.org/release-group/rg-new/front-250",
+                                QCryptographicHash::Sha1)
+                                .toHex()) +
+        QStringLiteral(".jpg");
+    QVERIFY(QDir{}.mkpath(kept + QStringLiteral("/covers")));
+    writeFile(new_order_cover, "a cover");
     const auto missing = run(*about_panel,
                              PluginAction{.id = QStringLiteral("about"),
                                           .label = QStringLiteral("About"),
@@ -507,16 +521,20 @@ void PluginsTest::theExamplePluginReads() {
                part.text == QStringLiteral("Missing albums (2)");
     });
     QVERIFY(section != missing_drawn->parts.end());
-    // Oldest first, each opening its MusicBrainz page.
+    // Oldest first, each a row opening its MusicBrainz page, with its
+    // cover where one is kept -- none fetched here.
+    QVERIFY(std::next(section)->kind == PluginPanelContent::Part::Kind::track);
     QCOMPARE(std::next(section)->text, QStringLiteral("Trial by Fire"));
     QCOMPARE(std::next(section)->detail, QStringLiteral("1988 · EP"));
+    QVERIFY(std::next(section)->cover.isEmpty());
     QCOMPARE(std::next(section, 2)->text, QStringLiteral("The New Order"));
     QCOMPARE(std::next(section, 2)->url,
              QStringLiteral("https://musicbrainz.org/release-group/rg-new"));
+    QCOMPARE(std::next(section, 2)->cover, new_order_cover);
     QCOMPARE(std::distance(section, missing_drawn->parts.end()), 3);
     // The album by its id, though the tags name it otherwise.
     QVERIFY(std::ranges::any_of(missing_drawn->parts, [](const auto& part) {
-        return part.kind == PluginPanelContent::Part::Kind::heading &&
+        return part.kind == PluginPanelContent::Part::Kind::track &&
                part.text == QStringLiteral("The Legacy");
     }));
     qunsetenv("http_proxy");
@@ -640,7 +658,7 @@ void PluginsTest::panelsHaveControls() {
         {"input": "room", "label": "Room", "value": "friday", "placeholder": "a name",
          "action": "start"},
         {"input": "password", "secret": true},
-        {"toggle": "party", "label": "Party", "on": true},
+        {"toggle": "party", "label": "Party", "detail": "Friends vote", "on": true},
         {"button": "Start", "action": "start", "primary": true},
         {"button": "Leave", "action": "leave", "value": "now"},
         {"text": "Glow", "detail": "Ana", "buttons": [
@@ -653,7 +671,8 @@ void PluginsTest::panelsHaveControls() {
     QVERIFY(parts[0].kind == Kind::input && parts[0].key == QStringLiteral("room") &&
             parts[0].value == QStringLiteral("friday") && parts[0].action == QStringLiteral("start"));
     QVERIFY(parts[1].kind == Kind::input && parts[1].secret);
-    QVERIFY(parts[2].kind == Kind::toggle && parts[2].on);
+    QVERIFY(parts[2].kind == Kind::toggle && parts[2].on &&
+            parts[2].detail == QStringLiteral("Friends vote"));
     QVERIFY(parts[3].kind == Kind::button && parts[3].on && parts[3].action == QStringLiteral("start"));
     QVERIFY(parts[4].kind == Kind::button && !parts[4].on && parts[4].value == QStringLiteral("now"));
     QCOMPARE(parts[5].buttons.size(), std::size_t{1U});
@@ -696,7 +715,8 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
          "buttons": [{"text": "▲ 3", "action": "vote", "value": "7", "on": true},
                      {"text": "✕", "action": "remove", "value": "7", "role": "quiet"}]},
         {"track": "Glow"},
-        {"status": "Hosting", "detail": "2 listening", "live": true},
+        {"status": "Hosting", "detail": "2 listening", "live": true,
+         "buttons": [{"text": "Web page", "url": "https://t.example/r", "role": "quiet"}]},
         {"people": ["Ana", " ", "Bo"]},
         {"button": "Start", "action": "start", "role": "primary"},
         {"button": "Stop", "action": "stop", "role": "quiet"},
@@ -716,6 +736,10 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
     QVERIFY(parts[1].kind == Kind::track && !parts[1].on && parts[1].artist.isEmpty());
     QVERIFY(parts[2].kind == Kind::status && parts[2].on &&
             parts[2].detail == QStringLiteral("2 listening"));
+    // A button opening a page rather than running the plugin.
+    QCOMPARE(parts[2].buttons.size(), std::size_t{1U});
+    QVERIFY(parts[2].buttons[0].url == QStringLiteral("https://t.example/r") &&
+            parts[2].buttons[0].action.isEmpty());
     QVERIFY(parts[3].kind == Kind::people &&
             parts[3].people == (std::vector<QString>{QStringLiteral("Ana"), QStringLiteral("Bo")}));
     QVERIFY(parts[4].role == Role::primary && parts[4].on);
@@ -727,7 +751,11 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
           R"({"parts": [{"track": "x", "colour": "red"}]})",
           R"({"parts": [{"button": "x", "action": "y", "role": "loud"}]})",
           R"({"parts": [{"track": "x", "buttons": [{"text": "y", "action": "z", "role": "big"}]}]})",
-          R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})"}) {
+          R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})",
+          R"({"parts": [{"status": "x", "buttons": [{"text": "y", "url": "file:///etc"}]}]})",
+          R"({"parts": [{"status": "x", "buttons": [{"text": "y"}]}]})",
+          R"({"parts": [{"status": "x", "buttons": [{"text": "y", "action": "a",
+                                                       "url": "https://x"}]}]})"}) {
         QVERIFY2(!parsePluginPanel(broken, &problem), broken);
     }
 }
@@ -1265,15 +1293,13 @@ esac
     QVERIFY(has(drawn, [](const auto& part) {
         return part.kind == Kind::toggle && part.key == QStringLiteral("party") && part.on;
     }));
+    // One status line: hosting, the room's web page, and Stop, quiet.
     QVERIFY(has(drawn, [](const auto& part) {
-        return part.kind == Kind::button && part.action == QStringLiteral("stop");
-    }));
-    QVERIFY(has(drawn, [](const auto& part) {
-        return part.kind == Kind::status && part.on;
-    }));
-    QVERIFY(has(drawn, [](const auto& part) {
-        return part.kind == Kind::button && part.action == QStringLiteral("stop") &&
-               part.role == PluginPanelContent::Role::quiet;
+        return part.kind == Kind::status && part.on && part.buttons.size() == 2U &&
+               part.buttons[0].url.startsWith(QStringLiteral("https://t.example/rooms/")) &&
+               part.buttons[0].action.isEmpty() &&
+               part.buttons[1].action == QStringLiteral("stop") &&
+               part.buttons[1].role == PluginPanelContent::Role::quiet;
     }));
     QVERIFY(has(drawn, [](const auto& part) {
         return part.kind == Kind::track && part.text == QStringLiteral("Time Machine") &&

@@ -436,6 +436,12 @@ class TrackRow final : public QWidget {
     button->setToolTip(each.text);
     button->setCursor(Qt::PointingHandCursor);
     button->setProperty("action", each.action);
+    if (!each.url.isEmpty()) {
+        // ADR-0304: a page it opens, not its plugin run again.
+        button->setToolTip(each.url);
+        QObject::connect(button, &QToolButton::clicked, button,
+                         [url = each.url] { QDesktopServices::openUrl(QUrl{url}); });
+    }
     if (each.role == PluginPanelContent::Role::quiet) {
         button->setAutoRaise(true);
         button->setProperty("role", QStringLiteral("quiet"));
@@ -600,6 +606,15 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
     }
     using Kind = PluginPanelContent::Part::Kind;
     const auto& parts = content.parts;
+    // A row's button runs its plugin again -- one that opens a page opens it.
+    const auto run_on_press = [this](QToolButton* button, const PluginPanelContent::Button& each) {
+        if (each.url.isEmpty()) {
+            connect(button, &QToolButton::clicked, this,
+                    [this, action = each.action, value = each.value] {
+                        emit actionRequested(action, value);
+                    });
+        }
+    };
     for (std::size_t index = 0; index < parts.size(); ++index) {
         const auto& part = parts[index];
         switch (part.kind) {
@@ -671,7 +686,20 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             line_layout->setSpacing(8);
             auto* label = plainLabel(part.text, line);
             label->setWordWrap(true);
-            line_layout->addWidget(label, 1);
+            if (part.detail.isEmpty()) {
+                line_layout->addWidget(label, 1);
+            } else {
+                // What it does, smaller, beneath its name.
+                auto* lines = new QVBoxLayout;
+                lines->setSpacing(0);
+                lines->addWidget(label);
+                auto* detail = plainLabel(part.detail, line);
+                detail->setWordWrap(true);
+                detail->setFont(smaller(detail->font()));
+                detail->setForegroundRole(QPalette::PlaceholderText);
+                lines->addWidget(detail);
+                line_layout->addLayout(lines, 1);
+            }
             auto* toggle = new PanelSwitch(line);
             toggle->setObjectName(QStringLiteral("bench-plugin-panel-toggle-%1").arg(part.key));
             toggle->setAccessibleName(part.text);
@@ -707,6 +735,13 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
                 line_layout->addWidget(detail);
             }
             line_layout->addStretch(1);
+            // Its buttons at the right, quiet ones too: there is no row to
+            // hover here.
+            for (const auto& each : part.buttons) {
+                auto* button = rowButton(each, line);
+                run_on_press(button, each);
+                line_layout->addWidget(button, 0, Qt::AlignVCenter);
+            }
             add(line);
             break;
         }
@@ -724,10 +759,7 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             auto* row = new TrackRow(part, parts_);
             for (const auto& each : part.buttons) {
                 auto* button = rowButton(each, row);
-                connect(button, &QToolButton::clicked, this,
-                        [this, action = each.action, value = each.value] {
-                            emit actionRequested(action, value);
-                        });
+                run_on_press(button, each);
                 row->addButton(button, each.role == PluginPanelContent::Role::quiet);
             }
             add(row);
@@ -789,10 +821,7 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
             line_layout->addWidget(item, 1);
             for (const auto& each : part.buttons) {
                 auto* button = rowButton(each, line);
-                connect(button, &QToolButton::clicked, this,
-                        [this, action = each.action, value = each.value] {
-                            emit actionRequested(action, value);
-                        });
+                run_on_press(button, each);
                 line_layout->addWidget(button, 0, Qt::AlignVCenter);
             }
             add(line);

@@ -2906,8 +2906,9 @@ esac
         10'000);
     QVERIFY(dock->findChild<QAbstractButton*>(QStringLiteral("bench-plugin-panel-toggle-party"))
                 ->isChecked());
+    // Two votes, two removes; the room's web page and Stop.
     QCOMPARE(dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button")).size(),
-             4);
+             6);
     // ADR-0304: drawn as Melody's -- what plays, the next, two suggestions,
     // two played; the status; the people.
     const auto tracks = dock->findChildren<QWidget*>(QStringLiteral("bench-plugin-panel-track"));
@@ -2919,11 +2920,22 @@ esac
              QStringLiteral("Time Machine"));
     QVERIFY(dock->findChild<QWidget*>(QStringLiteral("bench-plugin-panel-status")) != nullptr);
     QCOMPARE(dock->findChildren<QWidget*>(QStringLiteral("bench-plugin-panel-person")).size(), 3);
-    // The host's remove, quiet: shown only under the pointer.
-    for (auto* button :
-         dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button"))) {
-        QCOMPARE(button->isVisibleTo(dock), button->property("role").toString().isEmpty());
+    // The host's remove, quiet: shown only under the pointer -- on a row;
+    // the status line's buttons always.
+    for (auto* track : tracks) {
+        for (auto* button :
+             track->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button"))) {
+            QCOMPARE(button->isVisibleTo(dock), button->property("role").toString().isEmpty());
+        }
     }
+    auto* status = dock->findChild<QWidget*>(QStringLiteral("bench-plugin-panel-status"));
+    for (auto* button :
+         status->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button"))) {
+        QVERIFY(button->isVisibleTo(dock));
+    }
+    // Asked with nothing playing too, it does not name a track under the
+    // room's name.
+    QVERIFY(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-asked")) == nullptr);
     QTest::qWait(300);
     shot(QStringLiteral("room-panel-in.png"));
     qputenv("PATH", path);

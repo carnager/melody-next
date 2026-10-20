@@ -89,8 +89,9 @@ name. Everything else is the **Listening room** panel:
 - **To join:** the room's name and password, then **Join room** -- or open
   the page a friend sent.
 
-In a room the panel is the room itself: **Stop room** or **Leave room**, the
-host's **Party** toggle, the queue -- what plays and whose it is, what is
+In a room the panel is the room itself: a line saying whether you host or
+listen and how many listen, with the room's **Web page** and **Stop** or
+**Leave** beside it; the host's **Party** switch; the queue -- what plays and whose it is, what is
 next, at a party the suggestions with **▲** to vote and, for the host,
 **✕** to remove -- what played and who listens. Your tabs stay yours. An
 engine that restarts comes back into its room by itself.

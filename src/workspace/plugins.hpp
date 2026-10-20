@@ -242,6 +242,8 @@ struct PluginPanelContent {
         // Drawn as chosen -- a vote of one's own -- or as the one to press.
         bool on{false};
         Role role{Role::normal};
+        // ADR-0304: a page it opens instead -- http, https or melody.
+        QString url;
     };
     struct Part {
         enum class Kind : std::uint8_t {

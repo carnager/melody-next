@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -180,7 +181,7 @@ func TestTracks(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: kept, wait: 100 * time.Millisecond}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw", "")
+	made, _ := rooms.make("pw", "", "")
 	track := "/rooms/" + made.Room + "/tracks/entry-1"
 	opus := strings.Repeat("OggS", 1000)
 
@@ -257,7 +258,7 @@ func TestChat(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 2 * time.Second}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw", "")
+	made, _ := rooms.make("pw", "", "")
 	chat := "/rooms/" + made.Room + "/chat"
 	if status, _ := c.do("POST", chat, "guess", `{"name":"Ana","text":"hi"}`); status != 403 {
 		t.Fatal("nothing said without the invite")
@@ -313,7 +314,7 @@ func TestParty(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 200 * time.Millisecond}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw", "")
+	made, _ := rooms.make("pw", "", "")
 	base := "/rooms/" + made.Room
 	offer := func(who, title string) (int, map[string]any) {
 		return c.do("POST", base+"/suggestions", made.Invite,
@@ -405,7 +406,7 @@ func TestNamedRooms(t *testing.T) {
 // What played before what plays, newest first.
 func TestHistory(t *testing.T) {
 	rooms := newRooms("pw")
-	made, _ := rooms.make("pw", "")
+	made, _ := rooms.make("pw", "", "")
 	for index, title := range []string{"One", "Two", "Two", "Three"} {
 		// "Two" said twice -- a seek, a pause -- is one track.
 		entry := map[string]string{"One": "e1", "Two": "e2", "Three": "e3"}[title]
@@ -423,7 +424,7 @@ func TestKeptAcrossRestart(t *testing.T) {
 	directory := t.TempDir()
 	file := filepath.Join(directory, "rooms.json")
 	rooms := newRooms("pw")
-	made, _ := rooms.make("pw", "night-owl")
+	made, _ := rooms.make("pw", "night-owl", "")
 	_, _ = rooms.describe(made.Room, json.RawMessage(`{"entry":"e1","instance":1,"track":{"title":"One"}}`))
 	_ = rooms.say(made.Room, "Ana", "still here?")
 	_ = rooms.setParty(made.Room, true)
@@ -451,9 +452,23 @@ func TestKeptAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestNoPasswordNoRooms(t *testing.T) {
-	if _, err := newRooms("").make("", ""); err == nil {
-		t.Fatal("a server without a password makes no rooms")
+// A room joined by the password its host chose; a server without a
+// password of its own makes rooms for anyone.
+func TestRoomPasswords(t *testing.T) {
+	open := newRooms("")
+	made, err := open.make("", "doom", "letmein")
+	if err != nil || made.Invite != "letmein" {
+		t.Fatalf("a server without a password makes rooms for anyone: %v", err)
+	}
+	if open.holder("doom", "letmein") != listener || open.holder("doom", "guess") != nobody {
+		t.Fatal("the room's password lets in, nothing else")
+	}
+	if _, err := open.make("", "x-room", "abc"); !errors.Is(err, errBadSecret) {
+		t.Fatal("a password of four characters at least")
+	}
+	closed := newRooms("pw")
+	if _, err := closed.make("", "", ""); !errors.Is(err, errRefused) {
+		t.Fatal("one with a password makes rooms only with it")
 	}
 }
 
@@ -461,7 +476,7 @@ func TestSweep(t *testing.T) {
 	now := time.Now()
 	rooms := newRooms("pw")
 	rooms.now = func() time.Time { return now }
-	made, _ := rooms.make("pw", "")
+	made, _ := rooms.make("pw", "", "")
 	if _, err := rooms.next(context.Background(), made.Room, 0, "Bo", time.Millisecond); err != nil {
 		t.Fatal(err)
 	}

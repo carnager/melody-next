@@ -28,10 +28,13 @@ cd together && CGO_ENABLED=0 go build -o melody-together .
 scp melody-together server:/usr/local/bin/
 ```
 
-On the server, a password -- whoever hosts needs it; listeners need only an
-invite -- and the program:
+On the server, the program -- and, if only some may start rooms, a
+password for that; each room is kept among friends by its own password
+either way:
 
 ```sh
+melody-together
+# or, rooms started only with a password:
 openssl rand -hex 16 > /etc/melody-together/password
 melody-together -password-file /etc/melody-together/password
 # listens on 127.0.0.1:6099; -listen HOST:PORT for elsewhere

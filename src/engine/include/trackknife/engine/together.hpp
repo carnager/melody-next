@@ -73,6 +73,11 @@ class Together final {
         std::string by;
         std::string next;
         std::vector<std::string> history;
+        // What the host plays after it, in a room that is no party.
+        std::vector<std::string> upcoming;
+        // The room's name and the server's address.
+        std::string room;
+        std::string server;
     };
 
     // `directory`: where a listener keeps the host's copies it fetched, and
@@ -87,12 +92,14 @@ class Together final {
 
     // A room on `server`, made with its password; this engine its host. The
     // invite to send to friends.
-    // `room`: the room's name, else one is made; `name`: the host's, at a
-    // party.
+    // `password`: the server's, if it asks one; `room`: the room's name,
+    // else one is made; `room_password`: what friends join with, else a key
+    // is made; `name`: the host's, at a party.
     [[nodiscard]] core::Result<std::string> host(const std::string& server,
                                                  const std::string& password,
                                                  const std::string& name = {},
-                                                 const std::string& room = {});
+                                                 const std::string& room = {},
+                                                 const std::string& room_password = {});
     // Into the room an invite names, as `name`.
     [[nodiscard]] core::Result<void> join(const std::string& invite, const std::string& name);
     // Out of the room -- closing it, as its host.

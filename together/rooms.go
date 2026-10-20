@@ -24,12 +24,13 @@ import (
 // wakes whoever waits for the next.
 
 var (
-	errRefused  = errors.New("the server's password is not that")
-	errNoRoom   = errors.New("there is no such room")
-	errNoParty  = errors.New("the room is no party: only the host chooses")
-	errTooMany  = errors.New("three suggestions of yours are waiting already")
-	errNoSuch   = errors.New("there is no such suggestion")
-	maximumWait = 3
+	errRefused   = errors.New("the server's password is not that")
+	errNoRoom    = errors.New("there is no such room")
+	errNoParty   = errors.New("the room is no party: only the host chooses")
+	errTooMany   = errors.New("three suggestions of yours are waiting already")
+	errNoSuch    = errors.New("there is no such suggestion")
+	errBadSecret = errors.New("a room's password is 4 to 128 characters")
+	maximumWait  = 3
 )
 
 // Listeners not heard from for this long have gone; a room no one has
@@ -157,25 +158,30 @@ func same(offered, expected string) bool {
 		subtle.ConstantTimeCompare([]byte(offered), []byte(expected)) == 1
 }
 
-// A room, named as asked or with a name made here.
-func (r *rooms) make(password, wanted string) (made, error) {
-	// No password set is no rooms made: a server open to anyone is not one
-	// for friends.
-	if r.password == "" || !same(password, r.password) {
+// A room, named as asked or with a name made here; joined with `secret` --
+// the password its host chose -- or with a key made here. A server with a
+// password makes rooms only for whoever gives it; one without, for anyone.
+func (r *rooms) make(password, wanted, secret string) (made, error) {
+	if r.password != "" && !same(password, r.password) {
 		return made{}, errRefused
 	}
 	if wanted != "" && !namePattern.MatchString(wanted) {
 		return made{}, errBadName
 	}
+	if secret != "" && (len(secret) < 4 || len(secret) > 128) {
+		return made{}, errBadSecret
+	}
 	hostKey, err := token(32)
 	if err != nil {
 		return made{}, err
 	}
-	// The secret of a room is its invite's key, not its name: 64 bits, for
-	// a server of friends.
-	invite, err := token(8)
-	if err != nil {
-		return made{}, err
+	// The secret of a room is its password, not its name -- the host's, or
+	// 64 bits made here, plenty for a server of friends.
+	invite := secret
+	if invite == "" {
+		if invite, err = token(8); err != nil {
+			return made{}, err
+		}
 	}
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

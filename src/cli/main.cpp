@@ -159,14 +159,17 @@ void usage(std::ostream& out) {
            "  albumrating [0-10]          the same, for the playing track's album\n"
            "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
            "                              SIZE pixels across at most if given\n"
-           "  together host SERVER [ROOM [NAME]]\n"
+           "  together host SERVER [ROOM [PASSWORD [NAME]]]\n"
            "                              a room on a melody-together server, named ROOM\n"
-           "                              (- or none: a name is made), this\n"
+           "                              and joined with PASSWORD (- or none: made), this\n"
            "                              engine its host (ADR-0302); prints the invite\n"
-           "                              to send to friends. The server's password is\n"
+           "                              to send to friends. A server that asks a\n"
+           "                              password of its own is given\n"
            "                              $MELODY_TOGETHER_PASSWORD, else the first line\n"
            "                              of ~/.config/melody/together-password\n"
            "  together join INVITE [NAME] listen along, as NAME (default: $USER)\n"
+           "  together join SERVER ROOM PASSWORD [NAME]\n"
+           "                              the same, by the room's name and password\n"
            "  together leave              out of the room; as its host, closing it\n"
            "  together status             the room: who listens, what plays, and at a\n"
            "                              party what is suggested\n"
@@ -1721,10 +1724,11 @@ int run(const Options& options) {
             }
         };
         if (what == "host") {
-            if (words.size() < 3U || words.size() > 5U) {
+            if (words.size() < 3U || words.size() > 6U) {
                 fail("together host wants the server's address: https://together.example.org, "
-                     "a name for the room (- for one made), and yours at a party");
+                     "then the room's name and its password (- for one made), and yours");
             }
+            // The server's own password, for a server that asks one.
             std::string password;
             if (const char* given = trackknife::core::environment_variable("MELODY_TOGETHER_PASSWORD");
                 given != nullptr) {
@@ -1741,13 +1745,10 @@ int run(const Options& options) {
                     password = *read;
                 }
             }
-            if (password.empty()) {
-                fail("the server's password: $MELODY_TOGETHER_PASSWORD, or "
-                     "~/.config/melody/together-password");
-            }
-            const std::string room =
-                words.size() >= 4U && words[3] != "-" ? words[3] : std::string{};
-            std::string name = words.size() == 5U ? words[4] : std::string{};
+            const auto given = [&words](const std::size_t index) {
+                return words.size() > index && words[index] != "-" ? words[index] : std::string{};
+            };
+            std::string name = given(5);
             if (const char* user = trackknife::core::environment_variable("USER");
                 name.empty() && user != nullptr) {
                 name = user;
@@ -1756,23 +1757,33 @@ int run(const Options& options) {
                                      Json{{"server", words[2]},
                                           {"password", password},
                                           {"name", name},
-                                          {"room", room}});
+                                          {"room", given(3)},
+                                          {"room_password", given(4)}});
             if (options.json) {
                 std::cout << answer.dump() << "\n";
             } else {
                 std::cout << text_of(answer, "invite") << "\n";
             }
         } else if (what == "join") {
-            if (words.size() < 3U || words.size() > 4U) {
-                fail("together join wants the invite a friend sent, and a name to be known by");
+            // An invite, or the server, the room's name and its password.
+            const bool by_invite = words.size() >= 3U && words[2].find("/rooms/") != std::string::npos;
+            if (by_invite ? (words.size() > 4U) : (words.size() < 5U || words.size() > 6U)) {
+                fail("together join wants the invite a friend sent, or the server, the room's "
+                     "name and its password -- and a name to be known by");
             }
-            std::string name = words.size() == 4U ? words[3] : std::string{};
+            const auto name_at = by_invite ? 3U : 5U;
+            std::string name = words.size() > name_at ? words[name_at] : std::string{};
             if (const char* user = trackknife::core::environment_variable("USER");
                 name.empty() && user != nullptr) {
                 name = user;
             }
-            static_cast<void>(
-                call(*client, "together.join", Json{{"invite", words[2]}, {"name", name}}));
+            static_cast<void>(call(
+                *client, "together.join",
+                by_invite ? Json{{"invite", words[2]}, {"name", name}}
+                          : Json{{"server", words[2]},
+                                 {"room", words[3]},
+                                 {"password", words[4]},
+                                 {"name", name}}));
             show_room(call(*client, "together.state"));
         } else if (what == "leave") {
             static_cast<void>(call(*client, "together.leave"));

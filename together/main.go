@@ -22,20 +22,20 @@ import (
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:6099", "where to listen: a web proxy in front gives it TLS and a name")
-	passwordFile := flag.String("password-file", "", "the password that makes rooms; whoever hosts needs it, listeners need only an invite")
+	passwordFile := flag.String("password-file", "", "a password a room is made only with; without one, anyone reaching the server makes rooms, each kept by its own password")
 	data := flag.String("data", defaultData(), "where rooms and the copies of their tracks are kept, to outlive a restart")
 	filesMB := flag.Int64("files-mb", 2048, "the most the kept tracks may take, in MB")
 	flag.Parse()
-	if *passwordFile == "" {
-		fmt.Fprintln(os.Stderr, "melody-together: -password-file is needed")
-		flag.Usage()
-		os.Exit(2)
-	}
-	read, err := os.ReadFile(*passwordFile)
-	password := strings.TrimSpace(string(read))
-	if err != nil || password == "" {
-		fmt.Fprintln(os.Stderr, "melody-together: the password file is missing or empty")
-		os.Exit(1)
+	// Without one, anyone who reaches the server makes rooms -- each kept
+	// among friends by its own password.
+	password := ""
+	if *passwordFile != "" {
+		read, err := os.ReadFile(*passwordFile)
+		password = strings.TrimSpace(string(read))
+		if err != nil || password == "" {
+			fmt.Fprintln(os.Stderr, "melody-together: the password file is missing or empty")
+			os.Exit(1)
+		}
 	}
 
 	if err := os.MkdirAll(*data, 0o700); err != nil {

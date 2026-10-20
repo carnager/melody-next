@@ -317,7 +317,9 @@ class Errands final {
                 {"listeners", now.listeners}, {"track", now.track},
                 {"message", now.message},   {"party", now.party},
                 {"suggestions", suggestions}, {"by", now.by},
-                {"next", now.next},         {"history", now.history}};
+                {"next", now.next},         {"history", now.history},
+                {"upcoming", now.upcoming}, {"room", now.room},
+                {"server", now.server}};
 }
 
 [[nodiscard]] core::Result<std::uint64_t> suggestion_id(const Json& params) {
@@ -502,6 +504,8 @@ void Together::forget() const {
 }
 
 void Together::begin(std::shared_ptr<Session> session, Status status) {
+    status.room = session->invite.room;
+    status.server = session->invite.server;
     {
         const std::lock_guard guard{mutex_};
         session_ = session;
@@ -534,7 +538,7 @@ void Together::resume() {
                           .invite = text(document, "invite"),
                           .listeners = {},
                           .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
 }
 
 void Together::gone(Session& session, std::string message) {
@@ -577,7 +581,8 @@ core::Result<void> Together::measure_clock(Session& session) {
 }
 
 core::Result<std::string> Together::host(const std::string& server, const std::string& password,
-                                         const std::string& name, const std::string& room) {
+                                         const std::string& name, const std::string& room,
+                                         const std::string& room_password) {
     const std::lock_guard control{control_};
     end();
     auto session = std::make_shared<Session>();
@@ -595,8 +600,14 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     std::error_code unmade;
     std::filesystem::remove_all(session->downloads, unmade);
     std::filesystem::create_directories(session->downloads, unmade);
-    auto made = request("POST", base + "/rooms", password,
-                        room.empty() ? std::string{} : Json{{"name", room}}.dump(), 10'000L);
+    Json asked = Json::object();
+    if (!room.empty()) {
+        asked["name"] = room;
+    }
+    if (!room_password.empty()) {
+        asked["password"] = room_password;
+    }
+    auto made = request("POST", base + "/rooms", password, asked.dump(), 10'000L);
     if (!made) {
         return std::unexpected(made.error());
     }
@@ -604,7 +615,8 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
         return std::unexpected(together_error(
             made->status == 403   ? "the server's password is not that"
             : made->status == 409 ? "a room of that name is open on the server already"
-            : made->status == 400 ? "a room's name is 3 to 40 of a-z, 0-9 and -"
+            : made->status == 400 ? "a room's name is 3 to 40 of a-z, 0-9 and -, its password "
+                                    "4 characters at least"
                                   : "the server made no room (" + std::to_string(made->status) + ")",
             made->status == 403 ? core::ErrorCode::unauthorized : core::ErrorCode::backend));
     }
@@ -619,7 +631,7 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     const auto invite = invite_text(shared);
     remember(*session, invite);
     begin(session,
-          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
+          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
     return invite;
 }
 
@@ -654,7 +666,7 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     }
     remember(*session, invite);
     begin(session, Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}});
+                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}});
     return {};
 }
 
@@ -798,9 +810,28 @@ void Together::host_round(Session& session) {
             }
         }
     }
+    // What plays after it -- Up Next, then the queue -- the room's to see.
+    std::vector<QueueEntry> upcoming;
+    if (current) {
+        upcoming = player_->request_entries();
+        const auto queue = player_->queue();
+        const auto here = std::ranges::find(queue, state.entry, &QueueEntry::entry_id);
+        for (auto after = here == queue.end() ? queue.end() : std::next(here);
+             after != queue.end() && upcoming.size() < 5U; ++after) {
+            upcoming.push_back(*after);
+        }
+        if (upcoming.size() > 5U) {
+            upcoming.resize(5U);
+        }
+    }
+    std::string upcoming_key;
+    for (const auto& each : upcoming) {
+        upcoming_key += each.entry_id.to_string();
+    }
     const auto key = state.entry.to_string() + "/" + std::to_string(state.instance) + "/" +
                      (playing ? "playing" : paused ? "paused" : "stopped") + "/" +
-                     (following ? following->entry_id.to_string() : std::string{});
+                     (following ? following->entry_id.to_string() : std::string{}) + "/" +
+                     upcoming_key;
     const auto now = session.server_now();
     const auto anchor = now - state.position_ms;
     const bool moved = key != session.said_key ||
@@ -829,6 +860,11 @@ void Together::host_round(Session& session) {
                 said["file"] = file;
                 said["by"] = session.suggestion_by[current->entry_id.to_string()];
             }
+            auto listed = Json::array();
+            for (const auto& each : upcoming) {
+                listed.push_back(describe(session, each));
+            }
+            said["upcoming"] = std::move(listed);
             if (following) {
                 said["next"] = Json{{"entry", following->entry_id.to_string()},
                                     {"track", describe(session, *following)}};
@@ -850,6 +886,10 @@ void Together::host_round(Session& session) {
                 const std::lock_guard guard{mutex_};
                 status_.track = current ? shown(track) : std::string{};
                 status_.by = text(said, "by");
+                status_.upcoming.clear();
+                for (const auto& each : said.value("upcoming", Json::array())) {
+                    status_.upcoming.push_back(shown(each));
+                }
                 status_.next = said.contains("next") ? shown(said["next"].value("track", Json::object()))
                                                      : std::string{};
             }
@@ -960,6 +1000,10 @@ void Together::follow(Session& session, const Json& state) {
     {
         const std::lock_guard guard{mutex_};
         status_.by = text(state, "by");
+        status_.upcoming.clear();
+        for (const auto& each : state.value("upcoming", Json::array())) {
+            status_.upcoming.push_back(shown(each));
+        }
         const auto next = state.find("next");
         status_.next = next != state.end() && next->is_object()
                            ? shown(next->value("track", Json::object()))
@@ -1492,7 +1536,8 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
                       }
                       auto invite = together.host(server, params.value("password", std::string{}),
                                                   params.value("name", std::string{}),
-                                                  params.value("room", std::string{}));
+                                                  params.value("room", std::string{}),
+                                                  params.value("room_password", std::string{}));
                       if (!invite) {
                           return std::unexpected(invite.error());
                       }
@@ -1503,7 +1548,19 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
         if (name.empty()) {
             name = "a friend";
         }
-        auto joined = together.join(params.value("invite", std::string{}), name);
+        // An invite, or the server, the room's name and its password.
+        auto invite = params.value("invite", std::string{});
+        if (invite.empty()) {
+            auto server = params.value("server", std::string{});
+            while (server.ends_with('/')) {
+                server.pop_back();
+            }
+            invite = Together::invite_text(Together::Invite{
+                .server = server,
+                .room = params.value("room", std::string{}),
+                .key = params.value("password", std::string{})});
+        }
+        auto joined = together.join(invite, name);
         if (!joined) {
             return std::unexpected(joined.error());
         }

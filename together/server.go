@@ -19,8 +19,9 @@ import (
 // proxy in front of it to give TLS.
 //
 //	GET    /time                          the server's clock, in ms
-//	POST   /rooms                         {name?}: a room, named so or by the server
-//	                                      (the server's password)
+//	POST   /rooms                         {name?, password?}: a room, named so or by
+//	                                      the server, joined with that password or a
+//	                                      key made (the server's password, if it has one)
 //	PUT    /rooms/ROOM/state              what plays      (the host key)
 //	GET    /rooms/ROOM/state?after=N&name=WHO&wait=MS
 //	                                      the next state  (the invite, or the host key),
@@ -111,18 +112,19 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /rooms", func(w http.ResponseWriter, r *http.Request) {
 		// A name of the host's choosing, or none: one is made.
 		var asked struct {
-			Name string `json:"name"`
+			Name     string `json:"name"`
+			Password string `json:"password"`
 		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<10))
 		if len(strings.TrimSpace(string(body))) > 0 && json.Unmarshal(body, &asked) != nil {
-			refuse(w, http.StatusBadRequest, "a room is asked for as {name}")
+			refuse(w, http.StatusBadRequest, "a room is asked for as {name, password}")
 			return
 		}
-		made, err := s.rooms.make(bearer(r), strings.ToLower(strings.TrimSpace(asked.Name)))
+		made, err := s.rooms.make(bearer(r), strings.ToLower(strings.TrimSpace(asked.Name)), asked.Password)
 		switch {
 		case errors.Is(err, errRefused):
 			refuse(w, http.StatusForbidden, err.Error())
-		case errors.Is(err, errBadName):
+		case errors.Is(err, errBadName), errors.Is(err, errBadSecret):
 			refuse(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, errNameTaken):
 			refuse(w, http.StatusConflict, err.Error())

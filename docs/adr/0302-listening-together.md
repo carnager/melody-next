@@ -29,10 +29,12 @@ its direction.
    one Go program here, because it is copied to a server as a single
    static binary and nothing else -- run by one of the friends -- behind the web proxy that already gives the engine its TLS
    (ADR-0271); it speaks plain HTTP and has no TLS of its own. It holds
-   rooms: each the host's playback state, the listeners present, and an
-   invite. A room has a name -- the host's choice, or two words made by the
-   server, `quiet-otter` -- in its address, `/rooms/NAME`; the invite's key,
-   after `#`, is the secret. Rooms are kept on disk with what they played,
+   rooms: each the host's playback state, the listeners present, and a
+   password -- its host's choice, or a key the server makes -- that friends
+   join with; the invite carries it. A server may ask a password of its own
+   to start rooms, or start them for anyone. A room has a name -- the host's choice, or two words made by the
+   server, `quiet-otter` -- in its address, `/rooms/NAME`; its password,
+   after `#` in the invite, is the secret. Rooms are kept on disk with what they played,
    said and suggested, and their copies of tracks, so a restart of the
    server ends none. Making a room takes the server's password; joining takes the
    room's invite; the host alone changes what plays.

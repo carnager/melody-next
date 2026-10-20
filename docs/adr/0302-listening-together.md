@@ -65,9 +65,12 @@ its direction.
    it, served by melody-together itself: asked a name, it listens in the
    browser -- the server's clock measured as an engine does, the host's
    Opus copy played where the room is, what follows fetched ahead, drift
-   seeked back past 300 ms -- or opens Melody. Melody's blackbird is its
-   centre, bobbing while music plays, the track's progress a ring around
-   it; who listens, and the room's chat, beside it. The chat is the
+   seeked back past 300 ms -- or opens Melody. It fills the window in three
+   columns -- stacked on a phone: Melody's blackbird, bobbing while music
+   plays, over what plays and its progress; the room's tracks, large --
+   what plays and whose it is, what is next, at a party the suggestions
+   with a vote each, what played; and who listens over the room's chat,
+   the height of the window. The chat is the
    server's: the last hundred lines, carried by the same long poll. It is
    the page's alone: Melody listeners chat there too, and Melody shows no
    chat of its own (2026-10-20).

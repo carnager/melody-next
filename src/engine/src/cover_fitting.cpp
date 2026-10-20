@@ -91,7 +91,8 @@ using Scaler = std::unique_ptr<SwsContext, ScalerDeleter>;
     return frame;
 }
 
-[[nodiscard]] core::Result<std::vector<std::uint8_t>> encode_jpeg(const AVFrame& picture) {
+[[nodiscard]] core::Result<std::vector<std::uint8_t>> encode_jpeg(const AVFrame& picture,
+                                                                   const int quantiser) {
     const auto* codec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
     if (codec == nullptr) {
         return std::unexpected(failure("no JPEG encoder"));
@@ -106,11 +107,9 @@ using Scaler = std::unique_ptr<SwsContext, ScalerDeleter>;
     context->pix_fmt = AV_PIX_FMT_YUVJ420P;
     context->color_range = AVCOL_RANGE_JPEG;
     context->time_base = AVRational{1, 1};
-    // A fixed quantiser rather than a bitrate: a still has no rate, and
-    // this is what makes the quality the same for every cover. 3 looks like
-    // the original at thumbnail sizes.
+    // A quantiser rather than a bitrate: a still has no rate.
     context->flags |= AV_CODEC_FLAG_QSCALE;
-    context->global_quality = FF_QP2LAMBDA * 3;
+    context->global_quality = FF_QP2LAMBDA * quantiser;
     if (avcodec_open2(context.get(), codec, nullptr) < 0) {
         return std::unexpected(failure("could not open the JPEG encoder"));
     }
@@ -126,6 +125,21 @@ using Scaler = std::unique_ptr<SwsContext, ScalerDeleter>;
         return std::unexpected(failure("the scaled cover could not be encoded"));
     }
     return std::vector<std::uint8_t>(packet->data, packet->data + packet->size);
+}
+
+// As JPEG within its budget: 3 looks like the original, and is kept where
+// the cover allows; a grainy one -- film grain, a scanned sleeve -- is coarser
+// until it fits, the last step taken whatever it weighs.
+[[nodiscard]] core::Result<std::vector<std::uint8_t>> encode_within(const AVFrame& picture,
+                                                                    const std::size_t budget) {
+    core::Result<std::vector<std::uint8_t>> encoded;
+    for (const auto quantiser : {3, 5, 7, 10, 14, 20}) {
+        encoded = encode_jpeg(picture, quantiser);
+        if (!encoded || encoded->size() <= budget) {
+            break;
+        }
+    }
+    return encoded;
 }
 
 } // namespace
@@ -151,17 +165,26 @@ core::Result<std::vector<std::uint8_t>> fit_cover(std::span<const std::uint8_t> 
     if (source.width <= 0 || source.height <= 0) {
         return std::unexpected(failure("the cover has no size"));
     }
-    if (longest <= longest_edge) {
-        return original();
-    }
+    // Within the size, it is not made larger -- but it is made lighter: a
+    // 1000-pixel cover embedded as a megabyte is no cover for a phone.
+    const bool within = longest <= longest_edge;
+    const auto edge = within ? longest : longest_edge;
     // Aspect kept; each side at least a pixel, and even, which 4:2:0 wants.
     const auto scaled = [&](int side) {
-        const auto value =
-            static_cast<int>(static_cast<std::int64_t>(side) * longest_edge / longest);
+        const auto value = static_cast<int>(static_cast<std::int64_t>(side) * edge / longest);
         return std::max(2, value & ~1);
     };
     const auto width = scaled(source.width);
     const auto height = scaled(source.height);
+    // A budget of 0.3 bytes a pixel -- 300 KB for a cover a phone's width
+    // across, 5 KB for a thumbnail -- and never less than a tiny one needs.
+    const auto budget = std::max<std::size_t>(
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3U / 10U, 4'096U);
+    // One already within the size and the budget is sent as it was, losing
+    // nothing; a heavier one is re-encoded.
+    if (within && image.size() <= budget) {
+        return original();
+    }
 
     Scaler scaler{sws_getContext(source.width, source.height,
                                  static_cast<AVPixelFormat>(source.format), width, height,
@@ -178,7 +201,11 @@ core::Result<std::vector<std::uint8_t>> fit_cover(std::span<const std::uint8_t> 
                   target->linesize) != height) {
         return std::unexpected(failure("the cover could not be scaled"));
     }
-    return encode_jpeg(*target);
+    auto encoded = encode_within(*target, budget);
+    if (within && encoded && encoded->size() >= image.size()) {
+        return original();
+    }
+    return encoded;
 }
 
 } // namespace trackknife::engine

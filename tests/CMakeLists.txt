@@ -136,7 +136,8 @@ add_test(
 add_executable(trackknife_cover_fitting_tests cover_fitting_test.cpp)
 target_link_libraries(
     trackknife_cover_fitting_tests
-    PRIVATE Trackknife::Engine trackknife_project_options trackknife_project_warnings
+    PRIVATE Trackknife::Engine PkgConfig::AVCODEC PkgConfig::AVUTIL trackknife_project_options
+            trackknife_project_warnings
 )
 add_test(
     NAME cover-fitting

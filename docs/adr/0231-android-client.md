@@ -25,7 +25,11 @@ as it does at home.
 
 **Covers are scaled by the engine.** The phone asks for a cover at the size
 it shows it, by album key, and keeps it on disk. A 300 px cover is about
-30 KB where the originals were megabytes.
+30 KB where the originals were megabytes. A cover the engine sends for a
+size is within 0.3 bytes a pixel, coarser only where a grainy one needs it
+(2026-10-20): one already small enough to look at was once sent whole, and
+a 1000 px cover embedded at a megabyte -- Royal Thunder's *Crooked Doors* --
+passed the phone's 1 MiB message limit over WebSocket and was not shown.
 
 **The phone is an agent.** It registers like `melody-agent --stream`: no
 files, the engine sends stream URLs, ExoPlayer plays them. A gapless next

@@ -370,7 +370,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
         plugin.providers.push_back(std::move(provider));
     }
     static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
-                                        QStringLiteral("run"), QStringLiteral("timeout")};
+                                        QStringLiteral("run"), QStringLiteral("timeout"),
+                                        QStringLiteral("library")};
     for (const auto& value : panels.toArray()) {
         if (!value.isObject()) {
             return fail(QStringLiteral("a panel is not an object"));
@@ -408,6 +409,20 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
                     QStringLiteral("panel \"%1\": \"timeout\" is 1 to 300 seconds").arg(panel.id));
             }
             panel.timeout_seconds = seconds;
+        }
+        if (entry.contains(QStringLiteral("library"))) {
+            const auto asked = entry.value(QStringLiteral("library"));
+            for (const auto& what : asked.toArray()) {
+                if (what.toString() != QStringLiteral("artist-albums")) {
+                    return fail(QStringLiteral("panel \"%1\": \"library\" is a list of what it "
+                                               "is told: artist-albums")
+                                    .arg(panel.id));
+                }
+                panel.artist_albums = true;
+            }
+            if (!asked.isArray()) {
+                return fail(QStringLiteral("panel \"%1\": \"library\" is a list").arg(panel.id));
+            }
         }
         plugin.panels.push_back(std::move(panel));
     }
@@ -934,18 +949,136 @@ namespace {
 
 } // namespace
 
+namespace {
+
+[[nodiscard]] QJsonObject tagsJson(const PluginTags& tags) {
+    QJsonObject object;
+    for (const auto& [name, values] : tags) {
+        QJsonArray listed;
+        for (const auto& value : values) {
+            listed.push_back(text(value));
+        }
+        object.insert(text(name), listed);
+    }
+    return object;
+}
+
+[[nodiscard]] std::string firstOf(const PluginTags& tags, const char* name) {
+    const auto found = tags.find(name);
+    return found != tags.end() && !found->second.empty() ? found->second.front() : std::string{};
+}
+
+[[nodiscard]] QString quotedTerm(const std::string& value) {
+    auto quoted = text(value);
+    quoted.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    return QLatin1Char('"') + quoted + QLatin1Char('"');
+}
+
+[[nodiscard]] std::string folded(const std::string& value) {
+    return text(value).simplified().toCaseFolded().toStdString();
+}
+
+} // namespace
+
+QString pluginArtistQuery(const PluginTags& tags) {
+    // The album artist where the track has one; a track without is its
+    // artist's, and so are the albums of that artist's tracks without one.
+    auto name = firstOf(tags, "albumartist");
+    auto id = firstOf(tags, "musicbrainzalbumartistid");
+    if (name.empty()) {
+        name = firstOf(tags, "artist");
+        id = firstOf(tags, "musicbrainzartistid");
+    }
+    if (name.empty()) {
+        return {};
+    }
+    QStringList either{
+        QStringLiteral("albumartist IS %1").arg(quotedTerm(name)),
+        QStringLiteral("(albumartist MISSING AND artist IS %1)").arg(quotedTerm(name))};
+    if (!id.empty()) {
+        either << QStringLiteral("musicbrainzalbumartistid IS %1").arg(quotedTerm(id));
+    }
+    return either.join(QStringLiteral(" OR "));
+}
+
+QJsonArray pluginArtistAlbums(const std::vector<PluginLibraryTrack>& tracks,
+                              const std::vector<std::string>& music_folders) {
+    struct Album {
+        std::string key;
+        const PluginLibraryTrack* first{nullptr};
+        PluginTags shared;
+        std::size_t tracks{0};
+    };
+    std::vector<Album> albums;
+    for (const auto& track : tracks) {
+        const auto group = firstOf(track.tags, "musicbrainzreleasegroupid");
+        auto artist = firstOf(track.tags, "albumartist");
+        if (artist.empty()) {
+            artist = firstOf(track.tags, "artist");
+        }
+        const auto key = !group.empty() ? "group\x1f" + group
+                                        : "title\x1f" + folded(firstOf(track.tags, "album")) +
+                                              "\x1f" + folded(artist);
+        auto album = std::ranges::find(albums, key, &Album::key);
+        if (album == albums.end()) {
+            albums.push_back(Album{.key = key, .first = &track, .shared = track.tags, .tracks = 0});
+            album = std::prev(albums.end());
+        } else {
+            // What every track of it says alike.
+            std::erase_if(album->shared, [&track](const auto& field) {
+                const auto found = track.tags.find(field.first);
+                return found == track.tags.end() || found->second != field.second;
+            });
+        }
+        ++album->tracks;
+    }
+    std::ranges::stable_sort(albums, {}, [](const Album& album) {
+        return std::pair{firstOf(album.first->tags, "date"), folded(firstOf(album.first->tags, "album"))};
+    });
+    QJsonArray answered;
+    for (const auto& album : albums) {
+        const auto& path = album.first->path;
+        const auto slash = path.find_last_of('/');
+        const auto folder = slash == std::string::npos ? std::string{} : path.substr(0, slash);
+        const auto root = musicFolderOf(folder, music_folders);
+        auto artist = firstOf(album.first->tags, "albumartist");
+        if (artist.empty()) {
+            artist = firstOf(album.first->tags, "artist");
+        }
+        answered.push_back(QJsonObject{
+            {QStringLiteral("album"), text(firstOf(album.first->tags, "album"))},
+            {QStringLiteral("album_artist"), text(artist)},
+            {QStringLiteral("date"), text(firstOf(album.first->tags, "date"))},
+            {QStringLiteral("folder"), text(folder)},
+            {QStringLiteral("relative_folder"), text(relativeTo(folder, root))},
+            {QStringLiteral("tracks"), static_cast<double>(album.tracks)},
+            {QStringLiteral("tags"), tagsJson(album.shared)}});
+    }
+    return answered;
+}
+
 QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
                             const std::optional<PluginTrack>& playing,
                             const std::optional<std::int64_t> duration_ms,
                             const std::vector<std::string>& music_folders,
-                            const QJsonObject& settings) {
-    const QJsonObject input{{QStringLiteral("schema"), input_schema},
-                            {QStringLiteral("panel"), panel.id},
-                            {QStringLiteral("engine"), engineJson(engine)},
-                            {QStringLiteral("playing"),
-                             playing ? QJsonValue{playingJson(*playing, duration_ms, music_folders)}
-                                     : QJsonValue{QJsonValue::Null}},
-                            {QStringLiteral("settings"), settings}};
+                            const QJsonObject& settings, const PluginPanelLibrary& library) {
+    QJsonValue told{QJsonValue::Null};
+    if (playing) {
+        auto object = playingJson(*playing, duration_ms, music_folders);
+        object.insert(QStringLiteral("tags"), tagsJson(library.tags));
+        told = object;
+    }
+    QJsonObject input{{QStringLiteral("schema"), input_schema},
+                      {QStringLiteral("panel"), panel.id},
+                      {QStringLiteral("engine"), engineJson(engine)},
+                      {QStringLiteral("playing"), told},
+                      {QStringLiteral("settings"), settings}};
+    if (panel.artist_albums) {
+        input.insert(QStringLiteral("artist_albums"),
+                     library.artist_tracks
+                         ? pluginArtistAlbums(*library.artist_tracks, music_folders)
+                         : QJsonArray{});
+    }
     return QJsonDocument{input}.toJson(QJsonDocument::Compact);
 }
 

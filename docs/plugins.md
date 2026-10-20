@@ -92,13 +92,12 @@ dialog of its own ([ADR-0300](adr/0300-plugin-settings-and-optional-features.md)
 | `link` | A page about it, `http` or `https`, shown as a link beneath it -- for a feature, where to get what it works with. |
 
 An optional feature is a toggle and the settings that require it -- About's
-dropwatch support, its address and token beneath it:
+missing albums, a Discogs token beneath it:
 
 ```json
-{"key": "dropwatch", "label": "Dropwatch support", "kind": "toggle",
- "link": "https://github.com/carnager/dropwatch"},
-{"key": "url", "label": "Address", "requires": "dropwatch"},
-{"key": "token", "label": "API token", "kind": "secret", "requires": "dropwatch"}
+{"key": "missing", "label": "Missing albums", "kind": "toggle", "default": true},
+{"key": "discogs_token", "label": "Discogs token", "kind": "secret",
+ "requires": "missing", "link": "https://www.discogs.com/settings/developers"}
 ```
 
 The toggle is told like any other setting, and so are those requiring it,
@@ -203,8 +202,30 @@ button. Its program is given
 {"schema": 1, "panel": "artist", "engine": {…}, "settings": {…},
  "playing": {"path": "…", "relative_path": "…", "title": "…", "artist": "…",
              "album": "…", "album_artist": "…", "date": "…",
-             "track_number": "…", "duration_ms": 250000}}
+             "track_number": "…", "duration_ms": 250000,
+             "tags": {"albumartist": ["Testament"],
+                      "musicbrainzalbumartistid": ["05106775-…"], …}}}
 ```
+
+`tags` is every tag the library has of the track
+([ADR-0301](adr/0301-panels-are-told-the-library.md)), named as queries
+name them -- a field Melody knows folded, lowercase without spaces, `_` or
+`-` (`musicbrainzreleasegroupid`), another as it is spelled, lowercase --
+each a list of its values. A file outside the library has none.
+
+A panel that says `"library": ["artist-albums"]` is told, too, the playing
+artist's albums in the library -- by album artist, else artist, and by
+MusicBrainz id where the track has one; one for each release group, else
+album and album artist; oldest first:
+
+```json
+"artist_albums": [{"album": "Low", "album_artist": "Testament", "date": "1994",
+                   "folder": "/srv/music/Testament/Low", "relative_folder": "Testament/Low",
+                   "tracks": 11, "tags": {"musicbrainzreleasegroupid": ["c28ee416-…"], …}}]
+```
+
+An album's `tags` are those every track of it shares. Melody asks the
+engine for them; the plugin never needs to.
 
 and answers what to show, in parts Melody draws:
 

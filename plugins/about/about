@@ -15,20 +15,21 @@ asks -- by every run together, the panel being run anew for each track --
 and a 503, its answer to being asked too often, is asked again after the
 wait it names.
 
-With Dropwatch support ticked, beneath them the artist's albums dropwatch
-(https://github.com/carnager/dropwatch) knows of that are not in the
-library -- the artist found by its MusicBrainz id, which dropwatch's are,
-else by name. dropwatch's address and API token are set with it, else
-DROPWATCH_URL and DROPWATCH_TOKEN from the environment or
-~/.config/dropwatch/client.env; a token alone is for a dropwatch at
-http://localhost:8080. dropwatch is asked anew every run, its answer
-changing as the library does; where it cannot be reached the panel says so
-and shows the rest.
+Where the files carry their MusicBrainz ids -- Melody tells a panel every
+tag (ADR-0301) -- they are used, and nothing is searched for by name.
+
+Beneath them, the artist's missing albums: their albums and EPs on
+MusicBrainz -- not compilations, live albums or the like -- that are not
+among the artist's albums in the library, which Melody tells the panel
+(ADR-0301), matched by release group, else by title. For an artist
+MusicBrainz does not know, Discogs's, with a Discogs token. What MusicBrainz
+and Discogs list is kept a day; the library is told anew every time.
 """
 import fcntl
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -37,6 +38,7 @@ import urllib.request
 
 AGENT = "Melody-about/1 (https://github.com/carnager/melody-next)"
 KEPT = 7 * 24 * 3600
+LISTED = 24 * 3600
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                      "melody", "plugins", "about")
 TRIES = 4
@@ -87,12 +89,12 @@ def musicbrainz_turn():
         turn.flush()
 
 
-def fetch(url, binary=False):
+def fetch(url, binary=False, headers=None):
     host = urllib.parse.urlsplit(url).netloc
     for attempt in range(TRIES):
         if host == "musicbrainz.org":
             musicbrainz_turn()
-        request = urllib.request.Request(url, headers={"User-Agent": AGENT})
+        request = urllib.request.Request(url, headers={"User-Agent": AGENT, **(headers or {})})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 body = response.read()
@@ -116,10 +118,10 @@ def fetch(url, binary=False):
     return None
 
 
-def cached(name):
+def cached(name, kept_for=KEPT):
     path = os.path.join(CACHE, name)
     try:
-        if time.time() - os.path.getmtime(path) < KEPT:
+        if time.time() - os.path.getmtime(path) < kept_for:
             with open(path, encoding="utf-8") as kept:
                 return json.load(kept)
     except (OSError, ValueError):
@@ -139,9 +141,25 @@ def quoted(text):
     return '"%s"' % text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def identify(artist, album):
-    """The MusicBrainz album playing and its artist -- the artist by name
-    where the album is not found."""
+def first_tag(tags, name):
+    values = tags.get(name) or []
+    return str(values[0]).strip() if values else ""
+
+
+def identify(artist, album, tags):
+    """The MusicBrainz album playing and its artist: by the ids the files
+    carry, else searched for -- the artist by name where the album is not
+    found."""
+    named = bool(first_tag(tags, "albumartist"))
+    known_artist = first_tag(tags, "musicbrainzalbumartistid" if named else "musicbrainzartistid")
+    known_album = first_tag(tags, "musicbrainzreleasegroupid")
+    if known_artist and (known_album or not album):
+        return known_artist, known_album or None
+    found_artist, found_album = search(artist, album)
+    return known_artist or found_artist, known_album or found_album
+
+
+def search(artist, album):
     key = "id-" + hashlib.sha1(("%s\x1f%s" % (artist.casefold(), album.casefold()))
                                .encode("utf-8")).hexdigest()
     known = cached(key)
@@ -286,91 +304,88 @@ def about_album(mbid, language):
     return told
 
 
-def client_env():
-    values = {}
-    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                        "dropwatch", "client.env")
-    try:
-        with open(path, encoding="utf-8") as lines:
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                values[key.strip()] = value.strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return values
+def folded(title):
+    """A title as compared: case, punctuation and spacing aside."""
+    return " ".join(re.sub(r"[^\w\s]", " ", title.casefold()).split())
 
 
-def dropwatch_setting(settings, name, key):
-    """Melody's setting, else the environment's, else client.env's."""
-    return str(settings.get(name) or os.environ.get(key) or client_env().get(key) or "").strip()
+def musicbrainz_albums(artist_id):
+    """The artist's albums and EPs on MusicBrainz -- none of a secondary
+    kind, compilations and live albums -- kept a day."""
+    key = "albums-" + artist_id
+    known = cached(key, LISTED)
+    if known is not None:
+        return known
+    groups, offset = [], 0
+    while offset < 500:
+        page = fetch("https://musicbrainz.org/ws/2/release-group?artist=%s&type=album|ep"
+                     "&fmt=json&limit=100&offset=%d" % (artist_id, offset)) or {}
+        listed = page.get("release-groups") or []
+        groups += listed
+        offset += len(listed)
+        if not listed or offset >= page.get("release-group-count", 0):
+            break
+    albums = [{"id": group["id"], "title": group.get("title") or "",
+               "date": group.get("first-release-date") or "",
+               "kind": group.get("primary-type") or "",
+               "url": "https://musicbrainz.org/release-group/" + group["id"]}
+              for group in groups if not group.get("secondary-types")]
+    keep(key, albums)
+    return albums
 
 
-class Unreachable(Exception):
-    pass
+def discogs_albums(artist, token):
+    """The artist's albums on Discogs -- the masters of their own releases
+    -- for an artist MusicBrainz does not know; kept a day."""
+    key = "discogs-" + hashlib.sha1(artist.casefold().encode("utf-8")).hexdigest()
+    known = cached(key, LISTED)
+    if known is not None:
+        return known
+    headers = {"Authorization": "Discogs token=" + token}
+    found = (fetch("https://api.discogs.com/database/search?type=artist&per_page=5&q="
+                   + urllib.parse.quote(artist), headers=headers) or {}).get("results") or []
+    same = [r for r in found if folded(re.sub(r" \(\d+\)$", "", r.get("title") or ""))
+            == folded(artist)]
+    albums = []
+    if same:
+        page = fetch("https://api.discogs.com/artists/%s/releases?sort=year&per_page=100"
+                     % same[0]["id"], headers=headers) or {}
+        albums = [{"id": "", "title": r.get("title") or "", "date": str(r.get("year") or ""),
+                   "kind": "", "url": "https://www.discogs.com/master/%s" % r["id"]}
+                  for r in page.get("releases") or []
+                  if r.get("type") == "master" and r.get("role") == "Main"]
+    keep(key, albums)
+    return albums
 
 
-def dropwatch(base, token, path):
-    request = urllib.request.Request(base + path)
-    if token:
-        request.add_header("Authorization", "Bearer " + token)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        if error.code == 401:
-            raise Unreachable("dropwatch wants an API token: create one under its settings -> "
-                              "Account and set it in Melody's Settings -> Plugins"
-                              if not token else "dropwatch refused the API token")
-        raise Unreachable("dropwatch answered %s" % error.code)
-    except (OSError, ValueError) as error:
-        raise Unreachable("dropwatch at %s: %s" % (base, getattr(error, "reason", error)))
-
-
-def folded(name):
-    return " ".join(name.casefold().split())
-
-
-def missing_albums(settings, artist_id, names):
-    """The parts for the albums dropwatch knows of the artist that are not in
-    the library, beneath a heading; none where no dropwatch is set."""
-    token = dropwatch_setting(settings, "token", "DROPWATCH_TOKEN")
-    # An address, or a token alone for a dropwatch where it is by default.
-    base = (dropwatch_setting(settings, "url", "DROPWATCH_URL")
-            or ("http://localhost:8080" if token else "")).rstrip("/")
-    if not base:
-        return []
-    try:
-        artists = dropwatch(base, token, "/api/artists").get("artists") or []
-        by_name = [folded(n) for n in names if n]
-        artist = next((a for a in artists if artist_id and a.get("id") == artist_id), None) \
-            or next((a for a in artists if folded(a.get("name") or "") in by_name), None)
-        if artist is None:
-            return [{"heading": "Missing albums"},
-                    {"paragraph": "dropwatch does not watch this artist."}]
-        page = "%s/#artist/%s" % (base, urllib.parse.quote(artist["id"]))
-        releases = dropwatch(base, token, "/api/artists/%s/releases?missing=only"
-                             % urllib.parse.quote(artist["id"])).get("releases") or []
-    except Unreachable as error:
-        return [{"heading": "Missing albums"}, {"paragraph": str(error)}]
-    if not releases:
+def missing_albums(artist_id, artist, owned, settings):
+    """The parts for the artist's albums not in the library -- `owned`, the
+    albums Melody says the library has of them -- beneath a heading."""
+    token = str(settings.get("discogs_token") or "").strip()
+    if artist_id:
+        listed = musicbrainz_albums(artist_id)
+    elif token:
+        listed = discogs_albums(artist, token)
+    else:
         return [{"heading": "Missing albums"},
-                {"text": "Nothing missing", "detail": "in dropwatch", "url": page}]
-    parts = [{"heading": "Missing albums (%d)" % len(releases)}]
-    for release in sorted(releases, key=lambda r: r.get("firstReleaseDate") or ""):
-        year = (release.get("firstReleaseDate") or "")[:4]
-        detail = " · ".join(p for p in (year, release.get("primaryType") or "") if p)
-        if release.get("mbid"):
-            url = "https://musicbrainz.org/release-group/" + release["mbid"]
-        elif release.get("discogsMasterId"):
-            url = "https://www.discogs.com/master/%s" % release["discogsMasterId"]
-        else:
-            url = page
-        parts.append({"text": release.get("title") or "?", "detail": detail, "url": url})
-    parts.append({"link": "dropwatch", "detail": artist.get("name") or "", "url": page})
-    return parts
+                {"paragraph": "MusicBrainz knows no artist of that name for certain; a Discogs "
+                              "token in About's settings would ask Discogs."}]
+    groups = set()
+    titles = set()
+    for album in owned:
+        groups.update((album.get("tags") or {}).get("musicbrainzreleasegroupid") or [])
+        titles.add(folded(album.get("album") or ""))
+    missing = sorted((a for a in listed
+                      if a["id"] not in groups and folded(a["title"]) not in titles),
+                     key=lambda a: a["date"] or "9999")
+    if not missing:
+        return [{"heading": "Missing albums"},
+                {"paragraph": "Every album and EP %s lists is in the library."
+                              % ("MusicBrainz" if artist_id else "Discogs")}]
+    return [{"heading": "Missing albums (%d)" % len(missing)}] + [
+        {"text": a["title"] or "?",
+         "detail": " · ".join(p for p in (a["date"][:4], a["kind"]) if p), "url": a["url"]}
+        for a in missing]
 
 
 def main():
@@ -382,12 +397,16 @@ def main():
     language = str(settings.get("language") or "en").strip().lower() or "en"
     show_artist = settings.get("artist", True) is not False
     show_album = settings.get("album", True) is not False and bool(album)
-    show_missing = settings.get("dropwatch") is True
+    tags = playing.get("tags") or {}
+    owned = given.get("artist_albums")
+    # Told no albums of the library -- a Melody before ADR-0301 -- it cannot
+    # say which are missing.
+    show_missing = settings.get("missing", True) is not False and isinstance(owned, list)
     if not artist:
         print(json.dumps({"title": album, "parts": [
             {"paragraph": "The track names no artist."}]}))
         return
-    artist_id, album_id = identify(artist, album)
+    artist_id, album_id = identify(artist, album, tags)
     parts = []
     title = artist
     if show_artist:
@@ -437,7 +456,7 @@ def main():
         parts += [{"link": site, "detail": name, "url": found[site]}
                   for site in order if site in found]
     if show_missing:
-        parts += missing_albums(settings, artist_id, [artist])
+        parts += missing_albums(artist_id, artist, owned, settings)
     print(json.dumps({"title": title, "parts": parts}))
 
 

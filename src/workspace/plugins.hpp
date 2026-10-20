@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -10,6 +11,7 @@
 #include <QVariant>
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -42,6 +44,9 @@ struct PluginPanel {
     QString label;
     QStringList run;
     int timeout_seconds{30};
+    // ADR-0301: `"library": ["artist-albums"]` -- told the playing
+    // artist's albums in the library.
+    bool artist_albums{false};
 };
 
 // ADR-0293: something a plugin finds for Melody when Melody has none --
@@ -233,13 +238,38 @@ struct PluginPanelContent {
 [[nodiscard]] std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json,
                                                                  QString* problem);
 
+// ADR-0301: a track as the library has it -- its path and every tag, named
+// as queries name them (a known field folded, `musicbrainzalbumartistid`;
+// another as spelled, lowercase), the values as written.
+using PluginTags = std::map<std::string, std::vector<std::string>>;
+struct PluginLibraryTrack {
+    std::string path;
+    PluginTags tags;
+};
+// What a panel is told of the library: the playing track's tags, and --
+// for a panel that asks -- the tracks of the playing artist's albums.
+struct PluginPanelLibrary {
+    PluginTags tags;
+    std::optional<std::vector<PluginLibraryTrack>> artist_tracks;
+};
+// The query that finds the albums of the artist a track's tags name: by
+// album artist, else artist, and by MusicBrainz id where the tags have one.
+// Empty when they name none.
+[[nodiscard]] QString pluginArtistQuery(const PluginTags& tags);
+// Those tracks as albums -- one for each release group, else album and
+// album artist -- oldest first, with the tags every track of each shares.
+[[nodiscard]] QJsonArray pluginArtistAlbums(const std::vector<PluginLibraryTrack>& tracks,
+                                            const std::vector<std::string>& music_folders);
+
 // The JSON a panel's run is given: what plays -- null when nothing does --
-// the engine it plays on and the plugin's settings.
+// its tags, the engine it plays on, the plugin's settings and, asked for,
+// the artist's albums.
 [[nodiscard]] QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
                                           const std::optional<PluginTrack>& playing,
                                           std::optional<std::int64_t> duration_ms,
                                           const std::vector<std::string>& music_folders,
-                                          const QJsonObject& settings);
+                                          const QJsonObject& settings,
+                                          const PluginPanelLibrary& library = {});
 
 // What a lyrics provider answers: the lyrics, as LRC or plain text, and
 // what it names their source; none found, nullopt. Its answer unread, why.

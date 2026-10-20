@@ -3,6 +3,7 @@
 // ADR-0288: plugins as actions -- their manifest, what they are told, how
 // they are run, and that they stay off until enabled.
 
+#include "trackknife/query/tkq.hpp"
 #include "workspace/plugins.hpp"
 
 #include <QCoreApplication>
@@ -13,8 +14,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
-#include <QTcpServer>
-#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -33,6 +32,7 @@ class PluginsTest final : public QObject {
     void aListIsReadOrRefused();
     void settingsAreReadKeptAndHandedOn();
     void panelsAreReadAndTheirAnswersToo();
+    void panelsAreToldTheLibrary();
     void providersAreReadAndTheirLyricsToo();
     void triggersAreReadAndTold();
     void theScriptsPluginRunsTheCommandsSet();
@@ -369,7 +369,22 @@ void PluginsTest::theExamplePluginReads() {
                             "MusicBrainz": "https://musicbrainz.org/artist/%1"}})json")
                   .arg(mbid)
                   .toUtf8());
+    writeFile(kept + QStringLiteral("/albums-") + mbid,
+              QStringLiteral(R"json([
+                  {"id": "%1", "title": "The Legacy", "date": "1987-04-21", "kind": "Album",
+                   "url": "https://musicbrainz.org/release-group/%1"},
+                  {"id": "rg-souls", "title": "Souls of Black", "date": "1990-10-01",
+                   "kind": "Album", "url": "https://musicbrainz.org/release-group/rg-souls"},
+                  {"id": "rg-trial", "title": "Trial by Fire", "date": "1988", "kind": "EP",
+                   "url": "https://musicbrainz.org/release-group/rg-trial"},
+                  {"id": "rg-new", "title": "The New Order", "date": "1988-05-05",
+                   "kind": "Album", "url": "https://musicbrainz.org/release-group/rg-new"}])json")
+                  .arg(group)
+                  .toUtf8());
     qputenv("XDG_CACHE_HOME", QFile::encodeName(cache.path()));
+    // Anything asked of the network fails: what is kept answers.
+    qputenv("http_proxy", "http://127.0.0.1:9");
+    qputenv("https_proxy", "http://127.0.0.1:9");
     const auto told = run(*about_panel,
                           PluginAction{.id = QStringLiteral("artist"),
                                        .label = QStringLiteral("About"),
@@ -447,50 +462,23 @@ void PluginsTest::theExamplePluginReads() {
     QVERIFY(std::ranges::none_of(album_drawn->parts, [](const auto& part) {
         return part.text.contains(QStringLiteral("Berkeley"));
     }));
-    // Without Dropwatch support, nothing of dropwatch.
-    QVERIFY(std::ranges::none_of(drawn->parts, [](const auto& part) {
-        return part.text.startsWith(QStringLiteral("Missing albums"));
-    }));
-
-    // ADR-0300: with it, the artist's missing albums beneath the rest,
-    // dropwatch asked for the artist by its MusicBrainz id, with the token.
-    const auto options = std::ranges::find(about_panel->settings, QStringLiteral("url"),
-                                           &PluginSetting::key);
-    QVERIFY(options != about_panel->settings.end());
-    QCOMPARE(options->needs, QStringLiteral("dropwatch"));
-    QTcpServer dropwatch;
-    QVERIFY(dropwatch.listen(QHostAddress::LocalHost));
-    QStringList asked;
-    QObject::connect(&dropwatch, &QTcpServer::newConnection, &dropwatch, [&dropwatch, &asked, mbid] {
-        auto* peer = dropwatch.nextPendingConnection();
-        QObject::connect(peer, &QTcpSocket::readyRead, peer, [peer, &asked, mbid] {
-            const auto request = peer->readAll();
-            if (!request.contains("\r\n\r\n")) {
-                return;
-            }
-            const auto path = QString::fromLatin1(request.split(' ').value(1));
-            asked << path + (request.contains("Authorization: Bearer t0ken") ? "" : " untold");
-            const auto body =
-                path == QStringLiteral("/api/artists")
-                    ? QStringLiteral(R"({"artists": [{"id": "%1", "name": "Testament"}]})")
-                          .arg(mbid)
-                          .toUtf8()
-                    : QByteArray{R"({"releases": [
-                          {"title": "Souls of Black", "firstReleaseDate": "1990-10-01",
-                           "primaryType": "Album", "mbid": "2a05ffff"},
-                          {"title": "The New Order", "firstReleaseDate": "1988-05-05",
-                           "primaryType": "Album"}]})"};
-            peer->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: "
-                        "close\r\nContent-Length: " +
-                        QByteArray::number(body.size()) + "\r\n\r\n" + body);
-            peer->disconnectFromHost();
-        });
-    });
-    auto with_dropwatch = pluginSettings(*about_panel);
-    with_dropwatch[QStringLiteral("dropwatch")] = true;
-    with_dropwatch[QStringLiteral("url")] =
-        QStringLiteral("http://127.0.0.1:%1").arg(dropwatch.serverPort());
-    with_dropwatch[QStringLiteral("token")] = QStringLiteral("t0ken");
+    // ADR-0301: the missing albums -- MusicBrainz's albums and EPs, kept a
+    // day, that are not among the artist's albums Melody says the library
+    // has: matched by release group, and by title, case and punctuation
+    // aside.
+    PluginPanelLibrary library;
+    library.artist_tracks = std::vector<PluginLibraryTrack>{
+        {.path = "/srv/music/Testament/The Legacy/01.flac",
+         .tags = {{"album", {"The Legacy"}},
+                  {"albumartist", {"Testament"}},
+                  {"musicbrainzreleasegroupid", {group.toStdString()}}}},
+        {.path = "/srv/music/Testament/Souls/01.flac",
+         .tags = {{"album", {"souls of black!"}}, {"albumartist", {"Testament"}}}}};
+    // The ids the files carry stand for the search: told them, About asks
+    // nothing it has not kept -- here, nothing of anyone.
+    library.tags = {{"albumartist", {"Testament"}},
+                    {"musicbrainzalbumartistid", {mbid.toStdString()}},
+                    {"musicbrainzreleasegroupid", {group.toStdString()}}};
     const auto missing = run(*about_panel,
                              PluginAction{.id = QStringLiteral("about"),
                                           .label = QStringLiteral("About"),
@@ -502,14 +490,13 @@ void PluginsTest::theExamplePluginReads() {
                                               PluginTrack{.path = "/srv/music/Testament/01.flac",
                                                           .title = "Over the Wall",
                                                           .artist = "Testament",
-                                                          .album = "The Legacy",
+                                                          .album = "Legacy (Remaster)",
                                                           .album_artist = "Testament",
                                                           .date = "1987",
                                                           .track_number = "1"},
-                                              std::nullopt, {}, with_dropwatch));
+                                              std::nullopt, {}, pluginSettings(*about_panel),
+                                              library));
     QVERIFY2(missing.succeeded, qPrintable(missing.text));
-    QCOMPARE(asked, (QStringList{QStringLiteral("/api/artists"),
-                                 QStringLiteral("/api/artists/%1/releases?missing=only").arg(mbid)}));
     const auto missing_drawn = parsePluginPanel(missing.text.toUtf8(), &problem);
     QVERIFY2(missing_drawn.has_value(), qPrintable(problem));
     const auto section = std::ranges::find_if(missing_drawn->parts, [](const auto& part) {
@@ -517,13 +504,123 @@ void PluginsTest::theExamplePluginReads() {
                part.text == QStringLiteral("Missing albums (2)");
     });
     QVERIFY(section != missing_drawn->parts.end());
-    // Oldest first, each opening its MusicBrainz page, else dropwatch's.
-    QCOMPARE(std::next(section)->text, QStringLiteral("The New Order"));
-    QCOMPARE(std::next(section)->detail, QStringLiteral("1988 · Album"));
-    QCOMPARE(std::next(section, 2)->text, QStringLiteral("Souls of Black"));
+    // Oldest first, each opening its MusicBrainz page.
+    QCOMPARE(std::next(section)->text, QStringLiteral("Trial by Fire"));
+    QCOMPARE(std::next(section)->detail, QStringLiteral("1988 · EP"));
+    QCOMPARE(std::next(section, 2)->text, QStringLiteral("The New Order"));
     QCOMPARE(std::next(section, 2)->url,
-             QStringLiteral("https://musicbrainz.org/release-group/2a05ffff"));
-    QVERIFY(std::next(section)->url.endsWith(QStringLiteral("/#artist/") + mbid));
+             QStringLiteral("https://musicbrainz.org/release-group/rg-new"));
+    QCOMPARE(std::distance(section, missing_drawn->parts.end()), 3);
+    // The album by its id, though the tags name it otherwise.
+    QVERIFY(std::ranges::any_of(missing_drawn->parts, [](const auto& part) {
+        return part.kind == PluginPanelContent::Part::Kind::heading &&
+               part.text == QStringLiteral("The Legacy");
+    }));
+    qunsetenv("http_proxy");
+    qunsetenv("https_proxy");
+
+}
+
+// ADR-0301: a panel saying so is told the playing artist's albums in the
+// library, found by a query of the tags, made of the tracks found.
+void PluginsTest::panelsAreToldTheLibrary() {
+    const auto with = [](const QString& panel) {
+        return QStringLiteral(R"({"schema": 1, "name": "Told", "panels": [%1]})")
+            .arg(panel)
+            .toUtf8();
+    };
+    QString problem;
+    const auto asking = parsePluginManifest(
+        with(R"({"id": "a", "label": "A", "run": ["x"], "library": ["artist-albums"]})"),
+        QStringLiteral("/p/told"), &problem);
+    QVERIFY2(asking.has_value(), qPrintable(problem));
+    QVERIFY(asking->panels.front().artist_albums);
+    const auto plain = parsePluginManifest(with(R"({"id": "a", "label": "A", "run": ["x"]})"),
+                                           QStringLiteral("/p/told"), &problem);
+    QVERIFY(plain.has_value() && !plain->panels.front().artist_albums);
+    for (const auto* broken : {R"({"id": "a", "label": "A", "run": ["x"], "library": ["all"]})",
+                               R"({"id": "a", "label": "A", "run": ["x"],
+                                   "library": "artist-albums"})"}) {
+        problem.clear();
+        QVERIFY2(!parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"),
+                                      &problem),
+                 broken);
+        QVERIFY(!problem.isEmpty());
+    }
+
+    // The artist: the album artist, by id too; a name with a quote in it
+    // quoted as queries quote; a track without an album artist its artist's.
+    const auto query = pluginArtistQuery({{"albumartist", {"Guns N' \"Roses\""}},
+                                          {"musicbrainzalbumartistid", {"id-1"}},
+                                          {"artist", {"Slash"}}});
+    QCOMPARE(query, QStringLiteral(R"(albumartist IS "Guns N' ""Roses""" OR (albumartist MISSING )"
+                                   R"(AND artist IS "Guns N' ""Roses""") OR )"
+                                   R"(musicbrainzalbumartistid IS "id-1")"));
+    QVERIFY2(query::compile_tkq(query.toStdString()).has_value(), qPrintable(query));
+    QCOMPARE(pluginArtistQuery({{"artist", {"Slash"}}}),
+             QStringLiteral(R"(albumartist IS "Slash" OR (albumartist MISSING AND artist IS "Slash"))"));
+    QVERIFY(pluginArtistQuery({{"title", {"Untitled"}}}).isEmpty());
+
+    // One album for each release group, else album and album artist alike,
+    // oldest first, with what every track of it shares.
+    const auto albums = pluginArtistAlbums(
+        {{.path = "/srv/music/A/Later/01.flac",
+          .tags = {{"album", {"Later"}}, {"albumartist", {"A"}}, {"date", {"2001"}},
+                   {"title", {"One"}}}},
+         {.path = "/srv/music/A/First/CD1/01.flac",
+          .tags = {{"album", {"First"}}, {"albumartist", {"A"}}, {"date", {"1990"}},
+                   {"musicbrainzreleasegroupid", {"rg-1"}}, {"title", {"Two"}}}},
+         {.path = "/srv/music/A/First/CD2/01.flac",
+          .tags = {{"album", {"First (Disc 2)"}}, {"albumartist", {"A"}}, {"date", {"1990"}},
+                   {"musicbrainzreleasegroupid", {"rg-1"}}, {"title", {"Three"}}}},
+         {.path = "/srv/music/A/Later/02.flac",
+          .tags = {{"album", {"later"}}, {"artist", {"a"}}, {"date", {"2001"}},
+                   {"title", {"Four"}}}}},
+        {"/srv/music"});
+    QCOMPARE(albums.size(), 2);
+    const auto first = albums.at(0).toObject();
+    QCOMPARE(first.value(QStringLiteral("album")).toString(), QStringLiteral("First"));
+    QCOMPARE(first.value(QStringLiteral("tracks")).toInt(), 2);
+    QCOMPARE(first.value(QStringLiteral("relative_folder")).toString(),
+             QStringLiteral("A/First/CD1"));
+    const auto shared = first.value(QStringLiteral("tags")).toObject();
+    QCOMPARE(shared.keys(), (QStringList{QStringLiteral("albumartist"), QStringLiteral("date"),
+                                         QStringLiteral("musicbrainzreleasegroupid")}));
+    const auto later = albums.at(1).toObject();
+    QCOMPARE(later.value(QStringLiteral("album")).toString(), QStringLiteral("Later"));
+    QCOMPARE(later.value(QStringLiteral("album_artist")).toString(), QStringLiteral("A"));
+    QCOMPARE(later.value(QStringLiteral("tracks")).toInt(), 2);
+
+    // Told: the tags with what plays, the albums only to a panel that asks.
+    PluginPanelLibrary library;
+    library.tags = {{"musicbrainztrackid", {"t-1"}}};
+    library.artist_tracks = std::vector<PluginLibraryTrack>{};
+    const PluginTrack playing{.path = "/srv/music/A/Later/01.flac",
+                              .title = "One",
+                              .artist = "A",
+                              .album = "Later",
+                              .album_artist = {},
+                              .date = {},
+                              .track_number = {}};
+    const auto told = QJsonDocument::fromJson(pluginPanelInput(asking->panels.front(),
+                                                               PluginEngine{}, playing,
+                                                               std::nullopt, {}, {}, library))
+                          .object();
+    QCOMPARE(told.value(QStringLiteral("playing"))
+                 .toObject()
+                 .value(QStringLiteral("tags"))
+                 .toObject()
+                 .value(QStringLiteral("musicbrainztrackid"))
+                 .toArray()
+                 .first()
+                 .toString(),
+             QStringLiteral("t-1"));
+    QVERIFY(told.value(QStringLiteral("artist_albums")).isArray());
+    const auto untold = QJsonDocument::fromJson(pluginPanelInput(plain->panels.front(),
+                                                                 PluginEngine{}, playing,
+                                                                 std::nullopt, {}, {}, library))
+                            .object();
+    QVERIFY(!untold.contains(QStringLiteral("artist_albums")));
 }
 
 // What a `list` action answers: a heading and rows of text, detail and a

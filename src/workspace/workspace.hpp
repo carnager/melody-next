@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "workspace/plugins.hpp"
 #include "bench/desktop_media_session.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/engine_key.hpp"
@@ -929,6 +930,12 @@ class Workspace final : public QObject {
     using LyricsAnswer = core::Result<std::optional<metadata::Lyrics>>;
     [[nodiscard]] std::optional<QFuture<LyricsAnswer>>
     lyricsOfPlaying(const EnginePlayback::State& state);
+    // ADR-0301: what a panel is told of the library -- the playing file's
+    // tags and, asked for, the tracks of its artist's albums -- read on a
+    // worker from the engine that plays it. Nullopt when nothing plays on
+    // an engine; empty where the library does not have the file.
+    [[nodiscard]] std::optional<QFuture<PluginPanelLibrary>>
+    pluginLibraryOf(const std::string& raw_path, bool artist_albums);
     // ADR-0226, ADR-0228: where it sounds. Taken from each state -- saying
     // what changed since the last -- and offered as a menu of the engine's
     // speakers and the chosen one's devices.

@@ -289,4 +289,63 @@ Workspace::lyricsOfPlaying(const EnginePlayback::State& state) {
     });
 }
 
+std::optional<QFuture<PluginPanelLibrary>>
+Workspace::pluginLibraryOf(const std::string& raw_path, const bool artist_albums) {
+    const auto* link = linkOf(transport_);
+    auto* source = link != nullptr ? catalogueOf(link->key) : nullptr;
+    if (!playingOnEngine() || source == nullptr || raw_path.empty()) {
+        return std::nullopt;
+    }
+    std::shared_ptr<engine::Catalogue> catalogue{source->openDeferred()};
+    return QtConcurrent::run([catalogue = std::move(catalogue), raw_path, artist_albums] {
+        // As many as an artist has, and not a whole library's "Various
+        // Artists" read for a panel.
+        constexpr std::size_t most_tracks = 2'000;
+        const auto tagsOf = [](persistence::LibraryTrackSnapshot& snapshot) {
+            PluginTags tags;
+            for (auto& [name, values] : snapshot.facts.fields) {
+                auto& kept = tags[name];
+                for (auto& value : values) {
+                    kept.push_back(std::move(value.first));
+                }
+            }
+            return tags;
+        };
+        PluginPanelLibrary told;
+        auto playing = catalogue->cached_tracks({raw_path});
+        if (!playing || playing->empty()) {
+            return told;
+        }
+        told.tags = tagsOf(playing->front());
+        if (!artist_albums) {
+            return told;
+        }
+        told.artist_tracks.emplace();
+        const auto query = pluginArtistQuery(told.tags);
+        if (query.isEmpty()) {
+            return told;
+        }
+        const auto compiled = query::compile_tkq(query.toStdString());
+        if (!compiled) {
+            return told;
+        }
+        auto paths = catalogue->filter_paths(*compiled);
+        if (!paths) {
+            return told;
+        }
+        if (paths->size() > most_tracks) {
+            paths->resize(most_tracks);
+        }
+        auto tracks = catalogue->cached_tracks(*paths);
+        if (!tracks) {
+            return told;
+        }
+        for (auto& track : *tracks) {
+            told.artist_tracks->push_back(
+                PluginLibraryTrack{.path = track.raw_path, .tags = tagsOf(track)});
+        }
+        return told;
+    });
+}
+
 } // namespace trackknife::bench

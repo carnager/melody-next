@@ -477,7 +477,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showPluginPanelSubject(PluginPanelDock& slot, const PluginTrack& playing);
     // Runs the panel's program on what plays; its answer drawn unless
     // asked again since.
-    void runPluginPanelWith(PluginPanelDock& slot, QObject* context, PluginPlaying told);
+    void runPluginPanelWith(PluginPanelDock& slot, QObject* context, PluginPlaying told,
+                            const PluginPanelLibrary& library = {});
     // ADR-0295: each enabled plugin's triggers -- run on the library's news,
     // every so often, at start, or from Workspace › Run. One run of each at a
     // time; asked again while it runs, it runs once more after.

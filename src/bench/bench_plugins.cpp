@@ -13,6 +13,7 @@
 #include "workspace/plugins.hpp"
 
 #include <QClipboard>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QMenuBar>
@@ -313,7 +314,23 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
             }
             showPluginPanelSubject(*raw, told.track);
         }
-        runPluginPanelWith(*raw, guard.data(), std::move(told));
+        // ADR-0301: and what the library says of it -- its tags, and the
+        // artist's albums for a panel that asks.
+        auto library = workspace_.pluginLibraryOf(told.track.path, raw->panel.artist_albums);
+        if (!library) {
+            runPluginPanelWith(*raw, guard.data(), std::move(told));
+            return;
+        }
+        auto* watcher = new QFutureWatcher<PluginPanelLibrary>(guard.data());
+        connect(watcher, &QFutureWatcher<PluginPanelLibrary>::finished, guard.data(),
+                [this, raw, guard, watcher, told = std::move(told)]() mutable {
+                    watcher->deleteLater();
+                    if (guard.isNull() || raw->run != guard.data()) {
+                        return;
+                    }
+                    runPluginPanelWith(*raw, guard.data(), std::move(told), watcher->result());
+                });
+        watcher->setFuture(*library);
     });
 }
 
@@ -327,12 +344,12 @@ void BenchMainWindow::showPluginPanelSubject(PluginPanelDock& slot, const Plugin
 }
 
 void BenchMainWindow::runPluginPanelWith(PluginPanelDock& slot, QObject* context,
-                                         PluginPlaying told) {
+                                         PluginPlaying told, const PluginPanelLibrary& library) {
     auto* raw = &slot;
     runPluginPanel(
         slot.plugin, slot.panel,
         pluginPanelInput(slot.panel, told.engine, told.track, told.duration_ms, told.music_folders,
-                         pluginSettings(slot.plugin)),
+                         pluginSettings(slot.plugin), library),
         context, [raw, context](const PluginOutcome& outcome) {
             // Asked again since, or gone: this answer is not wanted.
             if (raw->run != context) {

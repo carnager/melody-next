@@ -3,7 +3,9 @@
 ## Status
 
 Accepted, 2026-10-20. Changes where the settings of ADR-0288 are set, and
-adds two keys to a setting in `plugin.json`.
+adds two keys to a setting in `plugin.json`. Decision 4, About's dropwatch
+support, is superseded by ADR-0301: About works out the missing albums
+itself.
 
 ## Context
 

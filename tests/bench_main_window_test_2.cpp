@@ -2829,6 +2829,104 @@ echo "shared:${relative:-$album}"
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0301: a panel is told every tag the library has of what plays, and,
+// asking for them, the artist's albums there -- by the album artist's
+// MusicBrainz id and name, one for each release group.
+void BenchMainWindowTest::aPluginPanelIsToldTheLibrary() {
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/told");
+    QVERIFY(QDir{}.mkpath(folder));
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto input = media.filePath(QStringLiteral("input.json"));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Told", "panels": [{"id": "told",
+                          "label": "Told", "run": ["./told"], "library": ["artist-albums"]}]})");
+        QFile script{folder + QStringLiteral("/told")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        // What it was given, kept for the test to read.
+        script.write(QStringLiteral("#!/bin/sh\ncat > '%1'\n"
+                                    "printf '{\"title\": \"Told\", \"parts\": []}'\n")
+                         .arg(input)
+                         .toUtf8());
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("told")), true);
+    // Two tracks of one release group, and another artist's.
+    const auto music = media.filePath(QStringLiteral("music"));
+    for (const auto* name : {"Credit/Rich/one.flac", "Credit/Rich/two.flac"}) {
+        const auto path = music + QLatin1Char('/') + QLatin1String(name);
+        QVERIFY(QDir{}.mkpath(QFileInfo{path}.absolutePath()));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    }
+    const auto other = music + QStringLiteral("/Project/Tone/tone.flac");
+    QVERIFY(QDir{}.mkpath(QFileInfo{other}.absolutePath()));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), other));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto* panel = window.localLibrary();
+    QVERIFY(panel != nullptr);
+    panel->browser().addRoot(QFile::encodeName(music).toStdString());
+    QTRY_VERIFY(!panel->browser().rootPaths().empty());
+    {
+        persistence::LibraryScanProgress progress;
+        QVERIFY(window.localCatalogue()->open()->scan({}, progress).has_value());
+    }
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-told-told"));
+    QVERIFY(dock != nullptr);
+    if (dock->isHidden()) {
+        window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+    }
+    QTRY_VERIFY(dock->isVisible());
+
+    // Told here that it plays; the engine, playing nothing, says nothing
+    // of it, and the library says the rest.
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    EnginePlayback::State state;
+    state.status = QStringLiteral("playing");
+    state.entry = QStringLiteral("e1");
+    state.path = music + QStringLiteral("/Credit/Rich/one.flac");
+    window.refreshPluginPanels(state);
+    QTRY_VERIFY_WITH_TIMEOUT(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title")) !=
+                                 nullptr,
+                             10'000);
+    QFile told_file{input};
+    QVERIFY(told_file.open(QIODevice::ReadOnly));
+    const auto told = QJsonDocument::fromJson(told_file.readAll()).object();
+    const auto tags = told.value(QStringLiteral("playing")).toObject().value(QStringLiteral("tags"))
+                          .toObject();
+    QCOMPARE(tags.value(QStringLiteral("musicbrainzalbumartistid")).toArray().first().toString(),
+             QStringLiteral("77777777-7777-7777-7777-777777777777"));
+    QCOMPARE(tags.value(QStringLiteral("artist")).toArray().size(), 2);
+    // A tag the library does not know as it is spelled, case aside.
+    QCOMPARE(tags.value(QStringLiteral("custom_field")).toArray().last().toString(),
+             QStringLiteral("second custom value"));
+    const auto albums = told.value(QStringLiteral("artist_albums")).toArray();
+    QCOMPARE(albums.size(), 1);
+    const auto album = albums.first().toObject();
+    QCOMPARE(album.value(QStringLiteral("album")).toString(), QStringLiteral("Rich Metadata"));
+    QCOMPARE(album.value(QStringLiteral("album_artist")).toString(),
+             QStringLiteral("Album Credit"));
+    QCOMPARE(album.value(QStringLiteral("tracks")).toInt(), 2);
+    QCOMPARE(album.value(QStringLiteral("relative_folder")).toString(),
+             QStringLiteral("Credit/Rich"));
+    QCOMPARE(album.value(QStringLiteral("tags"))
+                 .toObject()
+                 .value(QStringLiteral("musicbrainzreleasegroupid"))
+                 .toArray()
+                 .first()
+                 .toString(),
+             QStringLiteral("44444444-4444-4444-4444-444444444444"));
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 // ADR-0291: a plugin's panel, toggled in the Playback menu beside Lyrics,
 // asked about what plays while open and drawn as the parts it answers.
 void BenchMainWindowTest::aPluginPanelShowsWhatItSaysAboutThePlayingTrack() {

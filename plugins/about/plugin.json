@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "About",
-  "description": "The playing artist and album from MusicBrainz and Wikipedia: a photo, summaries, the label and links -- and, with dropwatch, the artist's albums missing from the library",
+  "description": "The playing artist and album from MusicBrainz and Wikipedia: a photo, summaries, the label and links -- and the artist's albums missing from the library",
   "panels": [
     {
       "id": "about",
@@ -9,7 +9,10 @@
       "run": [
         "./about"
       ],
-      "timeout": 60
+      "timeout": 60,
+      "library": [
+        "artist-albums"
+      ]
     }
   ],
   "settings": [
@@ -50,25 +53,19 @@
       "help": "Which Wikipedia to read. Where it has no article, the English one."
     },
     {
-      "key": "dropwatch",
-      "label": "Dropwatch support",
+      "key": "missing",
+      "label": "Missing albums",
       "kind": "toggle",
-      "default": false,
-      "help": "The artist's albums dropwatch knows of that are not in the library, beneath the rest",
-      "link": "https://github.com/carnager/dropwatch"
+      "default": true,
+      "help": "The artist's albums and EPs on MusicBrainz that are not in the library"
     },
     {
-      "key": "url",
-      "label": "Address",
-      "requires": "dropwatch",
-      "help": "Where dropwatch answers. Empty: http://localhost:8080 where a token is set"
-    },
-    {
-      "key": "token",
-      "label": "API token",
+      "key": "discogs_token",
+      "label": "Discogs token",
       "kind": "secret",
-      "requires": "dropwatch",
-      "help": "dropwatch: settings -> Account"
+      "requires": "missing",
+      "help": "For an artist MusicBrainz does not know: a personal access token, from Discogs's developer settings",
+      "link": "https://www.discogs.com/settings/developers"
     }
   ]
 }

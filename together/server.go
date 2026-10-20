@@ -23,21 +23,31 @@ import (
 //	GET    /rooms/ROOM/state?after=N&name=WHO&wait=MS
 //	                                      the next state  (the invite, or the host key),
 //	                                      waited for MS at most (25 s)
+//	POST   /rooms/ROOM/chat               a line said: {name, text} (the invite)
 //	POST   /rooms/ROOM/leave?name=WHO     a listener goes (the invite)
 //	PUT    /rooms/ROOM/tracks/TRACK       the host's copy of a track (the host key)
 //	GET    /rooms/ROOM/tracks/TRACK       that copy, for whoever lacks one (the invite,
 //	                                      as a header or ?key=); ranges honoured
-//	GET    /rooms/ROOM                    the invite, opened in a browser: how to join
+//	GET    /rooms/ROOM                    the invite, opened in a browser: the room to
+//	                                      listen in, or the way into Melody
+//	GET    /assets/mascot.svg             Melody's blackbird
 //	DELETE /rooms/ROOM                    the room closes (the host key)
 //
 // Each key travels as "Authorization: Bearer KEY"; every answer is JSON.
 
-// What an invite opens in a browser: how to join with it. The key is after
-// the #, so the server never sees it, and the page is the same for every
-// room -- which says nothing of whether there is one.
+// What an invite opens in a browser: the room, to listen in there, or the
+// way into Melody (ADR-0302 phase 3). The key is after the #, so the server
+// never sees it, and the page is the same for every room -- which says
+// nothing of whether there is one.
 //
-//go:embed invite.html
-var invitePage []byte
+//go:embed web/room.html
+var roomPage []byte
+
+// Melody's blackbird, a copy of packaging/icons/melody-mascot.svg: Go embeds
+// only what is beside it.
+//
+//go:embed web/mascot.svg
+var mascot []byte
 
 // A state is a track's description; anything near this is not one.
 const maximumState = 256 << 10
@@ -148,6 +158,29 @@ func (s *server) handler() http.Handler {
 			Ms    int64    `json:"ms"`
 		}{found, s.tracks.names(room), serverMs()})
 	}))
+	mux.HandleFunc("POST /rooms/{room}/chat", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		var line struct {
+			Name string `json:"name"`
+			Text string `json:"text"`
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 8<<10))
+		if err != nil || json.Unmarshal(body, &line) != nil {
+			refuse(w, http.StatusBadRequest, "a line is {name, text}")
+			return
+		}
+		line.Name = strings.TrimSpace(line.Name)
+		line.Text = strings.TrimSpace(line.Text)
+		if line.Name == "" || len(line.Name) > 64 || line.Text == "" || len([]rune(line.Text)) > 500 ||
+			strings.IndexFunc(line.Name, func(c rune) bool { return !unicode.IsPrint(c) }) >= 0 {
+			refuse(w, http.StatusBadRequest, "a name of at most 64 characters, and a line of at most 500")
+			return
+		}
+		if err := s.rooms.say(room, line.Name, line.Text); err != nil {
+			refuse(w, http.StatusNotFound, err.Error())
+			return
+		}
+		answer(w, http.StatusOK, map[string]bool{"said": true})
+	}))
 	mux.HandleFunc("POST /rooms/{room}/leave", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		if name, ok := listenerName(r); ok && name != "" {
 			s.rooms.leave(room, name)
@@ -158,8 +191,14 @@ func (s *server) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
-		_, _ = w.Write(invitePage)
+			"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "+
+				"img-src 'self'; media-src 'self'; connect-src 'self'")
+		_, _ = w.Write(roomPage)
+	})
+	mux.HandleFunc("GET /assets/mascot.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(mascot)
 	})
 	mux.HandleFunc("PUT /rooms/{room}/tracks/{track}", s.opened(host, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		err := s.tracks.put(room, r.PathValue("track"), r.Body)

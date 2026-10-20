@@ -153,9 +153,9 @@ func TestInvitePage(t *testing.T) {
 		if response.StatusCode != 200 || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") {
 			t.Fatalf("an invite opens a page: %d %s", response.StatusCode, response.Header.Get("Content-Type"))
 		}
-		if !strings.Contains(string(page), "Join the listening room") ||
+		if !strings.Contains(string(page), "Listen here") ||
 			!strings.Contains(string(page), "melody://together/join?invite=") {
-			t.Fatal("which opens Melody, or says how to join by hand")
+			t.Fatal("to listen in the browser, or to open Melody")
 		}
 	}
 }
@@ -244,6 +244,61 @@ func TestTracksKeptAnHour(t *testing.T) {
 	kept.sweep()
 	if len(kept.names("r")) != 0 {
 		t.Fatal("a track older than an hour goes")
+	}
+}
+
+// The room's chat: said by whoever holds the invite, to everyone waiting,
+// the last hundred kept for those arriving.
+func TestChat(t *testing.T) {
+	rooms := newRooms("pw")
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 2 * time.Second}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	made, _ := rooms.make("pw")
+	chat := "/rooms/" + made.Room + "/chat"
+	if status, _ := c.do("POST", chat, "guess", `{"name":"Ana","text":"hi"}`); status != 403 {
+		t.Fatal("nothing said without the invite")
+	}
+	for _, bad := range []string{`{"name":"","text":"hi"}`, `{"name":"Ana","text":"  "}`, `nope`,
+		`{"name":"Ana","text":"` + strings.Repeat("x", 501) + `"}`} {
+		if status, _ := c.do("POST", chat, made.Invite, bad); status != 400 {
+			t.Fatalf("refused: %s", bad)
+		}
+	}
+	woke := make(chan map[string]any)
+	go func() {
+		_, body := c.do("GET", "/rooms/"+made.Room+"/state?after=0&wait=1500", made.HostKey, "")
+		woke <- body
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if status, _ := c.do("POST", chat, made.Invite, `{"name":"Ana","text":"this riff!"}`); status != 200 {
+		t.Fatal("a line is said")
+	}
+	body := <-woke
+	lines := body["chat"].([]any)
+	if len(lines) != 1 || lines[0].(map[string]any)["text"] != "this riff!" || lines[0].(map[string]any)["name"] != "Ana" {
+		t.Fatalf("and everyone waiting has it: %v", body["chat"])
+	}
+	for index := 0; index < keptChat+5; index++ {
+		_ = rooms.say(made.Room, "Bo", "line")
+	}
+	if seen, _ := rooms.next(context.Background(), made.Room, 0, "", time.Millisecond); len(seen.Chat) != keptChat {
+		t.Fatal("the last hundred are kept")
+	}
+}
+
+func TestMascot(t *testing.T) {
+	served := httptest.NewServer((&server{rooms: newRooms("pw"), tracks: keptIn(t), wait: time.Second}).handler())
+	defer served.Close()
+	response, err := http.Get(served.URL + "/assets/mascot.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "image/svg+xml" ||
+		!strings.Contains(string(body), "<svg") {
+		t.Fatal("the blackbird is there for the page")
 	}
 }
 

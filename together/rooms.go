@@ -53,8 +53,20 @@ type seen struct {
 	Revision  uint64          `json:"revision"`
 	State     json.RawMessage `json:"state"`
 	Listeners []string        `json:"listeners"`
+	Chat      []said          `json:"chat"`
 	Closed    bool            `json:"closed"`
 }
+
+// A line of the room's chat: who, what, when on the server's clock.
+type said struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+	Text string `json:"text"`
+	Ms   int64  `json:"ms"`
+}
+
+// The chat a room keeps: enough to read back on arriving.
+const keptChat = 100
 
 type room struct {
 	hostKey   string
@@ -64,6 +76,8 @@ type room struct {
 	listeners map[string]time.Time
 	touched   time.Time
 	closed    bool
+	chat      []said
+	chatID    uint64
 	// Closed, and a new one made, whenever the room changes: whoever waits
 	// on it wakes.
 	changed chan struct{}
@@ -155,7 +169,10 @@ func (found *room) seen() seen {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return seen{Revision: found.revision, State: found.state, Listeners: names, Closed: found.closed}
+	chat := make([]said, len(found.chat))
+	copy(chat, found.chat)
+	return seen{Revision: found.revision, State: found.state, Listeners: names, Chat: chat,
+		Closed: found.closed}
 }
 
 // The host's: a new state, numbered and handed to everyone waiting.
@@ -225,6 +242,24 @@ func (r *rooms) touch(name string) {
 		found.touched = r.now()
 		found.moved()
 	}
+}
+
+// A line of chat, said to everyone waiting.
+func (r *rooms) say(name, who, text string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	found := r.rooms[name]
+	if found == nil || found.closed {
+		return errNoRoom
+	}
+	found.chatID++
+	found.chat = append(found.chat, said{ID: found.chatID, Name: who, Text: text, Ms: r.now().UnixMilli()})
+	if len(found.chat) > keptChat {
+		found.chat = found.chat[len(found.chat)-keptChat:]
+	}
+	found.touched = r.now()
+	found.moved()
+	return nil
 }
 
 func (r *rooms) leave(name, who string) {

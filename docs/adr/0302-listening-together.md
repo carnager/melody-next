@@ -3,11 +3,10 @@
 ## Status
 
 Accepted, 2026-10-20. Phase 1 -- everyone plays their own copy -- is built
-with this record, and phase 2 -- the host's copy for those without one --
-after it; 
-phase 3 -- a web page for friends without Melody -- phase 4 -- party
-mode, suggestions and votes -- and then chat and the phone are its
-direction.
+with this record; phase 2 -- the host's copy for those without one -- and
+phase 3 -- a web page for friends without Melody, with the room's chat --
+after it. Phase 4 -- party mode, suggestions and votes -- the chat in
+Melody, and the phone are its direction.
 
 ## Context
 
@@ -58,10 +57,14 @@ direction.
    keeps a track an hour on disk, within a size for all, and none past its
    room. The host's upload is one copy of
    each track: a hundred kilobits a second, for any number of friends.
-6. **Phase 3: a web page, for friends without Melody.** Served by
-   melody-together itself: the browser keeps the same clock and plays the
-   host's Opus files as phase 2 sends them, with the room's chat and who
-   listens around it -- and Melody's mascot at its centre.
+6. **Phase 3: a web page, for friends without Melody.** The invite opens
+   it, served by melody-together itself: asked a name, it listens in the
+   browser -- the server's clock measured as an engine does, the host's
+   Opus copy played where the room is, what follows fetched ahead, drift
+   seeked back past 300 ms -- or opens Melody. Melody's blackbird is its
+   centre, bobbing while music plays, the track's progress a ring around
+   it; who listens, and the room's chat, beside it. The chat is the
+   server's: the last hundred lines, carried by the same long poll.
 7. **Phase 4: party mode.** A room the host opens as a party lets anyone
    suggest a track -- from their own library, or the host's -- and vote for
    the suggestions; the host's engine takes the most wanted into its Up Next
@@ -91,7 +94,11 @@ direction.
 ## Verification
 
 - `together` (`go test` in `together/`): rooms, passwords and invites;
-  state kept and long-polled; listeners gone and rooms idle swept.
+  state kept and long-polled; listeners gone and rooms idle swept; the chat;
+  the page and the blackbird served.
+- By hand, in headless Chromium against a local server: the page joins,
+  plays within 60 ms of the room, follows a seek and a pause, and chats
+  both ways.
 - `engine-together`: a host and a listener engine, each with the album: the
   listener plays the host's track at the host's position; a seek, a drift
   and a pause followed; a track it lacks played from the host's copy, where

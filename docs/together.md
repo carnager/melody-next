@@ -10,8 +10,12 @@ A friend who has the track plays their **own copy**. One who does not gets
 the **host's**: while anyone listens, the host's engine sends its Opus copy
 (160 kbit/s) of what plays, and of what follows, to the server -- once,
 however many listen -- and a listener lacking it fetches it before it is
-due. A web page for friends without Melody, and a party mode with
-suggestions and votes, come next.
+due.
+
+A friend **without Melody** listens in the browser: the invite opens the
+room's page, which asks their name and plays the host's copy, in step, with
+who listens and the room's chat beside Melody's blackbird. A party mode
+with suggestions and votes comes next.
 
 ## The server
 

@@ -153,7 +153,7 @@ if(MELODY_GO)
     set_tests_properties(together PROPERTIES TIMEOUT 300)
     # The engines' side, against the real server.
     file(GLOB MELODY_TOGETHER_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/together/*.go"
-         "${PROJECT_SOURCE_DIR}/together/*.html")
+         "${PROJECT_SOURCE_DIR}/together/web/*")
     set(MELODY_TOGETHER_BINARY "${CMAKE_CURRENT_BINARY_DIR}/melody-together")
     add_custom_command(
         OUTPUT "${MELODY_TOGETHER_BINARY}"

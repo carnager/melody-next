@@ -7,7 +7,7 @@ blackbird whose body is a record:
 |---|---|
 | `melody.svg` | The icon: installed as `hicolor/scalable/apps/melody.svg`, the window's. Cropped from the traced source to fill its square. |
 | `melodies-vinyl-bird-v7.svg` | The traced source of it, uncropped. |
-| `melody-mascot.svg` | The blackbird, the mascot: in Help → About Melody. |
+| `melody-mascot.svg` | The blackbird, the mascot: in Help → About Melody, and -- copied to `together/web/mascot.svg`, as Go embeds only what is beside it -- the listening room's web page. |
 
 The crate icons drawn for the name Melodies before are gone with ADR-0287;
 they are in the history of this folder.

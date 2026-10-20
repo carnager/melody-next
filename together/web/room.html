@@ -123,7 +123,7 @@
     width: 100%; height: 100%; transform-origin: 50% 85%; display: block;
     filter: drop-shadow(0 6px 10px rgba(0,0,0,.25));
   }
-  body.playing:not(.listening) .bird { animation: bob 1.1s ease-in-out infinite; }
+  body.playing:not(.listening) .bird { animation: bob 2.6s ease-in-out infinite; }
   /* Asleep while nothing plays, or the host has paused. */
   body.dozing .perch { transform: rotate(-9deg) translateY(4%); filter: saturate(.55); }
   .zzz span {
@@ -155,11 +155,11 @@
   @keyframes pop { from { opacity: 0; transform: translateX(-50%) scale(.6); } }
   body.has-cover .bubble { animation-name: pop-side; }
   @keyframes pop-side { from { opacity: 0; transform: scale(.6); } }
-  .hop { animation: hop .45s cubic-bezier(.3,1.6,.5,1) !important; }
-  @keyframes hop { 40% { transform: translateY(-22%) rotate(-6deg); } }
+  .hop { animation: hop .7s ease-in-out !important; }
+  @keyframes hop { 45% { transform: translateY(-9%) rotate(-3deg); } }
   @keyframes bob {
-    0%, 100% { transform: translateY(0) rotate(-2.5deg); }
-    50% { transform: translateY(-8px) rotate(2.5deg); }
+    0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+    50% { transform: translateY(-4px) rotate(1.5deg); }
   }
   .notes span {
     position: absolute; bottom: 44%; right: 8%; font-size: 1.5rem; color: var(--accent);
@@ -766,17 +766,18 @@ function dance(now) {
     for (const sample of samples) sum += sample * sample;
     loud = Math.sqrt(sum / samples.length);
   }
-  level += (loud - level) * 0.25;
-  average += (loud - average) * 0.02;
-  // A beat: louder at once than it has lately been.
-  if (loud > average * 1.45 && loud > 0.04 && now - lastKick > 280) {
+  // Slow to follow, so it sways with the song rather than every drum.
+  level += (loud - level) * 0.05;
+  average += (loud - average) * 0.01;
+  // A beat: clearly louder than lately -- a gentle nod, not every one.
+  if (loud > average * 1.7 && loud > 0.06 && now - lastKick > 600) {
     kick = 1;
     lastKick = now;
   }
-  kick *= 0.86;
-  const lift = Math.min(1, level * 3.2) * 6 + kick * 10;
-  const tilt = Math.sin(now / 320) * Math.min(1, level * 4) * 6;
-  bird.style.transform = `translateY(${-lift}%) rotate(${tilt}deg) scale(${1 + kick * 0.05})`;
+  kick *= 0.93;
+  const lift = Math.min(1, level * 3) * 2.5 + kick * 3;
+  const tilt = Math.sin(now / 1100) * Math.min(1, level * 4) * 3 - kick * 2;
+  bird.style.transform = `translateY(${-lift}%) rotate(${tilt}deg)`;
 }
 
 function hop() {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func (c client) do(method, path, key, body string) (int, map[string]any) {
 
 func TestRooms(t *testing.T) {
 	rooms := newRooms("server secret")
-	served := httptest.NewServer((&server{rooms: rooms, wait: 2 * time.Second}).handler())
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 2 * time.Second}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
 
@@ -140,7 +141,7 @@ func TestRooms(t *testing.T) {
 // An invite opened in a browser is a page saying how to join -- the same
 // for any room, real or not.
 func TestInvitePage(t *testing.T) {
-	served := httptest.NewServer((&server{rooms: newRooms("pw"), wait: time.Second}).handler())
+	served := httptest.NewServer((&server{rooms: newRooms("pw"), tracks: keptIn(t), wait: time.Second}).handler())
 	defer served.Close()
 	for _, room := range []string{"real", "made-up"} {
 		response, err := http.Get(served.URL + "/rooms/" + room)
@@ -155,6 +156,93 @@ func TestInvitePage(t *testing.T) {
 		if !strings.Contains(string(page), "Join the listening room") {
 			t.Fatal("which says how to join")
 		}
+	}
+}
+
+func keptIn(t *testing.T) *tracks {
+	kept, err := newTracks(filepath.Join(t.TempDir(), "tracks"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kept
+}
+
+// Phase 2: the host's copy of a track, kept for whoever lacks one, fetched
+// with the invite -- as a header, or in the address as a browser's <audio>
+// asks -- and listed with the room's state.
+func TestTracks(t *testing.T) {
+	rooms := newRooms("pw")
+	kept := keptIn(t)
+	served := httptest.NewServer((&server{rooms: rooms, tracks: kept, wait: 100 * time.Millisecond}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	made, _ := rooms.make("pw")
+	track := "/rooms/" + made.Room + "/tracks/entry-1"
+	opus := strings.Repeat("OggS", 1000)
+
+	if status, _ := c.do("PUT", track, made.Invite, opus); status != 403 {
+		t.Fatal("a listener sends no tracks")
+	}
+	if status, _ := c.do("GET", track, made.Invite, ""); status != 404 {
+		t.Fatal("none sent, none fetched")
+	}
+	if status, _ := c.do("PUT", "/rooms/"+made.Room+"/tracks/..%2Fx", made.HostKey, opus); status != 400 && status != 404 {
+		t.Fatalf("a track's name is plain: %d", status)
+	}
+	if status, _ := c.do("PUT", track, made.HostKey, opus); status != 200 {
+		t.Fatal("the host sends one")
+	}
+	if _, state := c.do("GET", "/rooms/"+made.Room+"/state?after=0", made.Invite, ""); len(state["files"].([]any)) != 1 || state["files"].([]any)[0] != "entry-1" {
+		t.Fatal("and the room lists it")
+	}
+	fetched, err := http.Get(served.URL + track + "?key=" + made.Invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(fetched.Body)
+	fetched.Body.Close()
+	if fetched.StatusCode != 200 || string(body) != opus || fetched.Header.Get("Content-Type") != "audio/ogg" {
+		t.Fatal("a listener fetches it, the key in the address")
+	}
+	ranged, _ := http.NewRequest("GET", served.URL+track, nil)
+	ranged.Header.Set("Authorization", "Bearer "+made.Invite)
+	ranged.Header.Set("Range", "bytes=4-7")
+	part, err := http.DefaultClient.Do(ranged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(part.Body)
+	part.Body.Close()
+	if part.StatusCode != 206 || string(body) != "OggS" {
+		t.Fatal("a part of it, for a seek")
+	}
+	if status, _ := c.do("GET", track, "guess", ""); status != 403 {
+		t.Fatal("nothing without the invite")
+	}
+	// Over the server's size, the oldest go; with the room, all of them.
+	big := strings.Repeat("x", 700<<10)
+	c.do("PUT", "/rooms/"+made.Room+"/tracks/a", made.HostKey, big)
+	c.do("PUT", "/rooms/"+made.Room+"/tracks/b", made.HostKey, big)
+	if names := kept.names(made.Room); len(names) != 1 || names[0] != "b" {
+		t.Fatalf("the newest is kept within the size: %v", names)
+	}
+	c.do("DELETE", "/rooms/"+made.Room, made.HostKey, "")
+	if len(kept.names(made.Room)) != 0 {
+		t.Fatal("a closed room's tracks go")
+	}
+}
+
+func TestTracksKeptAnHour(t *testing.T) {
+	kept := keptIn(t)
+	now := time.Now()
+	kept.now = func() time.Time { return now }
+	if err := kept.put("r", "old", strings.NewReader("x")); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(keptFor + time.Minute)
+	kept.sweep()
+	if len(kept.names("r")) != 0 {
+		t.Fatal("a track older than an hour goes")
 	}
 }
 

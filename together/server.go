@@ -24,6 +24,9 @@ import (
 //	                                      the next state  (the invite, or the host key),
 //	                                      waited for MS at most (25 s)
 //	POST   /rooms/ROOM/leave?name=WHO     a listener goes (the invite)
+//	PUT    /rooms/ROOM/tracks/TRACK       the host's copy of a track (the host key)
+//	GET    /rooms/ROOM/tracks/TRACK       that copy, for whoever lacks one (the invite,
+//	                                      as a header or ?key=); ranges honoured
 //	GET    /rooms/ROOM                    the invite, opened in a browser: how to join
 //	DELETE /rooms/ROOM                    the room closes (the host key)
 //
@@ -53,7 +56,11 @@ func refuse(w http.ResponseWriter, status int, message string) {
 }
 
 func bearer(r *http.Request) string {
-	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); key != "" {
+		return key
+	}
+	// A browser's <audio> sends no header: the key in the address instead.
+	return r.URL.Query().Get("key")
 }
 
 // A listener's name as the others see it: printable, and short.
@@ -66,7 +73,8 @@ func listenerName(r *http.Request) (string, bool) {
 }
 
 type server struct {
-	rooms *rooms
+	rooms  *rooms
+	tracks *tracks
 	// How long a listener's ask for the next state is held.
 	wait time.Duration
 }
@@ -136,8 +144,9 @@ func (s *server) handler() http.Handler {
 		}
 		answer(w, http.StatusOK, struct {
 			seen
-			Ms int64 `json:"ms"`
-		}{found, serverMs()})
+			Files []string `json:"files"`
+			Ms    int64    `json:"ms"`
+		}{found, s.tracks.names(room), serverMs()})
 	}))
 	mux.HandleFunc("POST /rooms/{room}/leave", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
 		if name, ok := listenerName(r); ok && name != "" {
@@ -152,8 +161,35 @@ func (s *server) handler() http.Handler {
 			"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 		_, _ = w.Write(invitePage)
 	})
+	mux.HandleFunc("PUT /rooms/{room}/tracks/{track}", s.opened(host, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		err := s.tracks.put(room, r.PathValue("track"), r.Body)
+		switch {
+		case errors.Is(err, errTooLarge):
+			refuse(w, http.StatusRequestEntityTooLarge, err.Error())
+		case errors.Is(err, errBadTrack):
+			refuse(w, http.StatusBadRequest, err.Error())
+		case err != nil:
+			refuse(w, http.StatusInternalServerError, "the track could not be kept")
+		default:
+			// Said to everyone waiting: a track is there to fetch.
+			s.rooms.touch(room)
+			answer(w, http.StatusOK, map[string]bool{"kept": true})
+		}
+	}))
+	mux.HandleFunc("GET /rooms/{room}/tracks/{track}", s.opened(listener, func(w http.ResponseWriter, r *http.Request, room string, _ holder) {
+		file, added, err := s.tracks.open(room, r.PathValue("track"))
+		if err != nil {
+			refuse(w, http.StatusNotFound, "the host has not sent that track")
+			return
+		}
+		defer file.Close()
+		w.Header().Set("Content-Type", "audio/ogg")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		http.ServeContent(w, r, "", added, file)
+	}))
 	mux.HandleFunc("DELETE /rooms/{room}", s.opened(host, func(w http.ResponseWriter, _ *http.Request, room string, _ holder) {
 		s.rooms.close(room)
+		s.tracks.forget(room)
 		answer(w, http.StatusOK, map[string]bool{"closed": true})
 	}))
 	return mux

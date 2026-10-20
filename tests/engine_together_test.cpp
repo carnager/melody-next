@@ -3,7 +3,7 @@
 // ADR-0302: two engines listening together through a melody-together server
 // -- the real one -- each with its own copy of the album. The host plays,
 // seeks and pauses; the listener follows, where the host is, from its own
-// library; a track it lacks is said.
+// library -- or, for a track it lacks, from the host's copy.
 
 #include "trackknife/core/posix.hpp"
 #include "trackknife/engine/catalogue.hpp"
@@ -259,7 +259,8 @@ struct Engine final {
         trackknife::persistence::LibraryScanProgress progress;
         require(catalogue.scan({}, progress).has_value(), "and scanned");
         require(player->set_output(&audition).has_value(), "the player plays on the test's output");
-        together = std::make_unique<engine::Together>(*player, catalogue, nullptr);
+        together = std::make_unique<engine::Together>(*player, catalogue, nullptr,
+                                                      directory / "together");
     }
     [[nodiscard]] std::int64_t position() const { return player->state().position_ms; }
 };
@@ -352,17 +353,19 @@ int main(int argc, char** argv) {
             }),
             "and the friend with it, together");
 
-    // A track only the host has: said, and nothing played in its place.
+    // A track only the host has: its copy, sent once by the host's engine and
+    // fetched by the friend's, played where the host is.
     engine::QueueEntry other;
     other.source.raw_path = (directory / "host/music/Other/01.flac").string();
     other.duration_ms = 600'000;
     host.player->replace_queue({other});
     require(host.player->play_entry(other.entry_id).has_value(), "the host plays another");
-    require(eventually([&] {
-                return friend_.together->status().message.starts_with("not in this library");
-            }),
-            "the friend is told she lacks it");
-    require(friend_.player->state().status == "stopped", "and plays nothing in its place");
+    const auto downloads = (directory / "friend/together/downloads").string();
+    require(eventually([&] { return friend_.audition.loaded().starts_with(downloads); }, 30s),
+            "the friend plays the host's copy");
+    require(eventually([&] { return std::abs(friend_.position() - host.position()) < 400; }),
+            "where the host is");
+    require(friend_.together->status().message.empty(), "and nothing is wrong");
 
     // Leaving, and the room closing.
     friend_.together->leave();

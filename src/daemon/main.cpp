@@ -957,7 +957,8 @@ int main(int argc, char** argv) {
 
     // ADR-0302: listening together -- hosting a room, or following one --
     // with every window closed.
-    trackknife::engine::Together together{*player, catalogue, sink};
+    trackknife::engine::Together together{*player, catalogue, sink, state_directory / "together",
+                                          transcodes.get()};
     trackknife::engine::register_together_methods(dispatcher, together);
 
     // Another engine on these speakers, through an agent built in: newest

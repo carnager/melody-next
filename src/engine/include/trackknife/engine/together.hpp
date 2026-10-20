@@ -6,10 +6,13 @@
 #include "trackknife/engine/interruptible_pause.hpp"
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/engine/player.hpp"
+#include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -53,7 +56,10 @@ class Together final {
         std::string message;
     };
 
-    Together(Player& player, Catalogue& catalogue, EventSink sink);
+    // `directory`: where a listener keeps the host's copies it fetched, and
+    // the host its own transcodes when the engine keeps none (`transcodes`).
+    Together(Player& player, Catalogue& catalogue, EventSink sink, std::filesystem::path directory,
+             TranscodeCache* transcodes = nullptr);
     Together(const Together&) = delete;
     Together(Together&&) = delete;
     Together& operator=(const Together&) = delete;
@@ -78,6 +84,15 @@ class Together final {
     void host_round(Session& session);
     void listen_round(Session& session);
     void follow(Session& session, const protocol::Json& state);
+    // ADR-0302 phase 2: the host's copy of a track sent, once, for whoever
+    // lacks one; fetched by a listener who does, ahead when it can.
+    void send(Session& session, const QueueEntry& entry);
+    void fetch(Session& session, const std::string& entry);
+    void play_what_is_due(Session& session);
+    void start(Session& session, const std::string& path);
+    [[nodiscard]] std::string library_copy(Session& session, const std::string& entry,
+                                           const protocol::Json& track);
+    [[nodiscard]] protocol::Json describe(Session& session, const QueueEntry& entry);
     void keep_in_step(Session& session);
     [[nodiscard]] core::Result<void> measure_clock(Session& session);
     void changed();
@@ -86,6 +101,9 @@ class Together final {
     Player* player_;
     Catalogue* catalogue_;
     EventSink sink_;
+    std::filesystem::path directory_;
+    TranscodeCache* transcodes_;
+    std::unique_ptr<TranscodeCache> own_transcodes_;
     // Starting and ending a session, one at a time.
     std::mutex control_;
     mutable std::mutex mutex_;

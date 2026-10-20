@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +23,8 @@ import (
 func main() {
 	listen := flag.String("listen", "127.0.0.1:6099", "where to listen: a web proxy in front gives it TLS and a name")
 	passwordFile := flag.String("password-file", "", "the password that makes rooms; whoever hosts needs it, listeners need only an invite")
+	files := flag.String("files", filepath.Join(os.TempDir(), "melody-together"), "where the hosts' copies of tracks are kept, an hour each; emptied at start")
+	filesMB := flag.Int64("files-mb", 2048, "the most the kept tracks may take, in MB")
 	flag.Parse()
 	if *passwordFile == "" {
 		fmt.Fprintln(os.Stderr, "melody-together: -password-file is needed")
@@ -36,11 +39,18 @@ func main() {
 	}
 
 	rooms := newRooms(password)
+	kept, err := newTracks(*files, *filesMB<<20)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "melody-together: the folder for tracks:", err)
+		os.Exit(1)
+	}
 	// Stopping ends whoever waits on a long poll at once.
 	stopping, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	served := &http.Server{
-		Handler:           (&server{rooms: rooms, wait: 25 * time.Second}).handler(),
+		Handler: (&server{rooms: rooms, tracks: kept, wait: 25 * time.Second}).handler(),
+		// A track's upload or download takes as long as the line allows.
+		ReadTimeout:       0,
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return stopping },
 	}
@@ -55,7 +65,10 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				rooms.sweep()
+				for _, gone := range rooms.sweep() {
+					kept.forget(gone)
+				}
+				kept.sweep()
 			case <-stopping.Done():
 				return
 			}

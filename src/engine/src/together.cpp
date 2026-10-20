@@ -8,6 +8,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <deque>
+#include <functional>
+#include <map>
+#include <set>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -135,6 +141,143 @@ struct Answer final {
     return found != object.end() && found->is_number() ? found->get<std::int64_t>() : 0;
 }
 
+struct CloseFile final {
+    void operator()(std::FILE* file) const { std::fclose(file); }
+};
+using File = std::unique_ptr<std::FILE, CloseFile>;
+
+// Long, and stopped when the session ends: a track's copy, up or down.
+// Aborted when `stop` is set; slower than a kilobyte a second for half a
+// minute is a line that has gone.
+int still_wanted(void* stop, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return static_cast<const std::atomic_bool*>(stop)->load() ? 1 : 0;
+}
+
+void long_transfer(CURL* curl, const std::atomic_bool& stop) {
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, still_wanted);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, const_cast<std::atomic_bool*>(&stop));
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1'000L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5'000L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "melodyd");
+}
+
+[[nodiscard]] bool put_file(const std::string& url, const std::string& key,
+                            const std::filesystem::path& file, const std::atomic_bool& stop) {
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl{curl_easy_init(), curl_easy_cleanup};
+    const File input{std::fopen(file.c_str(), "rb")};
+    std::error_code unsized;
+    const auto size = std::filesystem::file_size(file, unsized);
+    if (!curl || !input || unsized) {
+        return false;
+    }
+    curl_slist* headers = curl_slist_append(nullptr, ("Authorization: Bearer " + key).c_str());
+    const std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> held{headers,
+                                                                           curl_slist_free_all};
+    std::string ignored;
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_READDATA, input.get());
+    curl_easy_setopt(curl.get(), CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(size));
+    curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, collect);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &ignored);
+    long_transfer(curl.get(), stop);
+    long status = 0;
+    return curl_easy_perform(curl.get()) == CURLE_OK &&
+           curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status) == CURLE_OK &&
+           status == 200;
+}
+
+std::size_t write_file(char* data, const std::size_t size, const std::size_t count, void* into) {
+    return std::fwrite(data, size, count, static_cast<std::FILE*>(into)) * size;
+}
+
+[[nodiscard]] bool get_file(const std::string& url, const std::string& key,
+                            const std::filesystem::path& target, const std::atomic_bool& stop) {
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl{curl_easy_init(), curl_easy_cleanup};
+    auto partial = target;
+    partial += ".partial";
+    File output{std::fopen(partial.c_str(), "wb")};
+    if (!curl || !output) {
+        return false;
+    }
+    curl_slist* headers = curl_slist_append(nullptr, ("Authorization: Bearer " + key).c_str());
+    const std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> held{headers,
+                                                                           curl_slist_free_all};
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, write_file);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, output.get());
+    long_transfer(curl.get(), stop);
+    long status = 0;
+    const bool fetched = curl_easy_perform(curl.get()) == CURLE_OK &&
+                         curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status) ==
+                             CURLE_OK &&
+                         status == 200;
+    output.reset();
+    std::error_code ignored;
+    if (!fetched) {
+        std::filesystem::remove(partial, ignored);
+        return false;
+    }
+    std::filesystem::rename(partial, target, ignored);
+    return !ignored;
+}
+
+// Errands done one at a time, apart from the session's own round: a track's
+// copy, up or down, takes as long as the line, and keeping in step does not
+// wait for it.
+class Errands final {
+  public:
+    Errands() : worker_{[this] { work(); }} {}
+    Errands(const Errands&) = delete;
+    Errands& operator=(const Errands&) = delete;
+    ~Errands() { stop(); }
+    void post(std::function<void()> errand) {
+        {
+            const std::lock_guard guard{mutex_};
+            errands_.push_back(std::move(errand));
+        }
+        posted_.notify_one();
+    }
+    void stop() {
+        {
+            const std::lock_guard guard{mutex_};
+            stopping_ = true;
+            errands_.clear();
+        }
+        posted_.notify_one();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+
+  private:
+    void work() {
+        for (;;) {
+            std::function<void()> errand;
+            {
+                std::unique_lock lock{mutex_};
+                posted_.wait(lock, [this] { return stopping_ || !errands_.empty(); });
+                if (stopping_) {
+                    return;
+                }
+                errand = std::move(errands_.front());
+                errands_.pop_front();
+            }
+            errand();
+        }
+    }
+    std::mutex mutex_;
+    std::condition_variable posted_;
+    std::deque<std::function<void()>> errands_;
+    bool stopping_{false};
+    std::thread worker_;
+};
+
 } // namespace
 
 struct Together::Session final {
@@ -160,6 +303,22 @@ struct Together::Session final {
     core::StableId ours;
     bool found{false};
     steady_clock::time_point last_seek;
+    // Phase 2. The host: tracks sent, or on their way. A listener: what the
+    // room has copies of, those fetched (by entry, the file), those on their
+    // way, and where its library has each entry -- empty when it has not.
+    std::atomic_bool stopping{false};
+    std::mutex copies;
+    std::set<std::string> sent;
+    std::set<std::string> sending;
+    std::set<std::string> files;
+    std::map<std::string, std::string> fetched;
+    std::set<std::string> fetching;
+    std::map<std::string, std::string> library;
+    std::map<std::string, Json> descriptions;
+    bool waiting{false};
+    std::filesystem::path downloads;
+    // Last: stopped first, before anything its errands use is gone.
+    Errands errands;
 
     [[nodiscard]] std::int64_t server_now() const { return local_ms() + offset_ms; }
     [[nodiscard]] std::string url(const std::string& path) const {
@@ -213,8 +372,18 @@ std::vector<std::string> Together::track_queries(const Json& track) {
     return queries;
 }
 
-Together::Together(Player& player, Catalogue& catalogue, EventSink sink)
-    : player_(&player), catalogue_(&catalogue), sink_(std::move(sink)) {}
+Together::Together(Player& player, Catalogue& catalogue, EventSink sink,
+                   std::filesystem::path directory, TranscodeCache* transcodes)
+    : player_(&player), catalogue_(&catalogue), sink_(std::move(sink)),
+      directory_(std::move(directory)), transcodes_(transcodes) {
+    // An engine that streams to no agent keeps no transcodes; the host's
+    // copies are made in a cache of their own.
+    if (transcodes_ == nullptr) {
+        own_transcodes_ =
+            std::make_unique<TranscodeCache>(directory_ / "transcodes", 1024ULL * 1024U * 1024U);
+        transcodes_ = own_transcodes_.get();
+    }
+}
 
 Together::~Together() { leave(); }
 
@@ -300,6 +469,10 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     auto session = std::make_shared<Session>();
     session->invite = *parsed;
     session->name = name;
+    session->downloads = directory_ / "downloads";
+    std::error_code unmade;
+    std::filesystem::remove_all(session->downloads, unmade);
+    std::filesystem::create_directories(session->downloads, unmade);
     // Asked once now, so a wrong invite is said to whoever gave it.
     auto first_look = request("GET", session->url("/state?after=0&wait=0"), parsed->key, {},
                               10'000L);
@@ -331,6 +504,7 @@ void Together::end() {
         session = std::exchange(session_, nullptr);
     }
     if (session) {
+        session->stopping = true;
         session->pause.interrupt();
     }
     if (worker_.joinable()) {
@@ -339,6 +513,7 @@ void Together::end() {
     if (!session) {
         return;
     }
+    session->errands.stop();
     // Said to the room on the way out, never waited on for long.
     if (session->hosting) {
         static_cast<void>(request("DELETE", session->url(""), session->invite.key, {}, 3'000L));
@@ -348,6 +523,10 @@ void Together::end() {
         if (session->found && player_->state().entry == session->ours) {
             static_cast<void>(player_->stop());
         }
+    }
+    if (!session->downloads.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove_all(session->downloads, ignored);
     }
     {
         const std::lock_guard guard{mutex_};
@@ -401,12 +580,57 @@ void Together::run(const std::shared_ptr<Session> session) {
     } while (!session->ended.load() && session->pause.wait(interval));
 }
 
+Json Together::describe(Session& session, const QueueEntry& entry) {
+    const auto id = entry.entry_id.to_string();
+    if (const auto known = session.descriptions.find(id); known != session.descriptions.end()) {
+        return known->second;
+    }
+    // The track as a listener's library can find it, read once.
+    Json described = Json::object();
+    if (auto tracks = catalogue_->cached_tracks({entry.source.raw_path});
+        tracks && !tracks->empty()) {
+        const auto& facts = tracks->front().facts;
+        for (const auto* name : {"title", "artist", "album", "albumartist", "musicbrainztrackid",
+                                 "tracknumber", "discnumber"}) {
+            if (auto value = first(facts, name); !value.empty()) {
+                described[name] = protocol::displayable_text(value);
+            }
+        }
+    }
+    if (!described.contains("title")) {
+        described["title"] = protocol::displayable_text(entry.title);
+        described["artist"] = protocol::displayable_text(
+            entry.group.artist.empty() ? entry.group.album_artist : entry.group.artist);
+        described["album"] = protocol::displayable_text(entry.group.album);
+    }
+    if (entry.duration_ms) {
+        described["duration_ms"] = *entry.duration_ms;
+    }
+    session.descriptions[id] = described;
+    return described;
+}
+
 void Together::host_round(Session& session) {
     const auto state = player_->state();
     const bool playing = state.status == "playing";
     const bool paused = state.status == "paused";
+    const auto current = playing || paused ? player_->entry(state.entry) : std::nullopt;
+    // What follows: armed to play without a gap, else the next in the queue.
+    std::optional<QueueEntry> following;
+    if (current) {
+        if (!state.gapless_entry.is_nil()) {
+            following = player_->entry(state.gapless_entry);
+        } else {
+            const auto queue = player_->queue();
+            const auto here = std::ranges::find(queue, state.entry, &QueueEntry::entry_id);
+            if (here != queue.end() && std::next(here) != queue.end()) {
+                following = *std::next(here);
+            }
+        }
+    }
     const auto key = state.entry.to_string() + "/" + std::to_string(state.instance) + "/" +
-                     (playing ? "playing" : paused ? "paused" : "stopped");
+                     (playing ? "playing" : paused ? "paused" : "stopped") + "/" +
+                     (following ? following->entry_id.to_string() : std::string{});
     const auto now = session.server_now();
     const auto anchor = now - state.position_ms;
     const bool moved = key != session.said_key ||
@@ -414,39 +638,22 @@ void Together::host_round(Session& session) {
                        (paused && std::abs(state.position_ms - session.said_position) > drift_ms);
     if (moved) {
         Json said = Json::object();
-        if (playing || paused) {
-            // The track as a listener's library can find it, read once.
-            if (state.entry != session.described_entry) {
-                session.described_entry = state.entry;
-                session.described_track = Json::object();
-                if (auto tracks = catalogue_->cached_tracks({state.source.raw_path});
-                    tracks && !tracks->empty()) {
-                    const auto& facts = tracks->front().facts;
-                    for (const auto* name : {"title", "artist", "album", "albumartist",
-                                             "musicbrainztrackid", "tracknumber", "discnumber"}) {
-                        if (auto value = first(facts, name); !value.empty()) {
-                            session.described_track[name] = protocol::displayable_text(value);
-                        }
-                    }
-                }
-                if (const auto entry = player_->entry(state.entry);
-                    entry && !session.described_track.contains("title")) {
-                    session.described_track["title"] = protocol::displayable_text(entry->title);
-                    session.described_track["artist"] =
-                        protocol::displayable_text(entry->group.artist.empty()
-                                                       ? entry->group.album_artist
-                                                       : entry->group.artist);
-                    session.described_track["album"] =
-                        protocol::displayable_text(entry->group.album);
-                }
-                session.described_track["duration_ms"] = state.duration_ms;
+        Json track = Json::object();
+        if (current) {
+            track = describe(session, *current);
+            if (state.duration_ms > 0) {
+                track["duration_ms"] = state.duration_ms;
             }
-            said = Json{{"track", session.described_track},
+            said = Json{{"track", track},
                         {"entry", state.entry.to_string()},
                         {"instance", state.instance},
                         {"paused", paused},
                         {"anchor_ms", anchor},
                         {"position_ms", state.position_ms}};
+            if (following) {
+                said["next"] = Json{{"entry", following->entry_id.to_string()},
+                                    {"track", describe(session, *following)}};
+            }
         } else {
             said = Json{{"track", nullptr}};
         }
@@ -459,15 +666,26 @@ void Together::host_round(Session& session) {
             say({});
             {
                 const std::lock_guard guard{mutex_};
-                status_.track = playing || paused
-                                    ? text(session.described_track, "artist") + " — " +
-                                          text(session.described_track, "title")
-                                    : std::string{};
+                status_.track = current ? text(track, "artist") + " — " + text(track, "title")
+                                        : std::string{};
             }
             changed();
         } else {
             say(put ? "the server refused what plays (" + std::to_string(put->status) + ")"
                     : put.error().message);
+        }
+    }
+    // Phase 2: while anyone listens, the host's copy of what plays and of
+    // what follows, for whoever lacks it.
+    bool anyone = false;
+    {
+        const std::lock_guard guard{mutex_};
+        anyone = !status_.listeners.empty();
+    }
+    if (anyone && current) {
+        send(session, *current);
+        if (following) {
+            send(session, *following);
         }
     }
     // Who listens, now and then.
@@ -508,6 +726,12 @@ void Together::listen_round(Session& session) {
         return;
     }
     const auto revision = seen->body.value("revision", std::uint64_t{0});
+    session.files.clear();
+    for (const auto& file : seen->body.value("files", Json::array())) {
+        if (file.is_string()) {
+            session.files.insert(file.get<std::string>());
+        }
+    }
     if (seen->body.value("closed", false)) {
         session.ended = true;
         if (session.found && player_->state().entry == session.ours) {
@@ -536,6 +760,9 @@ void Together::listen_round(Session& session) {
         follow(session, seen->body.value("state", Json::object()));
         changed();
     }
+    if (session.desired.contains("track") && session.desired.at("track").is_object()) {
+        play_what_is_due(session);
+    }
     keep_in_step(session);
 }
 
@@ -562,9 +789,72 @@ void Together::follow(Session& session, const Json& state) {
         const std::lock_guard guard{mutex_};
         status_.track = shown;
     }
+    if (const auto path = library_copy(session, text(state, "entry"), *track); !path.empty()) {
+        start(session, path);
+        return;
+    }
+    // Not here: the host's copy, when there is one -- play_what_is_due.
+    session.found = false;
+    session.waiting = true;
+    if (player_->state().entry == session.ours) {
+        static_cast<void>(player_->stop());
+    }
+}
+
+void Together::send(Session& session, const QueueEntry& entry) {
+    const auto id = entry.entry_id.to_string();
+    {
+        const std::lock_guard guard{session.copies};
+        if (session.sent.contains(id) || !session.sending.insert(id).second) {
+            return;
+        }
+    }
+    session.errands.post([this, &session, id, source = entry.source] {
+        // The engine's Opus copy -- made once, kept -- a hundred and sixty
+        // kilobits a second: as the phone hears it away from home.
+        auto file = transcodes_->ensure(
+            TranscodeSource{.raw_path = source.raw_path,
+                            .selection = source.selection,
+                            .segment = source.segment},
+            StreamFormat{.bitrate_kbps = 160, .codec = output::StreamCodec::opus,
+                         .sample_rate_cap = std::nullopt});
+        const bool kept = file && put_file(session.url("/tracks/" + id), session.invite.key,
+                                           *file, session.stopping);
+        const std::lock_guard guard{session.copies};
+        session.sending.erase(id);
+        if (kept) {
+            session.sent.insert(id);
+        }
+    });
+}
+
+void Together::fetch(Session& session, const std::string& entry) {
+    {
+        const std::lock_guard guard{session.copies};
+        if (session.fetched.contains(entry) || !session.fetching.insert(entry).second) {
+            return;
+        }
+    }
+    session.errands.post([&session, entry] {
+        const auto target = session.downloads / (entry + ".opus");
+        const bool kept = get_file(session.url("/tracks/" + entry), session.invite.key, target,
+                                   session.stopping);
+        const std::lock_guard guard{session.copies};
+        session.fetching.erase(entry);
+        if (kept) {
+            session.fetched[entry] = target.string();
+        }
+    });
+}
+
+std::string Together::library_copy(Session& session, const std::string& entry,
+                                   const Json& track) {
+    if (const auto known = session.library.find(entry); known != session.library.end()) {
+        return known->second;
+    }
     // This library's copy: by id, else by what it is called.
     std::string path;
-    for (const auto& source : track_queries(*track)) {
+    for (const auto& source : track_queries(track)) {
         auto compiled = query::compile_tkq(source);
         if (!compiled) {
             continue;
@@ -574,33 +864,66 @@ void Together::follow(Session& session, const Json& state) {
             break;
         }
     }
-    if (path.empty()) {
-        session.found = false;
-        if (player_->state().entry == session.ours) {
-            static_cast<void>(player_->stop());
-        }
-        say("not in this library: " + shown);
-        return;
-    }
+    session.library[entry] = path;
+    return path;
+}
+
+void Together::start(Session& session, const std::string& path) {
+    const auto& track = session.desired.at("track");
     QueueEntry entry;
     entry.source.raw_path = path;
-    entry.title = text(*track, "title");
-    entry.group = audio::AlbumRowKey{.album_artist = text(*track, "albumartist"),
-                                     .artist = text(*track, "artist"),
-                                     .album = text(*track, "album"),
+    entry.title = text(track, "title");
+    entry.group = audio::AlbumRowKey{.album_artist = text(track, "albumartist"),
+                                     .artist = text(track, "artist"),
+                                     .album = text(track, "album"),
                                      .date = {}};
-    if (const auto duration = number(*track, "duration_ms"); duration > 0) {
+    if (const auto duration = number(track, "duration_ms"); duration > 0) {
         entry.duration_ms = duration;
     }
     session.ours = entry.entry_id;
     session.found = true;
+    session.waiting = false;
     session.last_seek = {};
     player_->replace_queue({entry});
     if (auto played = player_->play_entry(session.ours); !played) {
-        say("could not play " + shown + ": " + played.error().message);
+        say("could not play " + text(track, "title") + ": " + played.error().message);
         return;
     }
     say({});
+}
+
+void Together::play_what_is_due(Session& session) {
+    const auto& desired = session.desired;
+    // What follows, fetched ahead where this library lacks it.
+    if (const auto next = desired.find("next"); next != desired.end() && next->is_object()) {
+        const auto entry = text(*next, "entry");
+        const auto track = next->find("track");
+        if (!entry.empty() && track != next->end() && track->is_object() &&
+            library_copy(session, entry, *track).empty() && session.files.contains(entry)) {
+            fetch(session, entry);
+        }
+    }
+    if (!session.waiting) {
+        return;
+    }
+    const auto entry = text(desired, "entry");
+    const auto shown =
+        text(desired.at("track"), "artist") + " — " + text(desired.at("track"), "title");
+    std::string fetched;
+    {
+        const std::lock_guard guard{session.copies};
+        if (const auto found = session.fetched.find(entry); found != session.fetched.end()) {
+            fetched = found->second;
+        }
+    }
+    if (!fetched.empty()) {
+        start(session, fetched);
+    } else if (session.files.contains(entry)) {
+        fetch(session, entry);
+        say("fetching the host's copy of " + shown);
+    } else {
+        say("not in this library: " + shown + " -- waiting for the host's copy");
+    }
 }
 
 void Together::keep_in_step(Session& session) {

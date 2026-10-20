@@ -6,10 +6,12 @@ room; the others join it with an invite. The host's engine says what it
 plays -- each track, seek and pause -- and every listener's engine plays the
 same track from its own library, where the host is.
 
-For now each listener plays their **own copy**: a track a friend does not
-have is said in their panel, and they wait for the next. Sending the host's
-copy to those without one, a web page for friends without Melody, and a party
-mode with suggestions and votes come next.
+A friend who has the track plays their **own copy**. One who does not gets
+the **host's**: while anyone listens, the host's engine sends its Opus copy
+(160 kbit/s) of what plays, and of what follows, to the server -- once,
+however many listen -- and a listener lacking it fetches it before it is
+due. A web page for friends without Melody, and a party mode with
+suggestions and votes, come next.
 
 ## The server
 
@@ -29,6 +31,8 @@ invite -- and the program:
 openssl rand -hex 16 > /etc/melody-together/password
 melody-together -password-file /etc/melody-together/password
 # listens on 127.0.0.1:6099; -listen HOST:PORT for elsewhere
+# keeps the hosts' copies in $TMPDIR/melody-together, an hour each, 2 GB at
+# most: -files DIR and -files-mb MB for elsewhere and more
 ```
 
 A systemd unit:
@@ -59,8 +63,9 @@ together.example.org {
 }
 ```
 
-A room no one has touched for twelve hours is closed. The server keeps
-nothing on disk.
+A room no one has touched for twelve hours is closed. The server keeps no
+rooms on disk -- a restart ends them -- and the copies of tracks only an
+hour, and none past their room.
 
 ## Hosting and joining
 
@@ -91,5 +96,5 @@ plays through whatever speakers the engine plays on.
 ## How a listener finds the track
 
 By its MusicBrainz track id, when both copies are tagged with one; else by
-title and artist, and album where it is there. A listener whose engine keeps
-the library elsewhere follows on that engine.
+title and artist, and album where it is there. Not found, the host's copy is
+fetched; the panel says so while it comes.

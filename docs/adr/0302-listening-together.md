@@ -3,7 +3,8 @@
 ## Status
 
 Accepted, 2026-10-20. Phase 1 -- everyone plays their own copy -- is built
-with this record; phase 2 -- the host's copy for those without one --
+with this record, and phase 2 -- the host's copy for those without one --
+after it; 
 phase 3 -- a web page for friends without Melody -- phase 4 -- party
 mode, suggestions and votes -- and then chat and the phone are its
 direction.
@@ -48,10 +49,14 @@ direction.
    track in its library by MusicBrainz track id, else by artist, title and
    album; one not found is said, and the listener waits silently for the
    next.
-5. **Phase 2: the host's copy, sent once.** For a track a listener does not
-   have, the host's engine uploads its Opus transcode to the room -- once,
-   however many listen -- and each such listener downloads it before it is
-   due. The server keeps a track an hour. The host's upload is one copy of
+5. **Phase 2: the host's copy, sent once.** While anyone listens, the
+   host's engine uploads its Opus transcode (160 kbit/s) of what plays and of
+   what follows to the room -- once, however many listen; the state names
+   what follows, and the room's answers list the copies it has. A listener
+   without the track downloads it -- what follows ahead -- and plays it where
+   the room is; its own copy, when it has one, still comes first. The server
+   keeps a track an hour on disk, within a size for all, and none past its
+   room. The host's upload is one copy of
    each track: a hundred kilobits a second, for any number of friends.
 6. **Phase 3: a web page, for friends without Melody.** Served by
    melody-together itself: the browser keeps the same clock and plays the
@@ -81,5 +86,9 @@ direction.
 - `together` (`go test` in `together/`): rooms, passwords and invites;
   state kept and long-polled; listeners gone and rooms idle swept.
 - `engine-together`: a host and a listener engine, each with the album: the
-  listener plays the host's track at the host's position; a seek, a pause
-  and the next track followed; a track it lacks said.
+  listener plays the host's track at the host's position; a seek, a drift
+  and a pause followed; a track it lacks played from the host's copy, where
+  the host is.
+- `together`: the host's copies kept, fetched by invite -- a header or the
+  address -- in ranges, listed with the state, gone after an hour, over the
+  size and with their room.

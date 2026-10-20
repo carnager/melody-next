@@ -216,6 +216,17 @@ func (r *rooms) next(ctx context.Context, name string, after uint64, who string,
 	}
 }
 
+// Something of the room changed that is not its state -- a track kept --
+// and whoever waits is told.
+func (r *rooms) touch(name string) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if found := r.rooms[name]; found != nil && !found.closed {
+		found.touched = r.now()
+		found.moved()
+	}
+}
+
 func (r *rooms) leave(name, who string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -238,27 +249,30 @@ func (r *rooms) close(name string) {
 }
 
 // Closes the rooms idle too long, and forgets the listeners gone; run now
-// and then.
-func (r *rooms) sweep() {
+// and then. The rooms gone, by name.
+func (r *rooms) sweep() []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	now := r.now()
+	var gone []string
 	for name, found := range r.rooms {
 		// Closed, it stays a while to say so to those still waiting.
 		if (found.closed && now.Sub(found.touched) > presence) ||
 			(!found.closed && now.Sub(found.touched) > idle) {
 			delete(r.rooms, name)
+			gone = append(gone, name)
 			continue
 		}
-		gone := false
+		left := false
 		for who, last := range found.listeners {
 			if now.Sub(last) > presence {
 				delete(found.listeners, who)
-				gone = true
+				left = true
 			}
 		}
-		if gone {
+		if left {
 			found.moved()
 		}
 	}
+	return gone
 }

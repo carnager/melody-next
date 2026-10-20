@@ -4,9 +4,12 @@
 
 #include "workspace/plugins.hpp"
 
+#include <QHash>
+#include <QJsonObject>
 #include <QWidget>
 
 class QLabel;
+class QLineEdit;
 class QVBoxLayout;
 
 namespace trackknife::bench {
@@ -25,9 +28,16 @@ class PluginPanelView final : public QWidget {
     void showContent(const PluginPanelContent& content);
     // The line under the panel's name: what it was asked about.
     void setSubject(const QString& subject);
+    // Whether it shows an answer -- kept while it is asked again.
+    [[nodiscard]] bool hasContent() const noexcept { return has_content_; }
+    // ADR-0303: every input's text as it stands, by its key.
+    [[nodiscard]] QJsonObject inputs() const;
 
   signals:
     void refreshRequested();
+    // ADR-0303: a button or a toggle pressed -- its action, or a toggle's
+    // key, and its value ("on" or "off" for a toggle).
+    void actionRequested(const QString& action, const QString& value);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -38,6 +48,13 @@ class PluginPanelView final : public QWidget {
     QLabel* subject_{nullptr};
     QWidget* parts_{nullptr};
     QVBoxLayout* parts_layout_{nullptr};
+    bool has_content_{false};
+    // ADR-0303: the inputs shown, and what was typed in them -- kept over an
+    // answer that gives the same value as the last, so typing survives the
+    // panel being asked again; one the plugin changes takes the plugin's.
+    QHash<QString, QLineEdit*> inputs_;
+    QHash<QString, QString> typed_;
+    QHash<QString, QString> given_;
 };
 
 } // namespace trackknife::bench

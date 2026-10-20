@@ -33,6 +33,7 @@ class PluginsTest final : public QObject {
     void settingsAreReadKeptAndHandedOn();
     void panelsAreReadAndTheirAnswersToo();
     void panelsAreToldTheLibrary();
+    void panelsHaveControls();
     void providersAreReadAndTheirLyricsToo();
     void triggersAreReadAndTold();
     void theScriptsPluginRunsTheCommandsSet();
@@ -628,6 +629,60 @@ void PluginsTest::panelsAreToldTheLibrary() {
                                                                  std::nullopt, {}, {}, library))
                             .object();
     QVERIFY(!untold.contains(QStringLiteral("artist_albums")));
+}
+
+// ADR-0303: a panel's controls -- fields, toggles, buttons, an item's
+// buttons -- read or refused, and what was pressed told with its next run.
+void PluginsTest::panelsHaveControls() {
+    QString problem;
+    const auto panel = parsePluginPanel(R"({"title": "Room", "parts": [
+        {"input": "room", "label": "Room", "value": "friday", "placeholder": "a name",
+         "action": "start"},
+        {"input": "password", "secret": true},
+        {"toggle": "party", "label": "Party", "on": true},
+        {"button": "Start", "action": "start", "primary": true},
+        {"button": "Leave", "action": "leave", "value": "now"},
+        {"text": "Glow", "detail": "Ana", "buttons": [
+            {"text": "▲ 2", "action": "vote", "value": "7", "on": true}]}]})",
+                                        &problem);
+    QVERIFY2(panel.has_value(), qPrintable(problem));
+    using Kind = PluginPanelContent::Part::Kind;
+    const auto& parts = panel->parts;
+    QCOMPARE(parts.size(), std::size_t{6U});
+    QVERIFY(parts[0].kind == Kind::input && parts[0].key == QStringLiteral("room") &&
+            parts[0].value == QStringLiteral("friday") && parts[0].action == QStringLiteral("start"));
+    QVERIFY(parts[1].kind == Kind::input && parts[1].secret);
+    QVERIFY(parts[2].kind == Kind::toggle && parts[2].on);
+    QVERIFY(parts[3].kind == Kind::button && parts[3].on && parts[3].action == QStringLiteral("start"));
+    QVERIFY(parts[4].kind == Kind::button && !parts[4].on && parts[4].value == QStringLiteral("now"));
+    QCOMPARE(parts[5].buttons.size(), std::size_t{1U});
+    QVERIFY(parts[5].buttons[0].on && parts[5].buttons[0].value == QStringLiteral("7"));
+    for (const auto* broken :
+         {R"({"parts": [{"input": ""}]})", R"({"parts": [{"toggle": ""}]})",
+          R"({"parts": [{"button": "Go"}]})", R"({"parts": [{"input": "a", "colour": 1}]})",
+          R"({"parts": [{"text": "x", "buttons": [{"text": "y"}]}]})"}) {
+        QVERIFY2(!parsePluginPanel(broken, &problem), broken);
+    }
+
+    // `always`: asked with nothing playing; and what was pressed, told.
+    const auto manifest = parsePluginManifest(
+        R"({"schema": 1, "name": "C", "panels": [{"id": "p", "label": "P", "run": ["x"],
+            "always": true}]})",
+        QStringLiteral("/p/c"), &problem);
+    QVERIFY2(manifest.has_value() && manifest->panels.front().always, qPrintable(problem));
+    const auto told = QJsonDocument::fromJson(
+                          pluginPanelInput(manifest->panels.front(), PluginEngine{}, std::nullopt,
+                                           std::nullopt, {}, {}, {},
+                                           PluginPanelAction{.id = QStringLiteral("vote"),
+                                                             .value = QStringLiteral("7"),
+                                                             .inputs = QJsonObject{{QStringLiteral("room"),
+                                                                                    QStringLiteral("x")}}}))
+                          .object();
+    QVERIFY(told.value(QStringLiteral("playing")).isNull());
+    QCOMPARE(told.value(QStringLiteral("action")).toObject().value(QStringLiteral("value")).toString(),
+             QStringLiteral("7"));
+    QCOMPARE(told.value(QStringLiteral("inputs")).toObject().value(QStringLiteral("room")).toString(),
+             QStringLiteral("x"));
 }
 
 // What a `list` action answers: a heading and rows of text, detail and a

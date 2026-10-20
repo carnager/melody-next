@@ -341,6 +341,7 @@ class BenchMainWindowTest final : public QObject {
     void aPluginPanelIsToldTheLibrary();
     void aTogetherLinkAsksTheEngineToJoin();
     void aRoomPanelIsAskedAgainAsTheRoomChanges();
+    void aPanelsControlsAskItAgain();
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
     void applyReadsAgainAFileChangedElsewhere();

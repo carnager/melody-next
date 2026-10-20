@@ -192,6 +192,22 @@ missing albums, a biography, credits ([ADR-0291](adr/0291-plugin-panels.md)):
 "panels": [{"id": "artist", "label": "About the artist", "run": ["./about"]}]
 ```
 
+A panel may hold controls ([ADR-0303](adr/0303-panels-with-controls.md)):
+
+| Part | Keys |
+| --- | --- |
+| Input | `input` -- its key -- `label`, `value`, `placeholder`, `secret` (shown as dots), `action` (run on Enter) |
+| Toggle | `toggle` -- its key -- `label`, `on` |
+| Button | `button` -- its text -- `action`, `value`, `primary`; buttons side by side are a row |
+
+and an item may carry `"buttons": [{"text", "action", "value", "on"}]` at its
+right -- a vote, one that is on drawn as chosen. Pressed, the panel's program
+runs again, told `"action": {"id", "value"}` -- a toggle's key and `on` or
+`off` -- and `"inputs"`, every input's text; its answer is the panel's new
+content. What was typed stays unless the answer gives the input a new value.
+A panel of controls says `"always": true` and is asked with nothing playing
+too, `playing` then null.
+
 A panel that shows a listening room says `"refresh": ["listening-room"]`,
 and is asked again whenever the room changes -- a vote, a friend arriving --
 not only with the track ([ADR-0302](adr/0302-listening-together.md)).

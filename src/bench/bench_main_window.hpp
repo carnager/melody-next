@@ -459,6 +459,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         std::optional<QString> asked;
         // Its run on the way: deleted, it stops.
         QPointer<QObject> run;
+        // ADR-0303: what was pressed, told with its next run.
+        std::optional<PluginPanelAction> action;
     };
     std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
     // ADR-0302: the panels showing a listening room, asked again as it
@@ -489,6 +491,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // asked again since.
     void runPluginPanelWith(PluginPanelDock& slot, QObject* context, PluginPlaying told,
                             const PluginPanelLibrary& library = {});
+    // Its answer drawn -- or why not -- unless asked again since.
+    static void showPluginPanelOutcome(PluginPanelDock& slot, QObject* context,
+                                       const PluginOutcome& outcome);
     // ADR-0295: each enabled plugin's triggers -- run on the library's news,
     // every so often, at start, or from Workspace › Run. One run of each at a
     // time; asked again while it runs, it runs once more after.

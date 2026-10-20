@@ -376,7 +376,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
     }
     static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
                                         QStringLiteral("run"), QStringLiteral("timeout"),
-                                        QStringLiteral("library"), QStringLiteral("refresh")};
+                                        QStringLiteral("library"), QStringLiteral("refresh"),
+                                        QStringLiteral("always")};
     for (const auto& value : panels.toArray()) {
         if (!value.isObject()) {
             return fail(QStringLiteral("a panel is not an object"));
@@ -428,6 +429,12 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
             if (!asked.isArray()) {
                 return fail(QStringLiteral("panel \"%1\": \"library\" is a list").arg(panel.id));
             }
+        }
+        if (entry.contains(QStringLiteral("always"))) {
+            if (!entry.value(QStringLiteral("always")).isBool()) {
+                return fail(QStringLiteral("panel \"%1\": \"always\" is true or false").arg(panel.id));
+            }
+            panel.always = entry.value(QStringLiteral("always")).toBool();
         }
         if (entry.contains(QStringLiteral("refresh"))) {
             const auto asked = entry.value(QStringLiteral("refresh"));
@@ -671,14 +678,63 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             if (read.url.isEmpty()) {
                 return fail(QStringLiteral("a link needs its url: %1").arg(read.text));
             }
+        } else if (part.contains(QStringLiteral("input"))) {
+            // ADR-0303: a field to type in, its text told with every action.
+            read.kind = Kind::input;
+            read.key = part.value(QStringLiteral("input")).toString();
+            read.text = part.value(QStringLiteral("label")).toString();
+            read.value = part.value(QStringLiteral("value")).toString();
+            read.placeholder = part.value(QStringLiteral("placeholder")).toString();
+            read.secret = part.value(QStringLiteral("secret")).toBool(false);
+            read.action = part.value(QStringLiteral("action")).toString();
+            allowed = {QStringLiteral("input"),       QStringLiteral("label"),
+                       QStringLiteral("value"),       QStringLiteral("placeholder"),
+                       QStringLiteral("secret"),      QStringLiteral("action")};
+            if (read.key.isEmpty()) {
+                return fail(QStringLiteral("an input needs its key"));
+            }
+        } else if (part.contains(QStringLiteral("toggle"))) {
+            read.kind = Kind::toggle;
+            read.key = part.value(QStringLiteral("toggle")).toString();
+            read.text = part.value(QStringLiteral("label")).toString();
+            read.on = part.value(QStringLiteral("on")).toBool(false);
+            allowed = {QStringLiteral("toggle"), QStringLiteral("label"), QStringLiteral("on")};
+            if (read.key.isEmpty()) {
+                return fail(QStringLiteral("a toggle needs its key"));
+            }
+        } else if (part.contains(QStringLiteral("button"))) {
+            read.kind = Kind::button;
+            read.text = part.value(QStringLiteral("button")).toString();
+            read.action = part.value(QStringLiteral("action")).toString();
+            read.value = part.value(QStringLiteral("value")).toString();
+            read.on = part.value(QStringLiteral("primary")).toBool(false);
+            allowed = {QStringLiteral("button"), QStringLiteral("action"), QStringLiteral("value"),
+                       QStringLiteral("primary")};
+            if (read.action.isEmpty()) {
+                return fail(QStringLiteral("a button needs its action: %1").arg(read.text));
+            }
         } else if (part.contains(QStringLiteral("text"))) {
             read.kind = Kind::item;
             read.text = part.value(QStringLiteral("text")).toString();
             read.detail = part.value(QStringLiteral("detail")).toString();
             read.url = part.value(QStringLiteral("url")).toString();
-            allowed = {QStringLiteral("text"), QStringLiteral("detail"), QStringLiteral("url")};
+            allowed = {QStringLiteral("text"), QStringLiteral("detail"), QStringLiteral("url"),
+                       QStringLiteral("buttons")};
+            for (const auto& listed : part.value(QStringLiteral("buttons")).toArray()) {
+                const auto button = listed.toObject();
+                PluginPanelContent::Button made{
+                    .text = button.value(QStringLiteral("text")).toString(),
+                    .action = button.value(QStringLiteral("action")).toString(),
+                    .value = button.value(QStringLiteral("value")).toString(),
+                    .on = button.value(QStringLiteral("on")).toBool(false)};
+                if (!listed.isObject() || made.text.isEmpty() || made.action.isEmpty()) {
+                    return fail(QStringLiteral("an item's button is {text, action, value?, on?}"));
+                }
+                read.buttons.push_back(std::move(made));
+            }
         } else {
-            return fail(QStringLiteral("a part is a heading, paragraph, text, link or image"));
+            return fail(QStringLiteral(
+                "a part is a heading, paragraph, text, link, image, input, toggle or button"));
         }
         for (const auto& key : part.keys()) {
             if (!allowed.contains(key)) {
@@ -1082,7 +1138,8 @@ QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine
                             const std::optional<PluginTrack>& playing,
                             const std::optional<std::int64_t> duration_ms,
                             const std::vector<std::string>& music_folders,
-                            const QJsonObject& settings, const PluginPanelLibrary& library) {
+                            const QJsonObject& settings, const PluginPanelLibrary& library,
+                            const std::optional<PluginPanelAction>& action) {
     QJsonValue told{QJsonValue::Null};
     if (playing) {
         auto object = playingJson(*playing, duration_ms, music_folders);
@@ -1094,6 +1151,11 @@ QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine
                       {QStringLiteral("engine"), engineJson(engine)},
                       {QStringLiteral("playing"), told},
                       {QStringLiteral("settings"), settings}};
+    if (action) {
+        input.insert(QStringLiteral("action"), QJsonObject{{QStringLiteral("id"), action->id},
+                                                           {QStringLiteral("value"), action->value}});
+        input.insert(QStringLiteral("inputs"), action->inputs);
+    }
     if (panel.artist_albums) {
         input.insert(QStringLiteral("artist_albums"),
                      library.artist_tracks

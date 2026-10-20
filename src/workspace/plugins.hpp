@@ -50,6 +50,9 @@ struct PluginPanel {
     // ADR-0302: `"refresh": ["listening-room"]` -- asked again whenever the
     // listening room changes, not only with the track.
     bool refresh_room{false};
+    // ADR-0303: `"always": true` -- asked with nothing playing too, `playing`
+    // then null: a panel of controls, not about the track.
+    bool always{false};
 };
 
 // ADR-0293: something a plugin finds for Melody when Melody has none --
@@ -227,8 +230,17 @@ struct PluginList {
 // image (a file the plugin keeps, a link on it) or a link alone -- links side
 // by side are drawn as a row of small buttons, what each is about their tip.
 struct PluginPanelContent {
+    // ADR-0303: a button a panel's program answers, run again when it is
+    // pressed: `action` and `value` are what it is told.
+    struct Button {
+        QString text;
+        QString action;
+        QString value;
+        // Drawn as chosen -- a vote of one's own -- or as the one to press.
+        bool on{false};
+    };
     struct Part {
-        enum class Kind : std::uint8_t { heading, paragraph, item, image, link };
+        enum class Kind : std::uint8_t { heading, paragraph, item, image, link, input, toggle, button };
         Kind kind{Kind::item};
         QString text;
         QString detail;
@@ -236,6 +248,17 @@ struct PluginPanelContent {
         QString url;
         // An image's, an absolute path on this computer.
         QString image;
+        // ADR-0303. An input's or a toggle's key -- what its value is told as.
+        QString key;
+        // An input's text, or placeholder; a button's action and value; a
+        // toggle's state.
+        QString value;
+        QString placeholder;
+        QString action;
+        bool secret{false};
+        bool on{false};
+        // An item's buttons, at its right.
+        std::vector<Button> buttons;
     };
     QString title;
     std::vector<Part> parts;
@@ -269,12 +292,20 @@ struct PluginPanelLibrary {
 // The JSON a panel's run is given: what plays -- null when nothing does --
 // its tags, the engine it plays on, the plugin's settings and, asked for,
 // the artist's albums.
+// ADR-0303: what was pressed in a panel -- a button's action and value, a
+// toggle as its key and "on" or "off" -- and every input's text as it stood.
+struct PluginPanelAction {
+    QString id;
+    QString value;
+    QJsonObject inputs;
+};
 [[nodiscard]] QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine,
                                           const std::optional<PluginTrack>& playing,
                                           std::optional<std::int64_t> duration_ms,
                                           const std::vector<std::string>& music_folders,
                                           const QJsonObject& settings,
-                                          const PluginPanelLibrary& library = {});
+                                          const PluginPanelLibrary& library = {},
+                                          const std::optional<PluginPanelAction>& action = {});
 
 // What a lyrics provider answers: the lyrics, as LRC or plain text, and
 // what it names their source; none found, nullopt. Its answer unread, why.

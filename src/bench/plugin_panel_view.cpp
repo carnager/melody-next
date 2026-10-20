@@ -2,6 +2,7 @@
 
 #include "bench/plugin_panel_view.hpp"
 
+#include <QCheckBox>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFrame>
@@ -10,9 +11,11 @@
 #include <QImageReader>
 #include <QLabel>
 #include <QLayout>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QToolButton>
 #include <QUrl>
@@ -257,7 +260,16 @@ PluginPanelView::PluginPanelView(const QString& label, QWidget* parent) : QWidge
 
 void PluginPanelView::setSubject(const QString& subject) { subject_->setText(subject); }
 
+QJsonObject PluginPanelView::inputs() const {
+    QJsonObject told;
+    for (auto input = inputs_.cbegin(); input != inputs_.cend(); ++input) {
+        told.insert(input.key(), input.value()->text());
+    }
+    return told;
+}
+
 void PluginPanelView::clearParts() {
+    inputs_.clear();
     while (parts_layout_->count() > 1) {
         auto* item = parts_layout_->takeAt(0);
         delete item->widget();
@@ -267,6 +279,7 @@ void PluginPanelView::clearParts() {
 
 void PluginPanelView::showMessage(const QString& message) {
     clearParts();
+    has_content_ = false;
     subject_->show();
     auto* label = partLabel(message.toHtmlEscaped(), parts_);
     label->setObjectName(QStringLiteral("bench-plugin-panel-message"));
@@ -276,6 +289,7 @@ void PluginPanelView::showMessage(const QString& message) {
 
 void PluginPanelView::showContent(const PluginPanelContent& content) {
     clearParts();
+    has_content_ = true;
     int at = 0;
     const auto add = [this, &at](QWidget* widget) { parts_layout_->insertWidget(at++, widget); };
     // The answer's title as the page's, what it was asked about beneath --
@@ -332,6 +346,64 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
         case Kind::paragraph:
             add(new FoldingParagraph(part.text, parts_));
             break;
+        case Kind::input: {
+            // ADR-0303: a field, its label above; Enter runs its action.
+            if (!part.text.isEmpty()) {
+                auto* label = partLabel(part.text.toHtmlEscaped(), parts_);
+                label->setForegroundRole(QPalette::PlaceholderText);
+                add(label);
+            }
+            auto* edit = new QLineEdit(parts_);
+            edit->setObjectName(QStringLiteral("bench-plugin-panel-input-%1").arg(part.key));
+            edit->setPlaceholderText(part.placeholder);
+            edit->setEchoMode(part.secret ? QLineEdit::Password : QLineEdit::Normal);
+            // What was typed stays, unless the plugin gives a new value.
+            const bool changed = given_.value(part.key) != part.value;
+            given_.insert(part.key, part.value);
+            if (changed) {
+                typed_.remove(part.key);
+            }
+            edit->setText(typed_.contains(part.key) ? typed_.value(part.key) : part.value);
+            connect(edit, &QLineEdit::textEdited, this,
+                    [this, key = part.key](const QString& text) { typed_.insert(key, text); });
+            if (!part.action.isEmpty()) {
+                connect(edit, &QLineEdit::returnPressed, this,
+                        [this, action = part.action] { emit actionRequested(action, {}); });
+            }
+            inputs_.insert(part.key, edit);
+            add(edit);
+            break;
+        }
+        case Kind::toggle: {
+            auto* toggle = new QCheckBox(part.text, parts_);
+            toggle->setObjectName(QStringLiteral("bench-plugin-panel-toggle-%1").arg(part.key));
+            toggle->setChecked(part.on);
+            connect(toggle, &QCheckBox::toggled, this, [this, key = part.key](const bool on) {
+                emit actionRequested(key, on ? QStringLiteral("on") : QStringLiteral("off"));
+            });
+            add(toggle);
+            break;
+        }
+        case Kind::button: {
+            // Buttons side by side, as links are; the primary one stands out.
+            auto* row = new QWidget(parts_);
+            auto* flow = new FlowLayout(row);
+            for (; index < parts.size() && parts[index].kind == Kind::button; ++index) {
+                const auto& pressed = parts[index];
+                auto* button = new QPushButton(pressed.text, row);
+                button->setObjectName(QStringLiteral("bench-plugin-panel-button"));
+                button->setDefault(pressed.on);
+                button->setProperty("action", pressed.action);
+                connect(button, &QPushButton::clicked, this,
+                        [this, action = pressed.action, value = pressed.value] {
+                            emit actionRequested(action, value);
+                        });
+                flow->addWidget(button);
+            }
+            --index;
+            add(row);
+            break;
+        }
         case Kind::item: {
             auto* item = new QWidget(parts_);
             auto* item_layout = new QVBoxLayout(item);
@@ -350,7 +422,37 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
                 detail->setFont(font);
                 item_layout->addWidget(detail);
             }
-            add(item);
+            if (part.buttons.empty()) {
+                add(item);
+                break;
+            }
+            // ADR-0303: its buttons at its right -- a vote, say -- one's own
+            // drawn as chosen.
+            auto* line = new QWidget(parts_);
+            auto* line_layout = new QHBoxLayout(line);
+            line_layout->setContentsMargins(0, 0, 0, 0);
+            line_layout->setSpacing(6);
+            line_layout->addWidget(item, 1);
+            for (const auto& each : part.buttons) {
+                auto* button = new QToolButton(line);
+                button->setObjectName(QStringLiteral("bench-plugin-panel-item-button"));
+                button->setText(each.text);
+                button->setCheckable(true);
+                button->setChecked(each.on);
+                button->setCursor(Qt::PointingHandCursor);
+                button->setProperty("action", each.action);
+                button->setStyleSheet(QStringLiteral(
+                    "QToolButton { border: 1px solid palette(mid); border-radius: 11px;"
+                    " padding: 2px 10px; font-weight: 600; }"
+                    "QToolButton:checked { background: palette(highlight);"
+                    " color: palette(highlighted-text); border-color: palette(highlight); }"));
+                connect(button, &QToolButton::clicked, this,
+                        [this, action = each.action, value = each.value] {
+                            emit actionRequested(action, value);
+                        });
+                line_layout->addWidget(button, 0, Qt::AlignVCenter);
+            }
+            add(line);
             break;
         }
         case Kind::link: {

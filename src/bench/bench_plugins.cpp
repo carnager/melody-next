@@ -212,6 +212,13 @@ void BenchMainWindow::buildPluginPanels() {
             slot->view = view;
             watchSidePanel(dock);
             auto* raw = slot.get();
+            // ADR-0303: pressed, asked again -- told what was pressed.
+            connect(view, &PluginPanelView::actionRequested, this,
+                    [this, raw](const QString& action, const QString& value) {
+                        raw->action = PluginPanelAction{
+                            .id = action, .value = value, .inputs = raw->view->inputs()};
+                        askPluginPanel(*raw);
+                    });
             connect(view, &PluginPanelView::refreshRequested, this,
                     [this, raw] { askPluginPanel(*raw); });
             auto* toggle = dock->panelToggleAction();
@@ -271,22 +278,42 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
     const auto& state = plugin_panel_state_;
     const auto stopped = state.status == QStringLiteral("stopped") || state.entry.isEmpty();
     const auto entry = stopped ? QString{} : state.entry;
+    // Asked again about the same -- the room changed, a button pressed -- it
+    // keeps what it shows until the answer comes, rather than flickering.
+    const bool again = slot.asked == entry && slot.view->hasContent();
     slot.asked = entry;
     // A newer question: the one on its way is stopped.
     auto* previous = slot.run.data();
     slot.run = nullptr;
     delete previous;
+    auto* raw = &slot;
     if (entry.isEmpty()) {
         slot.view->setSubject({});
-        slot.view->showMessage(QStringLiteral("Nothing is playing"));
+        if (!slot.panel.always) {
+            slot.view->showMessage(QStringLiteral("Nothing is playing"));
+            return;
+        }
+        // ADR-0303: a panel of controls is asked with nothing playing too.
+        auto* context = new QObject(this);
+        slot.run = context;
+        auto told = pluginPlaying(state);
+        const auto action = std::exchange(slot.action, std::nullopt);
+        runPluginPanel(slot.plugin, slot.panel,
+                       pluginPanelInput(slot.panel, told.engine, std::nullopt, std::nullopt,
+                                        told.music_folders, pluginSettings(slot.plugin), {},
+                                        action),
+                       context, [raw, context](const PluginOutcome& outcome) {
+                           showPluginPanelOutcome(*raw, context, outcome);
+                       });
         return;
     }
     auto told = pluginPlaying(state);
     showPluginPanelSubject(slot, told.track);
-    slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
+    if (!again) {
+        slot.view->showMessage(QStringLiteral("Asking %1\u2026").arg(slot.plugin.title));
+    }
     auto* context = new QObject(this);
     slot.run = context;
-    auto* raw = &slot;
     // What plays is the engine's to say: the window's lists may not hold it
     // yet -- an album another client started is in none until its queue has
     // come -- and told no tags, the plugin would say the track has none.
@@ -346,31 +373,36 @@ void BenchMainWindow::showPluginPanelSubject(PluginPanelDock& slot, const Plugin
 void BenchMainWindow::runPluginPanelWith(PluginPanelDock& slot, QObject* context,
                                          PluginPlaying told, const PluginPanelLibrary& library) {
     auto* raw = &slot;
+    const auto action = std::exchange(slot.action, std::nullopt);
     runPluginPanel(
         slot.plugin, slot.panel,
         pluginPanelInput(slot.panel, told.engine, told.track, told.duration_ms, told.music_folders,
-                         pluginSettings(slot.plugin), library),
+                         pluginSettings(slot.plugin), library, action),
         context, [raw, context](const PluginOutcome& outcome) {
-            // Asked again since, or gone: this answer is not wanted.
-            if (raw->run != context) {
-                return;
-            }
-            raw->run = nullptr;
-            context->deleteLater();
-            if (!outcome.succeeded) {
-                raw->view->showMessage(
-                    QStringLiteral("%1 failed: %2").arg(raw->plugin.title, outcome.text));
-                return;
-            }
-            QString problem;
-            const auto content = parsePluginPanel(outcome.text.toUtf8(), &problem);
-            if (!content) {
-                raw->view->showMessage(QStringLiteral("%1 answered what cannot be shown: %2")
-                                           .arg(raw->plugin.title, problem));
-                return;
-            }
-            raw->view->showContent(*content);
+            showPluginPanelOutcome(*raw, context, outcome);
         });
+}
+
+void BenchMainWindow::showPluginPanelOutcome(PluginPanelDock& slot, QObject* context,
+                                             const PluginOutcome& outcome) {
+    // Asked again since, or gone: this answer is not wanted.
+    if (slot.run != context) {
+        return;
+    }
+    slot.run = nullptr;
+    context->deleteLater();
+    if (!outcome.succeeded) {
+        slot.view->showMessage(QStringLiteral("%1 failed: %2").arg(slot.plugin.title, outcome.text));
+        return;
+    }
+    QString problem;
+    const auto content = parsePluginPanel(outcome.text.toUtf8(), &problem);
+    if (!content) {
+        slot.view->showMessage(QStringLiteral("%1 answered what cannot be shown: %2")
+                                   .arg(slot.plugin.title, problem));
+        return;
+    }
+    slot.view->showContent(*content);
 }
 
 BenchMainWindow::PluginPlaying BenchMainWindow::pluginPlaying(const EnginePlayback::State& state) {

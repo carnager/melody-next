@@ -43,7 +43,8 @@ void allowLocalEngine(bool allowed);
 
 // Connects to the local engine. When nothing answers, this user's engine on
 // Linux is systemd's to start: its socket is started if it is enabled and
-// is not yet, else what to do is said. Any other is started here, as
+// is not yet -- or again, when it runs without its socket file -- else what
+// to do is said. Any other is started here, as
 // `melodyd` with its socket, folder and file -- every setting is in
 // melodyd.conf (ADR-0286). Waits at most timeout for it to listen.
 [[nodiscard]] core::Result<std::unique_ptr<protocol::Client>>

@@ -557,8 +557,20 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
     // not running yet -- just installed, say -- and otherwise what to do is
     // said.
     if (engine.standard) {
-        if (socket_unit_enabled() &&
-            systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status == 0) {
+        // Running by systemd's account, yet its socket file gone: an update
+        // replaced the unit under it, systemd's engine started without the
+        // socket took the path itself, and stopping took the file with it.
+        // Started again, the socket is there to start the engine.
+        const auto socket_unit = [&engine] {
+            if (systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status != 0) {
+                return false;
+            }
+            std::error_code unreadable;
+            return std::filesystem::exists(engine.socket, unreadable) ||
+                   systemctl({QStringLiteral("restart"), QStringLiteral("melodyd.socket")})
+                           .status == 0;
+        };
+        if (socket_unit_enabled() && socket_unit()) {
             const auto deadline = std::chrono::steady_clock::now() + timeout;
             while (std::chrono::steady_clock::now() < deadline) {
                 if (auto started = protocol::Client::connect(endpoint)) {

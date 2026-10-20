@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -64,6 +65,8 @@ type seen struct {
 	Party     bool            `json:"party"`
 	// Most wanted first; the oldest first among as wanted.
 	Suggestions []suggestion `json:"suggestions"`
+	// Newest first.
+	History []played `json:"history"`
 }
 
 // A line of the room's chat: who, what, when on the server's clock.
@@ -105,16 +108,34 @@ type room struct {
 	party     bool
 	suggested []suggestion
 	suggestID uint64
+	// What played before what plays, newest first; and what plays, by its
+	// entry and instance, to tell when it changes.
+	history []played
+	playing string
+	current played
 	// Closed, and a new one made, whenever the room changes: whoever waits
 	// on it wakes.
 	changed chan struct{}
 }
+
+// A track the room played: what it was, its copy's name, and when it began
+// on the server's clock.
+type played struct {
+	Track json.RawMessage `json:"track"`
+	File  string          `json:"file"`
+	Ms    int64           `json:"ms"`
+}
+
+// The tracks a room remembers having played.
+const keptHistory = 30
 
 type rooms struct {
 	password string
 	now      func() time.Time
 	mutex    sync.Mutex
 	rooms    map[string]*room
+	// Changed since last kept on disk.
+	dirty bool
 }
 
 func newRooms(password string) *rooms {
@@ -136,26 +157,38 @@ func same(offered, expected string) bool {
 		subtle.ConstantTimeCompare([]byte(offered), []byte(expected)) == 1
 }
 
-func (r *rooms) make(password string) (made, error) {
+// A room, named as asked or with a name made here.
+func (r *rooms) make(password, wanted string) (made, error) {
 	// No password set is no rooms made: a server open to anyone is not one
 	// for friends.
 	if r.password == "" || !same(password, r.password) {
 		return made{}, errRefused
 	}
-	name, err := token(8)
-	if err != nil {
-		return made{}, err
+	if wanted != "" && !namePattern.MatchString(wanted) {
+		return made{}, errBadName
 	}
 	hostKey, err := token(32)
 	if err != nil {
 		return made{}, err
 	}
-	invite, err := token(32)
+	// The secret of a room is its invite's key, not its name: 64 bits, for
+	// a server of friends.
+	invite, err := token(8)
 	if err != nil {
 		return made{}, err
 	}
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	taken := func(name string) bool { return r.rooms[name] != nil }
+	name := wanted
+	if name == "" {
+		if name, err = madeName(taken); err != nil {
+			return made{}, err
+		}
+	} else if taken(name) {
+		return made{}, errNameTaken
+	}
+	r.dirty = true
 	r.rooms[name] = &room{
 		hostKey:   hostKey,
 		invite:    invite,
@@ -183,7 +216,7 @@ func (r *rooms) holder(name, key string) holder {
 }
 
 // Moved: the revision is a new one, and everyone waiting wakes. Called
-// with the lock held.
+// with the lock held -- by the rooms, which then have something to keep.
 func (found *room) moved() {
 	found.revision++
 	close(found.changed)
@@ -206,8 +239,10 @@ func (found *room) seen() seen {
 		}
 		return suggested[a].ID < suggested[b].ID
 	})
+	history := make([]played, len(found.history))
+	copy(history, found.history)
 	return seen{Revision: found.revision, State: found.state, Listeners: names, Chat: chat,
-		Closed: found.closed, Party: found.party, Suggestions: suggested}
+		Closed: found.closed, Party: found.party, Suggestions: suggested, History: history}
 }
 
 // The host's: a new state, numbered and handed to everyone waiting.
@@ -220,6 +255,31 @@ func (r *rooms) describe(name string, state json.RawMessage) (uint64, error) {
 	}
 	found.state = state
 	found.touched = r.now()
+	// A new track: the one before it goes into the room's history.
+	var said struct {
+		Entry    string          `json:"entry"`
+		Instance uint64          `json:"instance"`
+		File     string          `json:"file"`
+		Track    json.RawMessage `json:"track"`
+	}
+	if json.Unmarshal(state, &said) == nil && len(said.Track) > 0 && string(said.Track) != "null" {
+		playing := said.Entry + "/" + strconv.FormatUint(said.Instance, 10)
+		if playing != found.playing {
+			if found.playing != "" {
+				found.history = append([]played{found.current}, found.history...)
+				if len(found.history) > keptHistory {
+					found.history = found.history[:keptHistory]
+				}
+			}
+			file := said.File
+			if file == "" {
+				file = said.Entry
+			}
+			found.playing = playing
+			found.current = played{Track: said.Track, File: file, Ms: r.now().UnixMilli()}
+		}
+	}
+	r.dirty = true
 	found.moved()
 	return found.revision, nil
 }
@@ -283,6 +343,7 @@ func (r *rooms) touch(name string) {
 func (r *rooms) say(name, who, text string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	found := r.rooms[name]
 	if found == nil || found.closed {
 		return errNoRoom
@@ -301,6 +362,7 @@ func (r *rooms) say(name, who, text string) error {
 func (r *rooms) setParty(name string, on bool) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	found := r.rooms[name]
 	if found == nil || found.closed {
 		return errNoRoom
@@ -318,6 +380,7 @@ func (r *rooms) setParty(name string, on bool) error {
 func (r *rooms) suggest(name, who string, track json.RawMessage) (suggestion, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	found := r.rooms[name]
 	if found == nil || found.closed {
 		return suggestion{}, errNoRoom
@@ -347,6 +410,7 @@ func (r *rooms) suggest(name, who string, track json.RawMessage) (suggestion, er
 func (r *rooms) vote(name string, id uint64, who string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	found := r.rooms[name]
 	if found == nil || found.closed {
 		return errNoRoom
@@ -372,6 +436,7 @@ func (r *rooms) vote(name string, id uint64, who string) error {
 func (r *rooms) unsuggest(name string, id uint64) (suggestion, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	found := r.rooms[name]
 	if found == nil || found.closed {
 		return suggestion{}, errNoRoom
@@ -418,6 +483,7 @@ func (r *rooms) leave(name, who string) {
 func (r *rooms) close(name string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.dirty = true
 	if found := r.rooms[name]; found != nil && !found.closed {
 		found.closed = true
 		found.touched = r.now()
@@ -431,6 +497,7 @@ func (r *rooms) sweep() []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	now := r.now()
+	r.dirty = true
 	var gone []string
 	for name, found := range r.rooms {
 		// Closed, it stays a while to say so to those still waiting.
@@ -452,4 +519,82 @@ func (r *rooms) sweep() []string {
 		}
 	}
 	return gone
+}
+
+// What is kept of a room on disk: everything but who is listening this
+// moment, who comes back by asking.
+type keptRoom struct {
+	HostKey     string          `json:"host_key"`
+	Invite      string          `json:"invite"`
+	Revision    uint64          `json:"revision"`
+	State       json.RawMessage `json:"state"`
+	Touched     time.Time       `json:"touched"`
+	Closed      bool            `json:"closed"`
+	Chat        []said          `json:"chat"`
+	ChatID      uint64          `json:"chat_id"`
+	Party       bool            `json:"party"`
+	Suggestions []suggestion    `json:"suggestions"`
+	SuggestID   uint64          `json:"suggest_id"`
+	History     []played        `json:"history"`
+	Playing     string          `json:"playing"`
+	Current     played          `json:"current"`
+}
+
+// Writes the rooms to `path`, whole or not at all, when they changed since.
+func (r *rooms) keep(path string) error {
+	r.mutex.Lock()
+	if !r.dirty {
+		r.mutex.Unlock()
+		return nil
+	}
+	all := map[string]keptRoom{}
+	for name, found := range r.rooms {
+		all[name] = keptRoom{HostKey: found.hostKey, Invite: found.invite, Revision: found.revision,
+			State: found.state, Touched: found.touched, Closed: found.closed, Chat: found.chat,
+			ChatID: found.chatID, Party: found.party, Suggestions: found.suggested,
+			SuggestID: found.suggestID, History: found.history, Playing: found.playing,
+			Current: found.current}
+	}
+	r.dirty = false
+	r.mutex.Unlock()
+	text, err := json.Marshal(map[string]any{"version": 1, "rooms": all})
+	if err != nil {
+		return err
+	}
+	partial := path + ".partial"
+	if err := os.WriteFile(partial, text, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(partial, path)
+}
+
+// The rooms kept at `path`, if any.
+func (r *rooms) restore(path string) error {
+	text, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var kept struct {
+		Rooms map[string]keptRoom `json:"rooms"`
+	}
+	if err := json.Unmarshal(text, &kept); err != nil {
+		return err
+	}
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	for name, each := range kept.Rooms {
+		state := each.State
+		if len(state) == 0 {
+			state = json.RawMessage("{}")
+		}
+		r.rooms[name] = &room{hostKey: each.HostKey, invite: each.Invite, revision: each.Revision,
+			state: state, listeners: map[string]time.Time{}, touched: each.Touched,
+			closed: each.Closed, chat: each.Chat, chatID: each.ChatID, party: each.Party,
+			suggested: each.Suggestions, suggestID: each.SuggestID, history: each.History,
+			playing: each.Playing, current: each.Current, changed: make(chan struct{})}
+	}
+	return nil
 }

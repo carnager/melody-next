@@ -35,8 +35,9 @@ invite -- and the program:
 openssl rand -hex 16 > /etc/melody-together/password
 melody-together -password-file /etc/melody-together/password
 # listens on 127.0.0.1:6099; -listen HOST:PORT for elsewhere
-# keeps the hosts' copies in $TMPDIR/melody-together, an hour each, 2 GB at
-# most: -files DIR and -files-mb MB for elsewhere and more
+# keeps its rooms, and the copies of their tracks -- an hour each, 2 GB at
+# most -- in ~/.local/state/melody-together: -data DIR and -files-mb MB for
+# elsewhere and more; a restart ends no room
 ```
 
 A systemd unit:
@@ -67,9 +68,10 @@ together.example.org {
 }
 ```
 
-A room no one has touched for twelve hours is closed. The server keeps no
-rooms on disk -- a restart ends them -- and the copies of tracks only an
-hour, and none past their room.
+A room no one has touched for twelve hours is closed. Its name is the
+host's choice -- the plugin's **Room name**, or `melody-cli together host
+SERVER friday-doom` -- else two words the server makes, `quiet-otter`; the
+invite's key after `#` is what keeps it among friends.
 
 ## Hosting and joining
 

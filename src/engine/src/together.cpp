@@ -563,7 +563,7 @@ core::Result<void> Together::measure_clock(Session& session) {
 }
 
 core::Result<std::string> Together::host(const std::string& server, const std::string& password,
-                                         const std::string& name) {
+                                         const std::string& name, const std::string& room) {
     const std::lock_guard control{control_};
     end();
     auto session = std::make_shared<Session>();
@@ -581,14 +581,17 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
     std::error_code unmade;
     std::filesystem::remove_all(session->downloads, unmade);
     std::filesystem::create_directories(session->downloads, unmade);
-    auto made = request("POST", base + "/rooms", password, {}, 10'000L);
+    auto made = request("POST", base + "/rooms", password,
+                        room.empty() ? std::string{} : Json{{"name", room}}.dump(), 10'000L);
     if (!made) {
         return std::unexpected(made.error());
     }
     if (made->status != 200) {
         return std::unexpected(together_error(
-            made->status == 403 ? "the server's password is not that"
-                                : "the server made no room (" + std::to_string(made->status) + ")",
+            made->status == 403   ? "the server's password is not that"
+            : made->status == 409 ? "a room of that name is open on the server already"
+            : made->status == 400 ? "a room's name is 3 to 40 of a-z, 0-9 and -"
+                                  : "the server made no room (" + std::to_string(made->status) + ")",
             made->status == 403 ? core::ErrorCode::unauthorized : core::ErrorCode::backend));
     }
     session->invite.room = text(made->body, "room");
@@ -1452,7 +1455,8 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
                               "the server's address is needed", core::ErrorCode::invalid_argument));
                       }
                       auto invite = together.host(server, params.value("password", std::string{}),
-                                                  params.value("name", std::string{}));
+                                                  params.value("name", std::string{}),
+                                                  params.value("room", std::string{}));
                       if (!invite) {
                           return std::unexpected(invite.error());
                       }

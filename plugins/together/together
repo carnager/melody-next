@@ -107,7 +107,8 @@ def main():
         if not server or not password:
             fail("Set the server and its password under Settings › Plugins › Listen together")
         name = str(settings.get("name") or "").strip() or os.environ.get("USER", "the host")
-        answer = cli(given, "together", "host", server, name, password=password)
+        room = str(settings.get("room") or "").strip().lower() or "-"
+        answer = cli(given, "together", "host", server, room, name, password=password)
         # Just the invite: it goes onto the clipboard, to paste to friends.
         print(answer.get("invite", ""))
     elif what == "join":

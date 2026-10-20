@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,20 +44,44 @@ type tracks struct {
 	files map[string]map[string]kept
 }
 
+// The tracks kept in `directory`, a folder each room, those a previous run
+// kept among them: rooms outlive a restart, and so do their copies.
 func newTracks(directory string, capacity int64) (*tracks, error) {
-	// Whatever a previous run left is no one's now.
-	if err := os.RemoveAll(directory); err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
-	return &tracks{directory: directory, capacity: capacity, now: time.Now,
-		files: map[string]map[string]kept{}}, nil
+	found := &tracks{directory: directory, capacity: capacity, now: time.Now,
+		files: map[string]map[string]kept{}}
+	rooms, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	for _, room := range rooms {
+		if !room.IsDir() {
+			// An upload a stop cut short.
+			_ = os.Remove(filepath.Join(directory, room.Name()))
+			continue
+		}
+		copies, _ := os.ReadDir(filepath.Join(directory, room.Name()))
+		for _, copy := range copies {
+			track, isOpus := strings.CutSuffix(copy.Name(), ".opus")
+			info, err := copy.Info()
+			if !isOpus || err != nil || !trackPattern.MatchString(track) {
+				continue
+			}
+			if found.files[room.Name()] == nil {
+				found.files[room.Name()] = map[string]kept{}
+			}
+			found.files[room.Name()][track] = kept{path: filepath.Join(directory, room.Name(), copy.Name()),
+				size: info.Size(), added: info.ModTime()}
+		}
+	}
+	found.evictLocked()
+	return found, nil
 }
 
 func (t *tracks) path(room, track string) string {
-	return filepath.Join(t.directory, room+"-"+track+".opus")
+	return filepath.Join(t.directory, room, track+".opus")
 }
 
 // Keeps what `body` holds as the room's track, replacing one of that name.
@@ -80,6 +105,9 @@ func (t *tracks) put(room, track string, body io.Reader) error {
 		return errTooLarge
 	}
 	target := t.path(room, track)
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
 	if err := os.Rename(partial.Name(), target); err != nil {
 		return err
 	}
@@ -120,9 +148,7 @@ func (t *tracks) names(room string) []string {
 func (t *tracks) forget(room string) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	for _, found := range t.files[room] {
-		_ = os.Remove(found.path)
-	}
+	_ = os.RemoveAll(filepath.Join(t.directory, room))
 	delete(t.files, room)
 }
 

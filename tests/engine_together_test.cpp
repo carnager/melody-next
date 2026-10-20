@@ -339,8 +339,9 @@ int main(int argc, char** argv) {
 
     require(!host.together->host(server.url(), "wrong").has_value(),
             "a wrong server password makes no room");
-    const auto invite = host.together->host(server.url(), "friends");
+    const auto invite = host.together->host(server.url(), "friends", {}, "friday-doom");
     require(invite.has_value(), "the host makes a room");
+    require(invite->starts_with(server.url() + "/rooms/friday-doom#"), "named as asked");
     require(host.together->status().role == "host", "and is its host");
     require(!friend_.together->join(*invite + "x", "Ana").has_value(),
             "a wrong invite opens nothing");

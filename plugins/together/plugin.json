@@ -73,6 +73,11 @@
       "help": "The password the server makes rooms with; listeners need only an invite"
     },
     {
+      "key": "room",
+      "label": "Room name",
+      "help": "What your room is called in its address, e.g. friday-doom; empty, a name is made"
+    },
+    {
       "key": "invite",
       "label": "Invite",
       "help": "The invite a friend sent: paste it here, then Workspace › Run › Join the listening room"

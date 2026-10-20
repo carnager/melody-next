@@ -1118,7 +1118,7 @@ esac
     QFile lines{asked};
     QVERIFY(lines.open(QIODevice::ReadOnly));
     QCOMPARE(QString::fromUtf8(lines.readAll()),
-             QStringLiteral("--json together host https://t.example Bo|gemenon:6603|friends\n"
+             QStringLiteral("--json together host https://t.example - Bo|gemenon:6603|friends\n"
                             "--json together join https://t.example/rooms/r#k Bo|gemenon:6603|\n"));
 
     // The panel: what plays, who listens, the invite.

@@ -23,7 +23,7 @@ import (
 func main() {
 	listen := flag.String("listen", "127.0.0.1:6099", "where to listen: a web proxy in front gives it TLS and a name")
 	passwordFile := flag.String("password-file", "", "the password that makes rooms; whoever hosts needs it, listeners need only an invite")
-	files := flag.String("files", filepath.Join(os.TempDir(), "melody-together"), "where the hosts' copies of tracks are kept, an hour each; emptied at start")
+	data := flag.String("data", defaultData(), "where rooms and the copies of their tracks are kept, to outlive a restart")
 	filesMB := flag.Int64("files-mb", 2048, "the most the kept tracks may take, in MB")
 	flag.Parse()
 	if *passwordFile == "" {
@@ -38,8 +38,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := os.MkdirAll(*data, 0o700); err != nil {
+		fmt.Fprintln(os.Stderr, "melody-together: the data folder:", err)
+		os.Exit(1)
+	}
 	rooms := newRooms(password)
-	kept, err := newTracks(*files, *filesMB<<20)
+	roomsFile := filepath.Join(*data, "rooms.json")
+	if err := rooms.restore(roomsFile); err != nil {
+		fmt.Fprintln(os.Stderr, "melody-together: the rooms kept:", err)
+		os.Exit(1)
+	}
+	kept, err := newTracks(filepath.Join(*data, "tracks"), *filesMB<<20)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "melody-together: the folder for tracks:", err)
 		os.Exit(1)
@@ -60,15 +69,21 @@ func main() {
 		os.Exit(1)
 	}
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
+		sweeping := time.NewTicker(30 * time.Second)
+		keeping := time.NewTicker(time.Second)
+		defer sweeping.Stop()
+		defer keeping.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-sweeping.C:
 				for _, gone := range rooms.sweep() {
 					kept.forget(gone)
 				}
 				kept.sweep()
+			case <-keeping.C:
+				if err := rooms.keep(roomsFile); err != nil {
+					fmt.Fprintln(os.Stderr, "melody-together: keeping the rooms:", err)
+				}
 			case <-stopping.Done():
 				return
 			}
@@ -85,4 +100,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "melody-together:", err)
 		os.Exit(1)
 	}
+	// Stopped: what changed in the last second kept too.
+	if err := rooms.keep(roomsFile); err != nil {
+		fmt.Fprintln(os.Stderr, "melody-together: keeping the rooms:", err)
+	}
+}
+
+// $XDG_STATE_HOME/melody-together, else ~/.local/state/melody-together.
+func defaultData() string {
+	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
+		return filepath.Join(state, "melody-together")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "state", "melody-together")
+	}
+	return "melody-together"
 }

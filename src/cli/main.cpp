@@ -159,7 +159,9 @@ void usage(std::ostream& out) {
            "  albumrating [0-10]          the same, for the playing track's album\n"
            "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
            "                              SIZE pixels across at most if given\n"
-           "  together host SERVER [NAME] a room on a melody-together server, this\n"
+           "  together host SERVER [ROOM [NAME]]\n"
+           "                              a room on a melody-together server, named ROOM\n"
+           "                              (- or none: a name is made), this\n"
            "                              engine its host (ADR-0302); prints the invite\n"
            "                              to send to friends. The server's password is\n"
            "                              $MELODY_TOGETHER_PASSWORD, else the first line\n"
@@ -1719,9 +1721,9 @@ int run(const Options& options) {
             }
         };
         if (what == "host") {
-            if (words.size() < 3U || words.size() > 4U) {
+            if (words.size() < 3U || words.size() > 5U) {
                 fail("together host wants the server's address: https://together.example.org, "
-                     "and the name to be known by at a party");
+                     "a name for the room (- for one made), and yours at a party");
             }
             std::string password;
             if (const char* given = trackknife::core::environment_variable("MELODY_TOGETHER_PASSWORD");
@@ -1743,13 +1745,18 @@ int run(const Options& options) {
                 fail("the server's password: $MELODY_TOGETHER_PASSWORD, or "
                      "~/.config/melody/together-password");
             }
-            std::string name = words.size() == 4U ? words[3] : std::string{};
+            const std::string room =
+                words.size() >= 4U && words[3] != "-" ? words[3] : std::string{};
+            std::string name = words.size() == 5U ? words[4] : std::string{};
             if (const char* user = trackknife::core::environment_variable("USER");
                 name.empty() && user != nullptr) {
                 name = user;
             }
             const auto answer = call(*client, "together.host",
-                                     Json{{"server", words[2]}, {"password", password}, {"name", name}});
+                                     Json{{"server", words[2]},
+                                          {"password", password},
+                                          {"name", name},
+                                          {"room", room}});
             if (options.json) {
                 std::cout << answer.dump() << "\n";
             } else {

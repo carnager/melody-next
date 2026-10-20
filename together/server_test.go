@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -179,7 +180,7 @@ func TestTracks(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: kept, wait: 100 * time.Millisecond}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw")
+	made, _ := rooms.make("pw", "")
 	track := "/rooms/" + made.Room + "/tracks/entry-1"
 	opus := strings.Repeat("OggS", 1000)
 
@@ -256,7 +257,7 @@ func TestChat(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 2 * time.Second}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw")
+	made, _ := rooms.make("pw", "")
 	chat := "/rooms/" + made.Room + "/chat"
 	if status, _ := c.do("POST", chat, "guess", `{"name":"Ana","text":"hi"}`); status != 403 {
 		t.Fatal("nothing said without the invite")
@@ -312,7 +313,7 @@ func TestParty(t *testing.T) {
 	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: 200 * time.Millisecond}).handler())
 	defer served.Close()
 	c := client{t, served.URL}
-	made, _ := rooms.make("pw")
+	made, _ := rooms.make("pw", "")
 	base := "/rooms/" + made.Room
 	offer := func(who, title string) (int, map[string]any) {
 		return c.do("POST", base+"/suggestions", made.Invite,
@@ -376,8 +377,82 @@ func TestParty(t *testing.T) {
 	}
 }
 
+// A room has a name: the host's, or two words made here; its invite's key
+// is the secret.
+func TestNamedRooms(t *testing.T) {
+	rooms := newRooms("pw")
+	served := httptest.NewServer((&server{rooms: rooms, tracks: keptIn(t), wait: time.Second}).handler())
+	defer served.Close()
+	c := client{t, served.URL}
+	status, named := c.do("POST", "/rooms", "pw", `{"name":"Friday-Doom"}`)
+	if status != 200 || named["room"] != "friday-doom" || len(named["invite"].(string)) != 16 {
+		t.Fatalf("a room of the name asked: %d %v", status, named)
+	}
+	if status, _ := c.do("POST", "/rooms", "pw", `{"name":"friday-doom"}`); status != 409 {
+		t.Fatal("one of a name at a time")
+	}
+	for _, bad := range []string{`{"name":"a"}`, `{"name":"two words"}`, `{"name":"-dash"}`, `{"name":"x/y"}`} {
+		if status, _ := c.do("POST", "/rooms", "pw", bad); status != 400 {
+			t.Fatalf("refused: %s", bad)
+		}
+	}
+	_, made := c.do("POST", "/rooms", "pw", "")
+	if !regexp.MustCompile(`^[a-z]+-[a-z]+(-\d+)?$`).MatchString(made["room"].(string)) {
+		t.Fatalf("a name made of two words: %v", made["room"])
+	}
+}
+
+// What played before what plays, newest first.
+func TestHistory(t *testing.T) {
+	rooms := newRooms("pw")
+	made, _ := rooms.make("pw", "")
+	for index, title := range []string{"One", "Two", "Two", "Three"} {
+		// "Two" said twice -- a seek, a pause -- is one track.
+		entry := map[string]string{"One": "e1", "Two": "e2", "Three": "e3"}[title]
+		_, _ = rooms.describe(made.Room, json.RawMessage(`{"entry":"`+entry+`","instance":1,"track":{"title":"`+title+`"},"position_ms":`+strconv.Itoa(index)+`}`))
+	}
+	seen, _ := rooms.next(context.Background(), made.Room, 0, "", time.Millisecond)
+	if len(seen.History) != 2 || !strings.Contains(string(seen.History[0].Track), "Two") ||
+		!strings.Contains(string(seen.History[1].Track), "One") || seen.History[0].File != "e2" {
+		t.Fatalf("the tracks before, newest first: %+v", seen.History)
+	}
+}
+
+// Rooms and their copies outlive the server's restart.
+func TestKeptAcrossRestart(t *testing.T) {
+	directory := t.TempDir()
+	file := filepath.Join(directory, "rooms.json")
+	rooms := newRooms("pw")
+	made, _ := rooms.make("pw", "night-owl")
+	_, _ = rooms.describe(made.Room, json.RawMessage(`{"entry":"e1","instance":1,"track":{"title":"One"}}`))
+	_ = rooms.say(made.Room, "Ana", "still here?")
+	_ = rooms.setParty(made.Room, true)
+	kept, _ := newTracks(filepath.Join(directory, "tracks"), 1<<20)
+	if err := kept.put(made.Room, "e1", strings.NewReader("OggS")); err != nil {
+		t.Fatal(err)
+	}
+	if err := rooms.keep(file); err != nil {
+		t.Fatal(err)
+	}
+	again := newRooms("pw")
+	if err := again.restore(file); err != nil {
+		t.Fatal(err)
+	}
+	if again.holder(made.Room, made.Invite) != listener || again.holder(made.Room, made.HostKey) != host {
+		t.Fatal("the room opens with the same keys")
+	}
+	seen, _ := again.next(context.Background(), made.Room, 0, "", time.Millisecond)
+	if !strings.Contains(string(seen.State), "One") || len(seen.Chat) != 1 || !seen.Party {
+		t.Fatalf("what played, said and was: %+v", seen)
+	}
+	keptAgain, _ := newTracks(filepath.Join(directory, "tracks"), 1<<20)
+	if names := keptAgain.names(made.Room); len(names) != 1 || names[0] != "e1" {
+		t.Fatalf("and its copies: %v", names)
+	}
+}
+
 func TestNoPasswordNoRooms(t *testing.T) {
-	if _, err := newRooms("").make(""); err == nil {
+	if _, err := newRooms("").make("", ""); err == nil {
 		t.Fatal("a server without a password makes no rooms")
 	}
 }
@@ -386,7 +461,7 @@ func TestSweep(t *testing.T) {
 	now := time.Now()
 	rooms := newRooms("pw")
 	rooms.now = func() time.Time { return now }
-	made, _ := rooms.make("pw")
+	made, _ := rooms.make("pw", "")
 	if _, err := rooms.next(context.Background(), made.Room, 0, "Bo", time.Millisecond); err != nil {
 		t.Fatal(err)
 	}

@@ -27,12 +27,15 @@ and Discogs list is kept a day; the library is told anew every time.
 
 Badges above the missing albums show or hide the albums and the EPs, the
 choice kept in the state folder. Albums are drawn as Melody draws a track's
-row (ADR-0304), with their
-covers: the Cover Art Archive's for a release group, Discogs's thumbnail
-for a master. Covers are fetched side by side for a few seconds at most and
-kept a week -- and so is knowing there is none.
+row (ADR-0304), with their covers: the Cover Art Archive's for a release
+group -- else, with a Discogs token, Discogs's thumbnail of the album of
+that title, for the archive's images are kept on archive.org, which at
+times does not answer at all. Covers are fetched side by side for a few
+seconds at most and kept a week -- and so is knowing there is none; one
+that could not be fetched is tried again after an hour.
 """
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -60,6 +63,8 @@ TRIES = 4
 # How long a run waits for covers it has not kept: those not there by then
 # are shown the next time it is asked.
 COVERS_WAIT = 6.0
+# How long a cover that could not be fetched is left before trying again.
+RETRY = 3600
 COVERS_UNTIL = None
 
 # Where else an album is, by the host of a MusicBrainz link -- and, where it
@@ -182,18 +187,25 @@ def kind_of(album):
 
 def cover_file(url):
     """The cover at `url`, kept as a file, or None: fetched at most once a
-    week, a missing one too. Never fails the run -- a cover is not needed."""
+    week, a missing one too. Never fails the run -- a cover is not needed.
+
+    A fetch that failed, or was still on its way when its run ended, is not
+    tried again for an hour: a server that hangs -- archive.org, at times --
+    costs one wait, not one every track."""
     name = hashlib.sha1(url.encode("utf-8")).hexdigest()
     folder = os.path.join(CACHE, "covers")
     path = os.path.join(folder, name + ".jpg")
     none = os.path.join(folder, name + ".none")
-    for there, answer in ((path, path), (none, None)):
+    tried = os.path.join(folder, name + ".tried")
+    for there, answer, kept_for in ((path, path, KEPT), (none, None, KEPT), (tried, None, RETRY)):
         try:
-            if time.time() - os.path.getmtime(there) < KEPT:
+            if time.time() - os.path.getmtime(there) < kept_for:
                 return answer
         except OSError:
             pass
     os.makedirs(folder, exist_ok=True)
+    # Said before asking: a run that ends while this one waits leaves it.
+    open(tried, "w").close()
     request = urllib.request.Request(url, headers={"User-Agent": AGENT})
     try:
         with urllib.request.urlopen(request, timeout=COVERS_WAIT + 4) as response:
@@ -210,13 +222,17 @@ def cover_file(url):
     with open(partial, "wb") as kept:
         kept.write(body)
     os.replace(partial, path)
+    try:
+        os.remove(tried)
+    except OSError:
+        pass
     return path
 
 
 def covers_of(urls):
     """The covers of `urls`, by URL, those that came within COVERS_WAIT --
     fetched side by side by a few threads; one still on its way when the
-    time is up is left to finish while the run ends, kept for the next."""
+    time is up is tried again in an hour (cover_file)."""
     urls = list(dict.fromkeys(u for u in urls if u))
     found = {}
     waiting = queue.Queue()
@@ -245,6 +261,32 @@ def covers_of(urls):
         if not done.acquire(timeout=max(0.0, until - time.monotonic())):
             break
     return {url: path for url, path in dict(found).items() if path}
+
+
+@functools.lru_cache(maxsize=None)
+def discogs_thumbs(artist, token):
+    """Discogs's thumbnails of the artist's albums, by title as compared:
+    covers from Discogs's own servers, for when the Cover Art Archive's --
+    kept on archive.org -- do not come. Only with a token; none when Discogs
+    does not answer."""
+    if not token or not artist:
+        return {}
+    try:
+        albums = discogs_albums(artist, token)
+    except SystemExit:
+        return {}
+    return {folded(a["title"]): a["thumb"] for a in albums if a.get("thumb")}
+
+
+def cover_choices(group_id, title, thumbs):
+    """Where an album's cover may be had, best first: the Cover Art
+    Archive's for its release group, else Discogs's thumbnail."""
+    return [url for url in (group_cover(group_id) if group_id else "",
+                            thumbs.get(folded(title or ""), "")) if url]
+
+
+def first_cover(choices, covers):
+    return next((covers[url] for url in choices if covers.get(url)), "")
 
 
 def group_cover(group_id):
@@ -452,7 +494,8 @@ def musicbrainz_albums(artist_id):
 def discogs_albums(artist, token):
     """The artist's albums on Discogs -- the masters of their own releases
     -- for an artist MusicBrainz does not know; kept a day."""
-    key = "discogs-" + hashlib.sha1(artist.casefold().encode("utf-8")).hexdigest()
+    # "discogs2": kept since the listing has each album's thumbnail.
+    key = "discogs2-" + hashlib.sha1(artist.casefold().encode("utf-8")).hexdigest()
     known = cached(key, LISTED)
     if known is not None:
         return known
@@ -513,14 +556,19 @@ def missing_albums(artist_id, artist, owned, settings):
     missing = [a for a in missing if kind_of(a) in shown]
     if not missing:
         return parts + [{"paragraph": "Hidden by the filters above."}]
-    covers = covers_of(group_cover(a["id"]) if a["id"] else a.get("thumb") for a in missing)
+    # Each cover from the Cover Art Archive, else from Discogs -- asked for
+    # side by side, the first there taken.
+    thumbs = discogs_thumbs(artist, token)
+    choices = [cover_choices(a["id"], a["title"], thumbs) + ([a["thumb"]] if a.get("thumb") else [])
+               for a in missing]
+    covers = covers_of(url for each in choices for url in each)
     rows = []
-    for a in missing:
+    for a, each in zip(missing, choices):
         row = {"track": a["title"] or "?", "url": a["url"]}
         detail = " · ".join(p for p in (a["date"][:4], a["kind"]) if p)
         if detail:
             row["detail"] = detail
-        cover = covers.get(group_cover(a["id"]) if a["id"] else a.get("thumb"))
+        cover = first_cover(each, covers)
         if cover:
             row["cover"] = cover
         rows.append(row)
@@ -593,11 +641,14 @@ def main():
                 row["detail"] = told["label"]
             if told.get("links", {}).get("MusicBrainz"):
                 row["url"] = told["links"]["MusicBrainz"]
-            cover = covers_of([group_cover(album_id)]).get(group_cover(album_id))
-            if cover:
-                row["cover"] = cover
         elif album_artist:
             row["artist"] = album_artist
+        # Its cover from the Cover Art Archive, else Discogs's by its title.
+        choices = cover_choices(album_id, name, discogs_thumbs(
+            album_artist, str(settings.get("discogs_token") or "").strip()))
+        cover = first_cover(choices, covers_of(choices))
+        if cover:
+            row["cover"] = cover
         parts.append(row)
         if album_id:
             if told["summary"]:

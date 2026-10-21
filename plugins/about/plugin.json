@@ -64,7 +64,7 @@
       "label": "Discogs token",
       "kind": "secret",
       "requires": "missing",
-      "help": "For an artist MusicBrainz does not know: a personal access token, from Discogs's developer settings",
+      "help": "A personal access token: on Discogs's developer settings, Generate new token -- not an application's consumer key or secret. For an artist MusicBrainz does not know, and for covers when the Cover Art Archive does not answer",
       "link": "https://www.discogs.com/settings/developers"
     }
   ]

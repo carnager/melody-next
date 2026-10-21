@@ -597,6 +597,55 @@ void PluginsTest::theExamplePluginReads() {
     QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:on"),
                                            QStringLiteral("Trial by Fire"),
                                            QStringLiteral("The New Order")}));
+    // The Cover Art Archive not answering -- archive.org, at times -- a
+    // cover comes from Discogs's thumbnail of the album, with a token; and
+    // the archive is not waited for again within the hour.
+    {
+        const auto thumb = kept + QStringLiteral("/trial-by-fire.jpg");
+        writeFile(thumb, "a thumbnail");
+        const auto discogs_key = QStringLiteral("/discogs2-") +
+                                 QString::fromLatin1(QCryptographicHash::hash(
+                                                         "testament", QCryptographicHash::Sha1)
+                                                         .toHex());
+        writeFile(kept + discogs_key,
+                  QStringLiteral(R"json([{"id": "", "title": "Trial by Fire", "date": "1988",
+                      "kind": "", "url": "https://www.discogs.com/master/1",
+                      "thumb": "file://%1"}])json")
+                      .arg(thumb)
+                      .toUtf8());
+        auto told_input = QJsonDocument::fromJson(missing_input(std::nullopt)).object();
+        auto told_settings = told_input.value(QStringLiteral("settings")).toObject();
+        told_settings.insert(QStringLiteral("discogs_token"), QStringLiteral("a token"));
+        told_input.insert(QStringLiteral("settings"), told_settings);
+        const auto with_discogs = run(*about_panel,
+                                  PluginAction{.id = QStringLiteral("about"),
+                                               .label = QStringLiteral("About"),
+                                               .scope = PluginAction::Scope::tracks,
+                                               .run = about_panel->panels.front().run,
+                                               .result = PluginAction::Result::none,
+                                               .timeout_seconds = 30},
+                                  QJsonDocument{told_input}.toJson(QJsonDocument::Compact));
+        QVERIFY2(with_discogs.succeeded, qPrintable(with_discogs.text));
+        const auto drawn_now = parsePluginPanel(with_discogs.text.toUtf8(), &problem);
+        QVERIFY2(drawn_now.has_value(), qPrintable(problem));
+        const auto trial = std::ranges::find_if(drawn_now->parts, [](const auto& part) {
+            return part.kind == PluginPanelContent::Part::Kind::track &&
+                   part.text == QStringLiteral("Trial by Fire");
+        });
+        QVERIFY(trial != drawn_now->parts.end());
+        QVERIFY2(!trial->cover.isEmpty(), "the cover from Discogs");
+        QFile shown{trial->cover};
+        QVERIFY(shown.open(QIODevice::ReadOnly));
+        QCOMPARE(shown.readAll(), QByteArray{"a thumbnail"});
+        // The archive's address tried, and left for the hour.
+        const auto archive = QString::fromLatin1(
+            QCryptographicHash::hash(
+                "https://coverartarchive.org/release-group/rg-trial/front-250",
+                QCryptographicHash::Sha1)
+                .toHex());
+        QVERIFY(QFile::exists(kept + QStringLiteral("/covers/") + archive +
+                              QStringLiteral(".tried")));
+    }
     qunsetenv("http_proxy");
     qunsetenv("https_proxy");
 

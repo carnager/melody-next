@@ -395,6 +395,13 @@ void carriesMetadataIntoEveryPreset() {
     document.fields.push_back(
         field("unsyncedlyrics", "UNSYNCEDLYRICS", {"first line\nsecond line"}));
     document.fields.push_back(field("mycustomfield", "MYCUSTOMFIELD", {"custom value"}));
+    // ADR-0305: empty values, as a real MP4 file had its AcoustID tags, are
+    // not carried -- no preset's file keeps them, and carrying them failed
+    // every conversion -- and a tag of a real value and an empty one keeps
+    // the real one.
+    document.fields.push_back(field("acoustidfingerprint", "ACOUSTID_FINGERPRINT", {""}));
+    document.fields.push_back(field("acoustidid", "ACOUSTID_ID", {""}));
+    document.fields.push_back(field("mylistfield", "MYLISTFIELD", {"kept", ""}));
     document.fields.push_back(field("musicbrainzalbumid", "MUSICBRAINZ_ALBUMID",
                                     {"11111111-2222-3333-4444-555555555555"}));
     // Loudness claims measured against the source signal are stale after a
@@ -446,6 +453,10 @@ void carriesMetadataIntoEveryPreset() {
               std::optional<std::string>{"first line\nsecond line"});
         CHECK(reread->document.first_effective_value("mycustomfield") ==
               std::optional<std::string>{"custom value"});
+        CHECK(reread->document.effective_values("acoustidfingerprint").empty());
+        CHECK(reread->document.effective_values("acoustidid").empty());
+        CHECK(reread->document.effective_values("mylistfield") ==
+              std::vector<std::string>{"kept"});
         CHECK(reread->document.first_effective_value("musicbrainzalbumid") ==
               std::optional<std::string>{"11111111-2222-3333-4444-555555555555"});
         CHECK(!reread->document.first_effective_value("replaygaintrackgain").has_value());

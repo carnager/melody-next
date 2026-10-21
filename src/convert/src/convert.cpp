@@ -331,17 +331,28 @@ ensure_convert_capacity(EncoderPipeline& pipeline, const std::string& raw_path, 
            canonical_name == "r128albumgain";
 }
 
+// What a converted file is given of the source's tags: all but its stale
+// loudness claims -- and no empty values (ADR-0305). An empty value says
+// nothing, and the files written do not keep one -- WAV, FLAC and Opus alike
+// reread without it -- so carrying it made every conversion of such a file
+// fail. Left out here, the reread is still held to exactly what was meant
+// (verify_written_metadata).
 [[nodiscard]] metadata::MetadataDocument
-strip_loudness_fields(const metadata::MetadataDocument& document) {
-    metadata::MetadataDocument stripped;
-    stripped.fields.reserve(document.fields.size());
+fields_to_transfer(const metadata::MetadataDocument& document) {
+    metadata::MetadataDocument kept;
+    kept.fields.reserve(document.fields.size());
     for (const auto& field : document.fields) {
-        if (!is_loudness_field(field.canonical_name)) {
-            stripped.fields.push_back(field);
+        if (is_loudness_field(field.canonical_name)) {
+            continue;
+        }
+        auto carried = field;
+        std::erase_if(carried.values, [](const std::string& value) { return value.empty(); });
+        if (!carried.values.empty()) {
+            kept.fields.push_back(std::move(carried));
         }
     }
-    stripped.unsupported_native_objects = document.unsupported_native_objects;
-    return stripped;
+    kept.unsupported_native_objects = document.unsupported_native_objects;
+    return kept;
 }
 
 // FFmpeg's shared FLAC/ID3v2 picture-type vocabulary: the muxers map an
@@ -786,7 +797,7 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
         effective_sample_rate = request.sample_rate_cap;
     }
 
-    const auto transfer_metadata = strip_loudness_fields(request.metadata);
+    const auto transfer_metadata = fields_to_transfer(request.metadata);
     const auto artwork = request.preset.carries_artwork ? request.artwork : std::nullopt;
     auto pipeline_result = open_pipeline(request.preset, source_format, effective_sample_rate,
                                          effective_bit_depth, request.channel_policy, artwork,

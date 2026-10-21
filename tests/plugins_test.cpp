@@ -372,14 +372,14 @@ void PluginsTest::theExamplePluginReads() {
                             "MusicBrainz": "https://musicbrainz.org/artist/%1"}})json")
                   .arg(mbid)
                   .toUtf8());
-    writeFile(kept + QStringLiteral("/albums-") + mbid,
+    writeFile(kept + QStringLiteral("/albums2-") + mbid,
               QStringLiteral(R"json([
                   {"id": "%1", "title": "The Legacy", "date": "1987-04-21", "kind": "Album",
                    "url": "https://musicbrainz.org/release-group/%1"},
                   {"id": "rg-souls", "title": "Souls of Black", "date": "1990-10-01",
                    "kind": "Album", "url": "https://musicbrainz.org/release-group/rg-souls"},
                   {"id": "rg-trial", "title": "Trial by Fire", "date": "1988", "kind": "EP",
-                   "url": "https://musicbrainz.org/release-group/rg-trial"},
+                   "url": "https://musicbrainz.org/release-group/rg-trial", "master": "777"},
                   {"id": "rg-new", "title": "The New Order", "date": "1988-05-05",
                    "kind": "Album", "url": "https://musicbrainz.org/release-group/rg-new"}])json")
                   .arg(group)
@@ -598,21 +598,13 @@ void PluginsTest::theExamplePluginReads() {
                                            QStringLiteral("Trial by Fire"),
                                            QStringLiteral("The New Order")}));
     // The Cover Art Archive not answering -- archive.org, at times -- a
-    // cover comes from Discogs's thumbnail of the album, with a token; and
-    // the archive is not waited for again within the hour.
+    // cover comes, with a token, from the Discogs master MusicBrainz links
+    // the album to; and the archive is not waited for again within the hour.
     {
         const auto thumb = kept + QStringLiteral("/trial-by-fire.jpg");
         writeFile(thumb, "a thumbnail");
-        const auto discogs_key = QStringLiteral("/discogs2-") +
-                                 QString::fromLatin1(QCryptographicHash::hash(
-                                                         "testament", QCryptographicHash::Sha1)
-                                                         .toHex());
-        writeFile(kept + discogs_key,
-                  QStringLiteral(R"json([{"id": "", "title": "Trial by Fire", "date": "1988",
-                      "kind": "", "url": "https://www.discogs.com/master/1",
-                      "thumb": "file://%1"}])json")
-                      .arg(thumb)
-                      .toUtf8());
+        writeFile(kept + QStringLiteral("/master-777"),
+                  QStringLiteral(R"json({"thumb": "file://%1"})json").arg(thumb).toUtf8());
         auto told_input = QJsonDocument::fromJson(missing_input(std::nullopt)).object();
         auto told_settings = told_input.value(QStringLiteral("settings")).toObject();
         told_settings.insert(QStringLiteral("discogs_token"), QStringLiteral("a token"));

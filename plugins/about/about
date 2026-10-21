@@ -28,14 +28,13 @@ and Discogs list is kept a day; the library is told anew every time.
 Badges above the missing albums show or hide the albums and the EPs, the
 choice kept in the state folder. Albums are drawn as Melody draws a track's
 row (ADR-0304), with their covers: the Cover Art Archive's for a release
-group -- else, with a Discogs token, Discogs's thumbnail of the album of
-that title, for the archive's images are kept on archive.org, which at
-times does not answer at all. Covers are fetched side by side for a few
+group -- else, with a Discogs token, the thumbnail of the Discogs master
+MusicBrainz links that release group to, for the archive's images are kept
+on archive.org, which at times does not answer at all. Covers are fetched side by side for a few
 seconds at most and kept a week -- and so is knowing there is none; one
 that could not be fetched is tried again after an hour.
 """
 import fcntl
-import functools
 import hashlib
 import json
 import os
@@ -231,16 +230,17 @@ def cover_file(url):
 
 def covers_of(urls):
     """The covers of `urls`, by URL, those that came within COVERS_WAIT --
-    fetched side by side by a few threads; one still on its way when the
-    time is up is tried again in an hour (cover_file)."""
+    fetched side by side, a few threads for each server, so that one that
+    hangs -- archive.org, at times -- holds up none of another's; one still
+    on its way when the time is up is tried again in an hour (cover_file)."""
     urls = list(dict.fromkeys(u for u in urls if u))
     found = {}
-    waiting = queue.Queue()
+    by_server = {}
     for url in urls:
-        waiting.put(url)
+        by_server.setdefault(urllib.parse.urlsplit(url).netloc, queue.Queue()).put(url)
     done = threading.Semaphore(0)
 
-    def work():
+    def work(waiting):
         while True:
             try:
                 url = waiting.get_nowait()
@@ -249,8 +249,9 @@ def covers_of(urls):
             found[url] = cover_file(url)
             done.release()
 
-    for _ in range(min(6, len(urls))):
-        threading.Thread(target=work, daemon=True).start()
+    for waiting in by_server.values():
+        for _ in range(min(4, waiting.qsize())):
+            threading.Thread(target=work, args=(waiting,), daemon=True).start()
     # One wait for the run, however many times it asks: the album's cover
     # and the missing albums' together.
     global COVERS_UNTIL
@@ -263,26 +264,60 @@ def covers_of(urls):
     return {url: path for url, path in dict(found).items() if path}
 
 
-@functools.lru_cache(maxsize=None)
-def discogs_thumbs(artist, token):
-    """Discogs's thumbnails of the artist's albums, by title as compared:
-    covers from Discogs's own servers, for when the Cover Art Archive's --
-    kept on archive.org -- do not come. Only with a token; none when Discogs
-    does not answer."""
-    if not token or not artist:
-        return {}
+def master_of(url):
+    """The Discogs master a link names, or "": MusicBrainz links an album's
+    release group to it."""
+    found = re.search(r"discogs\.com/(?:[a-z]{2}/)?master/(\d+)", url or "")
+    return found.group(1) if found else ""
+
+
+def master_thumb(master, token):
+    """The thumbnail of a Discogs master's first image -- from Discogs's own
+    servers, for when the Cover Art Archive's, kept on archive.org, does not
+    come. Kept a week, none too; "" without a token, or when Discogs does not
+    answer (asked again next time)."""
+    if not master or not token:
+        return ""
+    key = "master-" + master
+    known = cached(key)
+    if known is not None:
+        return known.get("thumb") or ""
     try:
-        albums = discogs_albums(artist, token)
+        found = fetch("https://api.discogs.com/masters/" + master,
+                      headers={"Authorization": "Discogs token=" + token}) or {}
     except SystemExit:
-        return {}
-    return {folded(a["title"]): a["thumb"] for a in albums if a.get("thumb")}
+        return ""
+    images = found.get("images") or []
+    primary = next((i for i in images if i.get("type") == "primary"), images[0] if images else {})
+    thumb = primary.get("uri150") or primary.get("uri") or ""
+    keep(key, {"thumb": thumb})
+    return thumb
 
 
-def cover_choices(group_id, title, thumbs):
+def master_thumbs(masters, token):
+    """The thumbnails of `masters`, asked side by side for a few seconds at
+    most; those not answered by then are asked again next time."""
+    masters = [m for m in dict.fromkeys(masters) if m]
+    found = {}
+    if not masters or not token:
+        return found
+
+    def ask(master):
+        found[master] = master_thumb(master, token)
+
+    threads = [threading.Thread(target=ask, args=(m,), daemon=True) for m in masters[:12]]
+    for thread in threads:
+        thread.start()
+    until = time.monotonic() + COVERS_WAIT / 2
+    for thread in threads:
+        thread.join(max(0.0, until - time.monotonic()))
+    return dict(found)
+
+
+def cover_choices(group_id, thumb):
     """Where an album's cover may be had, best first: the Cover Art
-    Archive's for its release group, else Discogs's thumbnail."""
-    return [url for url in (group_cover(group_id) if group_id else "",
-                            thumbs.get(folded(title or ""), "")) if url]
+    Archive's for its release group, else a Discogs thumbnail."""
+    return [url for url in (group_cover(group_id) if group_id else "", thumb or "") if url]
 
 
 def first_cover(choices, covers):
@@ -469,14 +504,15 @@ def folded(title):
 def musicbrainz_albums(artist_id):
     """The artist's albums and EPs on MusicBrainz -- none of a secondary
     kind, compilations and live albums -- kept a day."""
-    key = "albums-" + artist_id
+    # "albums2": kept since each album carries its Discogs master.
+    key = "albums2-" + artist_id
     known = cached(key, LISTED)
     if known is not None:
         return known
     groups, offset = [], 0
     while offset < 500:
         page = fetch("https://musicbrainz.org/ws/2/release-group?artist=%s&type=album|ep"
-                     "&fmt=json&limit=100&offset=%d" % (artist_id, offset)) or {}
+                     "&inc=url-rels&fmt=json&limit=100&offset=%d" % (artist_id, offset)) or {}
         listed = page.get("release-groups") or []
         groups += listed
         offset += len(listed)
@@ -485,7 +521,10 @@ def musicbrainz_albums(artist_id):
     albums = [{"id": group["id"], "title": group.get("title") or "",
                "date": group.get("first-release-date") or "",
                "kind": group.get("primary-type") or "",
-               "url": "https://musicbrainz.org/release-group/" + group["id"]}
+               "url": "https://musicbrainz.org/release-group/" + group["id"],
+               "master": next((master_of((r.get("url") or {}).get("resource"))
+                               for r in group.get("relations") or []
+                               if master_of((r.get("url") or {}).get("resource"))), "")}
               for group in groups if not group.get("secondary-types")]
     keep(key, albums)
     return albums
@@ -494,8 +533,9 @@ def musicbrainz_albums(artist_id):
 def discogs_albums(artist, token):
     """The artist's albums on Discogs -- the masters of their own releases
     -- for an artist MusicBrainz does not know; kept a day."""
-    # "discogs2": kept since the listing has each album's thumbnail.
-    key = "discogs2-" + hashlib.sha1(artist.casefold().encode("utf-8")).hexdigest()
+    # "discogs3": kept since the listing has each album's thumbnail, and
+    # every page of the artist's releases.
+    key = "discogs3-" + hashlib.sha1(artist.casefold().encode("utf-8")).hexdigest()
     known = cached(key, LISTED)
     if known is not None:
         return known
@@ -506,12 +546,19 @@ def discogs_albums(artist, token):
             == folded(artist)]
     albums = []
     if same:
-        page = fetch("https://api.discogs.com/artists/%s/releases?sort=year&per_page=100"
-                     % same[0]["id"], headers=headers) or {}
+        # Every page: an artist of many singles and promos has its later
+        # albums far past the first hundred releases. Ten at most.
+        releases, number, pages = [], 1, 1
+        while number <= min(pages, 10):
+            page = fetch("https://api.discogs.com/artists/%s/releases?sort=year&per_page=100"
+                         "&page=%d" % (same[0]["id"], number), headers=headers) or {}
+            releases += page.get("releases") or []
+            pages = (page.get("pagination") or {}).get("pages") or 1
+            number += 1
         albums = [{"id": "", "title": r.get("title") or "", "date": str(r.get("year") or ""),
                    "kind": "", "url": "https://www.discogs.com/master/%s" % r["id"],
                    "thumb": r.get("thumb") or ""}
-                  for r in page.get("releases") or []
+                  for r in releases
                   if r.get("type") == "master" and r.get("role") == "Main"]
     keep(key, albums)
     return albums
@@ -558,8 +605,8 @@ def missing_albums(artist_id, artist, owned, settings):
         return parts + [{"paragraph": "Hidden by the filters above."}]
     # Each cover from the Cover Art Archive, else from Discogs -- asked for
     # side by side, the first there taken.
-    thumbs = discogs_thumbs(artist, token)
-    choices = [cover_choices(a["id"], a["title"], thumbs) + ([a["thumb"]] if a.get("thumb") else [])
+    thumbs = master_thumbs((a.get("master") for a in missing), token)
+    choices = [cover_choices(a["id"], a.get("thumb") or thumbs.get(a.get("master") or ""))
                for a in missing]
     covers = covers_of(url for each in choices for url in each)
     rows = []
@@ -643,9 +690,11 @@ def main():
                 row["url"] = told["links"]["MusicBrainz"]
         elif album_artist:
             row["artist"] = album_artist
-        # Its cover from the Cover Art Archive, else Discogs's by its title.
-        choices = cover_choices(album_id, name, discogs_thumbs(
-            album_artist, str(settings.get("discogs_token") or "").strip()))
+        # Its cover from the Cover Art Archive, else from the Discogs master
+        # MusicBrainz links it to.
+        master = master_of(found.get("Discogs"))
+        token = str(settings.get("discogs_token") or "").strip()
+        choices = cover_choices(album_id, master_thumbs([master], token).get(master))
         cover = first_cover(choices, covers_of(choices))
         if cover:
             row["cover"] = cover

@@ -2,6 +2,11 @@
 
 #include "bench_main_window_test.hpp"
 
+#include "uicommon/library_tree_view.hpp"
+
+#include <QPainter>
+#include <QStandardItemModel>
+
 namespace trackknife::bench {
 
 // The desktop says dark only after the window is up, and the scheme's
@@ -1881,6 +1886,56 @@ void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
     QCOMPARE(animation->state(), QAbstractAnimation::Stopped);
     toggle->trigger();
     QVERIFY(!dock->isVisible());
+
+    // The artists' initials in the library: grey, or -- set so -- on tiles
+    // of their names' colours, the library redrawn once Settings is saved.
+    auto* library = window.findChild<LocalLibraryPanel*>();
+    QVERIFY(library != nullptr && !library->colouredInitials());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    dialog = window.showSettingsDialog(SettingsDialog::Page::general);
+    auto* coloured =
+        dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-coloured-initials"));
+    QVERIFY(coloured && !coloured->isChecked());
+    coloured->setChecked(true);
+    buttons = dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Save), Qt::LeftButton);
+    QVERIFY(QSettings{}.value(QStringLiteral("appearance/library-coloured-initials")).toBool());
+    QVERIFY(library->colouredInitials());
+    // Drawn so: an artist's tile is a colour, not a grey.
+    {
+        ui::LibraryTreeView view;
+        QStandardItemModel model;
+        model.appendRow(new QStandardItem(QStringLiteral("Royal Thunder")));
+        view.setModel(&model);
+        ui::LibraryTreeDelegate delegate{&view, {}, [](const QModelIndex&) {
+                                             return ui::LibraryTreeDelegate::Presentation{
+                                                 .track = false, .album = false, .root = true,
+                                                 .artist = true, .secondary = {}, .count = {},
+                                                 .album_rating = 0U};
+                                         }};
+        const auto tile_saturation = [&view, &model, &delegate](const bool on) {
+            delegate.setColouredInitials(on);
+            QImage image{300, 40, QImage::Format_ARGB32};
+            image.fill(Qt::white);
+            QPainter painter{&image};
+            QStyleOptionViewItem option;
+            option.initFrom(&view);
+            option.rect = image.rect();
+            option.text = QStringLiteral("Royal Thunder");
+            delegate.paint(&painter, option, model.index(0, 0));
+            painter.end();
+            // A corner of the tile, clear of its letters.
+            return image.pixelColor(QPoint{7, 10}).hslSaturationF();
+        };
+        QVERIFY(tile_saturation(false) < 0.1F);
+        QVERIFY(tile_saturation(true) > 0.25F);
+    }
+    dialog = window.showSettingsDialog(SettingsDialog::Page::general);
+    dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-coloured-initials"))
+        ->setChecked(false);
+    buttons = dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Save), Qt::LeftButton);
+    QVERIFY(!library->colouredInitials());
     QSettings{}.remove(QStringLiteral("lyrics"));
     QSettings{}.remove(QStringLiteral("up-next"));
 }

@@ -72,6 +72,9 @@ The initial workspace is intentionally conventional:
 - Per ADR-0122, MPD and local live search share an expandable **Albums / Tracks**
   tree, library row renderer, spacing, artwork size, and extended selection.
   Album titles have an artist subtitle; track titles include their track number.
+  An artist's row has their initials on a quiet grey tile -- or, with
+  **Settings → General → Colour the artists' initials in the library**, on a
+  tile of the name's own colour, as track lists draw an album without a cover.
   Queue actions appear on the hovered or focused row and act on the selection.
   Right-click exposes append, insert-next, replace-and-play, and expansion actions.
   Enter/click expands a branch; Enter/double-click on a track appends the selection.

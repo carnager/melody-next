@@ -15,6 +15,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QSettings>
 #include <QDialogButtonBox>
 #include <QEvent>
 #include <QFile>
@@ -155,7 +156,7 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
         }
         browser_->request(tree_->selectionModel()->selectedRows(), action);
     });
-    tree_->setItemDelegate(new ui::LibraryTreeDelegate(
+    tree_->setItemDelegate(delegate_ = new ui::LibraryTreeDelegate(
         library_view, libraryActionIcons(this), [](const QModelIndex& index) {
             const auto value = index.data(entry_role);
             const auto entry = value.value<persistence::LibraryEntry>();
@@ -174,6 +175,7 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
                              : QString{},
                 .album_rating = value.isValid() ? entry.rating : 0U};
         }));
+    applyAppearance();
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     tree_->setModel(browser_->model());
@@ -320,6 +322,17 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
 }
 
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }
+
+void LocalLibraryPanel::applyAppearance() {
+    const auto coloured =
+        QSettings{}.value(QStringLiteral("appearance/library-coloured-initials"), false).toBool();
+    if (delegate_->colouredInitials() != coloured) {
+        delegate_->setColouredInitials(coloured);
+        tree_->viewport()->update();
+    }
+}
+
+bool LocalLibraryPanel::colouredInitials() const noexcept { return delegate_->colouredInitials(); }
 
 void LocalLibraryPanel::focusSearch() {
     search_->setFocus(Qt::ShortcutFocusReason);

@@ -26,6 +26,10 @@ class QTimer;
 class QToolButton;
 class QTreeView;
 
+namespace trackknife::ui {
+class LibraryTreeDelegate;
+} // namespace trackknife::ui
+
 namespace trackknife::bench {
 
 // One engine's library in the widgets window's Sources panel: a
@@ -47,6 +51,10 @@ class LocalLibraryPanel final : public QWidget {
     void refreshLibrary() { browser_->refreshLibrary(); }
     // Puts the cursor in the search field, its text selected to type over.
     void focusSearch();
+    // The artists' initials on tiles of their names' colours, as the setting
+    // says -- read again once Settings is saved.
+    void applyAppearance();
+    [[nodiscard]] bool colouredInitials() const noexcept;
     void stop();
     void resolveEntries(std::vector<persistence::LibraryEntry> entries,
                         std::function<void(std::vector<std::string>)> completion) {
@@ -108,6 +116,7 @@ class LocalLibraryPanel final : public QWidget {
     QCheckBox* query_toggle_{nullptr};
     QLabel* query_error_{nullptr};
     QTreeView* tree_{nullptr};
+    ui::LibraryTreeDelegate* delegate_{nullptr};
     QLabel* status_{nullptr};
     // ADR-0254: the view the library is shown in, and its editor.
     QComboBox* view_choice_{nullptr};

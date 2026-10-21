@@ -198,6 +198,13 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     panel_animations_->setObjectName(QStringLiteral("bench-settings-panel-animations"));
     bind(panel_animations_, "appearance/panel-animations");
     general_form->addRow(QStringLiteral("Appearance:"), panel_animations_);
+    // An artist's initials in the library on a tile of the name's colour, as
+    // an album without a cover is drawn; off, a quiet grey one.
+    auto* coloured_initials =
+        new QCheckBox(QStringLiteral("Colour the artists' initials in the library"), general);
+    coloured_initials->setObjectName(QStringLiteral("bench-settings-coloured-initials"));
+    bind(coloured_initials, "appearance/library-coloured-initials");
+    general_form->addRow(QString{}, coloured_initials);
     // ADR-0247: the system's colours, or Trackknife's own.
     color_scheme_ = new QComboBox(general);
     color_scheme_->setObjectName(QStringLiteral("bench-settings-color-scheme"));

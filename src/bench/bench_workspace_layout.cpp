@@ -725,6 +725,9 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
         buildPluginPanels();
         buildPluginTriggers();
         applyLocalLibraryVisibility();
+        for (auto* library : findChildren<LocalLibraryPanel*>()) {
+            library->applyAppearance();
+        }
         // ADR-0286: which engine holds the library decides how tabs are
         // marked and ordered.
         for (const auto& tab : list_tabs_) {

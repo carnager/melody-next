@@ -84,11 +84,16 @@ class LibraryTreeDelegate final : public QStyledItemDelegate {
                                  const QModelIndex& index) const override;
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
                const QModelIndex& index) const override;
+    // An artist's initials on a tile coloured by the name, as the track
+    // lists draw an album without a cover -- else on a quiet grey one.
+    void setColouredInitials(bool coloured) noexcept { coloured_initials_ = coloured; }
+    [[nodiscard]] bool colouredInitials() const noexcept { return coloured_initials_; }
 
   private:
     LibraryTreeView* view_;
     std::array<QIcon, 3> action_icons_;
     std::function<Presentation(const QModelIndex&)> presentation_;
+    bool coloured_initials_{false};
 };
 
 } // namespace trackknife::ui

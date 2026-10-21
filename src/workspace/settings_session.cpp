@@ -36,6 +36,7 @@ const QString notifications_key = QStringLiteral("desktop/notifications");
 const QString notifications_background_key =
     QStringLiteral("desktop/notifications-background-only");
 const QString panel_animations_key = QStringLiteral("appearance/panel-animations");
+const QString coloured_initials_key = QStringLiteral("appearance/library-coloured-initials");
 const QString lists_display_key = QStringLiteral("appearance/lists-display");
 const QString buffer_profile_key = QStringLiteral("playback/buffer-profile");
 const QString buffer_capacity_key = QStringLiteral("playback/buffer-capacity-ms");
@@ -61,6 +62,7 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     read(notifications_key, false);
     read(notifications_background_key, false);
     read(panel_animations_key, true);
+    read(coloured_initials_key, false);
     read(QLatin1String(color_scheme_key), QStringLiteral("system"));
     read(lists_display_key, QStringLiteral("tabs"));
     auto profile = settings.value(buffer_profile_key, QStringLiteral("balanced")).toString();

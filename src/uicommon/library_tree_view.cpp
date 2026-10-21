@@ -2,6 +2,7 @@
 
 #include "uicommon/library_tree_view.hpp"
 #include "uicommon/delegate_selection_style.hpp"
+#include "uicommon/queue_item_delegate.hpp"
 
 #include "uicommon/rating_stars.hpp"
 
@@ -276,7 +277,10 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
     auto content = item.rect.adjusted(5, 2, -8, -2);
     const auto icon_rect =
         QRect{content.left(), content.center().y() - icon_extent / 2, icon_extent, icon_extent};
-    if (row.artist) {
+    if (row.artist && coloured_initials_) {
+        // Their initials on a tile of the name's own colour.
+        paintInitialsTile(painter, icon_rect, primary, item.palette);
+    } else if (row.artist) {
         // No picture of the artist to show: their initials on a quiet tile.
         QString initials;
         for (const auto character : primary) {

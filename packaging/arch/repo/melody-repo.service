@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Publishes Melody's pacman repository when GitHub has something new
+# (packaging/arch/repo/publish). Copy to ~/.config/systemd/user/, with the
+# path below pointing at this checkout.
+[Unit]
+Description=Melody's pacman repository: build and publish what is new
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/Code/melody-next/packaging/arch/repo/publish
+Nice=10

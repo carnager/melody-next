@@ -1,0 +1,90 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Melody's own pacman repository: builds the packages in packaging/arch from
+# what is on GitHub, signs them, keeps them in a repository with its database,
+# and copies that to a web server's folder -- for `pacman -Syu` to bring
+# Melody's binaries, nothing compiled where it is installed.
+#
+#   publish            build and publish, when the repository moved on
+#   publish --force    build and publish though it did not
+#
+# Set in the environment, or in ${XDG_CONFIG_HOME:-~/.config}/melody/repo.conf:
+#   MELODY_REPO_TARGET  where it is copied, an rsync destination
+#                       (default proteus:/srv/http/melody-repo)
+#   MELODY_REPO_KEY     the GPG key the packages and database are signed with;
+#                       unsigned without one
+#   MELODY_REPO_NAME    the repository's name, pacman.conf's [section] (melody)
+#   MELODY_REPO_WORK    where it builds and keeps the repository
+#                       (default ~/.cache/melody-repo)
+set -euo pipefail
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/melody/repo.conf"
+# shellcheck source=/dev/null
+[[ -f $config ]] && source "$config"
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+recipes=$(dirname "$here")
+target=${MELODY_REPO_TARGET:-proteus:/srv/http/melody-repo}
+key=${MELODY_REPO_KEY:-}
+name=${MELODY_REPO_NAME:-melody}
+work=${MELODY_REPO_WORK:-${XDG_CACHE_HOME:-$HOME/.cache}/melody-repo}
+upstream=https://github.com/carnager/melody-next.git
+packages=(melodyd-git melody-git melody-cli-git melody-watch-git)
+
+force=false
+case ${1:-} in
+--force) force=true ;;
+"") ;;
+*)
+    echo "usage: publish [--force]" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$work/build" "$work/repo" "$work/sources"
+exec 9>"$work/lock"
+if ! flock --nonblock 9; then
+    echo "publish: another one is running" >&2
+    exit 1
+fi
+
+# Nothing new on GitHub: nothing to build.
+head=$(git ls-remote "$upstream" HEAD | cut -f1)
+if ! $force && [[ -f $work/published && $(<"$work/published") == "$head" ]]; then
+    echo "publish: ${head:0:8} is published already"
+    exit 0
+fi
+
+signing=()
+[[ -n $key ]] && signing=(--sign --key "$key")
+
+started="$work/started"
+touch "$started"
+for package in "${packages[@]}"; do
+    echo "publish: building $package"
+    rm -rf "${work:?}/build/$package"
+    cp -r "$recipes/$package" "$work/build/$package"
+    # The clone kept between runs; the same build folder each time, so the
+    # compiler cache finds what did not change.
+    (cd "$work/build/$package" &&
+        SRCDEST="$work/sources" PKGDEST="$work/repo" \
+            makepkg --force --cleanbuild --noconfirm "${signing[@]}")
+done
+
+# What this run made, but the debug packages: the repository is for playing.
+mapfile -t made < <(find "$work/repo" -maxdepth 1 -name '*.pkg.tar.zst' -newer "$started" |
+    grep -v -- '-debug-' | sort)
+find "$work/repo" -maxdepth 1 -name '*-debug-*.pkg.tar.zst*' -newer "$started" -delete
+if ((${#made[@]} == 0)); then
+    echo "publish: nothing was built" >&2
+    exit 1
+fi
+# Added to the database, the older versions they replace removed.
+repo-add --remove "${signing[@]}" "$work/repo/$name.db.tar.gz" "${made[@]}"
+# The key, for each machine to trust it once.
+[[ -n $key ]] && gpg --armor --export "$key" >"$work/repo/$name.asc"
+
+rsync --archive --copy-links --delete "$work/repo/" "$target/"
+echo "$head" >"$work/published"
+echo "publish: ${head:0:8} published to $target"

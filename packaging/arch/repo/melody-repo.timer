@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Every hour: publish only builds when GitHub moved on.
+[Unit]
+Description=Publish Melody's pacman repository hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

@@ -279,6 +279,50 @@ void containedSourceRevalidationFollowsSymlinksAndRejectsEscapes() {
 
 } // namespace
 
+// A temporary sibling of a file whose name is as long as names may be: its
+// own name within the 255 bytes too, never cut inside a character; a short
+// name kept whole.
+void temporarySiblingsStayWithinAFileName() {
+    namespace fs = std::filesystem;
+    const auto valid_utf8 = [](const std::string& text) {
+        std::size_t index = 0U;
+        while (index < text.size()) {
+            const auto lead = static_cast<unsigned char>(text[index]);
+            const std::size_t length = lead < 0x80U ? 1U : (lead >> 5U) == 0x6U ? 2U
+                                       : (lead >> 4U) == 0xEU ? 3U : (lead >> 3U) == 0x1EU ? 4U : 0U;
+            if (length == 0U || index + length > text.size()) {
+                return false;
+            }
+            for (std::size_t next = 1U; next < length; ++next) {
+                if ((static_cast<unsigned char>(text[index + next]) & 0xC0U) != 0x80U) {
+                    return false;
+                }
+            }
+            index += length;
+        }
+        return true;
+    };
+    // 2-byte characters, so a cut at a byte count could fall inside one.
+    std::string long_name;
+    while (long_name.size() + 2U <= 250U) {
+        long_name += "\xC3\xB6";
+    }
+    long_name += ".flac";
+    const fs::path target = fs::path{"/music/album"} / long_name;
+    const auto sibling = trackknife::core::temporary_sibling(target, "tk-part");
+    const auto name = sibling.filename().native();
+    check(sibling.parent_path() == target.parent_path(), "beside its target", __LINE__);
+    check(name.size() <= 255U, "within a file name's length", __LINE__);
+    check(name.front() == '.' && name.find(".tk-part-") != std::string::npos,
+          "hidden, and labelled", __LINE__);
+    check(valid_utf8(name), "never cut inside a character", __LINE__);
+    const auto short_sibling = trackknife::core::temporary_sibling(fs::path{"/music/a.flac"}, "x");
+    check(short_sibling.filename().native().starts_with(".a.flac.x-"), "a short name kept whole",
+          __LINE__);
+    check(trackknife::core::temporary_sibling(target, "tk-part") != sibling,
+          "a new one each time", __LINE__);
+}
+
 void noReplacePublicationLaddersAndRefusesOccupiedTargets() {
     namespace fs = std::filesystem;
     const auto directory =
@@ -403,6 +447,7 @@ int main() {
     unicodeCaseTransformsAndEncodingAreValidated();
     localSourceDiscoveryPreservesRawPathsAndOrder();
     containedSourceRevalidationFollowsSymlinksAndRejectsEscapes();
+    temporarySiblingsStayWithinAFileName();
     noReplacePublicationLaddersAndRefusesOccupiedTargets();
     listenAccountingCreditsRealListeningOnly();
     rewrittenFilesAlwaysMoveForwardInTime();

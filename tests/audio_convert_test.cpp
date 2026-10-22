@@ -317,6 +317,47 @@ void builtinPresetsProbeAvailable() {
     CHECK(!bogus.available && !bogus.detail.empty());
 }
 
+// A destination whose name is near the longest a file name may be: its
+// temporary is named within that too, and the conversion succeeds.
+void convertsToALongFileName() {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "tone.wav";
+    write_sine_wav(source, 0.6, tone_seconds);
+    const auto& presets = trackknife::convert::builtin_encoder_presets();
+    const auto flac = std::ranges::find_if(presets, [](const auto& preset) {
+        return preset.file_extension == "flac";
+    });
+    CHECK(flac != presets.end());
+    if (flac == presets.end()) {
+        return;
+    }
+    const auto destination = directory.path() / (std::string(245U, 'n') + ".flac");
+    const auto converted = trackknife::convert::convert_audio_file(
+        {.source_raw_path = source.native(),
+         .source_selection = {},
+         .source_range = {},
+         .destination_raw_path = destination.native(),
+         .preset = *flac,
+         .target_sample_rate = {},
+         .sample_rate_cap = {},
+         .target_bit_depth = {},
+         .keep_source_bit_depth = false,
+         .metadata = {},
+         .artwork = {}},
+        [](std::uint64_t, std::optional<std::uint64_t>) {});
+    if (!converted) {
+        std::cerr << "long name: " << converted.error().message << '\n';
+    }
+    CHECK(converted.has_value());
+    CHECK(std::filesystem::exists(destination));
+    // Nothing left beside it.
+    std::size_t files = 0U;
+    for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator{directory.path()}) {
+        ++files;
+    }
+    CHECK(files == 2U);
+}
+
 void convertsToEveryPresetAtomically() {
     TemporaryDirectory directory;
     const auto source = directory.path() / "tone.wav";
@@ -1111,6 +1152,7 @@ int main(const int argc, char** argv) {
     const std::filesystem::path fixture_directory{argv[1]};
     builtinPresetsProbeAvailable();
     convertsToEveryPresetAtomically();
+    convertsToALongFileName();
     carriesMetadataIntoEveryPreset();
     carriesArtworkIntoEveryPreset(fixture_directory);
     carriesExternalCoverThroughTheScan(fixture_directory);

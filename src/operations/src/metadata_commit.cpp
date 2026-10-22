@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/atomic_rename.hpp"
 #include "trackknife/core/posix.hpp"
 
 #include "trackknife/operations/metadata_commit.hpp"
@@ -2782,7 +2783,7 @@ write_prepared_carrier_bytes(const MetadataOperationJournalRecord& record, const
 // pre-existing is at risk and the publish is one atomic rename.
 [[nodiscard]] core::Result<void> publish_created_carrier_bytes(const std::string& raw_path,
                                                                const std::string& bytes) {
-    const auto prepared_path = raw_path + ".tk-prepared-" + core::StableId::random().to_string();
+    const auto prepared_path = core::temporary_sibling(raw_path, "tk-prepared").native();
     Descriptor prepared{
         ::open(prepared_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644)};
     if (!prepared.valid()) {

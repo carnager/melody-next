@@ -786,9 +786,9 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
     const auto source_format = decoder->output_format();
     const auto expected_source_frames = decoder->duration_samples();
 
-    const auto temporary =
-        destination.parent_path() / ("." + destination.filename().native() + ".tk-part-" +
-                                     core::StableId::random().to_string());
+    // Named after the destination, within the length a file name may have:
+    // a long track name must not make the temporary one impossible.
+    const auto temporary = core::temporary_sibling(destination, "tk-part");
     TemporaryOutputGuard guard{temporary};
 
     // The cap only ever lowers: sources at or below it keep their rate.

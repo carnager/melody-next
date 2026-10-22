@@ -3,6 +3,9 @@
 
 #include "trackknife/core/atomic_rename.hpp"
 
+#include "trackknife/core/stable_id.hpp"
+
+#include <algorithm>
 #include <cerrno>
 #include <string>
 #include <system_error>
@@ -84,6 +87,26 @@ Result<NoReplacePublishMethod> publish_no_replace_at(const int source_dir_fd,
             publish_error(ErrorCode::io, "publishing the prepared file", saved, target_name));
     }
     return NoReplacePublishMethod::checked_rename;
+}
+
+std::filesystem::path temporary_sibling(const std::filesystem::path& target,
+                                       const std::string_view label) {
+    constexpr std::size_t longest_name = 255U;
+    const auto suffix = "." + std::string{label} + "-" + StableId::random().to_string();
+    auto name = target.filename().native();
+    const auto room = longest_name - 1U - std::min(suffix.size(), longest_name - 1U);
+    if (name.size() > room) {
+        name.resize(room);
+        // Not inside a character: a continuation byte is never its start.
+        while (!name.empty() && (static_cast<unsigned char>(name.back()) & 0xC0U) == 0x80U) {
+            name.pop_back();
+        }
+        // ...nor after a lead byte whose continuation was cut off.
+        if (!name.empty() && (static_cast<unsigned char>(name.back()) & 0xC0U) == 0xC0U) {
+            name.pop_back();
+        }
+    }
+    return target.parent_path() / ("." + name + suffix);
 }
 
 } // namespace trackknife::core

@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/playlist_folder.hpp"
 
+#include "trackknife/core/atomic_rename.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/list_methods.hpp"
 #include "trackknife/engine/workspace.hpp"
@@ -88,7 +89,7 @@ constexpr std::string_view default_extension = ".m3u8";
 
 // Whole or not at all: a sibling written, then renamed over it.
 [[nodiscard]] bool write_file(const fs::path& path, const std::string& bytes) {
-    const auto partial = path.parent_path() / ("." + path.filename().string() + ".partial");
+    const auto partial = core::temporary_sibling(path, "partial");
     {
         std::ofstream out{partial, std::ios::binary | std::ios::trunc};
         if (!out) {

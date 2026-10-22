@@ -5,7 +5,9 @@
 #include "trackknife/core/result.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace trackknife::core {
 
@@ -27,5 +29,13 @@ enum class NoReplacePublishMethod : std::uint8_t {
                                                                    const std::string& source_name,
                                                                    int target_dir_fd,
                                                                    const std::string& target_name);
+
+// A hidden sibling of `target` to write before renaming it into place:
+// ".NAME.LABEL-RANDOM" in the same folder. NAME is the target's, shortened
+// -- never inside a UTF-8 character -- only as far as needed for the whole
+// to stay within the 255 bytes a file name may have: a target's own name
+// can be that long, and a sibling named after all of it could not be made.
+[[nodiscard]] std::filesystem::path temporary_sibling(const std::filesystem::path& target,
+                                                      std::string_view label);
 
 } // namespace trackknife::core

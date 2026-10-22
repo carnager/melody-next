@@ -405,6 +405,81 @@ void decodesCompressedGaplessFixtures(const std::filesystem::path& fixture_direc
     CHECK(!error);
 }
 
+// AAC's usual encoder delay is 2112 samples, longer than a frame of 1024:
+// FFmpeg reports it whole on the first frame, and the rest is dropped from
+// the next. The fixture's delay is one frame; the same file, its edit list
+// starting at 2112, is the same audio 1088 samples later.
+void decodesAnEncoderDelayLongerThanAFrame(const std::filesystem::path& fixture_directory) {
+    const auto binary = decode_base64_file(fixture_directory / "gapless-tone-aac-m4a.b64");
+    CHECK(binary.has_value());
+    if (!binary) {
+        return;
+    }
+    const auto write = [](const std::filesystem::path& path, const std::vector<unsigned char>& bytes) {
+        std::ofstream output{path, std::ios::binary};
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto stem = std::filesystem::temp_directory_path() /
+                      ("trackknife-aac-delay-" + trackknife::core::StableId::random().to_string());
+    const auto one_frame = std::filesystem::path{stem.native() + "-1024.m4a"};
+    const auto longer = std::filesystem::path{stem.native() + "-2112.m4a"};
+    write(one_frame, *binary);
+    // elst, version 0: version and flags, a count, then the first entry's
+    // duration and its media time -- the delay.
+    auto patched = *binary;
+    const std::string_view text{reinterpret_cast<const char*>(patched.data()), patched.size()};
+    const auto elst = text.find("elst");
+    CHECK(elst != std::string_view::npos && patched[elst + 4U] == 0U);
+    if (elst == std::string_view::npos) {
+        return;
+    }
+    const auto media_time = elst + 4U + 4U + 4U + 4U;
+    const auto read_be32 = [&patched](const std::size_t at) {
+        return (static_cast<std::uint32_t>(patched[at]) << 24U) |
+               (static_cast<std::uint32_t>(patched[at + 1U]) << 16U) |
+               (static_cast<std::uint32_t>(patched[at + 2U]) << 8U) |
+               static_cast<std::uint32_t>(patched[at + 3U]);
+    };
+    CHECK(read_be32(media_time) == 1024U);
+    constexpr std::uint32_t delay = 2112U;
+    patched[media_time] = 0U;
+    patched[media_time + 1U] = 0U;
+    patched[media_time + 2U] = static_cast<unsigned char>(delay >> 8U);
+    patched[media_time + 3U] = static_cast<unsigned char>(delay & 0xFFU);
+    write(longer, patched);
+
+    auto reference_decoder = trackknife::formats::AudioDecoder::open(one_frame.native());
+    auto decoder = trackknife::formats::AudioDecoder::open(longer.native());
+    CHECK(reference_decoder.has_value() && decoder.has_value());
+    if (reference_decoder && decoder) {
+        const auto channels = static_cast<std::size_t>(decoder->output_format().channels);
+        const auto reference = decode_all(*reference_decoder);
+        const auto decoded = decode_all(*decoder);
+        constexpr std::size_t later = 2112U - 1024U;
+        CHECK(reference.size() > later * channels);
+        CHECK(!decoded.empty());
+        const auto shared = std::min(decoded.size(), reference.size() - later * channels);
+        CHECK(shared > 1'000U * channels);
+        CHECK(std::ranges::equal(decoded | std::views::take(shared),
+                                 reference | std::views::drop(later * channels) |
+                                     std::views::take(shared)));
+        // Sought into: the same samples.
+        auto segment = trackknife::formats::AudioDecoder::open_segment(
+            longer.native(), {.start_sample = 500, .end_sample = 1'500});
+        CHECK(segment.has_value());
+        if (segment) {
+            const auto segment_samples = decode_all(*segment);
+            CHECK(segment_samples.size() == 1'000U * channels);
+            CHECK(std::ranges::equal(segment_samples, decoded | std::views::drop(500U * channels) |
+                                                          std::views::take(1'000U * channels)));
+        }
+    }
+    std::error_code error;
+    std::filesystem::remove(one_frame, error);
+    std::filesystem::remove(longer, error);
+}
+
 void normalizesVorbisFrameTimeline(const std::filesystem::path& fixture_directory) {
     const auto binary = decode_base64_file(fixture_directory / "vorbis-positive-start.b64");
     CHECK(binary.has_value());
@@ -970,6 +1045,7 @@ int main(const int argc, char** argv) {
     if (argc == 2) {
         decodesCompressedGaplessFixtures(argv[1]);
         normalizesVorbisFrameTimeline(argv[1]);
+        decodesAnEncoderDelayLongerThanAFrame(argv[1]);
         probesTaggedFlacFixture(argv[1]);
         probesTaggedWavPackFixture(argv[1]);
         probesTaggedAiffFixture(argv[1]);

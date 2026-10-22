@@ -84,6 +84,10 @@ struct AudioDecoder::Impl {
     std::optional<std::int64_t> timeline_origin_sample;
     std::optional<std::int64_t> next_decoded_sample;
     std::int64_t next_output_sample{0};
+    // The encoder delay still to drop: FFmpeg reports it whole on the first
+    // frame, and it may be longer than one -- AAC's 2112 samples, in frames of
+    // 1024 -- the rest dropped from the frames after.
+    std::uint64_t pending_skip{0U};
     // Which file was opened, to know it from one put in its place: a tag
     // write renames a new file over it. Read through another machine's
     // mount, the one opened is gone with it -- NFS keeps a replaced file
@@ -143,8 +147,16 @@ struct AudioDecoder::Impl {
         samples.resize(static_cast<std::size_t>(converted) *
                        static_cast<std::size_t>(output.channels));
 
-        const auto samples_to_skip = static_cast<std::uint64_t>(skip_start) + skip_end;
-        if (samples_to_skip > static_cast<std::uint64_t>(converted)) {
+        // The delay at the start, with what an earlier frame could not hold;
+        // what this one cannot hold either is dropped from the next.
+        auto front = pending_skip + skip_start;
+        pending_skip = 0U;
+        const auto decoded_frames = static_cast<std::uint64_t>(converted);
+        if (front > decoded_frames) {
+            pending_skip = front - decoded_frames;
+            front = decoded_frames;
+        }
+        if (static_cast<std::uint64_t>(skip_end) > decoded_frames - front) {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::backend,
                 .message = "decoded audio skip metadata exceeds its PCM frame",
@@ -166,13 +178,23 @@ struct AudioDecoder::Impl {
                                             AVRational{.num = 1, .den = output.sample_rate});
         }
         const auto channels = static_cast<std::size_t>(output.channels);
-        const auto drop_front = static_cast<std::size_t>(skip_start) * channels;
+        const auto drop_front = static_cast<std::size_t>(front) * channels;
         if (drop_front > 0U) {
             samples.erase(samples.begin(),
                           samples.begin() + static_cast<std::ptrdiff_t>(drop_front));
         }
         samples.resize(samples.size() - (static_cast<std::size_t>(skip_end) * channels));
-        const auto raw_output_start = raw_start_sample + skip_start;
+        if (samples.empty() && pending_skip > 0U) {
+            // All of it the delay: nothing played, and the timeline begins
+            // with the first frame that has something to play.
+            decoded_samples = raw_start_sample + converted;
+            av_frame_unref(frame);
+            return std::optional{PcmChunk{
+                .start_sample = next_decoded_sample.value_or(0),
+                .interleaved_samples = {},
+            }};
+        }
+        const auto raw_output_start = raw_start_sample + static_cast<std::int64_t>(front);
         if (!timeline_origin_sample) {
             timeline_origin_sample = raw_output_start;
         }
@@ -704,6 +726,7 @@ core::Result<void> AudioDecoder::seek_to_sample(const std::int64_t target_sample
     }
     decoder.decoded_samples = target_sample + decoder.timeline_origin_sample.value_or(0);
     decoder.next_decoded_sample.reset();
+    decoder.pending_skip = 0U;
     decoder.next_output_sample = target_sample;
     decoder.input_finished = false;
     decoder.drain_sent = false;

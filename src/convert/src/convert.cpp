@@ -183,9 +183,14 @@ struct EncoderPipeline {
 }
 
 // The source rate when the encoder accepts it, otherwise the smallest
-// supported rate at or above the source (so Opus resamples 44.1 kHz
-// material to 48 kHz, never down).
+// supported rate at or above the source (resampled up, never down). Opus
+// always at 48 kHz: the lower rates libopus takes are input conveniences,
+// and every decoder reads an Opus file at 48 kHz -- made at 12 kHz from an
+// 11,025 Hz source, it reread at another rate than written.
 [[nodiscard]] int choose_sample_rate(const AVCodec* codec, const int source_rate) {
+    if (codec->id == AV_CODEC_ID_OPUS) {
+        return 48'000;
+    }
     const auto* const supported = supported_sample_rates(codec);
     if (supported == nullptr) {
         return source_rate;

@@ -156,15 +156,12 @@ struct AudioDecoder::Impl {
             pending_skip = front - decoded_frames;
             front = decoded_frames;
         }
+        // The padding at the end may reach back past this frame -- a Vorbis
+        // stream of short blocks whose last frame starts after its end -- into
+        // audio already passed on: this frame is dropped whole, and what is
+        // left of the padding cannot be (FFmpeg itself keeps such a frame).
         if (static_cast<std::uint64_t>(skip_end) > decoded_frames - front) {
-            return std::unexpected(core::Error{
-                .code = core::ErrorCode::backend,
-                .message = "decoded audio skip metadata exceeds its PCM frame",
-                .context = {{.key = "path", .value = raw_path},
-                            {.key = "decoded_samples", .value = std::to_string(converted)},
-                            {.key = "skip_start", .value = std::to_string(skip_start)},
-                            {.key = "skip_end", .value = std::to_string(skip_end)}},
-            });
+            skip_end = static_cast<std::uint32_t>(decoded_frames - front);
         }
 
         auto raw_start_sample = decoded_samples;

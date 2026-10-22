@@ -68,8 +68,8 @@ class TemporaryDirectory final {
 };
 
 void write_sine_wav(const std::filesystem::path& path, const double amplitude,
-                    const double seconds) {
-    const auto frames = static_cast<std::uint32_t>(seconds * sample_rate);
+                    const double seconds, const int rate = sample_rate) {
+    const auto frames = static_cast<std::uint32_t>(seconds * rate);
     const std::uint32_t data_bytes = frames * 2U * 2U;
     std::ofstream output{path, std::ios::binary};
     const auto write_u32 = [&output](const std::uint32_t value) {
@@ -90,15 +90,15 @@ void write_sine_wav(const std::filesystem::path& path, const double amplitude,
     write_u32(16U);
     write_u16(1U);
     write_u16(2U);
-    write_u32(static_cast<std::uint32_t>(sample_rate));
-    write_u32(static_cast<std::uint32_t>(sample_rate) * 4U);
+    write_u32(static_cast<std::uint32_t>(rate));
+    write_u32(static_cast<std::uint32_t>(rate) * 4U);
     write_u16(4U);
     write_u16(16U);
     output.write("data", 4);
     write_u32(data_bytes);
     for (std::uint32_t frame = 0U; frame < frames; ++frame) {
         const auto value = amplitude * std::sin(2.0 * std::numbers::pi * tone_hertz *
-                                                static_cast<double>(frame) / sample_rate);
+                                                static_cast<double>(frame) / rate);
         const auto sample = static_cast<std::int16_t>(std::clamp(value, -1.0, 1.0) * 32'767.0);
         write_u16(static_cast<std::uint16_t>(sample));
         write_u16(static_cast<std::uint16_t>(sample));
@@ -315,6 +315,42 @@ void builtinPresetsProbeAvailable() {
     unbuildable.container_name = "flac";
     const auto bogus = trackknife::convert::probe_encoder_preset(unbuildable);
     CHECK(!bogus.available && !bogus.detail.empty());
+}
+
+// A source at a low rate -- 11,025 Hz, as old MP3s have -- converts with
+// every preset. Opus is made at 48 kHz, as every decoder reads it: made at
+// 12 kHz, the smallest rate it takes above the source's, it reread at 48 and
+// was refused.
+void convertsALowRateSourceWithEveryPreset() {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "low.wav";
+    write_sine_wav(source, 0.6, 0.5, 11'025);
+    for (const auto& preset : trackknife::convert::builtin_encoder_presets()) {
+        const auto destination =
+            directory.path() / ("low-" + preset.id + "." + preset.file_extension);
+        const auto converted = trackknife::convert::convert_audio_file(
+            {.source_raw_path = source.native(),
+             .source_selection = {},
+             .source_range = {},
+             .destination_raw_path = destination.native(),
+             .preset = preset,
+             .target_sample_rate = {},
+             .sample_rate_cap = {},
+             .target_bit_depth = {},
+             .keep_source_bit_depth = false,
+             .metadata = {},
+             .artwork = {}},
+            [](std::uint64_t, std::optional<std::uint64_t>) {});
+        if (!converted) {
+            std::cerr << "low rate, " << preset.id << ": " << converted.error().message << '\n';
+        }
+        CHECK(converted.has_value());
+        if (converted && preset.file_extension == "opus") {
+            CHECK(converted->sample_rate == 48'000);
+            // Half a second, at the rate it is read.
+            CHECK(std::abs(converted->duration_samples - 24'000) <= 48'000 / 5);
+        }
+    }
 }
 
 // A destination whose name is near the longest a file name may be: its
@@ -1153,6 +1189,7 @@ int main(const int argc, char** argv) {
     builtinPresetsProbeAvailable();
     convertsToEveryPresetAtomically();
     convertsToALongFileName();
+    convertsALowRateSourceWithEveryPreset();
     carriesMetadataIntoEveryPreset();
     carriesArtworkIntoEveryPreset(fixture_directory);
     carriesExternalCoverThroughTheScan(fixture_directory);

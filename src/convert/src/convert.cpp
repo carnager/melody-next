@@ -336,24 +336,57 @@ ensure_convert_capacity(EncoderPipeline& pipeline, const std::string& raw_path, 
            canonical_name == "r128albumgain";
 }
 
-// What a converted file is given of the source's tags: all but its stale
-// loudness claims -- and no empty values (ADR-0305). An empty value says
-// nothing, and the files written do not keep one -- WAV, FLAC and Opus alike
-// reread without it -- so carrying it made every conversion of such a file
-// fail. Left out here, the reread is still held to exactly what was meant
+// What a converted file is given of the source's tags, as MusicBrainz Picard
+// would write them (ADR-0307): all but its stale loudness claims, and no
+// empty values (ADR-0305) -- an empty value says nothing, and no preset's
+// file keeps one. No name Picard keeps to itself: one starting with "~"
+// (`~length`) is its variable, never written to a file. And a performer of
+// an instrument, `performer:agogô`, in Vorbis comments -- FLAC, Ogg, Opus,
+// whose names cannot hold it -- as Picard writes it there:
+// PERFORMER=Name (agogô). The reread is held to exactly this
 // (verify_written_metadata).
 [[nodiscard]] metadata::MetadataDocument
-fields_to_transfer(const metadata::MetadataDocument& document) {
+fields_to_transfer(const metadata::MetadataDocument& document, const EncoderPreset& preset) {
+    const auto vorbis_comments = preset.file_extension == "flac" ||
+                                 preset.file_extension == "ogg" || preset.file_extension == "opus";
+    constexpr std::string_view performer = "performer";
     metadata::MetadataDocument kept;
     kept.fields.reserve(document.fields.size());
+    std::vector<std::string> credits;
     for (const auto& field : document.fields) {
-        if (is_loudness_field(field.canonical_name)) {
+        if (is_loudness_field(field.canonical_name) || field.canonical_name.starts_with('~') ||
+            field.native_name.starts_with('~')) {
             continue;
         }
         auto carried = field;
         std::erase_if(carried.values, [](const std::string& value) { return value.empty(); });
-        if (!carried.values.empty()) {
-            kept.fields.push_back(std::move(carried));
+        if (carried.values.empty()) {
+            continue;
+        }
+        const auto& name = carried.canonical_name;
+        if (vorbis_comments && name.size() > performer.size() + 1U &&
+            name.starts_with(performer) && name[performer.size()] == ':') {
+            const auto instrument = name.substr(performer.size() + 1U);
+            for (const auto& who : carried.values) {
+                credits.push_back(who + " (" + instrument + ")");
+            }
+            continue;
+        }
+        kept.fields.push_back(std::move(carried));
+    }
+    if (!credits.empty()) {
+        // After the performers credited plainly, in the order they came.
+        const auto plain = std::ranges::find_if(kept.fields, [&performer](const auto& field) {
+            return field.canonical_name == performer;
+        });
+        if (plain != kept.fields.end()) {
+            plain->values.insert(plain->values.end(), credits.begin(), credits.end());
+        } else {
+            kept.fields.push_back(metadata::MetadataField{.canonical_name = std::string{performer},
+                                                          .native_name = "PERFORMER",
+                                                          .values = std::move(credits),
+                                                          .qualifier = {},
+                                                          .provenance = metadata::FieldProvenance::embedded});
         }
     }
     kept.unsupported_native_objects = document.unsupported_native_objects;
@@ -802,7 +835,7 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
         effective_sample_rate = request.sample_rate_cap;
     }
 
-    const auto transfer_metadata = fields_to_transfer(request.metadata);
+    const auto transfer_metadata = fields_to_transfer(request.metadata, request.preset);
     const auto artwork = request.preset.carries_artwork ? request.artwork : std::nullopt;
     auto pipeline_result = open_pipeline(request.preset, source_format, effective_sample_rate,
                                          effective_bit_depth, request.channel_policy, artwork,

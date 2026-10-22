@@ -479,6 +479,13 @@ void carriesMetadataIntoEveryPreset() {
     document.fields.push_back(field("acoustidfingerprint", "ACOUSTID_FINGERPRINT", {""}));
     document.fields.push_back(field("acoustidid", "ACOUSTID_ID", {""}));
     document.fields.push_back(field("mylistfield", "MYLISTFIELD", {"kept", ""}));
+    // ADR-0307, as Picard writes them: no "~" variable -- `~length`, written
+    // into real M4A files by some tool -- and a performer of an instrument
+    // as Vorbis comments can name it.
+    document.fields.push_back(field("~length", "~LENGTH", {"4:52"}));
+    document.fields.push_back(field("performer", "PERFORMER", {"Lead Singer"}));
+    // As TagLib reads it from an MP3: only ASCII made upper case.
+    document.fields.push_back(field("performer:agogô", "PERFORMER:AGOGô", {"Bell Player"}));
     document.fields.push_back(field("musicbrainzalbumid", "MUSICBRAINZ_ALBUMID",
                                     {"11111111-2222-3333-4444-555555555555"}));
     // Loudness claims measured against the source signal are stale after a
@@ -534,6 +541,16 @@ void carriesMetadataIntoEveryPreset() {
         CHECK(reread->document.effective_values("acoustidid").empty());
         CHECK(reread->document.effective_values("mylistfield") ==
               std::vector<std::string>{"kept"});
+        CHECK(reread->document.effective_values("~length").empty());
+        if (preset.file_extension == "flac" || preset.file_extension == "ogg" ||
+            preset.file_extension == "opus") {
+            CHECK(reread->document.effective_values("performer") ==
+                  (std::vector<std::string>{"Lead Singer", "Bell Player (agogô)"}));
+            CHECK(reread->document.effective_values("performer:agogô").empty());
+        } else {
+            CHECK(reread->document.effective_values("performer:agogô") ==
+                  std::vector<std::string>{"Bell Player"});
+        }
         CHECK(reread->document.first_effective_value("musicbrainzalbumid") ==
               std::optional<std::string>{"11111111-2222-3333-4444-555555555555"});
         CHECK(!reread->document.first_effective_value("replaygaintrackgain").has_value());

@@ -2689,7 +2689,8 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
                 refreshed += static_cast<std::size_t>(sqlite3_changes(db));
                 continue;
             }
-            if (!audio_path(std::filesystem::path{raw_path})) {
+            if (!audio_path(std::filesystem::path{raw_path}) ||
+                core::hidden_below_root(raw_path, root->raw_path)) {
                 continue;
             }
             // Read as a scan reads it, and stored under the root's current
@@ -2883,6 +2884,13 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 if (error) {
                     complete = false;
                     break;
+                }
+                // ADR-0308: nothing in a hidden folder below the root -- a
+                // trash, a sync tool's state.
+                if (std::filesystem::is_directory(status) &&
+                    path.filename().native().starts_with('.')) {
+                    iterator.disable_recursion_pending();
+                    continue;
                 }
                 if (!std::filesystem::is_regular_file(status) || !audio_path(path)) {
                     continue;

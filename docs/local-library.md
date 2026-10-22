@@ -117,7 +117,8 @@ write transaction; commits may land in any order. The library
 connection uses WAL with synchronous=NORMAL. The database is a cache;
 Refresh can rebuild metadata lost after a power failure.
 Only plausible audio extensions are probed; directory and file symlinks are
-skipped. Scans stop after one million visited entries and report incompleteness.
+skipped, and so are hidden files and folders below a library folder -- a sync
+tool's fragments, macOS's `._` files, a trash (ADR-0308). Scans stop after one million visited entries and report incompleteness.
 Cancellation and incomplete traversal retain previously indexed entries.
 
 Migration 35 adds track and album ratings (ADR-0179): the `local_ratings`

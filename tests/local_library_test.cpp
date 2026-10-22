@@ -8,6 +8,7 @@
 #include "bench/search_dialog.hpp"
 #include "drag_position.hpp"
 #include "test_engine.hpp"
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/persistence/list_repository.hpp"
@@ -139,6 +140,7 @@ class LocalLibraryTest final : public QObject {
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
     void refreshRereadsNamedFilesWithoutAWalk();
+    void hiddenFilesAndFoldersAreNotTheLibrarys();
     void refreshDropsAVanishedFolderAndInventoryPages();
     void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
     void missingFilesOnAnotherDeviceAreRetained();
@@ -311,6 +313,40 @@ void LocalLibraryTest::refreshRereadsNamedFilesWithoutAWalk() {
     const auto ignored = library->refresh({elsewhere});
     QVERIFY(ignored && *ignored == 0U);
     QCOMPARE(library->paths(tracks())->size(), 1U);
+}
+
+// ADR-0308: a hidden file beside a track -- a sync tool's fragment, macOS's
+// "._" file -- and anything in a hidden folder below the root is not
+// indexed, by a scan or when named to refresh; a root in a hidden folder
+// itself still is.
+void LocalLibraryTest::hiddenFilesAndFoldersAreNotTheLibrarys() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / ".local" / "music";
+    const auto track = fixture(root / "Album", "01 Song.flac", "Kept");
+    static_cast<void>(fixture(root / "Album", ".CS080.01 Song.flac", "Fragment"));
+    static_cast<void>(fixture(root / "Album", "._01 Song.flac", "AppleDouble"));
+    static_cast<void>(fixture(root / ".Trash" / "Old", "02 Gone.flac", "Trashed"));
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress scanned;
+    QVERIFY(library->scan({}, scanned));
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+    QCOMPARE(library->paths(tracks())->front(), track);
+    // Named to refresh, as a watcher names a new file: still not.
+    const auto fragment = fixture(root / "Album", ".CS100.01 Song.flac", "Fragment");
+    const auto trashed = fixture(root / ".Trash" / "Old", "03 Gone.flac", "Trashed");
+    const auto refreshed = library->refresh({fragment, trashed});
+    QVERIFY(refreshed && *refreshed == 0U);
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+
+    QVERIFY(!core::is_audio_path("/m/.CS080.ers and Flies.m4a"));
+    QVERIFY(!core::is_audio_path("/m/._Song.mp3"));
+    QVERIFY(core::is_audio_path("/m/.hidden/Song.mp3"));
+    QVERIFY(core::hidden_below_root("/m/root/.Trash/a.mp3", "/m/root"));
+    QVERIFY(core::hidden_below_root("/m/root/a/.b", "/m/root/"));
+    QVERIFY(!core::hidden_below_root("/home/u/.local/music/a.mp3", "/home/u/.local/music"));
+    QVERIFY(!core::hidden_below_root("/m/root/a.b/c.mp3", "/m/root"));
 }
 
 // ADR-0232: melody-watch sees a folder moved or deleted as a whole only as

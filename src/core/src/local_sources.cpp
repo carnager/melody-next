@@ -491,6 +491,30 @@ Result<ContainedLocalSource> revalidate_contained_source(const std::string& raw_
     };
 }
 
+bool hidden_below_root(const std::string_view raw_path, std::string_view root_raw_path) {
+    while (root_raw_path.size() > 1U && root_raw_path.ends_with('/')) {
+        root_raw_path.remove_suffix(1U);
+    }
+    if (!raw_path.starts_with(root_raw_path)) {
+        return false;
+    }
+    auto below = raw_path.substr(root_raw_path.size());
+    while (!below.empty()) {
+        while (below.starts_with('/')) {
+            below.remove_prefix(1U);
+        }
+        if (below.starts_with('.')) {
+            return true;
+        }
+        const auto slash = below.find('/');
+        if (slash == std::string_view::npos) {
+            break;
+        }
+        below.remove_prefix(slash);
+    }
+    return false;
+}
+
 bool is_audio_path(const std::string_view raw_path) {
     static constexpr std::array<std::string_view, 27> extensions{
         ".flac", ".mp3",  ".ogg", ".oga",  ".opus", ".m4a",  ".mp4", ".aac", ".wv",
@@ -499,8 +523,8 @@ bool is_audio_path(const std::string_view raw_path) {
     const auto slash = raw_path.rfind('/');
     const auto name = slash == std::string_view::npos ? raw_path : raw_path.substr(slash + 1U);
     const auto dot = name.rfind('.');
-    // A leading dot names a hidden file, not an extension.
-    if (dot == std::string_view::npos || dot == 0U || name.size() - dot > 5U) {
+    // A leading dot names a hidden file, never one of the library's.
+    if (name.starts_with('.') || dot == std::string_view::npos || name.size() - dot > 5U) {
         return false;
     }
     std::string extension{name.substr(dot)};

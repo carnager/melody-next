@@ -116,8 +116,15 @@ observe_local_source_revision(const std::string& raw_path);
 
 // Whether a file is one the library indexes, by its extension (ASCII, any
 // case). One list, for the index and for anything that tells it about files
-// (ADR-0232), so the two cannot disagree about what counts.
+// (ADR-0232), so the two cannot disagree about what counts. Never a hidden
+// file, its name starting with a dot (ADR-0308): a sync tool's fragment --
+// ChronoSync's ".CS080.Song.m4a" -- or macOS's "._Song.m4a" beside a track.
 [[nodiscard]] bool is_audio_path(std::string_view raw_path);
+
+// Whether a file or folder under a library root is in a hidden folder, or is
+// hidden itself: a name below `root_raw_path` starting with a dot. The root
+// itself may be in one -- ~/.local/share/music -- and still be indexed.
+[[nodiscard]] bool hidden_below_root(std::string_view raw_path, std::string_view root_raw_path);
 
 // Filesystem revalidation for file operations: resolves the configured root
 // and the referenced path to their final targets and requires the result to

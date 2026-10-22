@@ -17,6 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
@@ -68,51 +70,214 @@ struct TopLevelBox {
     std::array<unsigned char, 4> type{};
     std::size_t offset{0U};
     std::size_t size{0U};
+    // Its header: 8 bytes, 16 with a 64-bit size.
+    std::size_t header{8U};
 
     [[nodiscard]] bool is(const std::string_view name) const {
         return name.size() == 4U && std::equal(name.begin(), name.end(), type.begin());
     }
 };
 
-// Top-level ISO-BMFF box walk, including 64-bit largesize and the
-// size-0 "extends to end of file" form.
+[[nodiscard]] std::uint64_t read_be32(const std::vector<unsigned char>& bytes, const std::size_t at) {
+    return (static_cast<std::uint64_t>(bytes[at]) << 24U) |
+           (static_cast<std::uint64_t>(bytes[at + 1U]) << 16U) |
+           (static_cast<std::uint64_t>(bytes[at + 2U]) << 8U) |
+           static_cast<std::uint64_t>(bytes[at + 3U]);
+}
+
+// The ISO-BMFF boxes in [begin, end) of `bytes`, including 64-bit largesize
+// and the size-0 "extends to the end" form.
 [[nodiscard]] core::Result<std::vector<TopLevelBox>>
-parse_top_level_boxes(const std::vector<unsigned char>& bytes, const core::Error& malformed) {
+parse_boxes(const std::vector<unsigned char>& bytes, const std::size_t begin, const std::size_t end,
+            const core::Error& malformed) {
     std::vector<TopLevelBox> boxes;
-    std::size_t offset = 0U;
-    const auto read_be32 = [&bytes](const std::size_t at) {
-        return (static_cast<std::uint64_t>(bytes[at]) << 24U) |
-               (static_cast<std::uint64_t>(bytes[at + 1U]) << 16U) |
-               (static_cast<std::uint64_t>(bytes[at + 2U]) << 8U) |
-               static_cast<std::uint64_t>(bytes[at + 3U]);
-    };
-    while (offset < bytes.size()) {
-        if (bytes.size() - offset < 8U) {
+    std::size_t offset = begin;
+    while (offset < end) {
+        if (end - offset < 8U) {
             return std::unexpected(malformed);
         }
-        auto box_size = read_be32(offset);
+        auto box_size = read_be32(bytes, offset);
         TopLevelBox box;
         box.offset = offset;
         std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset) + 4, 4U, box.type.begin());
         if (box_size == 1U) {
-            if (bytes.size() - offset < 16U) {
+            if (end - offset < 16U) {
                 return std::unexpected(malformed);
             }
-            box_size = (read_be32(offset + 8U) << 32U) | read_be32(offset + 12U);
+            box_size = (read_be32(bytes, offset + 8U) << 32U) | read_be32(bytes, offset + 12U);
+            box.header = 16U;
         } else if (box_size == 0U) {
-            box_size = bytes.size() - offset;
+            box_size = end - offset;
         }
-        if (box_size < 8U || box_size > bytes.size() - offset) {
+        if (box_size < box.header || box_size > end - offset) {
             return std::unexpected(malformed);
         }
         box.size = static_cast<std::size_t>(box_size);
         boxes.push_back(box);
         offset += box.size;
     }
-    if (boxes.empty()) {
+    return boxes;
+}
+
+// Top-level ISO-BMFF box walk.
+[[nodiscard]] core::Result<std::vector<TopLevelBox>>
+parse_top_level_boxes(const std::vector<unsigned char>& bytes, const core::Error& malformed) {
+    auto boxes = parse_boxes(bytes, 0U, bytes.size(), malformed);
+    if (boxes && boxes->empty()) {
         return std::unexpected(malformed);
     }
     return boxes;
+}
+
+// A box's children, by their type, in order.
+[[nodiscard]] core::Result<std::vector<TopLevelBox>>
+children(const std::vector<unsigned char>& bytes, const TopLevelBox& parent,
+         const core::Error& malformed) {
+    return parse_boxes(bytes, parent.offset + parent.header, parent.offset + parent.size,
+                       malformed);
+}
+
+[[nodiscard]] const TopLevelBox* child(const std::vector<TopLevelBox>& boxes,
+                                       const std::string_view name) {
+    const auto found = std::ranges::find_if(boxes, [name](const auto& box) { return box.is(name); });
+    return found == boxes.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] bool same_bytes(const std::vector<unsigned char>& first, const TopLevelBox& one,
+                              const std::vector<unsigned char>& second, const TopLevelBox& other) {
+    return one.size == other.size &&
+           std::equal(first.begin() + static_cast<std::ptrdiff_t>(one.offset),
+                      first.begin() + static_cast<std::ptrdiff_t>(one.offset + one.size),
+                      second.begin() + static_cast<std::ptrdiff_t>(other.offset));
+}
+
+// A sample table's chunk offsets: `stco`'s 32-bit or `co64`'s 64-bit.
+[[nodiscard]] std::optional<std::vector<std::uint64_t>>
+chunk_offsets(const std::vector<unsigned char>& bytes, const TopLevelBox& table) {
+    const auto wide = table.is("co64");
+    const auto payload = table.offset + table.header;
+    if (table.size < table.header + 8U) {
+        return std::nullopt;
+    }
+    const auto count = read_be32(bytes, payload + 4U);
+    const auto entry = wide ? 8U : 4U;
+    if (count > (table.size - table.header - 8U) / entry) {
+        return std::nullopt;
+    }
+    std::vector<std::uint64_t> offsets;
+    offsets.reserve(static_cast<std::size_t>(count));
+    for (std::uint64_t index = 0U; index < count; ++index) {
+        const auto at = payload + 8U + static_cast<std::size_t>(index) * entry;
+        offsets.push_back(wide ? (read_be32(bytes, at) << 32U) | read_be32(bytes, at + 4U)
+                               : read_be32(bytes, at));
+    }
+    return offsets;
+}
+
+// ADR-0306: the audio index. The audio is proven byte-identical by the box
+// comparison; but `moov`, which TagLib rewrites, holds each track's table of
+// where its chunks of audio are -- shifted by TagLib when the audio moves,
+// and unchecked by that comparison. Here every chunk offset of the prepared
+// file must be the source's, moved by exactly as much as the box it points
+// into moved; the tables of the samples themselves -- their sizes, timing
+// and grouping -- unchanged.
+[[nodiscard]] core::Result<void>
+verify_mp4_audio_index(const std::vector<unsigned char>& source,
+                       const std::vector<TopLevelBox>& source_boxes,
+                       const std::vector<const TopLevelBox*>& source_fixed,
+                       const std::vector<unsigned char>& prepared,
+                       const std::vector<TopLevelBox>& prepared_boxes,
+                       const std::vector<const TopLevelBox*>& prepared_fixed,
+                       const core::Error& malformed, const core::Error& misplaced) {
+    const auto* source_moov = child(source_boxes, "moov");
+    const auto* prepared_moov = child(prepared_boxes, "moov");
+    auto source_tracks = children(source, *source_moov, malformed);
+    auto prepared_tracks = children(prepared, *prepared_moov, malformed);
+    if (!source_tracks || !prepared_tracks) {
+        return std::unexpected(malformed);
+    }
+    const auto tracks = [](const std::vector<TopLevelBox>& boxes) {
+        std::vector<TopLevelBox> found;
+        std::ranges::copy_if(boxes, std::back_inserter(found),
+                             [](const auto& box) { return box.is("trak"); });
+        return found;
+    };
+    const auto source_traks = tracks(*source_tracks);
+    const auto prepared_traks = tracks(*prepared_tracks);
+    if (source_traks.size() != prepared_traks.size()) {
+        return std::unexpected(misplaced);
+    }
+    // A track's sample table: trak > mdia > minf > stbl, its children.
+    const auto sample_table =
+        [&malformed](const std::vector<unsigned char>& bytes,
+                     const TopLevelBox& trak) -> core::Result<std::vector<TopLevelBox>> {
+        auto level = children(bytes, trak, malformed);
+        for (const auto* name : {"mdia", "minf", "stbl"}) {
+            if (!level) {
+                return std::unexpected(level.error());
+            }
+            const auto* found = child(*level, name);
+            if (found == nullptr) {
+                return std::vector<TopLevelBox>{};
+            }
+            level = children(bytes, *found, malformed);
+        }
+        return level;
+    };
+    // Where a source offset is in the prepared file: in the same fixed box,
+    // moved as that box moved. None when it is in no fixed box.
+    const auto moved = [&](const std::uint64_t at) -> std::optional<std::uint64_t> {
+        for (std::size_t index = 0U; index < source_fixed.size(); ++index) {
+            const auto& box = *source_fixed[index];
+            if (at >= box.offset && at < box.offset + box.size) {
+                return at - box.offset + prepared_fixed[index]->offset;
+            }
+        }
+        return std::nullopt;
+    };
+    for (std::size_t track = 0U; track < source_traks.size(); ++track) {
+        auto source_table = sample_table(source, source_traks[track]);
+        auto prepared_table = sample_table(prepared, prepared_traks[track]);
+        if (!source_table || !prepared_table) {
+            return std::unexpected(malformed);
+        }
+        for (const auto* name : {"stsd", "stts", "ctts", "stsc", "stsz", "stz2", "stss"}) {
+            const auto* before = child(*source_table, name);
+            const auto* after = child(*prepared_table, name);
+            if ((before == nullptr) != (after == nullptr) ||
+                (before != nullptr && !same_bytes(source, *before, prepared, *after))) {
+                return std::unexpected(misplaced);
+            }
+        }
+        const auto* before = child(*source_table, "stco");
+        if (before == nullptr) {
+            before = child(*source_table, "co64");
+        }
+        const auto* after = child(*prepared_table, before != nullptr && before->is("co64")
+                                                       ? "co64"
+                                                       : "stco");
+        if (before == nullptr && after == nullptr) {
+            continue;
+        }
+        if (before == nullptr || after == nullptr) {
+            return std::unexpected(misplaced);
+        }
+        const auto source_offsets = chunk_offsets(source, *before);
+        const auto prepared_offsets = chunk_offsets(prepared, *after);
+        if (!source_offsets || !prepared_offsets) {
+            return std::unexpected(malformed);
+        }
+        if (source_offsets->size() != prepared_offsets->size()) {
+            return std::unexpected(misplaced);
+        }
+        for (std::size_t index = 0U; index < source_offsets->size(); ++index) {
+            const auto expected = moved((*source_offsets)[index]);
+            if (!expected || *expected != (*prepared_offsets)[index]) {
+                return std::unexpected(misplaced);
+            }
+        }
+    }
+    return {};
 }
 
 } // namespace
@@ -121,7 +286,8 @@ parse_top_level_boxes(const std::vector<unsigned char>& bytes, const core::Error
 // (ADR-0137): TagLib rewrites `moov` and may grow or shrink `free`
 // padding, so those two may differ. Everything else — `ftyp`, every
 // `mdat`, and any other top-level box — must be byte-identical and appear
-// in the same order.
+// in the same order; and `moov`'s audio index must still point at that
+// audio (ADR-0306).
 core::Result<void>
 preservation_detail::verify_mp4_box_preservation(const std::string& source_raw_path,
                                                  const std::string& prepared_raw_path,
@@ -192,7 +358,12 @@ preservation_detail::verify_mp4_box_preservation(const std::string& source_raw_p
                              source_raw_path, prepared_raw_path));
         }
     }
-    return {};
+    return verify_mp4_audio_index(
+        *source_bytes, *source_boxes, source_fixed, *prepared_bytes, *prepared_boxes,
+        prepared_fixed, malformed,
+        writer_error(core::ErrorCode::conflict,
+                     "a prepared MP4's audio index no longer points at its audio",
+                     source_raw_path, prepared_raw_path));
 }
 
 namespace {

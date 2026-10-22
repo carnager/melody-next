@@ -12,6 +12,8 @@
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
+#include "../src/metadata/src/container_preservation_detail.hpp"
+
 #include <taglib/mp4coverart.h>
 #include <taglib/mp4file.h>
 #include <taglib/mp4item.h>
@@ -19,6 +21,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -163,6 +166,124 @@ decode_base64_file(const std::filesystem::path& path) {
     const auto first_samples = decode_all(first);
     const auto second_samples = decode_all(second);
     return first_samples && second_samples && *first_samples == *second_samples;
+}
+
+// The first `stco` table's entries in `bytes`: where its count is, and how
+// many. ADR-0306's tests change them in place.
+struct ChunkTable {
+    std::size_t count_at{0U};
+    std::size_t count{0U};
+};
+[[nodiscard]] std::optional<ChunkTable> chunk_table(const std::vector<unsigned char>& bytes) {
+    const std::string_view text{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+    const auto at = text.find("stco");
+    if (at == std::string_view::npos || at + 12U > bytes.size()) {
+        return std::nullopt;
+    }
+    const auto be32 = [&bytes](const std::size_t from) {
+        return (static_cast<std::size_t>(bytes[from]) << 24U) |
+               (static_cast<std::size_t>(bytes[from + 1U]) << 16U) |
+               (static_cast<std::size_t>(bytes[from + 2U]) << 8U) |
+               static_cast<std::size_t>(bytes[from + 3U]);
+    };
+    return ChunkTable{.count_at = at + 8U, .count = be32(at + 8U)};
+}
+[[nodiscard]] std::uint32_t chunk_offset(const std::vector<unsigned char>& bytes,
+                                         const ChunkTable& table, const std::size_t index) {
+    const auto at = table.count_at + 4U + index * 4U;
+    return (static_cast<std::uint32_t>(bytes[at]) << 24U) |
+           (static_cast<std::uint32_t>(bytes[at + 1U]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[at + 2U]) << 8U) |
+           static_cast<std::uint32_t>(bytes[at + 3U]);
+}
+void set_chunk_offset(std::vector<unsigned char>& bytes, const ChunkTable& table,
+                      const std::size_t index, const std::uint32_t value) {
+    const auto at = table.count_at + 4U + index * 4U;
+    bytes[at] = static_cast<unsigned char>(value >> 24U);
+    bytes[at + 1U] = static_cast<unsigned char>(value >> 16U);
+    bytes[at + 2U] = static_cast<unsigned char>(value >> 8U);
+    bytes[at + 3U] = static_cast<unsigned char>(value);
+}
+void write_bytes(const std::filesystem::path& path, const std::vector<unsigned char>& bytes) {
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+}
+
+// ADR-0306: the audio index. Many real files have `moov` before `mdat`
+// ("fast start"), so a tag that grows `moov` moves the audio, and TagLib
+// must shift every chunk offset by as much. The audio stays byte-identical
+// either way; only this proves it can still be found.
+void verifiesTheAudioIndex(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto original =
+        materialize(fixture_directory, "tagged-tone-m4a.b64", directory.path() / "original.m4a");
+    const auto bytes = read_bytes(original);
+    const auto ftyp = box_bytes(bytes, "ftyp");
+    const auto mdat = box_bytes(bytes, "mdat");
+    auto moov = box_bytes(bytes, "moov");
+    CHECK(!ftyp.empty() && !mdat.empty() && !moov.empty());
+    // Fast start, made here: ftyp, moov, mdat -- every offset moved by the
+    // moov now in front of the audio.
+    const auto table = chunk_table(moov);
+    CHECK(table.has_value() && table->count > 0U);
+    if (!table) {
+        return;
+    }
+    const auto old_mdat_at = bytes.size() - mdat.size() - moov.size();
+    const auto new_mdat_at = ftyp.size() + moov.size();
+    for (std::size_t index = 0U; index < table->count; ++index) {
+        set_chunk_offset(moov, *table, index,
+                         static_cast<std::uint32_t>(chunk_offset(moov, *table, index) -
+                                                    old_mdat_at + new_mdat_at));
+    }
+    std::vector<unsigned char> fast;
+    fast.insert(fast.end(), ftyp.begin(), ftyp.end());
+    fast.insert(fast.end(), moov.begin(), moov.end());
+    fast.insert(fast.end(), mdat.begin(), mdat.end());
+    const auto source = directory.path() / "source.m4a";
+    write_bytes(source, fast);
+    CHECK(decoded_pcm_matches(original, source));
+
+    // A large tag: moov grows, the audio moves, TagLib shifts the index.
+    const auto prepared = directory.path() / "prepared.m4a";
+    std::filesystem::copy_file(source, prepared);
+    {
+        TagLib::MP4::File file{prepared.c_str()};
+        CHECK(file.isValid());
+        auto properties = file.properties();
+        properties.replace("COMMENT",
+                           TagLib::String{std::string(20000U, 'x'), TagLib::String::UTF8});
+        CHECK(file.setProperties(properties).isEmpty());
+        CHECK(file.save());
+    }
+    auto written = read_bytes(prepared);
+    const auto written_table = chunk_table(written);
+    CHECK(written_table.has_value() && written_table->count == table->count);
+    if (!written_table) {
+        return;
+    }
+    CHECK(chunk_offset(written, *written_table, 0U) != chunk_offset(moov, *table, 0U));
+    CHECK(decoded_pcm_matches(original, prepared));
+    namespace detail = trackknife::metadata::preservation_detail;
+    CHECK(detail::verify_mp4_box_preservation(source.native(), prepared.native(), {}).has_value());
+
+    // An index not shifted -- as if the writer had not -- points beside the
+    // audio: refused, though every byte of the audio is the same.
+    auto unshifted = written;
+    for (std::size_t index = 0U; index < table->count; ++index) {
+        set_chunk_offset(unshifted, *written_table, index, chunk_offset(moov, *table, index));
+    }
+    const auto damaged = directory.path() / "damaged.m4a";
+    write_bytes(damaged, unshifted);
+    auto refused = detail::verify_mp4_box_preservation(source.native(), damaged.native(), {});
+    CHECK(!refused.has_value());
+    CHECK(!refused && refused.error().message.find("audio index") != std::string::npos);
+    // One chunk off by a byte: refused too.
+    auto nudged = written;
+    set_chunk_offset(nudged, *written_table, 0U, chunk_offset(written, *written_table, 0U) + 1U);
+    write_bytes(damaged, nudged);
+    CHECK(!detail::verify_mp4_box_preservation(source.native(), damaged.native(), {}).has_value());
 }
 
 // ADR-0136: standard atoms, an exact freeform addition, the combined trkn
@@ -448,6 +569,7 @@ int main(const int argc, char** argv) {
     if (argc == 2) {
         roundTripsAtomEditsPreservingBoxes(std::filesystem::path{argv[1]});
         roundTripsCovrArtworkEdits(std::filesystem::path{argv[1]});
+        verifiesTheAudioIndex(std::filesystem::path{argv[1]});
     }
     return failures == 0 ? 0 : 1;
 }

@@ -32,6 +32,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LooksOne
 import androidx.compose.material.icons.filled.Pause
@@ -203,6 +205,18 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
             facts?.let { if (it.ratingHash == change.hash) facts = it.copy(rating = change.rating) }
         }
     }
+    // ADR-0297: whether it is a favourite -- asked again when any list on the
+    // engine changes, the Favorites playlist among them, a heart given in the
+    // desktop app showing here. Null: an engine without favourites.
+    val level by engine.level.collectAsState()
+    var favorite by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(entry?.path, engine, level) {
+        val path = entry?.path
+        favorite = path?.let { runCatching { engine.favorite(it) }.getOrNull() }
+        engine.listsChanged.collect {
+            if (path != null) runCatching { engine.favorite(path) }.getOrNull()?.let { favorite = it }
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = colours.ground, contentColor = colours.text) {
         Column(
@@ -246,6 +260,33 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
                         style = MaterialTheme.typography.bodyMedium, color = colours.soft,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
+                }
+                val path = entry?.path
+                favorite?.let { isFavorite ->
+                    if (path != null) {
+                        IconButton(
+                            onClick = {
+                                // Shown at once; put back if the engine refuses.
+                                favorite = !isFavorite
+                                scope.launch {
+                                    runCatching { engine.setFavorite(path, !isFavorite) }
+                                        .onSuccess { favorite = it }
+                                        .onFailure {
+                                            favorite = isFavorite
+                                            vm.say("Could not change the favourite: ${it.message}")
+                                        }
+                                }
+                            },
+                            modifier = Modifier.offset(y = 6.dp),
+                        ) {
+                            Icon(
+                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                if (isFavorite) "Remove from favourites" else "Add to favourites",
+                                Modifier.size(24.dp),
+                                tint = if (isFavorite) colours.accent else colours.muted,
+                            )
+                        }
+                    }
                 }
                 facts?.let { track ->
                     Box(Modifier.padding(bottom = 2.dp)) {

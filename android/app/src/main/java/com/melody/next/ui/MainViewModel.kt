@@ -167,6 +167,11 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /** Something to say from a screen: shown as the view model's own are. */
+    fun say(text: String) {
+        message = text
+    }
+
     fun messageShown() {
         message = null
     }

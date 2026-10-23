@@ -34,6 +34,9 @@ data class LibraryPage(val entries: List<LibraryEntry>, val more: Boolean)
  * hears -- and turns what the user does into requests. Nothing is decided
  * here that the engine decides.
  */
+/** ADR-0297: the protocol level that brought favourites. */
+const val FAVORITES_LEVEL = 20
+
 class EngineClient(
     private val scope: CoroutineScope,
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
@@ -67,6 +70,10 @@ class EngineClient(
      * time, or learnt on connecting -- what it is found by on this network.
      */
     val engineId: StateFlow<String?> = _engineId
+
+    private val _level = MutableStateFlow(0)
+    /** ADR-0260: the engine's protocol level, from engine.info: what it can be asked. */
+    val level: StateFlow<Int> = _level
 
     @Volatile private var control: EngineConnection? = null
     @Volatile private var covers: EngineConnection? = null
@@ -130,6 +137,7 @@ class EngineClient(
                     val info = opened.call("engine.info")
                     val name = info.optString("name").ifEmpty { via.host }
                     info.optString("id").takeIf { it.isNotEmpty() }?.let { _engineId.value = it }
+                    _level.value = info.optInt("level", 0)
                     // ADR-0260: another protocol is not used, nor asked again
                     // until the app is; an older engine is, and said so.
                     val verdict = ProtocolVersion.of(info, name)
@@ -439,6 +447,25 @@ class EngineClient(
     suspend fun setRating(hash: String, album: Boolean, rating: Int) {
         call("catalogue.set_rating", JSONObject().put("hash", hash).put("album", album).put("rating", rating.coerceIn(0, 10)))
     }
+
+    /**
+     * ADR-0297: whether a file is a favourite -- in the engine's Favorites
+     * playlist. Null from an engine too old to have them (level 20).
+     */
+    suspend fun favorite(path: String): Boolean? {
+        if (_level.value < FAVORITES_LEVEL) return null
+        return call("favorites.state", JSONObject().put("paths", JSONArray().put(path)))
+            .optJSONArray("favorites")?.optBoolean(0)
+    }
+
+    /**
+     * The file made a favourite, or no longer one: into the Favorites
+     * playlist or out of it, and loved on Last.fm where the engine scrobbles.
+     * What it is now.
+     */
+    suspend fun setFavorite(path: String, favorite: Boolean): Boolean =
+        call("favorites.toggle", JSONObject().put("path", path).put("favorite", favorite))
+            .optBoolean("favorite", favorite)
 
     /**
      * A cover, scaled by the engine to `size` pixels. Over a connection of

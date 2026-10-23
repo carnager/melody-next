@@ -50,3 +50,31 @@ Notifications are a separate matter on macOS, posted through
   one does, notifications on macOS report why they are not shown.
 - The macOS code cannot be built on the Linux machine that runs the tests;
   it is checked by building and using it on a Mac.
+
+## Callback lifetime correction, 2026-10-23
+
+The six transport callbacks were blocks created inside a temporary C++
+lambda. Reading its captured session guard captured the lambda's `this`,
+which was gone when a media key or headset command arrived. Four macOS
+crash reports show the fault in that block's `QPointer::isNull()` call.
+Transport blocks now copy function parameters directly, keeping the guard
+and signal alive until the system releases the block.
+
+The macOS-only `now-playing-macos` test intercepts registration at the public
+`MPRemoteCommand` methods and invokes the actual escaping blocks after
+construction returns. It checks repeated play/pause, play, pause, stop,
+next and previous, the seek/repeat/shuffle payloads, unregistration, and
+callbacks retained past session destruction. It failed before the correction
+and passes with it.
+
+**Melody decision:** headset pause commands remain explicit pauses, separate
+from play/pause toggles. AirPods removal uses the system's automatic ear/head
+detection and Now Playing command delivery; Melody does not poll private
+Bluetooth sensor properties. Automatic Ear Detection (AirPods) or Automatic
+Head Detection (AirPods Max) must be enabled in the Mac's AirPods settings.
+See [Apple's playback guide](https://support.apple.com/guide/airpods/dev216d7c746/web).
+**Unknown:** physical removal and replacement on each headset/Mac combination
+still need a hardware check; the callback test verifies handling of delivered
+pause commands, not sensor detection or the system's choice of active player.
+Disconnection is separate: the engine already pauses on output-device loss
+(ADR-0255).

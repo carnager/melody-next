@@ -61,6 +61,22 @@ struct NowPlayingSession::Commands {
         targets.emplace_back(command, [command addTargetWithHandler:handler]);
     }
 
+    void addSimple(MPRemoteCommand* command, QPointer<NowPlayingSession> self,
+                   void (NowPlayingSession::*signal)()) {
+        // A block nested in a C++ lambda captures that lambda's `this` when
+        // it reads a lambda capture, not the captured QPointer itself. That
+        // lambda died at the end of session setup. Function parameters here
+        // are copied into the escaping block, including the lifetime guard.
+        add(command, ^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent* event) {
+          (void)event;
+          if (self.isNull()) {
+              return MPRemoteCommandHandlerStatusCommandFailed;
+          }
+          emit(self.data()->*signal)();
+          return MPRemoteCommandHandlerStatusSuccess;
+        });
+    }
+
     ~Commands() {
         for (auto& [command, target] : targets) {
             [command removeTarget:target];
@@ -74,22 +90,13 @@ NowPlayingSession::NowPlayingSession(QObject* parent)
     // the guard drops a command that arrives as the window closes.
     QPointer<NowPlayingSession> self{this};
     auto* center = [MPRemoteCommandCenter sharedCommandCenter];
-    const auto simple = [&](MPRemoteCommand* command, void (NowPlayingSession::*signal)()) {
-        commands_->add(command, ^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent* event) {
-          (void)event;
-          if (self.isNull()) {
-              return MPRemoteCommandHandlerStatusCommandFailed;
-          }
-          emit(self.data()->*signal)();
-          return MPRemoteCommandHandlerStatusSuccess;
-        });
-    };
-    simple(center.togglePlayPauseCommand, &NowPlayingSession::playPauseRequested);
-    simple(center.playCommand, &NowPlayingSession::playRequested);
-    simple(center.pauseCommand, &NowPlayingSession::pauseRequested);
-    simple(center.stopCommand, &NowPlayingSession::stopRequested);
-    simple(center.nextTrackCommand, &NowPlayingSession::nextRequested);
-    simple(center.previousTrackCommand, &NowPlayingSession::previousRequested);
+    commands_->addSimple(center.togglePlayPauseCommand, self,
+                         &NowPlayingSession::playPauseRequested);
+    commands_->addSimple(center.playCommand, self, &NowPlayingSession::playRequested);
+    commands_->addSimple(center.pauseCommand, self, &NowPlayingSession::pauseRequested);
+    commands_->addSimple(center.stopCommand, self, &NowPlayingSession::stopRequested);
+    commands_->addSimple(center.nextTrackCommand, self, &NowPlayingSession::nextRequested);
+    commands_->addSimple(center.previousTrackCommand, self, &NowPlayingSession::previousRequested);
     commands_->add(center.changePlaybackPositionCommand,
                    ^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent* event) {
                      if (self.isNull()) {

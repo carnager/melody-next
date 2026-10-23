@@ -982,6 +982,15 @@ if(MELODY_BUILD_UI)
         bench_main_window_test_7.cpp
         bench_main_window_test_8.cpp
     )
+    if(APPLE)
+        qt_add_executable(trackknife_now_playing_macos_tests now_playing_macos_test.mm)
+        set_source_files_properties(now_playing_macos_test.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+        target_link_libraries(trackknife_now_playing_macos_tests PRIVATE
+            Trackknife::Workspace Qt6::Test "${MELODY_MEDIAPLAYER_FRAMEWORK}"
+            trackknife_project_options trackknife_project_warnings)
+        add_test(NAME now-playing-macos COMMAND trackknife_now_playing_macos_tests)
+        set_tests_properties(now-playing-macos PROPERTIES TIMEOUT 30)
+    endif()
     qt_add_executable(trackknife_mpris_service_tests mpris_service_test.cpp)
     target_link_libraries(trackknife_mpris_service_tests PRIVATE Trackknife::BenchUi Qt6::DBus
         Qt6::Test trackknife_project_options trackknife_project_warnings)

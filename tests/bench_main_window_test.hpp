@@ -370,6 +370,7 @@ class BenchMainWindowTest final : public QObject {
     void musicBrainzIdentifyStagesChosenVersion_data();
     void musicBrainzIdentifyStagesChosenVersion();
     void musicBrainzIdentifyLooksUpNamedReleases();
+    void musicBrainzIdentifyStepsThroughAlbums();
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsTakesAFileGroupedApart();

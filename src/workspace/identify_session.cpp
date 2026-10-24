@@ -6,6 +6,7 @@
 #include "trackknife/musicbrainz/web_service.hpp"
 
 #include <QCollator>
+#include <QDir>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QLocale>
@@ -863,6 +864,213 @@ void IdentifySession::back() {
     match_ = nullptr;
     emit matchClosed();
     emit changed();
+}
+
+MultiIdentifySession::MultiIdentifySession(TaggerSession& tagger, MusicBrainzLookupService service,
+                                           std::vector<TaggerSession::Identify> albums,
+                                           QObject* parent)
+    : QObject(parent), tagger_(&tagger) {
+    albums_.reserve(albums.size());
+    for (auto& files : albums) {
+        auto* session = new IdentifySession(service, files.descriptors, files.local_paths,
+                                            files.items, files.artist, files.release,
+                                            files.release_id, this);
+        const auto index = albums_.size();
+        connect(session, &IdentifySession::changed, this, [this] {
+            emit changed();
+            lookAhead();
+        });
+        connect(session, &IdentifySession::accepted, this,
+                [this, index](metadata::MetadataProposalSet proposals) {
+                    accepted(index, std::move(proposals));
+                });
+        albums_.push_back(Album{.files = std::move(files),
+                                .session = session,
+                                .started = false,
+                                .accepted = false,
+                                .staged = false,
+                                .note = {}});
+    }
+    connect(&tagger, &TaggerSession::proposalsSettled, this, &MultiIdentifySession::settled);
+    // The tagger busy -- reading the files, staging something else --
+    // staging waits for it.
+    connect(&tagger, &TaggerSession::changed, this, &MultiIdentifySession::stageNext);
+}
+
+MultiIdentifySession::~MultiIdentifySession() = default;
+
+IdentifySession* MultiIdentifySession::album(const std::size_t index) const {
+    return index < albums_.size() ? albums_[index].session.data() : nullptr;
+}
+
+QString MultiIdentifySession::name(const std::size_t index) const {
+    if (index >= albums_.size()) {
+        return {};
+    }
+    const auto& files = albums_[index].files;
+    if (!files.release.isEmpty()) {
+        return files.artist.isEmpty()
+                   ? files.release
+                   : QStringLiteral("%1 — %2").arg(files.artist, files.release);
+    }
+    return files.local_paths.empty() ? QString{}
+                                     : QFileInfo{files.local_paths.front()}.dir().dirName();
+}
+
+MultiIdentifySession::State MultiIdentifySession::state(const std::size_t index) const {
+    const auto& album = albums_[index];
+    if (album.staged) {
+        return State::staged;
+    }
+    if (album.accepted) {
+        return State::staging;
+    }
+    if (!album.started) {
+        return State::waiting;
+    }
+    if (album.session->busy()) {
+        return State::looking_up;
+    }
+    return album.session->candidates().empty() ? State::nothing_found : State::found;
+}
+
+QString MultiIdentifySession::stateText(const std::size_t index) const {
+    if (index >= albums_.size()) {
+        return {};
+    }
+    switch (state(index)) {
+    case State::waiting:
+        return QStringLiteral("Waiting");
+    case State::looking_up:
+        return QStringLiteral("Looking up…");
+    case State::found: {
+        // Accepted, and not taken: why.
+        if (!albums_[index].note.isEmpty()) {
+            return albums_[index].note;
+        }
+        const auto versions = albums_[index].session->candidates().size();
+        return versions == 1U ? QStringLiteral("1 version")
+                              : QStringLiteral("%1 versions").arg(versions);
+    }
+    case State::nothing_found:
+        return albums_[index].note.isEmpty() ? QStringLiteral("Nothing found")
+                                             : albums_[index].note;
+    case State::staging:
+        return QStringLiteral("Staging…");
+    case State::staged:
+        return QStringLiteral("Staged");
+    }
+    return {};
+}
+
+void MultiIdentifySession::setCurrent(const std::size_t index) {
+    if (index >= albums_.size()) {
+        return;
+    }
+    current_ = index;
+    lookUp(index);
+    lookAhead();
+    emit changed();
+}
+
+std::optional<std::size_t> MultiIdentifySession::nextToDo(const std::size_t after) const {
+    for (std::size_t step = 1U; step <= albums_.size(); ++step) {
+        const auto index = (after + step) % albums_.size();
+        if (!albums_[index].accepted) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+void MultiIdentifySession::lookUp(const std::size_t index) {
+    auto& album = albums_[index];
+    if (album.started || album.accepted) {
+        return;
+    }
+    album.started = true;
+    // Its tagged release, else a search by its tags; an album of untagged
+    // files is the person's to search for, or to fingerprint.
+    if (!album.files.release_id.isEmpty()) {
+        album.session->start();
+    } else if (!album.files.artist.isEmpty() || !album.files.release.isEmpty()) {
+        album.session->search(album.files.artist, album.files.release);
+    } else {
+        album.note = QStringLiteral("No tags to search by");
+    }
+}
+
+void MultiIdentifySession::lookAhead() {
+    // One at a time, besides the one shown: MusicBrainz is asked once a
+    // second, and the one shown is asked first.
+    for (std::size_t index = 0; index < albums_.size(); ++index) {
+        if (index != current_ && albums_[index].started && albums_[index].session->busy()) {
+            return;
+        }
+    }
+    for (std::size_t step = 1U; step < albums_.size(); ++step) {
+        const auto index = (current_ + step) % albums_.size();
+        if (!albums_[index].started && !albums_[index].accepted) {
+            lookUp(index);
+            // One with nothing to search by asks nothing: on to the next.
+            if (albums_[index].session->busy()) {
+                return;
+            }
+        }
+    }
+}
+
+void MultiIdentifySession::accepted(const std::size_t index,
+                                    metadata::MetadataProposalSet proposals) {
+    albums_[index].accepted = true;
+    albums_[index].note.clear();
+    to_stage_.emplace_back(index, std::move(proposals));
+    emit changed();
+    stageNext();
+}
+
+void MultiIdentifySession::stageNext() {
+    if (staging_ || to_stage_.empty() || tagger_.isNull() || !tagger_->canStageProposals()) {
+        return;
+    }
+    auto [index, proposals] = std::move(to_stage_.front());
+    to_stage_.pop_front();
+    staging_ = index;
+    tagger_->applyMusicBrainzProposals(std::move(proposals));
+}
+
+void MultiIdentifySession::settled(const bool staged) {
+    if (!staging_) {
+        return;
+    }
+    auto& album = albums_[*staging_];
+    staging_.reset();
+    if (staged) {
+        album.staged = true;
+    } else {
+        // Back to the person, saying why.
+        album.accepted = false;
+        const auto why = tagger_.isNull() ? QString{} : tagger_->status();
+        album.note = why.isEmpty() ? QStringLiteral("Could not be staged")
+                                   : QStringLiteral("Could not be staged: %1").arg(why);
+    }
+    emit changed();
+    stageNext();
+    if (!staging()) {
+        if (std::ranges::all_of(albums_, &Album::staged)) {
+            emit finished();
+        }
+        if (released_) {
+            deleteLater();
+        }
+    }
+}
+
+void MultiIdentifySession::release() {
+    released_ = true;
+    if (!staging()) {
+        deleteLater();
+    }
 }
 
 } // namespace trackknife::bench

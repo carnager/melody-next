@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
+#include "workspace/tagger_session.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/matching.hpp"
@@ -14,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
@@ -210,6 +212,75 @@ class IdentifySession final : public QObject {
     std::vector<std::pair<std::string, std::size_t>> scan_candidates_;
     std::size_t scan_matched_files_{0U};
     QPointer<TrackMatchSession> match_;
+};
+
+// ADR-0311: Identify over the albums a tagger's files hold, one at a time,
+// each its own IdentifySession -- its own search, versions and matching.
+// Those ahead of the one shown are looked up in the background, one at a
+// time, from their tagged release or their tags, so each is there when it
+// is reached. Each album accepted is staged into the tagger's draft, one
+// after another; written with the tagger's own Write.
+class MultiIdentifySession final : public QObject {
+    Q_OBJECT
+
+  public:
+    enum class State : std::uint8_t {
+        waiting,
+        looking_up,
+        found,
+        nothing_found,
+        // Accepted, waiting for the tagger to take it.
+        staging,
+        staged,
+    };
+
+    MultiIdentifySession(TaggerSession& tagger, MusicBrainzLookupService service,
+                         std::vector<TaggerSession::Identify> albums, QObject* parent = nullptr);
+    ~MultiIdentifySession() override;
+
+    [[nodiscard]] std::size_t count() const { return albums_.size(); }
+    [[nodiscard]] IdentifySession* album(std::size_t index) const;
+    // "Artist — Album", as its tags say, else its first file's name.
+    [[nodiscard]] QString name(std::size_t index) const;
+    [[nodiscard]] State state(std::size_t index) const;
+    [[nodiscard]] QString stateText(std::size_t index) const;
+    [[nodiscard]] std::size_t current() const { return current_; }
+    // The album shown: looked up at once if it has not been.
+    void setCurrent(std::size_t index);
+    // The next album after `after`, wrapping round, not yet accepted.
+    [[nodiscard]] std::optional<std::size_t> nextToDo(std::size_t after) const;
+    // Accepted albums not yet taken by the tagger.
+    [[nodiscard]] bool staging() const { return staging_.has_value() || !to_stage_.empty(); }
+    // Goes once nothing it was given is left to stage: the window that
+    // showed it may close before.
+    void release();
+
+  signals:
+    void changed();
+    // Every album accepted and staged.
+    void finished();
+
+  private:
+    struct Album {
+        TaggerSession::Identify files;
+        QPointer<IdentifySession> session;
+        bool started{false};
+        bool accepted{false};
+        bool staged{false};
+        QString note;
+    };
+    void lookUp(std::size_t index);
+    void lookAhead();
+    void accepted(std::size_t index, metadata::MetadataProposalSet proposals);
+    void stageNext();
+    void settled(bool staged);
+
+    QPointer<TaggerSession> tagger_;
+    std::vector<Album> albums_;
+    std::size_t current_{0U};
+    std::deque<std::pair<std::size_t, metadata::MetadataProposalSet>> to_stage_;
+    std::optional<std::size_t> staging_;
+    bool released_{false};
 };
 
 } // namespace trackknife::bench

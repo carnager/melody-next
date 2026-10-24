@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposal, 2026-10-24. Would supersede the window of ADR-0261 (Identify
+Point 1 accepted and implemented, 2026-10-24; points 2 to 4 remain a
+proposal. Would in the end supersede the window of ADR-0261 (Identify
 albums…), keeping its grouping, lookup and write.
 
 ## Context
@@ -24,18 +25,30 @@ Both share the lookup, the matcher and the proposals; the search, the
 fingerprint voting and the candidate rows are written twice. The person
 prefers Identify's flexibility, and needs Identify albums' reach.
 
-## Proposal
+## Decision
 
 Identify grows into the one tool, keeping its page for each album:
 
 1. **Many albums, one at a time.** With several albums chosen, Identify
-   groups them as Identify albums does (`album_groups`) and steps through
-   them -- "Album 3 of 12", Previous and Next -- each with its own search
-   terms, candidates and matcher. The albums after the one shown are looked
-   up in the background at MusicBrainz's pace, so the next is there when
-   reached. Each one accepted is staged into the tag editor's draft, which
-   writes them together, with its Actions -- rename, move, ReplayGain -- and
-   its undo (ADR-0262, ADR-0263).
+   groups them as Identify albums does (`album_groups`: release id, else
+   album artist, album and year, else folder) and steps through them: a
+   list of the albums and their state beside the page of the one shown --
+   "Album 3 of 12", Previous and Next, Alt+Page Up and Down -- each with
+   its own search terms, versions and matcher. Each album is looked up as
+   it is shown -- its tagged release (ADR-0310), else a search by its tags;
+   one of untagged files is the person's to search or fingerprint -- and
+   those after it in the background, one at a time beside it, so the next
+   is there when reached. One album is the same page alone, now searched
+   as it opens.
+   Each one accepted is staged into the tag editor's draft, one after
+   another, and the next not yet accepted is shown; when every album is
+   staged the window closes. The tag editor writes them together, with its
+   Actions -- rename, move, ReplayGain -- and its undo (ADR-0262,
+   ADR-0263). An album accepted is staged even when the window is closed
+   before the tagger takes it.
+
+## Proposal
+
 2. **Clear matches by themselves, if asked.** A checkbox, off by default:
    "Accept clear matches by themselves" -- ADR-0261's clear match. Ticked,
    those are staged without stopping and Next goes to the next album that
@@ -55,4 +68,8 @@ Identify grows into the one tool, keeping its page for each album:
 
 ## Verification
 
-To be written with the decision.
+- `bench-main-window`: two albums chosen, one tagged with its release and
+  one with only its tags, listed; the second looked up while the first is
+  shown, by one search; the first accepted and staged, the second shown
+  and accepted; both staged with their own releases, and the window closed.
+  One album, tagged, searched as it opens.

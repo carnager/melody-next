@@ -14,6 +14,7 @@
 #include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/musicbrainz/album_groups.hpp"
 #include "uicommon/debug_log.hpp"
 
 #include <QElapsedTimer>
@@ -1787,24 +1788,35 @@ void TaggerSession::readChangedAgain(std::vector<std::size_t> items) {
     startSelection();
 }
 
-std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
+std::vector<TaggerSession::Identify> TaggerSession::identifyAlbums() const {
     if (grid_model_ == nullptr || proposal_running_ || identify_dialog_open_ ||
         !services_.musicbrainz.fetch) {
-        return std::nullopt;
+        return {};
     }
-    auto items = itemsOrAll();
+    const auto items = itemsOrAll();
     if (items.empty()) {
-        return std::nullopt;
+        return {};
     }
     const auto& selection = grid_model_->selection();
-    Identify request;
-    std::optional<std::string> release_id;
-    request.descriptors.reserve(items.size());
-    request.local_paths.reserve(items.size());
+    const auto first = [](const metadata::MetadataDocument& tags,
+                          std::initializer_list<const char*> names) {
+        for (const auto* name : names) {
+            if (auto value = tags.first_effective_value(name); value && !value->empty()) {
+                return *value;
+            }
+        }
+        return std::string{};
+    };
+    std::vector<musicbrainz::LocalTrackDescriptor> descriptors;
+    std::vector<QString> paths;
+    std::vector<musicbrainz::AlbumGroupInput> inputs;
+    descriptors.reserve(items.size());
+    paths.reserve(items.size());
+    inputs.reserve(items.size());
     for (const auto item_index : items) {
         const auto& source = selection.source(item_index);
         const auto& baseline = source.baseline;
-        request.local_paths.push_back(QFile::decodeName(
+        paths.push_back(QFile::decodeName(
             QByteArray{source.raw_path.data(), static_cast<qsizetype>(source.raw_path.size())}));
         musicbrainz::LocalTrackDescriptor descriptor{
             .title = baseline.first_effective_value("title").value_or(std::string{}),
@@ -1821,29 +1833,45 @@ std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
         if (const auto disc = baseline.first_effective_value("discnumber")) {
             descriptor.disc_number = parse_position_number(*disc);
         }
-        if (request.release.isEmpty() && !descriptor.album.empty()) {
-            request.release = display_utf8(descriptor.album);
-        }
-        if (request.artist.isEmpty()) {
-            const auto album_artist = baseline.first_effective_value("albumartist");
-            request.artist = display_utf8(
-                album_artist && !album_artist->empty() ? *album_artist : descriptor.artist);
-        }
-        request.descriptors.push_back(std::move(descriptor));
-        auto tagged = baseline.first_effective_value("musicbrainz_albumid");
-        if (!tagged || tagged->empty()) {
-            tagged = baseline.first_effective_value("musicbrainzalbumid");
-        }
-        const auto id = tagged.value_or(std::string{});
-        if (!release_id) {
-            release_id = id;
-        } else if (*release_id != id) {
-            release_id = std::string{};
-        }
+        inputs.push_back(musicbrainz::AlbumGroupInput{
+            .raw_path = source.raw_path,
+            .release_id = first(baseline, {"musicbrainz_albumid", "musicbrainzalbumid"}),
+            .album_artist = first(baseline, {"albumartist"}),
+            .artist = descriptor.artist,
+            .album = descriptor.album,
+            .date = first(baseline, {"date", "originaldate"}),
+        });
+        descriptors.push_back(std::move(descriptor));
     }
-    request.release_id = display_utf8(release_id.value_or(std::string{}));
-    request.items = std::move(items);
-    return request;
+    std::vector<Identify> albums;
+    for (const auto& group : musicbrainz::group_albums(inputs)) {
+        Identify album;
+        std::optional<std::string> release_id;
+        for (const auto at : group.items) {
+            const auto& descriptor = descriptors[at];
+            if (album.release.isEmpty() && !descriptor.album.empty()) {
+                album.release = display_utf8(descriptor.album);
+            }
+            if (album.artist.isEmpty()) {
+                const auto& input = inputs[at];
+                album.artist = display_utf8(!input.album_artist.empty() ? input.album_artist
+                                                                        : descriptor.artist);
+            }
+            // The release every file of it is tagged with; none where they
+            // differ or one has none.
+            if (!release_id) {
+                release_id = inputs[at].release_id;
+            } else if (*release_id != inputs[at].release_id) {
+                release_id = std::string{};
+            }
+            album.descriptors.push_back(descriptor);
+            album.local_paths.push_back(paths[at]);
+            album.items.push_back(items[at]);
+        }
+        album.release_id = display_utf8(release_id.value_or(std::string{}));
+        albums.push_back(std::move(album));
+    }
+    return albums;
 }
 
 void TaggerSession::applyMusicBrainzProposals(metadata::MetadataProposalSet proposals) {

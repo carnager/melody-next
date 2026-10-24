@@ -1075,20 +1075,12 @@ void MetadataPropertiesDialog::destinationActivated(QComboBox* combo, const int 
 }
 
 void MetadataPropertiesDialog::startIdentify() {
-    auto request = session_->identifyRequest();
-    if (!request) {
+    auto albums = session_->identifyAlbums();
+    if (albums.empty()) {
         return;
     }
-    auto* dialog = createMusicBrainzIdentifyDialog(
-        session_->services().musicbrainz, std::move(request->descriptors),
-        std::move(request->local_paths), std::move(request->items), request->artist,
-        request->release, request->release_id,
-        [session = QPointer{session_}](metadata::MetadataProposalSet proposals) {
-            if (session) {
-                session->applyMusicBrainzProposals(std::move(proposals));
-            }
-        },
-        this);
+    auto* dialog = createMusicBrainzIdentifyDialog(*session_, session_->services().musicbrainz,
+                                                   std::move(albums), this);
     identify_dialog_ = dialog;
     session_->setIdentifyDialogOpen(true);
     connect(dialog, &QDialog::finished, this, [this, dialog] {

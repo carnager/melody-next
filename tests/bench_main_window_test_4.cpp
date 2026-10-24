@@ -1002,7 +1002,8 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
 
 // ADR-0311: several albums chosen are identified one at a time -- each its
 // own search, versions and matching -- beside a list of them; those ahead
-// looked up meanwhile; each accepted staged, and the next shown.
+// looked up meanwhile; each one's pairing chosen, or the album skipped, and
+// the next shown; Apply stages every album chosen.
 void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{
@@ -1168,18 +1169,35 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
         QTRY_VERIFY(stage->isEnabled());
         QTest::mouseClick(stage, Qt::LeftButton);
     };
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    auto* skip = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-skip"));
+    QVERIFY(apply != nullptr && skip != nullptr);
+    QVERIFY(!apply->isEnabled());
     accept();
     if (QTest::currentTestFailed()) {
         return;
     }
-    // On to the next, its versions there already.
+    // Chosen, not staged: on to the next, its versions there already.
     QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
-    QTRY_COMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("Staged"));
+    QCOMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("Chosen"));
+    QCOMPARE(grid_model->patches().patch_count(), 0U);
+    QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
+    // Skipped, and come back to.
+    skip->click();
+    QCOMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Skipped"));
+    albums->setCurrentItem(albums->topLevelItem(0));
+    QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
+    albums->setCurrentItem(albums->topLevelItem(1));
+    QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
     accept();
     if (QTest::currentTestFailed()) {
         return;
     }
-    // Both staged: done.
+    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Chosen"));
+    QCOMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
+    // Applied: both staged, and done.
+    QVERIFY(apply->isEnabled());
+    apply->click();
     QTRY_VERIFY(open.isNull());
     QCOMPARE(asked.count(QStringLiteral("search")), 1);
     const auto title = grid_model->fieldColumn(QStringLiteral("Album"));

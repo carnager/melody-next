@@ -38,7 +38,9 @@ namespace {
 // versions, then the chosen version's matching.
 class IdentifyAlbumPage final : public QWidget {
   public:
-    IdentifyAlbumPage(IdentifySession* session, QWidget* parent)
+    // `many`: one of several albums, whose matching is a choice to apply
+    // with the others, not staged at once.
+    IdentifyAlbumPage(IdentifySession* session, const bool many, QWidget* parent)
         : QWidget(parent), session_(session) {
         setObjectName(QStringLiteral("bench-musicbrainz-identify-album"));
         auto* root = new QVBoxLayout(this);
@@ -122,9 +124,17 @@ class IdentifyAlbumPage final : public QWidget {
                 [this](QTreeWidgetItem*, int) { useSelected(); });
         connect(use_, &QPushButton::clicked, this, [this] { useSelected(); });
         connect(session_, &IdentifySession::changed, this, &IdentifyAlbumPage::sync);
-        connect(session_, &IdentifySession::matchOpened, this, [this](TrackMatchSession* match) {
+        connect(session_, &IdentifySession::matchOpened, this, [this, many](TrackMatchSession* match) {
             auto* review =
                 createMusicBrainzTrackMatchView(match, [this] { session_->back(); }, pages_);
+            if (auto* use = review->findChild<QPushButton*>(
+                    QStringLiteral("bench-musicbrainz-match-stage"));
+                use != nullptr && many) {
+                use->setText(QStringLiteral("Use these matches"));
+                use->setToolTip(QStringLiteral(
+                    "Choose this pairing for the album and go on to the next; Apply stages "
+                    "every album chosen"));
+            }
             pages_->addWidget(review);
             pages_->setCurrentWidget(review);
         });
@@ -239,19 +249,39 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         next_ = new QPushButton(QStringLiteral("Next"), this);
         next_->setObjectName(QStringLiteral("bench-musicbrainz-identify-next"));
         next_->setToolTip(QStringLiteral("The album after (Alt+Page Down)"));
-        for (auto* button : {previous_, next_}) {
+        skip_ = new QPushButton(QStringLiteral("Skip"), this);
+        skip_->setObjectName(QStringLiteral("bench-musicbrainz-identify-skip"));
+        skip_->setToolTip(
+            QStringLiteral("Leave this album as it is and go on to the next one to do"));
+        for (auto* button : {previous_, next_, skip_}) {
             button->setAutoDefault(false);
             button->setVisible(many);
             bottom->addWidget(button);
         }
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
         buttons->setObjectName(QStringLiteral("bench-musicbrainz-identify-buttons"));
+        apply_ = buttons->addButton(QStringLiteral("Apply"), QDialogButtonBox::AcceptRole);
+        apply_->setObjectName(QStringLiteral("bench-musicbrainz-identify-apply"));
+        apply_->setAutoDefault(false);
+        apply_->setVisible(many);
+        buttons->button(QDialogButtonBox::Close)
+            ->setToolTip(many ? QStringLiteral("Close; albums chosen and not applied are left as "
+                                               "they are")
+                              : QString{});
         bottom->addWidget(buttons);
         root->addLayout(bottom);
 
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::close);
+        connect(apply_, &QPushButton::clicked, session_, &MultiIdentifySession::apply);
         connect(previous_, &QPushButton::clicked, this, [this] { step(-1); });
         connect(next_, &QPushButton::clicked, this, [this] { step(1); });
+        connect(skip_, &QPushButton::clicked, this, [this] {
+            const auto at = session_->current();
+            session_->skip(at);
+            if (const auto next = session_->nextToDo(at)) {
+                show(*next);
+            }
+        });
         if (many) {
             auto* back = new QShortcut(QKeySequence{Qt::ALT | Qt::Key_PageUp}, this);
             auto* on = new QShortcut(QKeySequence{Qt::ALT | Qt::Key_PageDown}, this);
@@ -264,11 +294,11 @@ class MusicBrainzIdentifyDialog final : public QDialog {
             }
         });
         connect(session_, &MultiIdentifySession::changed, this, &MusicBrainzIdentifyDialog::sync);
-        // Every album staged: done.
+        // Every album applied staged: done.
         connect(session_, &MultiIdentifySession::finished, this, &QDialog::close);
         for (std::size_t index = 0; index < session_->count(); ++index) {
-            // Accepted: on to the next album not yet accepted, this one's
-            // versions shown again for when it is come back to.
+            // Chosen: on to the next album to do, this one's versions shown
+            // again for when it is come back to.
             connect(session_->album(index), &IdentifySession::accepted, this, [this, index] {
                 if (session_->count() < 2U) {
                     return;
@@ -305,7 +335,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         }
         auto*& page = pages_by_album_[index];
         if (page == nullptr) {
-            page = new IdentifyAlbumPage(session_->album(index), pages_);
+            page = new IdentifyAlbumPage(session_->album(index), session_->count() > 1U, pages_);
             pages_->addWidget(page);
         }
         pages_->setCurrentWidget(page);
@@ -336,6 +366,13 @@ class MusicBrainzIdentifyDialog final : public QDialog {
                                                : QString{});
         previous_->setEnabled(at > 0U);
         next_->setEnabled(at + 1U < session_->count());
+        const auto chosen = session_->chosenCount();
+        apply_->setText(chosen == 0U   ? QStringLiteral("Apply")
+                        : chosen == 1U ? QStringLiteral("Apply 1 album")
+                                       : QStringLiteral("Apply %1 albums").arg(chosen));
+        apply_->setToolTip(QStringLiteral("Stage every album chosen into the tag editor's draft"));
+        apply_->setEnabled(chosen > 0U && !session_->staging());
+        skip_->setEnabled(!session_->staging());
     }
 
     MultiIdentifySession* session_;
@@ -345,6 +382,8 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     QLabel* place_{nullptr};
     QPushButton* previous_{nullptr};
     QPushButton* next_{nullptr};
+    QPushButton* skip_{nullptr};
+    QPushButton* apply_{nullptr};
     bool showing_{false};
 };
 

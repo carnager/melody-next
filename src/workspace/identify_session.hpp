@@ -218,8 +218,10 @@ class IdentifySession final : public QObject {
 // each its own IdentifySession -- its own search, versions and matching.
 // Those ahead of the one shown are looked up in the background, one at a
 // time, from their tagged release or their tags, so each is there when it
-// is reached. Each album accepted is staged into the tagger's draft, one
-// after another; written with the tagger's own Write.
+// is reached. The pairing confirmed for an album is its choice, or it is
+// skipped; apply() stages every album chosen into the tagger's draft, one
+// after another -- written with the tagger's own Write. A single album's
+// choice is applied at once.
 class MultiIdentifySession final : public QObject {
     Q_OBJECT
 
@@ -229,7 +231,10 @@ class MultiIdentifySession final : public QObject {
         looking_up,
         found,
         nothing_found,
-        // Accepted, waiting for the tagger to take it.
+        // Its pairing confirmed, to be applied.
+        chosen,
+        skipped,
+        // Applied, waiting for the tagger to take it.
         staging,
         staged,
     };
@@ -247,9 +252,17 @@ class MultiIdentifySession final : public QObject {
     [[nodiscard]] std::size_t current() const { return current_; }
     // The album shown: looked up at once if it has not been.
     void setCurrent(std::size_t index);
-    // The next album after `after`, wrapping round, not yet accepted.
+    // The next album after `after`, wrapping round, neither chosen,
+    // skipped nor applied.
     [[nodiscard]] std::optional<std::size_t> nextToDo(std::size_t after) const;
-    // Accepted albums not yet taken by the tagger.
+    // Passed over: left out of apply() until a version is chosen for it.
+    void skip(std::size_t index);
+    // The albums chosen and not yet applied.
+    [[nodiscard]] std::size_t chosenCount() const;
+    // Every album chosen staged into the tagger's draft, one after another;
+    // finished() once all are.
+    void apply();
+    // Applied albums not yet taken by the tagger.
     [[nodiscard]] bool staging() const { return staging_.has_value() || !to_stage_.empty(); }
     // Goes once nothing it was given is left to stage: the window that
     // showed it may close before.
@@ -257,7 +270,7 @@ class MultiIdentifySession final : public QObject {
 
   signals:
     void changed();
-    // Every album accepted and staged.
+    // Every album applied is staged.
     void finished();
 
   private:
@@ -265,7 +278,9 @@ class MultiIdentifySession final : public QObject {
         TaggerSession::Identify files;
         QPointer<IdentifySession> session;
         bool started{false};
-        bool accepted{false};
+        std::optional<metadata::MetadataProposalSet> chosen;
+        bool skipped{false};
+        bool applied{false};
         bool staged{false};
         QString note;
     };
@@ -280,6 +295,8 @@ class MultiIdentifySession final : public QObject {
     std::size_t current_{0U};
     std::deque<std::pair<std::size_t, metadata::MetadataProposalSet>> to_stage_;
     std::optional<std::size_t> staging_;
+    // The tagger refused one of the albums applied last: said, not closed.
+    bool refused_{false};
     bool released_{false};
 };
 

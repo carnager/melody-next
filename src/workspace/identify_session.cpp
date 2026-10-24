@@ -887,7 +887,9 @@ MultiIdentifySession::MultiIdentifySession(TaggerSession& tagger, MusicBrainzLoo
         albums_.push_back(Album{.files = std::move(files),
                                 .session = session,
                                 .started = false,
-                                .accepted = false,
+                                .chosen = std::nullopt,
+                                .skipped = false,
+                                .applied = false,
                                 .staged = false,
                                 .note = {}});
     }
@@ -922,8 +924,14 @@ MultiIdentifySession::State MultiIdentifySession::state(const std::size_t index)
     if (album.staged) {
         return State::staged;
     }
-    if (album.accepted) {
+    if (album.applied) {
         return State::staging;
+    }
+    if (album.chosen) {
+        return State::chosen;
+    }
+    if (album.skipped) {
+        return State::skipped;
     }
     if (!album.started) {
         return State::waiting;
@@ -955,6 +963,10 @@ QString MultiIdentifySession::stateText(const std::size_t index) const {
     case State::nothing_found:
         return albums_[index].note.isEmpty() ? QStringLiteral("Nothing found")
                                              : albums_[index].note;
+    case State::chosen:
+        return QStringLiteral("Chosen");
+    case State::skipped:
+        return QStringLiteral("Skipped");
     case State::staging:
         return QStringLiteral("Staging…");
     case State::staged:
@@ -976,7 +988,8 @@ void MultiIdentifySession::setCurrent(const std::size_t index) {
 std::optional<std::size_t> MultiIdentifySession::nextToDo(const std::size_t after) const {
     for (std::size_t step = 1U; step <= albums_.size(); ++step) {
         const auto index = (after + step) % albums_.size();
-        if (!albums_[index].accepted) {
+        const auto& album = albums_[index];
+        if (!album.chosen && !album.skipped && !album.applied) {
             return index;
         }
     }
@@ -985,7 +998,7 @@ std::optional<std::size_t> MultiIdentifySession::nextToDo(const std::size_t afte
 
 void MultiIdentifySession::lookUp(const std::size_t index) {
     auto& album = albums_[index];
-    if (album.started || album.accepted) {
+    if (album.started || album.applied) {
         return;
     }
     album.started = true;
@@ -1010,7 +1023,7 @@ void MultiIdentifySession::lookAhead() {
     }
     for (std::size_t step = 1U; step < albums_.size(); ++step) {
         const auto index = (current_ + step) % albums_.size();
-        if (!albums_[index].started && !albums_[index].accepted) {
+        if (!albums_[index].started && !albums_[index].applied) {
             lookUp(index);
             // One with nothing to search by asks nothing: on to the next.
             if (albums_[index].session->busy()) {
@@ -1022,9 +1035,45 @@ void MultiIdentifySession::lookAhead() {
 
 void MultiIdentifySession::accepted(const std::size_t index,
                                     metadata::MetadataProposalSet proposals) {
-    albums_[index].accepted = true;
-    albums_[index].note.clear();
-    to_stage_.emplace_back(index, std::move(proposals));
+    auto& album = albums_[index];
+    if (album.applied) {
+        return;
+    }
+    album.chosen = std::move(proposals);
+    album.skipped = false;
+    album.note.clear();
+    // One album: nothing to gather, applied at once.
+    if (albums_.size() == 1U) {
+        apply();
+        return;
+    }
+    emit changed();
+}
+
+void MultiIdentifySession::skip(const std::size_t index) {
+    if (index >= albums_.size() || albums_[index].applied) {
+        return;
+    }
+    albums_[index].chosen.reset();
+    albums_[index].skipped = true;
+    emit changed();
+}
+
+std::size_t MultiIdentifySession::chosenCount() const {
+    return static_cast<std::size_t>(std::ranges::count_if(
+        albums_, [](const Album& album) { return album.chosen && !album.applied; }));
+}
+
+void MultiIdentifySession::apply() {
+    refused_ = false;
+    for (std::size_t index = 0; index < albums_.size(); ++index) {
+        auto& album = albums_[index];
+        if (album.chosen && !album.applied) {
+            album.applied = true;
+            to_stage_.emplace_back(index, std::move(*album.chosen));
+            album.chosen.reset();
+        }
+    }
     emit changed();
     stageNext();
 }
@@ -1049,7 +1098,8 @@ void MultiIdentifySession::settled(const bool staged) {
         album.staged = true;
     } else {
         // Back to the person, saying why.
-        album.accepted = false;
+        album.applied = false;
+        refused_ = true;
         const auto why = tagger_.isNull() ? QString{} : tagger_->status();
         album.note = why.isEmpty() ? QStringLiteral("Could not be staged")
                                    : QStringLiteral("Could not be staged: %1").arg(why);
@@ -1057,7 +1107,9 @@ void MultiIdentifySession::settled(const bool staged) {
     emit changed();
     stageNext();
     if (!staging()) {
-        if (std::ranges::all_of(albums_, &Album::staged)) {
+        // Every album applied taken: done, whatever was skipped. One the
+        // tagger refused keeps the window open, saying why.
+        if (!refused_ && std::ranges::any_of(albums_, &Album::staged)) {
             emit finished();
         }
         if (released_) {

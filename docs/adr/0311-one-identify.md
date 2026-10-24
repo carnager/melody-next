@@ -40,12 +40,16 @@ Identify grows into the one tool, keeping its page for each album:
    those after it in the background, one at a time beside it, so the next
    is there when reached. One album is the same page alone, now searched
    as it opens.
-   Each one accepted is staged into the tag editor's draft, one after
-   another, and the next not yet accepted is shown; when every album is
-   staged the window closes. The tag editor writes them together, with its
-   Actions -- rename, move, ReplayGain -- and its undo (ADR-0262,
-   ADR-0263). An album accepted is staged even when the window is closed
-   before the tagger takes it.
+   An album's pairing confirmed -- **Use these matches** -- is its choice,
+   or the album is **Skipped**; either way the next album to do is shown.
+   Nothing is staged until **Apply**, which stages every album chosen into
+   the tag editor's draft, one after another, and closes the window once
+   they are; Close leaves albums chosen and not applied as they were. A
+   skipped album is chosen for by coming back to it. One album has nothing
+   to gather: its pairing confirmed is applied at once, as before. The tag
+   editor writes them together, with its Actions -- rename, move,
+   ReplayGain -- and its undo (ADR-0262, ADR-0263). Albums applied are
+   staged even when the window is closed before the tagger takes them.
 
 ## Proposal
 
@@ -70,6 +74,7 @@ Identify grows into the one tool, keeping its page for each album:
 
 - `bench-main-window`: two albums chosen, one tagged with its release and
   one with only its tags, listed; the second looked up while the first is
-  shown, by one search; the first accepted and staged, the second shown
-  and accepted; both staged with their own releases, and the window closed.
+  shown, by one search; the first chosen and nothing staged, the second
+  shown; skipped, come back to and chosen; Apply staging both with their
+  own releases, and the window closed.
   One album, tagged, searched as it opens.

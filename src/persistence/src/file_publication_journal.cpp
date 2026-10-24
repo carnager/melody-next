@@ -326,7 +326,8 @@ valid_failure_evidence(const Kind kind, const Content content,
         record.source_raw_path == record.target_raw_path ||
         !valid_revision(record.expected_source_revision) ||
         !valid_optional_revision(record.prepared_revision) ||
-        !valid_optional_revision(record.target_revision) || record.occurrence_indexes.empty() ||
+        // ADR-0318: none for a file travelling with an album -- no track.
+        !valid_optional_revision(record.target_revision) ||
         record.occurrence_indexes.size() > maximum_occurrences ||
         record.planned_missing_directory_raw_paths.size() > maximum_directories ||
         (record.reverses_journal_id && (record.reverses_journal_id == record.id ||

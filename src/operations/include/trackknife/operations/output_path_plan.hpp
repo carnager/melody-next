@@ -118,6 +118,9 @@ struct PlannedOutputPathSource {
     std::vector<std::size_t> item_indexes;
     bool sanitized{false};
     bool no_change{false};
+    // ADR-0318: an image, CUE sheet or playlist travelling with the audio of
+    // its folder -- no track of the selection, no item.
+    bool companion{false};
 
     friend bool operator==(const PlannedOutputPathSource&,
                            const PlannedOutputPathSource&) = default;

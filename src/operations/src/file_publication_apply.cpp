@@ -7,6 +7,9 @@
 #include "trackknife/metadata/mp3_writer.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <unistd.h>
+#include <set>
 #include <atomic>
 #include <cstddef>
 #include <memory>
@@ -234,6 +237,31 @@ std::size_t FilePublicationApplyResult::cancelled_source_count() const noexcept 
                                                        &FilePublicationApplySourceResult::state));
 }
 
+namespace {
+
+// ADR-0318: the folders an album left, removed where nothing stayed in them --
+// rmdir takes only an empty one. Their own folders only: never one above,
+// which may be a library's.
+void remove_left_folders(const FilePublicationApplyResult& result) {
+    std::set<std::string> left;
+    for (const auto& source : result.sources) {
+        if (source.state != FilePublicationApplySourceState::committed ||
+            source.publication == OutputPathPublicationKind::no_change ||
+            source.target_raw_path.empty()) {
+            continue;
+        }
+        const auto from = std::filesystem::path{source.source_raw_path}.parent_path();
+        if (from != std::filesystem::path{source.target_raw_path}.parent_path()) {
+            left.insert(from.native());
+        }
+    }
+    for (const auto& folder : left) {
+        static_cast<void>(::rmdir(folder.c_str()));
+    }
+}
+
+} // namespace
+
 core::Result<FilePublicationApplyResult>
 apply_file_publications(const OutputPathPreflight& preflight, FilePublicationJournal& journal,
                         const FilePublicationDependentStateCommitter& dependent_state_committer,
@@ -420,6 +448,7 @@ apply_file_publications(const OutputPathPreflight& preflight, FilePublicationJou
     }
     result.cancellation_requested =
         cancellation.is_cancellation_requested() || result.cancelled_source_count() > 0U;
+    remove_left_folders(result);
     return result;
 }
 
@@ -695,6 +724,7 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
     }
     result.cancellation_requested =
         cancellation.is_cancellation_requested() || result.cancelled_source_count() > 0U;
+    remove_left_folders(result);
     return result;
 }
 

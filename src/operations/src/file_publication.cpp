@@ -187,6 +187,21 @@ system_error(const std::string_view operation, const int number, const std::stri
     };
 }
 
+// ADR-0318: the folder an album left is removed once empty; undone, the
+// album comes back to it, made again -- that folder only, in the folder it
+// was in, never further up.
+void restore_left_folder(const std::filesystem::path& folder) {
+    struct stat status{};
+    if (::lstat(folder.c_str(), &status) == 0 || errno != ENOENT) {
+        return;
+    }
+    struct stat parent{};
+    if (::stat(folder.parent_path().c_str(), &parent) != 0 || !S_ISDIR(parent.st_mode)) {
+        return;
+    }
+    static_cast<void>(::mkdir(folder.c_str(), 0755));
+}
+
 [[nodiscard]] core::Result<DirectoryWalk>
 walk_directory(const std::string& raw_path, const bool allow_missing,
                const std::string& source_raw_path, const std::string& target_raw_path,
@@ -1809,6 +1824,7 @@ core::Result<FilePublicationCommitResult> undo_same_filesystem_publication(
         return std::unexpected(std::move(source.error()));
     }
     const auto target_path = std::filesystem::path{original.source_raw_path};
+    restore_left_folder(target_path.parent_path());
     auto target_parent =
         walk_directory(target_path.parent_path().native(), false, original.target_raw_path,
                        original.source_raw_path, original.id);
@@ -2980,6 +2996,7 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
             return std::unexpected(cancelled(record.source_raw_path, record.target_raw_path));
         }
         const std::filesystem::path source_path{record.source_raw_path};
+        restore_left_folder(source_path.parent_path());
         auto source_parent =
             walk_directory(source_path.parent_path().native(), false, record.source_raw_path,
                            record.target_raw_path, record.id);

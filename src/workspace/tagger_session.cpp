@@ -2650,10 +2650,6 @@ void TaggerSession::startWritePlan() {
         setStatus(text);
         emit changed();
     };
-    if (has_path_operation && !artwork_intents.empty() && cover_policy.write_folder_image) {
-        refuse(QStringLiteral("Save folder covers before renaming or moving these files"));
-        return;
-    }
     std::optional<operations::OutputLayoutProfile> output_layout;
     std::optional<operations::DestinationProfile> destination;
     if (has_path_operation) {
@@ -2748,6 +2744,27 @@ void TaggerSession::finishWritePlan() {
                 if (source.artwork && source.artwork->folder_image) {
                     folders.push_back(*source.artwork->folder_image);
                 }
+            }
+        }
+        // ADR-0184: a folder cover is written beside the files where they
+        // are; one whose files would move away from it waits for them to be
+        // moved first. A file renamed or moved to where it already is moves
+        // nowhere: its cover, tags and gains are written as without them.
+        if (!folders.empty() && plan->path_preflight) {
+            const auto moving = std::ranges::any_of(
+                plan->path_preflight->sources, [&folders](const auto& source) {
+                    return source.publication != operations::OutputPathPublicationKind::no_change &&
+                           std::ranges::any_of(folders, [&source](const auto& folder) {
+                               return std::filesystem::path{folder.raw_path}.parent_path() ==
+                                      std::filesystem::path{source.planned.source_raw_path}
+                                          .parent_path();
+                           });
+                });
+            if (moving) {
+                setStatus(QStringLiteral(
+                    "Save folder covers before moving these files away from them"));
+                emit changed();
+                return;
             }
         }
         emit changed();

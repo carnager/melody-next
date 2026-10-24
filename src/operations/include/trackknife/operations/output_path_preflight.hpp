@@ -36,6 +36,10 @@ enum class OutputPathPreflightIssueKind : std::uint8_t {
     component_too_long,
     path_too_long,
     filesystem_observation_failed,
+    // ADR-0318: two companions would go to one target.
+    companion_target_conflict,
+    // ADR-0318: a CUE sheet names an audio file the plan renames.
+    cue_reference_broken,
 };
 
 [[nodiscard]] std::string_view
@@ -82,5 +86,14 @@ struct OutputPathPreflight {
 [[nodiscard]] core::Result<OutputPathPreflight>
 preflight_output_paths(const OutputPathPlan& plan,
                        const core::CancellationToken& cancellation = {});
+
+// ADR-0318: the same, with the companions of the files that move: where
+// every audio file of a folder goes to one other folder, that folder's
+// images, CUE sheets and playlists go with them, planned as further sources
+// (`companion`) and checked as every source is. A CUE sheet naming a file the
+// plan renames is a blocking issue: the sheet would no longer find it.
+[[nodiscard]] core::Result<OutputPathPreflight>
+preflight_output_paths_with_companions(const OutputPathPlan& plan,
+                                       const core::CancellationToken& cancellation = {});
 
 } // namespace trackknife::operations

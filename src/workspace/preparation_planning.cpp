@@ -95,12 +95,16 @@ planPreparation(PreparationRequest request, const core::CancellationToken& cance
         }
         path_plan = std::move(*planned);
         if (path_plan->ready()) {
-            auto checked = tools.preflight
-                               ? tools.preflight(*path_plan, cancellation)
-                               : operations::preflight_output_paths(*path_plan, cancellation);
+            auto checked =
+                tools.preflight
+                    ? tools.preflight(*path_plan, cancellation)
+                    : operations::preflight_output_paths_with_companions(*path_plan, cancellation);
             if (!checked) {
                 return std::unexpected(std::move(checked.error()));
             }
+            // ADR-0318: the plan as checked -- with the files travelling
+            // along with the album.
+            path_plan = checked->plan;
             path_preflight = std::move(*checked);
         }
     }

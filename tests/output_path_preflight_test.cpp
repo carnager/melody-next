@@ -248,7 +248,101 @@ void classifiesARealCrossFilesystemTargetWhenAvailable() {
 
 } // namespace
 
+// ADR-0318: an album leaving its folder whole takes its images, CUE sheets
+// and playlists along; one leaving part of its audio behind takes nothing;
+// a CUE sheet naming a renamed file blocks; two covers for one target block.
+void companionsTravelWithTheirAlbum() {
+    using namespace trackknife;
+    using namespace trackknife::operations;
+    TemporaryDirectory temporary;
+    const auto album = temporary.path() / "In" / "Album";
+    const auto destination = temporary.path() / "Out";
+    std::filesystem::create_directories(album);
+    std::filesystem::create_directories(destination);
+    for (const auto* name : {"01.flac", "02.flac"}) {
+        write_file(album / name);
+    }
+    write_file(album / "cover.jpg", "jpeg");
+    write_file(album / "album.cue", "FILE \"01.flac\" WAVE\n  TRACK 01 AUDIO\n");
+    write_file(album / "album.m3u", "01.flac\n02.flac\n");
+    write_file(album / "notes.txt", "text");
+    write_file(album / ".hidden.jpg", "jpeg");
+    const auto target = destination / "Artist" / "Album";
+    const auto plan_of = [&](const std::vector<std::pair<std::string, std::string>>& moves) {
+        auto plan = ready_plan(album / moves.front().first, target / moves.front().second,
+                               *core::observe_local_source_revision(
+                                   (album / moves.front().first).native()),
+                               true, destination);
+        for (std::size_t index = 1U; index < moves.size(); ++index) {
+            auto next = plan.sources.front();
+            next.source_raw_path = (album / moves[index].first).native();
+            next.target_raw_path = (target / moves[index].second).native();
+            next.source_revision =
+                *core::observe_local_source_revision(next.source_raw_path);
+            next.item_indexes = {index};
+            plan.sources.push_back(next);
+        }
+        return plan;
+    };
+    const auto companions_of = [](const OutputPathPreflight& preflight) {
+        std::vector<std::string> names;
+        for (const auto& source : preflight.sources) {
+            if (source.planned.companion) {
+                names.push_back(std::filesystem::path{source.planned.target_raw_path}
+                                    .filename()
+                                    .string());
+            }
+        }
+        std::ranges::sort(names);
+        return names;
+    };
+
+    // Whole, names kept: cover, sheet and playlist along, into the target.
+    auto whole = preflight_output_paths_with_companions(
+        plan_of({{"01.flac", "01.flac"}, {"02.flac", "02.flac"}}));
+    CHECK(whole.has_value());
+    CHECK(whole->ready());
+    CHECK((companions_of(*whole) ==
+           std::vector<std::string>{"album.cue", "album.m3u", "cover.jpg"}));
+    CHECK(std::ranges::all_of(whole->sources, [&](const auto& source) {
+        return std::filesystem::path{source.planned.target_raw_path}.parent_path() == target;
+    }));
+    CHECK(std::ranges::all_of(whole->sources, [](const auto& source) {
+        return !source.planned.companion || source.planned.item_indexes.empty();
+    }));
+
+    // Part of it: nothing along.
+    auto part = preflight_output_paths_with_companions(plan_of({{"01.flac", "01.flac"}}));
+    CHECK(part.has_value() && part->ready());
+    CHECK(companions_of(*part).empty());
+
+    // The sheet's file renamed: blocked, saying why.
+    auto renamed = preflight_output_paths_with_companions(
+        plan_of({{"01.flac", "01 - One.flac"}, {"02.flac", "02.flac"}}));
+    CHECK(renamed.has_value());
+    CHECK(!renamed->ready());
+    CHECK(has_issue(*renamed, OutputPathPreflightIssueKind::cue_reference_broken));
+
+    // A cover already at the target: the preflight's own check.
+    std::filesystem::create_directories(target);
+    write_file(target / "cover.jpg", "other");
+    auto occupied = preflight_output_paths_with_companions(
+        plan_of({{"01.flac", "01.flac"}, {"02.flac", "02.flac"}}));
+    CHECK(occupied.has_value());
+    CHECK(!occupied->ready());
+    CHECK(has_issue(*occupied, OutputPathPreflightIssueKind::target_exists));
+    std::filesystem::remove(target / "cover.jpg");
+
+    // Nothing of a plan that moves nothing out of its folder.
+    auto staying = preflight_output_paths_with_companions(
+        ready_plan(album / "01.flac", album / "01 - One.flac",
+                   *core::observe_local_source_revision((album / "01.flac").native())));
+    CHECK(staying.has_value());
+    CHECK(companions_of(*staying).empty());
+}
+
 int main() {
+    companionsTravelWithTheirAlbum();
     classifiesSameFilesystemAndMissingDirectoriesWithoutMutation();
     changedHardLinkedOccupiedAndSymlinkedPathsFailClosed();
     noChangeIsReadyAndCancellationIsTyped();

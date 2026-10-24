@@ -48,7 +48,7 @@ constexpr std::array<std::pair<operations::OutputPathPlanIssueKind, std::string_
          "mirror_source_outside_root"},
     }};
 
-constexpr std::array<std::pair<operations::OutputPathPreflightIssueKind, std::string_view>, 16>
+constexpr std::array<std::pair<operations::OutputPathPreflightIssueKind, std::string_view>, 18>
     preflight_issue_kinds{{
         {operations::OutputPathPreflightIssueKind::source_missing, "source_missing"},
         {operations::OutputPathPreflightIssueKind::source_symlink, "source_symlink"},
@@ -70,6 +70,9 @@ constexpr std::array<std::pair<operations::OutputPathPreflightIssueKind, std::st
          "target_parent_not_writable"},
         {operations::OutputPathPreflightIssueKind::target_exists, "target_exists"},
         {operations::OutputPathPreflightIssueKind::component_too_long, "component_too_long"},
+        {operations::OutputPathPreflightIssueKind::companion_target_conflict,
+         "companion_target_conflict"},
+        {operations::OutputPathPreflightIssueKind::cue_reference_broken, "cue_reference_broken"},
         {operations::OutputPathPreflightIssueKind::path_too_long, "path_too_long"},
         {operations::OutputPathPreflightIssueKind::filesystem_observation_failed,
          "filesystem_observation_failed"},
@@ -237,7 +240,8 @@ constexpr std::array<std::pair<operations::FilePublicationApplySourceState, std:
         {"sanitized_basename", protocol::encode_raw_path(source.sanitized_basename)},
         {"item_indexes", source.item_indexes},
         {"sanitized", source.sanitized},
-        {"no_change", source.no_change}};
+        {"no_change", source.no_change},
+        {"companion", source.companion}};
 }
 
 [[nodiscard]] operations::PlannedOutputPathSource read_planned(Reader& in) {
@@ -252,6 +256,7 @@ constexpr std::array<std::pair<operations::FilePublicationApplySourceState, std:
         .item_indexes = in.indexes("item_indexes"),
         .sanitized = in.flag("sanitized"),
         .no_change = in.flag("no_change"),
+        .companion = in.optional_flag("companion"),
     };
 }
 

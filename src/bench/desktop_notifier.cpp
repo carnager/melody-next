@@ -123,7 +123,8 @@ void DesktopNotifier::send(const QString& summary, const QString& body, const QS
     if (!standalone) {
         replace_sent_.start();
     }
-    call << QStringLiteral("Melody") << replaces << QStringLiteral("audio-x-generic") << summary
+    // Melody's own icon, as its launcher shows it (hicolor/scalable/apps).
+    call << QStringLiteral("Melody") << replaces << QStringLiteral("melody") << summary
          << body << QStringList{} << hints << -1;
     auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(call), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,

@@ -11,6 +11,11 @@
 # layout tests measure rows in the desktop's font; settings are isolated by
 # the tests themselves. Audio is still the machine's: PipeWire is found where
 # it was.
+#
+# The desktop's Qt platform theme is not loaded. Plasma's brings
+# KNotifications, whose event sounds (libcanberra over PipeWire's ALSA plugin)
+# deadlock when torn down at exit: every test of the window passed and its
+# process never ended, so ctest never returned.
 function(melody_isolate_tests)
     get_property(tests DIRECTORY PROPERTY TESTS)
     if(NOT tests)
@@ -35,7 +40,7 @@ function(melody_isolate_tests)
     set(runtime "${CMAKE_BINARY_DIR}/test-runtime")
     file(MAKE_DIRECTORY "${runtime}")
     file(CHMOD "${runtime}" DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-    set(environment "XDG_RUNTIME_DIR=set:${runtime}")
+    set(environment "XDG_RUNTIME_DIR=set:${runtime}" "QT_QPA_PLATFORMTHEME=unset:")
     if(DEFINED ENV{PIPEWIRE_RUNTIME_DIR})
         list(APPEND environment "PIPEWIRE_RUNTIME_DIR=set:$ENV{PIPEWIRE_RUNTIME_DIR}")
     elseif(DEFINED ENV{XDG_RUNTIME_DIR})

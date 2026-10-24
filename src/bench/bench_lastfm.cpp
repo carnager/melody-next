@@ -98,6 +98,13 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* enabled = new QCheckBox(QStringLiteral("Scrobble playback to Last.fm"), page);
     enabled->setObjectName(QStringLiteral("lastfm-enabled"));
     layout->addWidget(enabled);
+    auto* library_only =
+        new QCheckBox(QStringLiteral("Only scrobble tracks in the library"), page);
+    library_only->setObjectName(QStringLiteral("lastfm-library-only"));
+    library_only->setToolTip(
+        QStringLiteral("Files played from elsewhere and streams are not scrobbled. Applies "
+                       "to Melody and to every engine below."));
+    layout->addWidget(library_only);
     // ADR-0297: a favourite loved there too, and unloved when it is no more.
     auto* love = new QCheckBox(QStringLiteral("Favourite tracks are also loved on Last.fm"), page);
     love->setObjectName(QStringLiteral("lastfm-love-favorites"));
@@ -120,7 +127,8 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     layout->addWidget(engines);
     layout->addStretch();
 
-    const auto sync = [session, key, secret, reuse, credentials, begin, cancel, enabled, status] {
+    const auto sync = [session, key, secret, reuse, credentials, begin, cancel, enabled,
+                       library_only, status] {
         const auto show = [](QLineEdit* field, const QString& text) {
             if (field->text() != text) {
                 const QSignalBlocker blocker{field};
@@ -143,6 +151,11 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
             enabled->setChecked(session->scrobbling());
         }
         enabled->setEnabled(session->connected());
+        {
+            const QSignalBlocker blocker{library_only};
+            library_only->setChecked(session->libraryOnly());
+        }
+        library_only->setEnabled(session->connected());
         status->setText(session->status());
     };
     // One row per engine: what it says, and handing the account to it.
@@ -188,6 +201,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     connect(cancel, &QPushButton::clicked, session, &LastFmSettingsSession::stopWaiting);
     connect(disconnect, &QPushButton::clicked, session, &LastFmSettingsSession::disconnectAccount);
     connect(enabled, &QCheckBox::toggled, session, &LastFmSettingsSession::setScrobbling);
+    connect(library_only, &QCheckBox::toggled, session, &LastFmSettingsSession::setLibraryOnly);
     connect(another, &QPushButton::clicked, this, [this, engines, session] {
         bool accepted = false;
         const auto address =

@@ -135,6 +135,7 @@ void LastFm::load() {
                            .user = document.value("user", std::string{})};
     }
     enabled_ = document.value("enabled", false);
+    library_only_ = document.value("library_only", false);
     if (const auto pending = document.find("pending");
         pending != document.end() && pending->is_array()) {
         for (const auto& item : *pending) {
@@ -154,6 +155,7 @@ bool LastFm::save_locked() {
     Json document = Json::object();
     document["version"] = 1;
     document["enabled"] = enabled_;
+    document["library_only"] = library_only_;
     if (session_) {
         document["key"] = session_->api_key;
         document["secret"] = session_->secret;
@@ -185,7 +187,7 @@ bool LastFm::save_locked() {
     return written && ::rename(temporary.c_str(), state_file_.c_str()) == 0;
 }
 
-core::Result<void> LastFm::set_session(Session session) {
+core::Result<void> LastFm::set_session(Session session, const std::optional<bool> library_only) {
     if (session.api_key.size() != 32U || session.secret.size() != 32U ||
         session.session_key.empty() || session.user.empty()) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
@@ -204,6 +206,9 @@ core::Result<void> LastFm::set_session(Session session) {
     }
     session_ = std::move(session);
     enabled_ = true;
+    if (library_only) {
+        library_only_ = *library_only;
+    }
     auth_failed_ = false;
     failures_ = 0;
     retry_at_ms_ = 0;
@@ -213,6 +218,18 @@ core::Result<void> LastFm::set_session(Session session) {
     message_ = "Connected";
     if (!save_locked()) {
         return std::unexpected(lastfm_error("could not save the Last.fm session"));
+    }
+    return {};
+}
+
+core::Result<void> LastFm::set_library_only(const bool on) {
+    const std::lock_guard guard{mutex_};
+    if (blocked_) {
+        return std::unexpected(lastfm_error(message_));
+    }
+    library_only_ = on;
+    if (!save_locked()) {
+        return std::unexpected(lastfm_error("could not save the Last.fm state"));
     }
     return {};
 }
@@ -239,7 +256,8 @@ LastFm::Status LastFm::status() const {
     return Status{.user = session_ ? session_->user : std::string{},
                   .enabled = enabled_ && session_.has_value(),
                   .pending = pending_.size(),
-                  .message = message_};
+                  .message = message_,
+                  .library_only = library_only_};
 }
 
 std::optional<LastFm::Track> LastFm::playing_track(const Player::State& state) {
@@ -255,15 +273,23 @@ std::optional<LastFm::Track> LastFm::playing_track(const Player::State& state) {
         state.duration_ms > 0 ? static_cast<double>(state.duration_ms) / 1000.0 : 0.0;
     // The library's tags when the file is in it -- what every client shows --
     // else what the client that queued it said.
+    bool in_library = false;
     if (!state.source.raw_path.empty()) {
-        if (auto known = catalogue_->cached_tracks({state.source.raw_path});
-            known && !known->empty() && !known->front().facts.title.empty()) {
-            const auto& facts = known->front().facts;
-            cached_track_ = Track{.artist = facts.artist,
-                                  .title = facts.title,
-                                  .album = facts.album,
-                                  .duration = duration};
-            return cached_track_;
+        auto known = catalogue_->cached_tracks({state.source.raw_path});
+        if (known && !known->empty()) {
+            in_library = true;
+            if (const auto& facts = known->front().facts; !facts.title.empty()) {
+                cached_track_ = Track{.artist = facts.artist,
+                                      .title = facts.title,
+                                      .album = facts.album,
+                                      .duration = duration,
+                                      .in_library = true};
+                return cached_track_;
+            }
+        } else if (!known && known.error().code != core::ErrorCode::conflict) {
+            // The library could not be asked, which says nothing of whether
+            // the file is in it: asked again next time.
+            cached_entry_ = {};
         }
     }
     if (const auto entry = player_->entry(state.entry); entry && !entry->title.empty()) {
@@ -271,7 +297,8 @@ std::optional<LastFm::Track> LastFm::playing_track(const Player::State& state) {
                                                                     : entry->group.artist,
                               .title = entry->title,
                               .album = entry->group.album,
-                              .duration = duration};
+                              .duration = duration,
+                              .in_library = in_library};
     }
     return cached_track_;
 }
@@ -283,7 +310,10 @@ void LastFm::sample_locked(const std::int64_t now_ms, const std::int64_t wall_s)
     }
     const auto state = player_->state();
     auto track = playing_track(state);
-    const bool valid = track && !track->artist.empty() && !track->title.empty();
+    // A track outside the library, when only the library's count, is
+    // nothing playing: no "now playing" and no listen.
+    const bool valid = track && !track->artist.empty() && !track->title.empty() &&
+                       (!library_only_ || track->in_library);
     const bool playing = state.status == "playing";
     // Which playback, not which track: the same track played twice is two
     // listens.
@@ -505,7 +535,8 @@ void register_lastfm_methods(protocol::Dispatcher& dispatcher, LastFm& lastfm) {
         return Json{{"user", status.user.empty() ? Json(nullptr) : Json(status.user)},
                     {"enabled", status.enabled},
                     {"pending", status.pending},
-                    {"message", status.message}};
+                    {"message", status.message},
+                    {"library_only", status.library_only}};
     };
     // Write-only: the session goes in and never comes back out.
     dispatcher.on("lastfm.set_session",
@@ -514,7 +545,10 @@ void register_lastfm_methods(protocol::Dispatcher& dispatcher, LastFm& lastfm) {
                           LastFm::Session{.api_key = params.value("api_key", std::string{}),
                                           .secret = params.value("secret", std::string{}),
                                           .session_key = params.value("session_key", std::string{}),
-                                          .user = params.value("user", std::string{})});
+                                          .user = params.value("user", std::string{})},
+                          params.contains("library_only") && params["library_only"].is_boolean()
+                              ? std::optional{params["library_only"].get<bool>()}
+                              : std::nullopt);
                       if (!set) {
                           return std::unexpected(std::move(set.error()));
                       }
@@ -526,6 +560,16 @@ void register_lastfm_methods(protocol::Dispatcher& dispatcher, LastFm& lastfm) {
         }
         return status_json();
     });
+    dispatcher.on("lastfm.set_options",
+                  [&lastfm, status_json](const Json& params) -> core::Result<Json> {
+                      if (const auto only = params.find("library_only");
+                          only != params.end() && only->is_boolean()) {
+                          if (auto set = lastfm.set_library_only(only->get<bool>()); !set) {
+                              return std::unexpected(std::move(set.error()));
+                          }
+                      }
+                      return status_json();
+                  });
     dispatcher.on("lastfm.status",
                   [status_json](const Json&) -> core::Result<Json> { return status_json(); });
     dispatcher.on("lastfm.love", [&lastfm](const Json& params) -> core::Result<Json> {

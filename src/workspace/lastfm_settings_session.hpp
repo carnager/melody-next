@@ -52,6 +52,8 @@ class LastFmSettingsSession final : public QObject {
     [[nodiscard]] bool waiting() const { return waiting_; }
     [[nodiscard]] bool connected() const { return connected_; }
     [[nodiscard]] bool scrobbling() const { return scrobbling_; }
+    // Only tracks in the playing engine's library are scrobbled.
+    [[nodiscard]] bool libraryOnly() const { return library_only_; }
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] const std::vector<Engine>& engines() const { return engines_; }
     // The engine already scrobbles as this account: handing it over again
@@ -63,6 +65,8 @@ class LastFmSettingsSession final : public QObject {
     void stopWaiting();
     void disconnectAccount();
     void setScrobbling(bool on);
+    // For this window and every engine listed: those reached are told at once.
+    void setLibraryOnly(bool on);
     void useAccount(int row);
     // Another engine, by address and password; the error, if it is not one.
     [[nodiscard]] QString addEngine(const QString& address, const QString& password);
@@ -92,6 +96,7 @@ class LastFmSettingsSession final : public QObject {
     bool request_pending_{false};
     bool connected_{false};
     bool scrobbling_{false};
+    bool library_only_{false};
     QString status_;
     std::vector<Engine> engines_;
     int other_engines_{0};

@@ -24,6 +24,16 @@ The credentials are saved privately on this computer. **Disconnect / clear
 pending** removes them. Untick **Scrobble playback to Last.fm** if you only want
 Love and Unlove. An engine too old to scrobble says so next to its name.
 
+Tick **Only scrobble tracks in the library** to leave out everything the
+playing engine's library does not index: files opened from elsewhere, and
+streams. Such a track is not sent as "now playing" either. The choice is
+told to Melody's own scrobbling and to every engine listed on the page at
+once, and handed over with the account; an engine shows ", library only"
+after the account it scrobbles as. An engine that cannot be reached keeps
+what it had, and one too old for the choice says so. Tracks are matched
+by file: a copy of a library track somewhere else is not the library's.
+Disconnecting keeps the choice.
+
 Scrobbling requires artist, title, and duration greater than 30 seconds.
 Advancing playback counts toward half the duration or four minutes, whichever
 comes first. Pauses, large seeks, stalls, and long observation gaps do not earn

@@ -42,6 +42,8 @@ class LastFm final {
         bool enabled{false};
         std::size_t pending{0};
         std::string message;
+        // Only what this engine's library indexes is scrobbled.
+        bool library_only{false};
     };
 
     // `endpoint` is Last.fm's API root; tests give a fake one.
@@ -57,7 +59,13 @@ class LastFm final {
     void start();
     void stop();
 
-    [[nodiscard]] core::Result<void> set_session(Session session);
+    // `library_only`, when given, is set with it: one call to hand over
+    // the account as the client has it.
+    [[nodiscard]] core::Result<void> set_session(Session session,
+                                                 std::optional<bool> library_only = {});
+    // Whether only tracks in this engine's library are scrobbled -- not a
+    // file played from elsewhere, nor a stream. Love is not affected.
+    [[nodiscard]] core::Result<void> set_library_only(bool on);
     // Signs out: the session and anything not yet sent are dropped.
     [[nodiscard]] core::Result<void> clear();
     [[nodiscard]] Status status() const;
@@ -75,6 +83,9 @@ class LastFm final {
         std::string title;
         std::string album;
         double duration{0.0};
+        // The file is in this engine's library. Not kept with a pending
+        // scrobble: it was decided when the listen was.
+        bool in_library{false};
     };
     struct Pending final {
         Track track;
@@ -98,6 +109,7 @@ class LastFm final {
     mutable std::mutex mutex_;
     std::optional<Session> session_;
     bool enabled_{false};
+    bool library_only_{false};
     std::deque<Pending> pending_;
     std::string message_;
     bool blocked_{false};     // the state file could not be read; never overwrite it

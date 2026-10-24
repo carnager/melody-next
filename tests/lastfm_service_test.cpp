@@ -205,9 +205,40 @@ void LastFmServiceTest::accountAndPersistence() {
                     .isEmpty();
             }(),
             4000);
-        service.execute("disconnect");
+        // Only the library's tracks: one it does not have is neither playing
+        // nor a listen, one it has is both.
+        service.execute("library-only", {"1"});
         QTRY_COMPARE(spy.size(), 2);
+        QVERIFY(spy.last()[1].toJsonObject().value("library_only").toBool());
+        const auto play = [&service](const QString& identity, const QString& title,
+                                     const bool library, const int from) {
+            for (int n = 0; n <= 20; ++n)
+                service.observe({{"identity", identity},
+                                 {"artist", "A"},
+                                 {"title", title},
+                                 {"library", library},
+                                 {"duration", 40},
+                                 {"position", n},
+                                 {"playing", true},
+                                 {"monotonic", (from + n) * 1000}});
+        };
+        const auto sent = [&requests](const QString& method, const QString& title) {
+            return std::any_of(requests.begin(), requests.end(), [&](const auto& q) {
+                return q.queryItemValue("method") == method &&
+                       q.queryItemValue("track", QUrl::FullyDecoded) == title;
+            });
+        };
+        play("two", "Outside", false, 100);
+        play("three", "Kept", true, 200);
+        QTRY_VERIFY_WITH_TIMEOUT(sent("track.scrobble", "Kept"), 4000);
+        QVERIFY(sent("track.updateNowPlaying", "Kept"));
+        QVERIFY(!sent("track.updateNowPlaying", "Outside"));
+        QVERIFY(!sent("track.scrobble", "Outside"));
+        service.execute("disconnect");
+        QTRY_COMPARE(spy.size(), 3);
         QVERIFY(!spy.last()[1].toJsonObject().value("connected").toBool());
+        QVERIFY2(spy.last()[1].toJsonObject().value("library_only").toBool(),
+                 "the choice is the user's, not the account's");
     }
 }
 QTEST_GUILESS_MAIN(LastFmServiceTest)

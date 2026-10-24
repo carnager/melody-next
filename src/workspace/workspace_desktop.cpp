@@ -41,6 +41,9 @@ void Workspace::startLastFm() {
                 if (state.contains(QStringLiteral("user"))) {
                     lastfm_user_ = state.value(QStringLiteral("user")).toString();
                 }
+                if (state.contains(QStringLiteral("library_only"))) {
+                    lastfm_library_only_ = state.value(QStringLiteral("library_only")).toBool();
+                }
             });
     lastfm_->execute(QStringLiteral("status"));
 }
@@ -69,6 +72,35 @@ void Workspace::sampleLastFm(const EnginePlayback::State& state) {
     if (const auto* row = playingRow(state.entry)) {
         track = *row;
     }
+    // Whether the library has it, asked of the engine playing it, off this
+    // thread, when only the library's tracks are scrobbled: an answer before
+    // the first half-minute of the track is all a listen needs.
+    if (!lastfm_library_only_) {
+        lastfm_library_entry_.clear();
+    } else if (state.entry != lastfm_library_entry_) {
+        lastfm_library_entry_ = state.entry;
+        lastfm_in_library_ = false;
+        const auto* link = linkOf(transport_);
+        auto* source = link != nullptr ? catalogueOf(link->key) : nullptr;
+        const auto raw_path =
+            !track.raw_path.empty() ? track.raw_path : state.path.toLocal8Bit().toStdString();
+        if (source != nullptr && !raw_path.empty() && !state.entry.isEmpty()) {
+            QtConcurrent::run([catalogue = std::shared_ptr{source->openDeferred()}, raw_path] {
+                return catalogue->cached_tracks({raw_path});
+            }).then(this, [this, entry = state.entry](
+                              const core::Result<std::vector<persistence::LibraryTrackSnapshot>>&
+                                  known) {
+                if (entry != lastfm_library_entry_) {
+                    return;
+                }
+                lastfm_in_library_ = known && !known->empty();
+                // Not asked, rather than not in it: asked again.
+                if (!known && known.error().code != core::ErrorCode::conflict) {
+                    lastfm_library_entry_.clear();
+                }
+            });
+        }
+    }
     // Observable for offscreen tests and diagnostics: "is anything being
     // credited, and for which track" is otherwise only answerable by watching
     // the network.
@@ -84,6 +116,7 @@ void Workspace::sampleLastFm(const EnginePlayback::State& state) {
          {"artist", QString::fromStdString(track.artist)},
          {"title", QString::fromStdString(track.title)},
          {"album", QString::fromStdString(track.album)},
+         {"library", lastfm_in_library_},
          {"duration",
           state.duration_ms > 0 ? static_cast<double>(state.duration_ms) / 1000.0 : 0.0},
          {"position", static_cast<double>(state.position_ms) / 1000.0},

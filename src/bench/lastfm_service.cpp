@@ -58,6 +58,7 @@ class Worker final : public QObject {
         return {{"connected", !state_.value("session").toString().isEmpty()},
                 {"user", state_.value("user")},
                 {"enabled", state_.value("enabled").toBool()},
+                {"library_only", state_.value("library_only").toBool()},
                 {"pending", state_.value("pending").toArray().size()},
                 {"message", message_},
                 {"credentials_saved", state_.value("key").toString().size() == 32 &&
@@ -171,7 +172,11 @@ class Worker final : public QObject {
         }
         auto fail = [this, op](const QString& error) { finish(op, {}, error); };
         if (op == "disconnect") {
+            // A preference, not the account's: kept for the next one.
+            const auto library_only = state_.value("library_only");
             state_ = {};
+            if (library_only.toBool())
+                state_["library_only"] = true;
             token_.clear();
             listen_.reset();
             now_playing_ = {};
@@ -191,6 +196,15 @@ class Worker final : public QObject {
             state_["enabled"] = args[0] == "1";
             listen_.reset();
             now_playing_ = {};
+            finish(op, {}, save() ? QString{} : QStringLiteral("Could not save Last.fm state"));
+            return;
+        }
+        if (op == "library-only") {
+            if (args.size() != 1 || (args[0] != "0" && args[0] != "1")) {
+                fail("Invalid library-only value");
+                return;
+            }
+            state_["library_only"] = args[0] == "1";
             finish(op, {}, save() ? QString{} : QStringLiteral("Could not save Last.fm state"));
             return;
         }
@@ -313,8 +327,13 @@ class Worker final : public QObject {
             listen_.reset();
             return;
         }
+        // A track outside the library, when only the library's count, is
+        // nothing playing: no "now playing" and no listen. Until the library
+        // has answered it is not known to be in it.
         const bool valid = !sample.value("artist").toString().isEmpty() &&
-                           !sample.value("title").toString().isEmpty();
+                           !sample.value("title").toString().isEmpty() &&
+                           (!state_.value("library_only").toBool() ||
+                            sample.value("library").toBool());
         const bool eligible = listen_.observe(
             valid ? sample.value("identity").toString().toStdString() : std::string{},
             sample.value("duration").toDouble(), sample.value("position").toDouble(),

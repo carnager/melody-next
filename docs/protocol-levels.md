@@ -7,6 +7,16 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 23 (2026-10-24)
+
+Scrobbling only the library's tracks.
+
+- `lastfm.set_options {library_only}` -> the status: whether only tracks
+  this engine's library indexes are scrobbled and said to be playing -- not
+  a file played from elsewhere, nor a stream. Love is not affected.
+- `lastfm.set_session` takes `library_only` too, and `lastfm.status`
+  answers it.
+
 ### Level 22 (2026-10-20)
 
 ADR-0302 phase 4: a listening party.

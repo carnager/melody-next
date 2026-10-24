@@ -20,7 +20,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <string>
@@ -273,6 +275,19 @@ class FakeLastFm final {
     return count;
 }
 
+void materialize(const std::filesystem::path& fixtures, const char* name,
+                 const std::filesystem::path& into) {
+    std::ifstream input{fixtures / name};
+    require(input.good(), "the fixture opens");
+    std::string base64((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::erase(base64, '\n');
+    const auto decoded = trackknife::protocol::decode_raw_path(base64);
+    require(decoded.has_value(), "the fixture decodes");
+    std::filesystem::create_directories(into.parent_path());
+    std::ofstream output{into, std::ios::binary};
+    output.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
+}
+
 const engine::LastFm::Session session{.api_key = std::string(32U, 'k'),
                                       .secret = std::string(32U, 's'),
                                       .session_key = "session-key",
@@ -280,7 +295,9 @@ const engine::LastFm::Session session{.api_key = std::string(32U, 'k'),
 
 } // namespace
 
-int main() {
+int main(const int argc, char** argv) {
+    require(argc == 2, "usage: engine_lastfm_test <fixture-dir>");
+    const std::filesystem::path fixtures{argv[1]};
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-lastfm-" + core::StableId::random().to_string());
     std::filesystem::create_directories(directory);
@@ -351,8 +368,58 @@ int main() {
     require(requests.back().at("method") == "track.love" && requests.back().at("track") == "Song",
             "as itself");
     require(again.clear().has_value() && !again.status().enabled, "and signing out stops it");
+    again.stop();
+
+    // Only the library's tracks, when that is asked for: a file from
+    // elsewhere is neither playing nor a listen, one the library indexes is
+    // both.
+    {
+        const auto music = directory / "music";
+        materialize(fixtures, "rich-metadata-flac.b64", music / "Album" / "01.flac");
+        require(catalogue.add_root(music.string()).has_value(), "a music folder is added");
+        trackknife::persistence::LibraryScanProgress progress;
+        require(catalogue.scan({}, progress).has_value(), "and scanned");
+        const auto only_file = directory / "only.json";
+        engine::LastFm only{*player, catalogue, only_file, fake.endpoint()};
+        require(only.set_session(session, true).has_value() && only.status().library_only,
+                "a session is handed over to scrobble the library only");
+
+        const auto listen = [&](const std::int64_t from) {
+            for (std::int64_t second = 0; second <= 130; ++second) {
+                audition.advance_to(second * 1'000);
+                only.tick((from + second) * 1'000, 1'900'000'000 + from + second);
+            }
+        };
+        player->replace_queue({song});
+        require(player->play_entry(song.entry_id).has_value(), "the song from elsewhere plays");
+        const auto before = fake.requests().size();
+        listen(0);
+        require(fake.requests().size() == before && only.status().pending == 0U,
+                "a file outside the library is not scrobbled, nor said to be playing");
+
+        engine::QueueEntry kept;
+        kept.source.raw_path = (music / "Album" / "01.flac").string();
+        kept.duration_ms = 200'000;
+        kept.title = "Queued as";
+        kept.group.artist = "Someone";
+        player->replace_queue({kept});
+        require(player->play_entry(kept.entry_id).has_value(), "the library's track plays");
+        listen(1'000);
+        const auto after = fake.requests();
+        require(after.size() == before + 2U && after[before].at("method") ==
+                                                    "track.updateNowPlaying",
+                "the library's track is said to be playing");
+        require(after.back().at("method") == "track.scrobble" &&
+                    after.back().at("track") == "Metadata Fixture",
+                "and scrobbled, by the library's tags");
+
+        engine::LastFm reread{*player, catalogue, only_file, fake.endpoint()};
+        require(reread.status().library_only, "the choice outlives a restart");
+        require(only.set_library_only(false).has_value() && !only.status().library_only,
+                "and can be taken back");
+    }
 
     std::filesystem::remove_all(directory);
-    std::cout << "engine lastfm: 1 scenario\n";
+    std::cout << "engine lastfm: 2 scenarios\n";
     return EXIT_SUCCESS;
 }

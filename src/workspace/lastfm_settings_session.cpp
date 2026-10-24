@@ -177,11 +177,44 @@ void LastFmSettingsSession::setScrobbling(const bool on) {
     send(QStringLiteral("enable"), {on ? QStringLiteral("1") : QStringLiteral("0")});
 }
 
+void LastFmSettingsSession::setLibraryOnly(const bool on) {
+    library_only_ = on;
+    send(QStringLiteral("library-only"), {on ? QStringLiteral("1") : QStringLiteral("0")});
+    for (int row = 0; row < static_cast<int>(engines_.size()); ++row) {
+        const auto& engine = engines_[static_cast<std::size_t>(row)];
+        setEngineState(engine.id, QStringLiteral("Telling it…"), {}, false);
+        auto* watcher = new QFutureWatcher<QString>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, row, id = engine.id] {
+            watcher->deleteLater();
+            if (const auto error = watcher->result(); !error.isEmpty()) {
+                setEngineState(id, error, {}, false);
+                return;
+            }
+            ask(row);
+        });
+        watcher->setFuture(QtConcurrent::run([endpoint = engine.endpoint, on] {
+            auto client = protocol::Client::connect(endpoint);
+            if (!client) {
+                return QStringLiteral("Not reachable");
+            }
+            auto answer = (*client)->call("lastfm.set_options", {{"library_only", on}},
+                                          std::chrono::seconds{3});
+            (*client)->close();
+            if (!answer) {
+                return answer.error().code == core::ErrorCode::unsupported
+                           ? QStringLiteral("Cannot scrobble the library only (engine too old)")
+                           : QString::fromStdString(answer.error().message);
+            }
+            return QString{};
+        }));
+    }
+}
+
 void LastFmSettingsSession::received(const QString& op, const QJsonObject& state,
                                      const QString& error) {
     static const QStringList answered{QStringLiteral("status"), QStringLiteral("begin"),
                                       QStringLiteral("finish"), QStringLiteral("disconnect"),
-                                      QStringLiteral("enable")};
+                                      QStringLiteral("enable"), QStringLiteral("library-only")};
     if (!answered.contains(op)) {
         return;
     }
@@ -207,6 +240,7 @@ void LastFmSettingsSession::received(const QString& op, const QJsonObject& state
         return;
     }
     scrobbling_ = state.value("enabled").toBool();
+    library_only_ = state.value("library_only").toBool();
     connected_ = state.value("connected").toBool();
     if (op == QStringLiteral("finish") && state.value("authorization_pending").toBool()) {
         poll_.start();
@@ -277,8 +311,10 @@ void LastFmSettingsSession::ask(const int row) {
             return {QStringLiteral("Not scrobbling"), {}};
         }
         const auto name = QString::fromStdString(user.get<std::string>());
-        return {QStringLiteral("Scrobbling as %1 · %2 waiting")
-                    .arg(name)
+        return {QStringLiteral("Scrobbling as %1%2 · %3 waiting")
+                    .arg(name,
+                         answer->value("library_only", false) ? QStringLiteral(", library only")
+                                                              : QString{})
                     .arg(answer->value("pending", 0)),
                 name};
     }));
@@ -309,7 +345,8 @@ void LastFmSettingsSession::useAccount(const int row) {
                         {"api_key", session.value("api_key").toString().toStdString()},
                         {"secret", session.value("secret").toString().toStdString()},
                         {"session_key", session.value("session_key").toString().toStdString()},
-                        {"user", session.value("user").toString().toStdString()}};
+                        {"user", session.value("user").toString().toStdString()},
+                        {"library_only", library_only_}};
                     auto* watcher = new QFutureWatcher<QString>(this);
                     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, id] {
                         watcher->deleteLater();

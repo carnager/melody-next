@@ -363,6 +363,11 @@ class Workspace final : public QObject {
     QElapsedTimer lastfm_clock_;
     qint64 lastfm_sample_time_{-1000};
     QString lastfm_user_;
+    // Whether the playing entry's file is in its engine's library, for
+    // scrobbling only the library's tracks; asked once per entry.
+    bool lastfm_library_only_{false};
+    QString lastfm_library_entry_;
+    bool lastfm_in_library_{false};
     // ADR-0253: the tkq-1 rules last seen in the definitions, so that one
     // gone is told from another window's that this one never knew.
     std::optional<QSet<QString>> known_rules_;

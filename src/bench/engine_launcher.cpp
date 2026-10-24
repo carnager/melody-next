@@ -18,6 +18,7 @@
 #include <QStandardPaths>
 
 #include <signal.h>
+#include <sys/stat.h>
 #ifdef __APPLE__
 #include <libproc.h>
 #include <sys/proc.h>
@@ -28,6 +29,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -333,8 +335,8 @@ protocol::Json sharingChanges(const LocalEngineSharing& now, const LocalEngineSh
 core::Result<void> stopLocalEngine(const LocalEngine& engine) {
     // The engine is whoever holds its lock. Asked to stop for good -- under
     // systemd, not restarted after (ADR-0286) -- else, an engine older than
-    // engine.stop, signalled: found through /proc, as fuser does, because
-    // flock(2) does not say who holds it.
+    // engine.stop, signalled: found through /proc/locks, because flock(2)
+    // does not say who holds it.
     const auto holders = lockHolders(engine.state / "engine.lock");
     if (holders.empty()) {
         return {};
@@ -513,32 +515,51 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
         }
     }
 #else
-    for (const auto& process : std::filesystem::directory_iterator{"/proc", error}) {
-        const auto name = process.path().filename().string();
-        if (name.empty() ||
-            !std::ranges::all_of(name, [](const char c) { return c >= '0' && c <= '9'; })) {
+    // flock(2) does not say who holds a lock, but the kernel lists every lock
+    // in /proc/locks: "1: FLOCK  ADVISORY  WRITE 1234 00:2a:5678 0 EOF", the
+    // holder's pid and the file's device and inode. The inode alone is
+    // matched -- on btrfs the device there is not the one stat() gives -- and
+    // each process it names is asked whether it has the file open, which
+    // settles an inode of the same number elsewhere.
+    struct stat locked{};
+    if (::stat(target.c_str(), &locked) != 0) {
+        return holders;
+    }
+    const auto inode = ":" + std::to_string(locked.st_ino);
+    const auto holds = [&target](const std::filesystem::path& descriptors) {
+        std::error_code unreadable;
+        for (const auto& descriptor :
+             std::filesystem::directory_iterator{descriptors, unreadable}) {
+            std::error_code gone;
+            if (std::filesystem::read_symlink(descriptor.path(), gone) == target) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::ifstream locks{"/proc/locks"};
+    for (std::string line; std::getline(locks, line);) {
+        std::istringstream fields{line};
+        std::string number, kind, mode, access, file;
+        long pid = 0;
+        // A waiter is listed as "1: -> FLOCK ...": not a holder.
+        if (!(fields >> number >> kind) || kind == "->" ||
+            !(fields >> mode >> access >> pid >> file) || pid <= 0 ||
+            !file.ends_with(inode)) {
             continue;
         }
+        const auto holder = static_cast<pid_t>(pid);
+        if (std::ranges::contains(holders, holder)) {
+            continue;
+        }
+        const std::filesystem::path process{"/proc/" + std::to_string(pid)};
         // A process whose main thread has exited shows no files of its own
         // while its other threads still hold them: looked for there too.
-        // Only then: a live process's threads share its files, and reading
-        // them once per thread of every browser took seconds.
-        const auto holds = [&target](const std::filesystem::path& descriptors) {
-            std::error_code unreadable;
-            for (const auto& descriptor :
-                 std::filesystem::directory_iterator{descriptors, unreadable}) {
-                std::error_code gone;
-                if (std::filesystem::read_symlink(descriptor.path(), gone) == target) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        bool held = holds(process.path() / "fd");
-        if (!held && mainThreadExited(static_cast<pid_t>(std::stoi(name)))) {
+        bool held = holds(process / "fd");
+        if (!held && mainThreadExited(holder)) {
             std::error_code unreadable;
             for (const auto& task :
-                 std::filesystem::directory_iterator{process.path() / "task", unreadable}) {
+                 std::filesystem::directory_iterator{process / "task", unreadable}) {
                 if (holds(task.path() / "fd")) {
                     held = true;
                     break;
@@ -546,7 +567,7 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
             }
         }
         if (held) {
-            holders.push_back(static_cast<pid_t>(std::stoi(name)));
+            holders.push_back(holder);
         }
     }
 #endif

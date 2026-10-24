@@ -119,7 +119,7 @@ struct LocalEngineSharing final {
 // adopted it, and in a container that may be a PID 1 that never reaps.
 [[nodiscard]] bool processRunning(pid_t pid);
 
-// The processes holding a lock file open: the engine, for its engine.lock.
+// The processes holding a lock file locked: the engine, for its engine.lock.
 [[nodiscard]] std::vector<pid_t> lockHolders(const std::filesystem::path& lock);
 
 // The melodyd installed beside this executable, or the build tree's.

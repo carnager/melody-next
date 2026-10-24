@@ -278,6 +278,9 @@ class MultiIdentifySession final : public QObject {
     // Goes once nothing it was given is left to stage: the window that
     // showed it may close before.
     void release();
+    // ADR-0316: once the albums applied are staged, their front covers
+    // fetched from the Cover Art Archive by the tagger.
+    void setFetchCovers(bool fetch) { fetch_covers_ = fetch; }
 
   signals:
     void changed();
@@ -308,6 +311,9 @@ class MultiIdentifySession final : public QObject {
     // The tagger refused one of the albums applied last: said, not closed.
     bool refused_{false};
     bool released_{false};
+    bool fetch_covers_{false};
+    // The albums the last apply() staged, for their covers.
+    std::vector<std::size_t> applied_;
 };
 
 } // namespace trackknife::bench

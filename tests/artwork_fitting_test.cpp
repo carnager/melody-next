@@ -7,7 +7,9 @@
 
 #include <QFile>
 #include <QImage>
+#include <QBuffer>
 #include <QImageReader>
+#include <QImageWriter>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -20,9 +22,10 @@ class ArtworkFittingTest final : public QObject {
   private slots:
     void aLargeScanBecomesASmallJpeg();
     void aCoverThatFitsIsLeftAlone();
-    void transparencyKeepsPng();
+    void transparencyIsFlattenedIntoAJpeg();
     void anOpaquePngBecomesJpeg();
     void aCoverOverTheInputLimitCanStillBeShrunk();
+    void anyImageBecomesTheJpegMelodyWrites();
 };
 
 namespace {
@@ -76,7 +79,7 @@ void ArtworkFittingTest::aCoverThatFitsIsLeftAlone() {
     QVERIFY(!QDir{directory.filePath(QStringLiteral("drafts"))}.exists());
 }
 
-void ArtworkFittingTest::transparencyKeepsPng() {
+void ArtworkFittingTest::transparencyIsFlattenedIntoAJpeg() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     QImage logo{2000, 2000, QImage::Format_ARGB32};
@@ -87,10 +90,12 @@ void ArtworkFittingTest::transparencyKeepsPng() {
     const auto source = saved(directory, logo, QStringLiteral("logo.png"), "PNG");
     const auto fitted = fitArtworkImage(source, 500U, directory.path());
     QVERIFY(fitted.has_value());
-    QCOMPARE(fitted->mime_type, std::string{"image/png"});
+    // ADR-0317: a cover is a JPEG -- transparency over white.
+    QCOMPARE(fitted->mime_type, std::string{"image/jpeg"});
     const auto result = decoded(*fitted);
     QCOMPARE(result.size(), QSize(500, 500));
-    QCOMPARE(qAlpha(result.pixel(0, 0)), 0);
+    QVERIFY(qRed(result.pixel(0, 0)) > 250 && qGreen(result.pixel(0, 0)) > 250 &&
+            qBlue(result.pixel(0, 0)) > 250);
 }
 
 void ArtworkFittingTest::anOpaquePngBecomesJpeg() {
@@ -122,6 +127,33 @@ void ArtworkFittingTest::aCoverOverTheInputLimitCanStillBeShrunk() {
     QVERIFY(fitted.has_value());
     QVERIFY(fitted->byte_size < 16U * 1024U * 1024U);
     QCOMPARE(decoded(*fitted).size(), QSize(1500, 1000));
+}
+
+// ADR-0317: whatever comes in -- a BMP, a WebP where Qt reads it -- is the
+// JPEG Melody writes, no larger than the edge; one that fits keeps its size.
+void ArtworkFittingTest::anyImageBecomesTheJpegMelodyWrites() {
+    QImage picture{1600, 1200, QImage::Format_RGB32};
+    picture.fill(Qt::darkGreen);
+    QList<QByteArray> formats{"BMP", "PNG"};
+    if (QImageWriter::supportedImageFormats().contains("webp") &&
+        QImageReader::supportedImageFormats().contains("webp"))
+        formats << "WEBP";
+    for (const auto& format : formats) {
+        QByteArray encoded;
+        QBuffer buffer{&encoded};
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QVERIFY2(picture.save(&buffer, format.constData()), format.constData());
+        buffer.close();
+        const auto cover = coverJpeg(encoded, 500U);
+        QVERIFY2(cover.has_value(), format.constData());
+        QVERIFY(cover->startsWith("\xFF\xD8"));
+        const auto decoded = QImage::fromData(*cover, "JPEG");
+        QCOMPARE(decoded.size(), QSize(500, 375));
+        const auto whole = coverJpeg(encoded, 0U);
+        QVERIFY(whole.has_value());
+        QCOMPARE(QImage::fromData(*whole, "JPEG").size(), QSize(1600, 1200));
+    }
+    QVERIFY(!coverJpeg(QByteArray{"not an image"}, 500U).has_value());
 }
 
 } // namespace trackknife::bench

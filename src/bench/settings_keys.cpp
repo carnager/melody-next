@@ -50,9 +50,13 @@ metadata::ArtworkStoragePolicy SettingsKeys::artworkPolicy() {
                                 .toString()
                                 .toStdString(),
             .max_embedded_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_embedded_edge_key), 0).toInt())),
+                0, settings.value(QLatin1String(artwork_max_embedded_edge_key),
+                                  artwork_default_max_edge)
+                       .toInt())),
             .max_folder_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_folder_edge_key), 0).toInt()))};
+                0, settings.value(QLatin1String(artwork_max_folder_edge_key),
+                                  artwork_default_max_edge)
+                       .toInt()))};
 }
 
 } // namespace trackknife::bench

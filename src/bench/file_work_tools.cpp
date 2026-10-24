@@ -89,14 +89,12 @@ stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const F
             }
             // Resized here first when every destination would shrink it: the
             // engine then makes each copy from this one.
-            std::optional<FittedArtwork> fitted;
-            if (edge > 0U) {
-                auto fit = fitArtworkBytes(*bytes, edge, cancellation);
-                if (!fit) {
-                    return std::unexpected(std::move(fit.error()));
-                }
-                fitted = std::move(*fit);
+            // A JPEG within the edge stays as it is; anything else is one.
+            auto fit = fitArtworkBytes(*bytes, edge, cancellation);
+            if (!fit) {
+                return std::unexpected(std::move(fit.error()));
             }
+            std::optional<FittedArtwork> fitted = std::move(*fit);
             auto there =
                 fitted ? tools.stage(std::span{
                              reinterpret_cast<const unsigned char*>(fitted->bytes.constData()),

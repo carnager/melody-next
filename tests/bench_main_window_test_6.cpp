@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench_main_window_test.hpp"
+#include "workspace/artwork_session.hpp"
 
 namespace trackknife::bench {
 
@@ -1066,10 +1067,9 @@ void BenchMainWindowTest::coverPolicyRoundTrip() {
     QVERIFY(embed && folder && name && buttons && embedded_edge && folder_edge);
     QVERIFY(embed->isChecked());
     QVERIFY(!folder->isChecked());
-    // No limit until one is chosen: existing behaviour is unchanged.
-    QCOMPARE(embedded_edge->value(), 0);
-    QCOMPARE(embedded_edge->text(), QStringLiteral("No limit"));
-    QCOMPARE(SettingsDialog::artworkPolicy().max_embedded_edge, 0U);
+    // ADR-0317: 1000 px until another limit is chosen.
+    QCOMPARE(embedded_edge->value(), 1000);
+    QCOMPARE(SettingsDialog::artworkPolicy().max_embedded_edge, 1000U);
     embed->setChecked(false);
     folder->setChecked(true);
     name->setCurrentText(QStringLiteral("front.jpg"));
@@ -1225,7 +1225,8 @@ void BenchMainWindowTest::coverThumbnailAppliesPolicy() {
     QTRY_VERIFY(!section->isBusy());
     QTRY_VERIFY(section->hasPendingChanges());
     QCOMPARE(section->pendingIntents().size(), embed ? 2U : 1U);
-    const auto destination = media.filePath(QStringLiteral("folder.png"));
+    // ADR-0317: written as a JPEG, whatever was pasted.
+    const auto destination = media.filePath(QStringLiteral("folder.jpg"));
     QVERIFY(!QFile::exists(destination));
     QVERIFY(!observed.has_value());
     QTRY_VERIFY(apply->isEnabled());
@@ -1382,6 +1383,207 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
     QCOMPARE(backups->size(), 1U);
 }
 
+// ADR-0316: with Fetch covers ticked, each album Identify applies has its
+// release's front cover from the Cover Art Archive staged, as Fetch cover…
+// stages one chosen: each album's for its own files.
+void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto alpha_id = QStringLiteral("11111111-2222-3333-4444-555555555555");
+    const auto beta_id = QStringLiteral("44444444-2222-3333-4444-555555555555");
+    const auto field = [](std::string name, std::vector<std::string> values) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = std::move(values),
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    std::vector<MetadataPropertiesSource> sources;
+    for (const auto& [album, release] :
+         {std::pair{std::string{"Alpha"}, alpha_id.toStdString()},
+          std::pair{std::string{"Beta"}, std::string{}}}) {
+        QVERIFY(QDir{media.path()}.mkpath(QString::fromStdString(album)));
+        const auto path = media.filePath(QString::fromStdString(album + "/01.flac"));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), path));
+        const auto encoded = QFile::encodeName(path);
+        const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+        auto read = metadata::read_local_metadata(raw_path);
+        QVERIFY(read.has_value());
+        auto document = read->document;
+        std::erase_if(document.fields, [](const metadata::MetadataField& each) {
+            return each.canonical_name == "ALBUM" || each.canonical_name == "ARTIST" ||
+                   each.canonical_name == "ALBUMARTIST" || each.canonical_name == "TITLE" ||
+                   each.canonical_name == "TRACKNUMBER" ||
+                   each.canonical_name == "MUSICBRAINZ_ALBUMID";
+        });
+        document.fields.push_back(field("ALBUM", {album}));
+        document.fields.push_back(field("ARTIST", {"Band"}));
+        document.fields.push_back(field("TITLE", {"One"}));
+        document.fields.push_back(field("TRACKNUMBER", {"1"}));
+        if (!release.empty()) {
+            document.fields.push_back(field("MUSICBRAINZ_ALBUMID", {release}));
+        }
+        sources.push_back(MetadataPropertiesSource{
+            .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                     .source_revision = read->source_revision,
+                                                     .baseline = std::move(document)},
+            .track_label = QString::fromStdString(album),
+        });
+    }
+    QImage cover{16, 16, QImage::Format_ARGB32};
+    cover.fill(Qt::darkCyan);
+    QByteArray png;
+    QBuffer buffer{&png};
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(cover.save(&buffer, "PNG"));
+    buffer.close();
+    const auto release_body = [](const QString& id, const char* title, const char* group) {
+        return QStringLiteral(R"json({
+          "id": "%1", "title": "%2", "status": "Official", "date": "1999-09-09",
+          "country": "DE", "release-group": {"id": "%3"},
+          "artist-credit": [{"name": "Band",
+            "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+          "media": [{"position": 1, "format": "CD", "track-count": 1, "tracks": [
+            {"id": "aaaa1111-0000-0000-0000-000000000001", "position": 1, "number": "1",
+             "title": "One",
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000001", "title": "One"}}
+          ]}]
+        })json")
+            .arg(id, QLatin1String{title}, QLatin1String{group})
+            .toUtf8();
+    };
+    const auto listing = [](const QString& id) {
+        return QStringLiteral(R"json({"images": [{"id": 7, "front": true, "approved": true,
+            "types": ["Front"], "image": "https://coverartarchive.org/release/%1/7.png"}]})json")
+            .arg(id)
+            .toUtf8();
+    };
+    QStringList covers_asked;
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
+                const auto plain = QUrl::fromPercentEncoding(url.toUtf8());
+                if (plain.contains(QStringLiteral("?query="))) {
+                    completion(QStringLiteral(R"json({"count": 1, "releases": [{
+                        "id": "%1", "score": 100, "title": "Beta", "status": "Official",
+                        "track-count": 1,
+                        "artist-credit": [{"name": "Band", "artist": {
+                          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+                        "release-group": {"id": "88888888-8888-7777-6666-555555555555"},
+                        "media": [{"format": "CD", "track-count": 1}]}]})json")
+                                   .arg(beta_id)
+                                   .toUtf8());
+                    return;
+                }
+                if (plain.contains(QStringLiteral("release?release-group="))) {
+                    completion(QByteArray{R"json({"release-count": 0, "releases": []})json"});
+                    return;
+                }
+                for (const auto& [id, title, group] :
+                     {std::tuple{alpha_id, "Alpha", "99999999-8888-7777-6666-555555555555"},
+                      std::tuple{beta_id, "Beta", "88888888-8888-7777-6666-555555555555"}}) {
+                    if (plain.contains(id + QStringLiteral("?inc="))) {
+                        completion(release_body(id, title, group));
+                        return;
+                    }
+                    if (plain == QStringLiteral("https://coverartarchive.org/release/") + id) {
+                        covers_asked << title;
+                        completion(listing(id));
+                        return;
+                    }
+                    if (plain.endsWith(id + QStringLiteral("/7.png"))) {
+                        completion(png);
+                        return;
+                    }
+                }
+                completion(std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                                       .message = "unexpected url",
+                                                       .context = {}}));
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+    const auto database_path =
+        std::filesystem::path{media.filePath(QStringLiteral("cover.sqlite3")).toStdString()};
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, service);
+    properties->setArtworkMutationServices(
+        ArtworkWritePlanApplierFactory{[database_path] {
+            return ArtworkWritePlanApplier{
+                [database_path](const metadata::ArtworkWritePlan& plan,
+                                const operations::ArtworkApplyProgressCallback& progress,
+                                const core::CancellationToken& cancellation)
+                    -> core::Result<operations::ArtworkApplyResult> {
+                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
+                    if (!opened) {
+                        return std::unexpected(std::move(opened.error()));
+                    }
+                    auto journal = std::move(*opened);
+                    return operations::apply_artwork_write_plan(
+                        plan,
+                        [&journal](const metadata::ArtworkWritePlanSource& source_plan,
+                                   const core::CancellationToken& source_cancellation) {
+                            return operations::commit_artwork_source(
+                                source_plan, journal,
+                                [](const operations::MetadataCommitResult&)
+                                    -> core::Result<void> { return {}; },
+                                source_cancellation);
+                        },
+                        progress, cancellation, operations::ArtworkApplyOptions{});
+                }};
+        }},
+        {});
+    properties->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = properties->fileListView()) != nullptr);
+    auto* grid = qobject_cast<MetadataGridModel*>(files->model());
+    auto* identify = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify"));
+    QVERIFY(grid != nullptr && identify != nullptr);
+    files->selectAll();
+    QTRY_VERIFY_WITH_TIMEOUT(identify->isEnabled(), 10'000);
+    QTest::mouseClick(identify, Qt::LeftButton);
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = properties->findChild<QDialog*>(
+                     QStringLiteral("bench-musicbrainz-identify"))) != nullptr);
+    QPointer<QDialog> open = dialog;
+    auto* fetch = dialog->findChild<QCheckBox*>(QStringLiteral("bench-musicbrainz-identify-fetch-covers"));
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    auto* next = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-next"));
+    QVERIFY(fetch != nullptr && apply != nullptr && next != nullptr);
+    QVERIFY(fetch->isChecked());
+    // Both albums seen, each previewed.
+    QTRY_COMPARE_WITH_TIMEOUT(apply->text(), QStringLiteral("Apply 1 album"), 10'000);
+    next->click();
+    QTRY_COMPARE_WITH_TIMEOUT(apply->text(), QStringLiteral("Apply 2 albums"), 10'000);
+    apply->click();
+    QTRY_VERIFY_WITH_TIMEOUT(open.isNull(), 10'000);
+    // Their covers, each staged for its own album's file.
+    auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
+    QVERIFY(status != nullptr);
+    QTRY_VERIFY2_WITH_TIMEOUT(status->text().contains(QStringLiteral("Covers fetched for 2 albums")),
+                              qPrintable(status->text()), 20'000);
+    QCOMPARE(covers_asked.size(), 2);
+    auto* artwork = properties->findChild<ArtworkSession*>();
+    QVERIFY(artwork != nullptr);
+    std::set<std::string> covered;
+    for (const auto& intent : artwork->pendingIntents()) {
+        if (intent.kind == metadata::ArtworkWritePlanIntentKind::add &&
+            intent.added_role == metadata::ArtworkRole::front) {
+            covered.insert(intent.raw_media_path);
+        }
+    }
+    QCOMPARE(covered.size(), std::size_t{2U});
+    QVERIFY(covered.contains(sources[0].source.raw_path));
+    QVERIFY(covered.contains(sources[1].source.raw_path));
+    delete properties;
+}
+
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront_data() {
     // ADR-0237: a downloaded cover is handed to the engine and written by it,
     // or written by this process -- the same section, the same result.
@@ -1391,6 +1593,12 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront_data() {
 }
 
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
+    // ADR-0317: covers are JPEGs: a colour within its loss.
+    const auto jpeg_close = [](const QColor& shown, const QColor& expected) {
+        return std::abs(shown.red() - expected.red()) <= 4 &&
+               std::abs(shown.green() - expected.green()) <= 4 &&
+               std::abs(shown.blue() - expected.blue()) <= 4;
+    };
     QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -1608,7 +1816,12 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     const auto shown = preview.deviceIndependentSize();
     QVERIFY(shown.width() <= 60.0 && shown.height() <= 60.0);
     QVERIFY(preview.devicePixelRatio() > 1.0);
-    QCOMPARE(preview.pixelColor(0, 0), QColor{Qt::darkCyan});
+    // A JPEG now (ADR-0317): the colour within its loss.
+    const auto shown_colour = preview.pixelColor(0, 0);
+    const QColor expected_colour{Qt::darkCyan};
+    QVERIFY(std::abs(shown_colour.red() - expected_colour.red()) <= 4 &&
+            std::abs(shown_colour.green() - expected_colour.green()) <= 4 &&
+            std::abs(shown_colour.blue() - expected_colour.blue()) <= 4);
     QCOMPARE(pending->model()->index(0, 4).data().toString(), QStringLiteral("None"));
     QVERIFY(!observed.has_value());
     QTest::mouseClick(save, Qt::LeftButton);
@@ -1628,7 +1841,8 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
         return item.role == metadata::ArtworkRole::front;
     });
     QVERIFY(added != inventory->items.end());
-    QCOMPARE(added->mime_type, std::string{"image/png"});
+    // ADR-0317: the archive's PNG written as Melody writes covers.
+    QCOMPARE(added->mime_type, std::string{"image/jpeg"});
     QCOMPARE(added->provenance, metadata::ArtworkProvenance::embedded);
 
     QCOMPARE(grid->selection().source(0).source_revision,
@@ -1746,12 +1960,11 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QCOMPARE(second_pending->model()->rowCount(), 2);
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
-    QCOMPARE(second_pending->model()
+    QVERIFY(jpeg_close(second_pending->model()
                  ->index(1, 5)
                  .data(Qt::DecorationRole)
                  .value<QImage>()
-                 .pixelColor(0, 0),
-             QColor{Qt::darkMagenta});
+                 .pixelColor(0, 0), QColor{Qt::darkMagenta}));
     auto* second_discard = second_properties->findChild<QPushButton*>(
         QStringLiteral("bench-metadata-artwork-discard"));
     QVERIFY(second_discard != nullptr);
@@ -1764,12 +1977,11 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_VERIFY(second_save->isEnabled());
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
-    QCOMPARE(second_pending->model()
+    QVERIFY(jpeg_close(second_pending->model()
                  ->index(1, 5)
                  .data(Qt::DecorationRole)
                  .value<QImage>()
-                 .pixelColor(0, 0),
-             QColor{Qt::darkMagenta});
+                 .pixelColor(0, 0), QColor{Qt::darkMagenta}));
     QVERIFY(!observed.has_value());
     QTest::mouseClick(second_save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
@@ -1788,7 +2000,9 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     const auto new_front = std::ranges::find_if(replaced->items, [](const auto& item) {
         return item.role == metadata::ArtworkRole::front;
     });
-    QCOMPARE(new_front->byte_size, static_cast<std::uint64_t>(second_png_bytes.size()));
+    // The second image, as Melody writes covers (ADR-0317): a 24 px JPEG.
+    QCOMPARE(new_front->mime_type, std::string{"image/jpeg"});
+    QCOMPARE(new_front->width, std::optional<std::uint32_t>{24U});
 
     QPointer second_guard{second_properties};
     second_properties->close();
@@ -2033,8 +2247,9 @@ void BenchMainWindowTest::artworkArchivePickerAddsChosenImageWithItsRole() {
         return item.role == metadata::ArtworkRole::back;
     });
     QVERIFY(added != inventory->items.end());
-    QCOMPARE(added->mime_type, std::string{"image/png"});
-    QCOMPARE(added->byte_size, static_cast<std::uint64_t>(back_bytes.size()));
+    // ADR-0317: as Melody writes covers, a JPEG.
+    QCOMPARE(added->mime_type, std::string{"image/jpeg"});
+    QVERIFY(added->byte_size > 0U);
 
     QPointer guard{properties};
     properties->close();

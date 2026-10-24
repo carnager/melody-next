@@ -117,6 +117,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion_data() {
 
 void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     QFETCH(bool, untagged);
+    // Its covers are another test's (ADR-0316).
+    QSettings{}.setValue(QStringLiteral("identify/fetch-covers"), false);
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{
             .canonical_name = metadata::canonicalize_field_name(name),

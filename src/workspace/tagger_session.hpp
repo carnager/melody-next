@@ -157,6 +157,10 @@ class TaggerArtwork {
     virtual void setScope(std::vector<MetadataArtworkScopeSource> sources,
                           bool source_limit_exceeded) = 0;
     virtual void setCoverArtRelease(std::optional<QString> release_id) = 0;
+    // ADR-0316: the Cover Art Archive's front cover of the release the
+    // files in scope carry, staged as Fetch cover… stages one chosen --
+    // their artwork read first, shown or not. `done`: staged, or why not.
+    virtual void stageArchiveFront(std::function<void(bool, QString)> done) = 0;
 };
 
 // One tag-editing session (the "Edit tags" window): the selected files read
@@ -392,6 +396,11 @@ class TaggerSession final : public QObject {
     // None while Identify cannot run.
     [[nodiscard]] std::vector<Identify> identifyAlbums() const;
     void applyMusicBrainzProposals(metadata::MetadataProposalSet proposals);
+    // ADR-0316: each album's front cover from the Cover Art Archive, in
+    // turn -- its files selected, the front of the release they now carry
+    // staged as Fetch cover… stages it. coversFetched says how it went.
+    void fetchCovers(std::vector<std::vector<std::size_t>> albums);
+    [[nodiscard]] bool fetchingCovers() const { return covers_asked_ > 0U; }
 
     // What the files open here are: how many, as read, and how long.
     [[nodiscard]] std::size_t itemCount() const;
@@ -480,6 +489,8 @@ class TaggerSession final : public QObject {
     // ADR-0261: a proposal set has been staged -- or not, saying why in the
     // status.
     void proposalsSettled(bool staged);
+    // fetchCovers is over: of so many albums, so many with a cover staged.
+    void coversFetched(std::size_t staged, std::size_t albums);
     // measureBeforeWrite() is over: the gains are in the draft (or there
     // was nothing to measure), or not, saying why in the status.
     void gainsMeasured(bool ok);
@@ -557,6 +568,12 @@ class TaggerSession final : public QObject {
     MetadataPropertiesSourceReader source_reader_;
     TaggerServices services_;
     TaggerArtwork* artwork_{nullptr};
+    // fetchCovers's albums still to do, and how it is going.
+    std::deque<std::vector<std::size_t>> covers_to_fetch_;
+    std::size_t covers_asked_{0U};
+    std::size_t covers_staged_{0U};
+    QString covers_why_;
+    void fetchNextCover();
     ArtworkWritePlanApplierFactory artwork_plan_applier_factory_;
     ArtworkApplyObserver artwork_apply_observer_;
     std::unique_ptr<QTemporaryDir> cover_art_directory_;

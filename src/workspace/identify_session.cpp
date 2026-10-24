@@ -1109,6 +1109,7 @@ void MultiIdentifySession::lookAhead() {
 
 void MultiIdentifySession::apply() {
     refused_ = false;
+    applied_.clear();
     for (std::size_t index = 0; index < albums_.size(); ++index) {
         auto& album = albums_[index];
         if (album.skipped || album.applied || !ready(album)) {
@@ -1120,6 +1121,7 @@ void MultiIdentifySession::apply() {
         if (to_stage_.size() > queued) {
             album.applied = true;
             album.note.clear();
+            applied_.push_back(index);
         }
     }
     emit changed();
@@ -1158,6 +1160,16 @@ void MultiIdentifySession::settled(const bool staged) {
         // Every album applied taken: done. One the tagger refused keeps the
         // window open, saying why.
         if (!refused_ && std::ranges::any_of(albums_, &Album::staged)) {
+            // Their covers, by the tagger, once the window has gone.
+            if (fetch_covers_ && !tagger_.isNull()) {
+                std::vector<std::vector<std::size_t>> covers;
+                for (const auto index : std::exchange(applied_, {})) {
+                    if (albums_[index].staged) {
+                        covers.push_back(albums_[index].files.items);
+                    }
+                }
+                tagger_->fetchCovers(std::move(covers));
+            }
             emit finished();
         }
         if (released_) {

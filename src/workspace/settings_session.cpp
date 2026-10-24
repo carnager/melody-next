@@ -109,8 +109,10 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     read(QLatin1String(SettingsKeys::artwork_folder_image_key), false);
     read(QLatin1String(SettingsKeys::artwork_folder_image_name_key), QStringLiteral("cover.jpg"));
     read(QLatin1String(SettingsKeys::artwork_fetch_source_key), QStringLiteral("coverartarchive"));
-    read(QLatin1String(SettingsKeys::artwork_max_embedded_edge_key), 0);
-    read(QLatin1String(SettingsKeys::artwork_max_folder_edge_key), 0);
+    read(QLatin1String(SettingsKeys::artwork_max_embedded_edge_key),
+         SettingsKeys::artwork_default_max_edge);
+    read(QLatin1String(SettingsKeys::artwork_max_folder_edge_key),
+         SettingsKeys::artwork_default_max_edge);
     read(QLatin1String(SettingsKeys::acoustid_client_key), QString{});
     read(lastfm_key, QString{});
 

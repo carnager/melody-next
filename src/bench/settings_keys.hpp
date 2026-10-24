@@ -95,6 +95,8 @@ struct SettingsKeys {
     // Longest edge of a newly written cover, in pixels; 0 is no limit.
     static constexpr auto artwork_max_embedded_edge_key = "artwork/max-embedded-edge";
     static constexpr auto artwork_max_folder_edge_key = "artwork/max-folder-edge";
+    // ADR-0317: covers written at most this large unless set otherwise.
+    static constexpr int artwork_default_max_edge = 1000;
 };
 
 } // namespace trackknife::bench

@@ -630,6 +630,75 @@ void TaggerSession::describeSelection(const metadata::StagedMetadataSelection& s
                                   .arg(item_count - revision_count);
 }
 
+void TaggerSession::fetchCovers(std::vector<std::vector<std::size_t>> albums) {
+    if (artwork_ == nullptr || grid_model_ == nullptr || albums.empty() || fetchingCovers()) {
+        return;
+    }
+    covers_to_fetch_.assign(albums.begin(), albums.end());
+    covers_asked_ = albums.size();
+    covers_staged_ = 0U;
+    covers_why_.clear();
+    fetchNextCover();
+}
+
+void TaggerSession::fetchNextCover() {
+    if (covers_to_fetch_.empty() || artwork_ == nullptr || grid_model_ == nullptr) {
+        const auto asked = std::exchange(covers_asked_, 0U);
+        const auto staged = covers_staged_;
+        covers_to_fetch_.clear();
+        selectAllRows();
+        // Said until something else is: the staging said before it is done.
+        sticky_status_ = staged == asked
+                      ? QStringLiteral("Covers fetched for %1 %2")
+                            .arg(asked)
+                            .arg(asked == 1U ? QStringLiteral("album") : QStringLiteral("albums"))
+                      : QStringLiteral("Covers fetched for %1 of %2 albums%3")
+                            .arg(staged)
+                            .arg(asked)
+                            .arg(covers_why_.isEmpty() ? QString{}
+                                                       : QStringLiteral(" · ") + covers_why_);
+        setStatus(sticky_status_);
+        emit changed();
+        emit coversFetched(staged, asked);
+        return;
+    }
+    const auto items = covers_to_fetch_.front();
+    covers_to_fetch_.pop_front();
+    // Its files, and only them: the scope the cover is staged for.
+    QItemSelection rows;
+    for (const auto item : items) {
+        const auto row = static_cast<int>(item);
+        if (row < grid_model_->rowCount()) {
+            rows.select(grid_model_->index(row, 0),
+                        grid_model_->index(row, grid_model_->columnCount() - 1));
+        }
+    }
+    file_selection_->select(rows, QItemSelectionModel::ClearAndSelect);
+    selection_debounce_.stop();
+    updateSelectionProjection();
+    setStatus(QStringLiteral("Fetching covers · album %1 of %2…")
+                  .arg(covers_asked_ - covers_to_fetch_.size())
+                  .arg(covers_asked_));
+    emit changed();
+    const QPointer self{this};
+    artwork_->stageArchiveFront([self](const bool staged, const QString& why) {
+        if (self.isNull()) {
+            return;
+        }
+        if (staged) {
+            ++self->covers_staged_;
+        } else if (self->covers_why_.isEmpty()) {
+            self->covers_why_ = why;
+        }
+        // Not within the artwork's own call.
+        QTimer::singleShot(0, self, [self] {
+            if (!self.isNull()) {
+                self->fetchNextCover();
+            }
+        });
+    });
+}
+
 void TaggerSession::selectAllRows() {
     if (grid_model_ == nullptr || grid_model_->rowCount() == 0) {
         return;

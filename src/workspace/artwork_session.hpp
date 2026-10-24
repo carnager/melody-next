@@ -67,6 +67,7 @@ class ArtworkSession final : public QObject, public TaggerArtwork {
     void setScope(std::vector<MetadataArtworkScopeSource> sources,
                   bool source_limit_exceeded = false) override;
     void setCoverArtRelease(std::optional<QString> release_id) override;
+    void stageArchiveFront(std::function<void(bool, QString)> done) override;
 
     // ADR-0237: where it reads, resizes and hands over artwork -- this
     // process's until set.
@@ -177,7 +178,19 @@ class ArtworkSession final : public QObject, public TaggerArtwork {
     [[nodiscard]] bool localCoversOffered() const;
     [[nodiscard]] bool archiveReady() const;
     void useArchiveImage(const musicbrainz::CoverArtImage& image);
-    void reviewFetchedCover(const std::string& replacement_raw_path);
+    // ADR-0317: bytes coming in made the cover Melody writes, off the UI
+    // thread; `then` on it, with the JPEG or why not.
+    void asCover(std::function<core::Result<QByteArray>()> read,
+                 std::function<void(core::Result<QByteArray>)> then);
+    // A file chosen as a cover, converted and stored; `then` with where.
+    void coverFromFile(const QString& path, std::function<void(std::string raw_path)> then);
+    // Read while shown -- or while a front is to be staged unseen.
+    [[nodiscard]] bool reading() const { return active_ || archive_front_ != nullptr; }
+    // The front cover asked for by stageArchiveFront, once the files are read.
+    void continueArchiveFront();
+    void finishArchiveFront(bool staged, const QString& why);
+    // Staged, or said why not.
+    bool reviewFetchedCover(const std::string& replacement_raw_path);
     void dispatchReview(std::vector<metadata::ArtworkWritePlanIntent> intents);
     void startReview(metadata::ArtworkWritePlanIntentKind kind,
                      std::optional<std::string> replacement_raw_path,
@@ -264,6 +277,7 @@ class ArtworkSession final : public QObject, public TaggerArtwork {
     bool apply_running_{false};
     bool export_running_{false};
     bool cover_fetch_running_{false};
+    std::shared_ptr<std::function<void(bool, QString)>> archive_front_;
     bool stop_requested_{false};
     bool add_available_{false};
 };

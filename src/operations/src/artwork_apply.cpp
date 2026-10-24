@@ -33,10 +33,14 @@ constexpr std::size_t maximum_apply_parallelism = 8U;
     return result;
 }
 
-[[nodiscard]] bool exceeds(const metadata::ArtworkImageFile& image, const std::uint32_t edge) {
-    // Unknown dimensions go to the fitter, which decodes and knows.
-    return edge != 0U &&
-           (!image.width || !image.height || std::max(*image.width, *image.height) > edge);
+// ADR-0317: what is written is a JPEG within the edge -- converted when it is
+// larger, or no JPEG. Unknown dimensions go to the fitter, which decodes and
+// knows.
+[[nodiscard]] bool needs_fitting(const metadata::ArtworkImageFile& image,
+                                 const std::uint32_t edge) {
+    return image.mime_type != "image/jpeg" ||
+           (edge != 0U &&
+            (!image.width || !image.height || std::max(*image.width, *image.height) > edge));
 }
 
 struct FittedCovers {
@@ -58,7 +62,9 @@ fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
     FittedCovers fitted{.intents = intents, .folder_images = {}};
     const auto embed_edge = policy.embed ? policy.max_embedded_edge : 0U;
     const auto folder_edge = policy.write_folder_image ? policy.max_folder_edge : 0U;
-    if (embed_edge == 0U && folder_edge == 0U)
+    // Without a converter -- a caller that never resizes -- covers go as
+    // they are, unless a size limit asks for one.
+    if (!fitter && embed_edge == 0U && folder_edge == 0U)
         return fitted;
     if (!fitter)
         return std::unexpected(apply_error(core::ErrorCode::invalid_argument,
@@ -95,7 +101,7 @@ fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
                 return std::unexpected(source.error());
             const auto fit =
                 [&](const std::uint32_t edge) -> core::Result<metadata::ArtworkImageFile> {
-                if (!exceeds(*source, edge))
+                if (!needs_fitting(*source, edge))
                     return *source;
                 return fitter(*source, edge, cancellation);
             };

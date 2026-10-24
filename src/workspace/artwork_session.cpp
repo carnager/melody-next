@@ -3,6 +3,7 @@
 #include "workspace/artwork_session.hpp"
 
 #include "bench/artwork_fitting.hpp"
+#include "bench/file_work_tools.hpp"
 #include "bench/settings_keys.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/operations/artwork_export.hpp"
@@ -14,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFutureWatcher>
 #include <QImageReader>
 #include <QPointer>
 #include <QSaveFile>
@@ -572,7 +574,7 @@ void ArtworkSession::setScope(std::vector<MetadataArtworkScopeSource> sources,
     cancellation_.request_cancellation();
     mutation_cancellation_.request_cancellation();
     debounce_.stop();
-    if (active_) {
+    if (reading()) {
         scheduleInventory();
     }
 }
@@ -593,7 +595,7 @@ void ArtworkSession::setActive(const bool active) {
 }
 
 void ArtworkSession::scheduleInventory() {
-    if (!active_) {
+    if (!reading()) {
         return;
     }
     if (scope_.empty()) {
@@ -601,6 +603,7 @@ void ArtworkSession::scheduleInventory() {
         setStatus(QStringLiteral("Select at least one file to inspect artwork"));
         displayed_generation_ = generation_;
         emit changed();
+        continueArchiveFront();
         return;
     }
     if (source_limit_exceeded_ || scope_.size() > metadata_artwork_source_limit) {
@@ -610,6 +613,7 @@ void ArtworkSession::scheduleInventory() {
                       .arg(metadata_artwork_source_limit));
         displayed_generation_ = generation_;
         emit changed();
+        continueArchiveFront();
         return;
     }
     setStatus(QStringLiteral("Preparing artwork inventory for %1 %2…")
@@ -624,7 +628,7 @@ void ArtworkSession::scheduleInventory() {
 }
 
 void ArtworkSession::startInventory() {
-    if (!active_ || job_running_ || scope_.empty() || source_limit_exceeded_ ||
+    if (!reading() || job_running_ || scope_.empty() || source_limit_exceeded_ ||
         scope_.size() > metadata_artwork_source_limit) {
         return;
     }
@@ -703,8 +707,8 @@ void ArtworkSession::startInventory() {
 void ArtworkSession::finishInventory() {
     job_running_ = false;
     const auto result = watcher_.result();
-    if (!result || !active_ || result->generation != generation_) {
-        if (active_ && displayed_generation_ != generation_) {
+    if (!result || !reading() || result->generation != generation_) {
+        if (reading() && displayed_generation_ != generation_) {
             scheduleInventory();
         }
         emit changed();
@@ -776,6 +780,7 @@ void ArtworkSession::finishInventory() {
     showFront(front_image_, front_mixed_);
     displayed_generation_ = result->generation;
     emit changed();
+    continueArchiveFront();
 }
 
 void ArtworkSession::clearPresentation() {
@@ -1098,41 +1103,199 @@ void ArtworkSession::useArchiveImage(const musicbrainz::CoverArtImage& image) {
                               .arg(*cover_release_id_, QString::fromStdString(image.id),
                                    display_utf8(metadata::artwork_role_name(role)));
     const QPointer self{this};
+    const auto refused = [self](const QString& text) {
+        self->cover_fetch_running_ = false;
+        self->setStatus(text);
+        emit self->changed();
+        self->finishArchiveFront(false, text);
+    };
     cover_service_.fetch_bytes(
         QString::fromStdString(image.image_url),
-        [self, generation, identity, role](core::Result<QByteArray> bytes) {
+        [self, generation, identity, role, refused](core::Result<QByteArray> bytes) {
             if (self.isNull()) {
                 return;
             }
-            self->cover_fetch_running_ = false;
-            const auto refused = [&self](const QString& text) {
-                self->setStatus(text);
-                emit self->changed();
-            };
             if (!bytes) {
                 refused(QStringLiteral("No image was added · %1")
                             .arg(display_utf8(bytes.error().message)));
                 return;
             }
-            const auto stored = self->cover_service_.store_image(identity, *bytes);
-            if (!stored) {
-                refused(QStringLiteral("No image was added · %1")
-                            .arg(display_utf8(stored.error().message)));
-                return;
-            }
-            if (self->generation_ != generation) {
-                refused(QStringLiteral("The selection changed while fetching; no image was added"));
-                return;
-            }
-            const auto encoded = QFile::encodeName(*stored);
-            std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
-            if (role == metadata::ArtworkRole::front) {
-                self->reviewFetchedCover(raw_path);
-            } else {
-                self->startReview(metadata::ArtworkWritePlanIntentKind::add, std::move(raw_path),
-                                  role);
-            }
+            // ADR-0317: as Melody writes covers -- a JPEG within the edge --
+            // whatever the archive keeps, off this thread.
+            self->asCover(
+                [fetched = std::move(*bytes)] { return core::Result<QByteArray>{fetched}; },
+                [self, generation, identity, role, refused](core::Result<QByteArray> cover) {
+                    if (self.isNull()) {
+                        return;
+                    }
+                    if (!cover) {
+                        refused(QStringLiteral("No image was added · %1")
+                                    .arg(display_utf8(cover.error().message)));
+                        return;
+                    }
+                    const auto stored = self->cover_service_.store_image(identity, *cover);
+                    if (!stored) {
+                        refused(QStringLiteral("No image was added · %1")
+                                    .arg(display_utf8(stored.error().message)));
+                        return;
+                    }
+                    if (self->generation_ != generation) {
+                        refused(QStringLiteral(
+                            "The selection changed while fetching; no image was added"));
+                        return;
+                    }
+                    self->cover_fetch_running_ = false;
+                    const auto encoded = QFile::encodeName(*stored);
+                    std::string raw_path{encoded.constData(),
+                                         static_cast<std::size_t>(encoded.size())};
+                    if (role == metadata::ArtworkRole::front) {
+                        const auto staged = self->reviewFetchedCover(raw_path);
+                        self->finishArchiveFront(staged, staged ? QString{} : self->status_);
+                    } else {
+                        self->startReview(metadata::ArtworkWritePlanIntentKind::add,
+                                          std::move(raw_path), role);
+                    }
+                });
         });
+}
+
+void ArtworkSession::asCover(std::function<core::Result<QByteArray>()> read,
+                             std::function<void(core::Result<QByteArray>)> then) {
+    const auto edge = largestCoverEdge(SettingsKeys::artworkPolicy());
+    auto* watcher = new QFutureWatcher<core::Result<QByteArray>>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this,
+            [watcher, then = std::move(then)] {
+                watcher->deleteLater();
+                then(watcher->result());
+            });
+    watcher->setFuture(QtConcurrent::run([read = std::move(read), edge] {
+        auto bytes = read();
+        return bytes ? coverJpeg(*bytes, edge) : bytes;
+    }));
+}
+
+void ArtworkSession::coverFromFile(const QString& path,
+                                   std::function<void(std::string raw_path)> then) {
+    const auto encoded = QFile::encodeName(path);
+    std::string original{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    // Without a store for converted images, the file as it is.
+    if (!cover_service_.store_image) {
+        then(std::move(original));
+        return;
+    }
+    cover_fetch_running_ = true;
+    setStatus(QStringLiteral("Reading %1…").arg(QFileInfo{path}.fileName()));
+    emit changed();
+    const auto identity =
+        QStringLiteral("file-") +
+        QString::fromLatin1(
+            QCryptographicHash::hash(encoded, QCryptographicHash::Sha1).toHex().left(16));
+    const QPointer self{this};
+    asCover(
+        [path]() -> core::Result<QByteArray> {
+            QFile file{path};
+            if (!file.open(QIODevice::ReadOnly)) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                                   .message = file.errorString().toStdString(),
+                                                   .context = {}});
+            }
+            if (file.size() > static_cast<qint64>(operations::maximum_fittable_artwork_bytes)) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
+                                                   .message = "the image is too large",
+                                                   .context = {}});
+            }
+            return file.readAll();
+        },
+        [self, identity, then = std::move(then)](core::Result<QByteArray> cover) {
+            if (self.isNull()) {
+                return;
+            }
+            self->cover_fetch_running_ = false;
+            const auto stored =
+                cover ? self->cover_service_.store_image(identity, *cover)
+                      : core::Result<QString>{std::unexpected(std::move(cover.error()))};
+            if (!stored) {
+                self->setStatus(QStringLiteral("No image was added · %1")
+                                    .arg(display_utf8(stored.error().message)));
+                emit self->changed();
+                return;
+            }
+            const auto encoded_path = QFile::encodeName(*stored);
+            then(std::string{encoded_path.constData(),
+                             static_cast<std::size_t>(encoded_path.size())});
+        });
+}
+
+// ADR-0316: a front cover fetched without the picker -- Identify's.
+
+void ArtworkSession::stageArchiveFront(std::function<void(bool, QString)> done) {
+    if (archive_front_ != nullptr) {
+        (*archive_front_)(false, QStringLiteral("Another cover is being fetched"));
+    }
+    archive_front_ = std::make_shared<std::function<void(bool, QString)>>(std::move(done));
+    if (displayed_generation_ == generation_ && !job_running_) {
+        continueArchiveFront();
+    } else {
+        scheduleInventory();
+    }
+}
+
+void ArtworkSession::continueArchiveFront() {
+    if (archive_front_ == nullptr || displayed_generation_ != generation_ || cover_fetch_running_) {
+        return;
+    }
+    if (!coverServiceReady()) {
+        finishArchiveFront(false, QStringLiteral("Covers are not fetched from the Cover Art "
+                                                 "Archive in Cover settings"));
+        return;
+    }
+    if (!cover_release_id_ || !add_available_) {
+        finishArchiveFront(false, QStringLiteral("The files name no one release"));
+        return;
+    }
+    const auto generation = generation_;
+    const QPointer self{this};
+    cover_service_.fetch_listing(*cover_release_id_, [self, generation](
+                                                         core::Result<musicbrainz::CoverArtListing>
+                                                             listing) {
+        if (self.isNull() || self->archive_front_ == nullptr) {
+            return;
+        }
+        if (self->generation_ != generation) {
+            self->finishArchiveFront(false, QStringLiteral("The files changed while fetching"));
+            return;
+        }
+        if (!listing) {
+            self->finishArchiveFront(false, QStringLiteral("The Cover Art Archive could not be "
+                                                           "asked · %1")
+                                                .arg(display_utf8(listing.error().message)));
+            return;
+        }
+        const auto front = musicbrainz::select_front_cover(*listing);
+        if (!front) {
+            self->finishArchiveFront(false, QStringLiteral("The Cover Art Archive has no front "
+                                                           "cover for this release"));
+            return;
+        }
+        self->useArchiveImage(listing->images[*front]);
+        // Not fetched after all -- busy, not ready: said, not waited for.
+        if (!self->cover_fetch_running_ && self->archive_front_ != nullptr) {
+            self->finishArchiveFront(false, self->status_);
+        }
+    });
+}
+
+void ArtworkSession::finishArchiveFront(const bool staged, const QString& why) {
+    if (archive_front_ == nullptr) {
+        return;
+    }
+    const auto done = std::exchange(archive_front_, nullptr);
+    if (!active_) {
+        // Read only for this: let go of what was read.
+        cancellation_.request_cancellation();
+        debounce_.stop();
+    }
+    (*done)(staged, why);
 }
 
 // Staging.
@@ -1151,19 +1314,20 @@ void ArtworkSession::add(const QString& path, const int role_index) {
         static_cast<std::size_t>(role_index) >= role_values.size()) {
         return;
     }
-    const auto encoded = QFile::encodeName(path);
-    startReview(metadata::ArtworkWritePlanIntentKind::add,
-                std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())},
-                role_values[static_cast<std::size_t>(role_index)]);
+    // ADR-0317: whatever the file is, the JPEG Melody writes.
+    coverFromFile(path, [this, role = role_values[static_cast<std::size_t>(role_index)]](
+                            std::string raw_path) {
+        startReview(metadata::ArtworkWritePlanIntentKind::add, std::move(raw_path), role);
+    });
 }
 
 void ArtworkSession::replace(const QString& path) {
     if (path.isEmpty()) {
         return;
     }
-    const auto encoded = QFile::encodeName(path);
-    startReview(metadata::ArtworkWritePlanIntentKind::replace,
-                std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
+    coverFromFile(path, [this](std::string raw_path) {
+        startReview(metadata::ArtworkWritePlanIntentKind::replace, std::move(raw_path));
+    });
 }
 
 void ArtworkSession::removeSelected() {
@@ -1272,20 +1436,24 @@ void ArtworkSession::dispatchReview(std::vector<metadata::ArtworkWritePlanIntent
 // The fetched archive front becomes each file's front cover: replacing the
 // existing embedded front picture where one exists, adding one otherwise —
 // never stacking a second front.
-void ArtworkSession::reviewFetchedCover(const std::string& replacement_raw_path) {
+bool ArtworkSession::reviewFetchedCover(const std::string& replacement_raw_path) {
     if (!applier_factory_ || plan_running_ || apply_running_ || job_running_ ||
         displayed_generation_ != generation_ || !add_available_) {
-        return;
+        return false;
     }
     const auto policy = SettingsKeys::artworkPolicy();
     if (!policy.embed && !policy.write_folder_image) {
         setStatus(QStringLiteral("Enable a cover destination in Cover settings"));
         emit changed();
-        return;
+        return false;
     }
-    std::erase_if(pending_intents_, [](const auto& intent) {
+    // The front staged for these files goes; another album's stays.
+    std::erase_if(pending_intents_, [this](const auto& intent) {
         return intent.kind == metadata::ArtworkWritePlanIntentKind::add &&
-               intent.added_role == metadata::ArtworkRole::front;
+               intent.added_role == metadata::ArtworkRole::front &&
+               std::ranges::any_of(scope_, [&intent](const auto& source) {
+                   return source.raw_path == intent.raw_media_path;
+               });
     });
     std::vector<metadata::ArtworkWritePlanIntent> intents;
     for (const auto& source : scope_) {
@@ -1325,9 +1493,10 @@ void ArtworkSession::reviewFetchedCover(const std::string& replacement_raw_path)
     if (intents.empty()) {
         setStatus(QStringLiteral("Select at least one writable FLAC, MP3, or MP4 file"));
         emit changed();
-        return;
+        return false;
     }
     dispatchReview(std::move(intents));
+    return true;
 }
 
 void ArtworkSession::discardPendingChanges() {

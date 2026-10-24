@@ -8,6 +8,7 @@
 #include "trackknife/musicbrainz/proposal_bridge.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -198,6 +199,7 @@ class IdentifyAlbumPage final : public QWidget {
 // shown, where there is more than one.
 class MusicBrainzIdentifyDialog final : public QDialog {
     static constexpr auto geometry_key = "identify/geometry";
+    static constexpr auto fetch_covers_key = "identify/fetch-covers";
 
   public:
     MusicBrainzIdentifyDialog(MultiIdentifySession* session, QWidget* parent)
@@ -263,6 +265,20 @@ class MusicBrainzIdentifyDialog final : public QDialog {
             button->setVisible(many);
             bottom->addWidget(button);
         }
+        // ADR-0316: the covers of the albums applied, fetched with them.
+        fetch_covers_ = new QCheckBox(QStringLiteral("Fetch covers"), this);
+        fetch_covers_->setObjectName(QStringLiteral("bench-musicbrainz-identify-fetch-covers"));
+        fetch_covers_->setToolTip(QStringLiteral(
+            "Stage each album's front cover from the Cover Art Archive with its tags, as Fetch "
+            "cover… does -- where Cover settings keep covers"));
+        fetch_covers_->setChecked(
+            QSettings{}.value(QLatin1String{fetch_covers_key}, true).toBool());
+        session_->setFetchCovers(fetch_covers_->isChecked());
+        connect(fetch_covers_, &QCheckBox::toggled, this, [this](const bool on) {
+            QSettings{}.setValue(QLatin1String{fetch_covers_key}, on);
+            session_->setFetchCovers(on);
+        });
+        bottom->addWidget(fetch_covers_);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
         buttons->setObjectName(QStringLiteral("bench-musicbrainz-identify-buttons"));
         apply_ = buttons->addButton(QStringLiteral("Apply"), QDialogButtonBox::AcceptRole);
@@ -383,6 +399,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     QPushButton* next_{nullptr};
     QPushButton* skip_{nullptr};
     QPushButton* apply_{nullptr};
+    QCheckBox* fetch_covers_{nullptr};
     bool showing_{false};
 };
 

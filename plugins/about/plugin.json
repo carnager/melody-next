@@ -66,6 +66,20 @@
       "requires": "missing",
       "help": "A personal access token: on Discogs's developer settings, Generate new token -- not an application's consumer key or secret. For an artist MusicBrainz does not know, and for covers when the Cover Art Archive does not answer",
       "link": "https://www.discogs.com/settings/developers"
+    },
+    {
+      "key": "dropwatch_url",
+      "label": "dropwatch address",
+      "requires": "missing",
+      "help": "A dropwatch's address, as http://nas:8080: the artist's albums from it, much faster than from MusicBrainz -- where it watches the artist. Empty: MusicBrainz",
+      "link": "https://github.com/carnager/dropwatch"
+    },
+    {
+      "key": "dropwatch_token",
+      "label": "dropwatch API token",
+      "kind": "secret",
+      "requires": "missing",
+      "help": "Where the dropwatch asks for one: its settings, Account"
     }
   ]
 }

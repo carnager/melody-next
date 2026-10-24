@@ -899,7 +899,7 @@ if(MELODY_BUILD_UI)
     qt_add_executable(trackknife_plugins_tests plugins_test.cpp)
     target_link_libraries(
         trackknife_plugins_tests
-        PRIVATE Trackknife::Workspace Qt6::Test trackknife_project_options
+        PRIVATE Trackknife::Workspace Qt6::Network Qt6::Test trackknife_project_options
                 trackknife_project_warnings
     )
     target_compile_definitions(trackknife_plugins_tests

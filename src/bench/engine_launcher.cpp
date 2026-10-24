@@ -453,6 +453,20 @@ namespace {
     return threads;
 }
 
+// Its main thread has exited, its other threads perhaps not: "1234 (melodyd)
+// Z ...", the state after the command name, which is in parentheses and may
+// itself contain them.
+[[nodiscard]] bool mainThreadExited(const pid_t pid) {
+    std::ifstream stat{"/proc/" + std::to_string(pid) + "/stat"};
+    std::string line;
+    if (!std::getline(stat, line)) {
+        return false;
+    }
+    const auto name_end = line.rfind(')');
+    return name_end != std::string::npos && name_end + 2 < line.size() &&
+           line[name_end + 2] == 'Z';
+}
+
 } // namespace
 #endif
 
@@ -468,15 +482,7 @@ bool processRunning(const pid_t pid) {
     }
     return true;
 #else
-    // The state follows the command name, which is in parentheses and may
-    // itself contain them: "1234 (melodyd) Z ...".
-    std::ifstream stat{"/proc/" + std::to_string(pid) + "/stat"};
-    std::string line;
-    if (!std::getline(stat, line)) {
-        return true;
-    }
-    const auto name_end = line.rfind(')');
-    if (name_end == std::string::npos || name_end + 2 >= line.size() || line[name_end + 2] != 'Z') {
+    if (!mainThreadExited(pid)) {
         return true;
     }
     // A zombie main thread is not a process gone: its other threads may still
@@ -515,6 +521,8 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
         }
         // A process whose main thread has exited shows no files of its own
         // while its other threads still hold them: looked for there too.
+        // Only then: a live process's threads share its files, and reading
+        // them once per thread of every browser took seconds.
         const auto holds = [&target](const std::filesystem::path& descriptors) {
             std::error_code unreadable;
             for (const auto& descriptor :
@@ -527,7 +535,7 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
             return false;
         };
         bool held = holds(process.path() / "fd");
-        if (!held && threadCount(static_cast<pid_t>(std::stoi(name))) > 1) {
+        if (!held && mainThreadExited(static_cast<pid_t>(std::stoi(name)))) {
             std::error_code unreadable;
             for (const auto& task :
                  std::filesystem::directory_iterator{process.path() / "task", unreadable}) {

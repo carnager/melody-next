@@ -787,7 +787,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     // (the cached path is theTaggerOpensOnCachedTagsAndReadsBehind's).
     auto* session = dialog->findChild<TaggerSession*>();
     QVERIFY(session != nullptr);
-    QTRY_VERIFY(session->ready() && session->canWriteElsewhere());
+    QTRY_VERIFY(session->ready() && session->canStageProposals());
     QVERIFY2(!read_only->text().contains(QStringLiteral("cached")),
              qPrintable(QStringLiteral("unexpected status: %1").arg(read_only->text())));
     QCOMPARE(buttons->standardButtons(), QDialogButtonBox::Close);

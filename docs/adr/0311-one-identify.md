@@ -2,9 +2,9 @@
 
 ## Status
 
-Point 1 accepted and implemented, 2026-10-24; points 2 to 4 remain a
-proposal. Would in the end supersede the window of ADR-0261 (Identify
-albums…), keeping its grouping, lookup and write.
+Points 1 and 4 accepted and implemented, 2026-10-24; points 2 and 3 remain
+a proposal. Supersedes the window of ADR-0261 (Identify albums…) and its
+own write (ADR-0262, ADR-0263), keeping its grouping.
 
 ## Context
 
@@ -62,15 +62,22 @@ Identify grows into the one tool, keeping its page for each album:
 3. **The grouping beside it.** A compact list of the albums -- their state,
    Split by folder, Merge, Leave out -- next to the album shown, from
    Identify albums.
-4. **Identify albums… goes.** Tools › Identify albums… opens Identify on
-   the selection, or the whole list.
+## Decision, continued
+
+4. **Identify albums… goes.** Its window, its session, its lookup queue and
+   its own write are removed, and so is the tag editor's button for it. The
+   Edit menu's and a list's Tools entry is **Identify…**: the tag editor on
+   the selected tracks -- the whole list when none are -- with Identify
+   open in it once the files are read. Writing, renaming, moving and undo
+   are the tag editor's Apply, as for any edit. The pure judging of a clear
+   match (`album_lookup`) stays, for point 2. Identify opens at most of the
+   screen and keeps the size it is left at; an album's versions stand a few
+   rows high, its pairing gets the rest.
 
 ## Unknown
 
-- Whether Identify then lives in the tag editor's window, or the tag
-  editor opens it as now with the list beside it.
-- How far a thousand-album batch still needs Identify albums' summary page,
-  its filters by state, rather than the list of point 3.
+- How far a thousand-album batch needs Identify albums' summary page, its
+  filters by state, rather than the list of point 3.
 
 ## Verification
 
@@ -82,3 +89,6 @@ Identify grows into the one tool, keeping its page for each album:
   version chosen previews its pairing, a release looked up already not
   fetched again.
   One album, tagged, searched as it opens.
+- `bench-main-window`: Identify… from the Edit menu opens the tag editor on
+  the whole list with none selected and on the one selected, Identify open
+  in it; there is no Identify albums… entry or button.

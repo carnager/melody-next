@@ -17,6 +17,8 @@
 #include <QLineEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QScreen>
+#include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -108,8 +110,12 @@ class IdentifyAlbumPage final : public QWidget {
         holder_layout->addWidget(match_heading_);
         splitter->addWidget(results_);
         splitter->addWidget(match_holder_);
-        splitter->setStretchFactor(0, 2);
-        splitter->setStretchFactor(1, 3);
+        // The versions a few rows high -- they are seldom many -- and the
+        // pairing the rest: it is what is checked, file by file.
+        splitter->setStretchFactor(0, 0);
+        splitter->setStretchFactor(1, 1);
+        const auto row = results_->fontMetrics().height() * 3 / 2 + 2;
+        splitter->setSizes({row * 9 + results_->header()->sizeHint().height(), row * 40});
         layout->addWidget(splitter, 1);
 
         // Enter in a search field searches.
@@ -191,6 +197,8 @@ class IdentifyAlbumPage final : public QWidget {
 // The albums, one page at a time (ADR-0311): a list of them beside the page
 // shown, where there is more than one.
 class MusicBrainzIdentifyDialog final : public QDialog {
+    static constexpr auto geometry_key = "identify/geometry";
+
   public:
     MusicBrainzIdentifyDialog(MultiIdentifySession* session, QWidget* parent)
         : QDialog(parent), session_(session) {
@@ -198,9 +206,16 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         setWindowTitle(QStringLiteral("Identify with MusicBrainz"));
         setWindowModality(Qt::WindowModal);
         setAttribute(Qt::WA_DeleteOnClose);
-        setMinimumSize(640, 400);
+        setMinimumSize(720, 480);
         const auto many = session_->count() > 1U;
-        resize(many ? 1180 : 940, many ? 600 : 520);
+        // As large as it was left, else most of the screen: a release's
+        // versions and every file's pairing need the room.
+        if (!restoreGeometry(QSettings{}.value(QLatin1String{geometry_key}).toByteArray())) {
+            const auto* where = parent != nullptr ? parent->screen() : screen();
+            const auto area = where->availableGeometry();
+            const auto share = many ? 0.85 : 0.7;
+            resize(static_cast<int>(area.width() * share), static_cast<int>(area.height() * share));
+        }
 
         auto* root = new QVBoxLayout(this);
         auto* splitter = new QSplitter(this);
@@ -227,7 +242,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         splitter->addWidget(albums_);
         splitter->addWidget(pages_);
         splitter->setStretchFactor(1, 1);
-        splitter->setSizes({300, 880});
+        splitter->setSizes({240, 1000});
         root->addWidget(splitter, 1);
 
         auto* bottom = new QHBoxLayout;
@@ -288,8 +303,13 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     }
 
     ~MusicBrainzIdentifyDialog() override {
-        // Accepted albums not yet taken by the tagger are still staged.
-        session_->release();
+        QSettings{}.setValue(QLatin1String{geometry_key}, saveGeometry());
+        // Albums applied and not yet taken by the tagger are still staged --
+        // unless the tagger went first, closed with its window, and the
+        // session with it.
+        if (!session_.isNull()) {
+            session_->release();
+        }
     }
 
     MusicBrainzIdentifyDialog(const MusicBrainzIdentifyDialog&) = delete;
@@ -354,7 +374,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         skip_->setEnabled(!session_->staging());
     }
 
-    MultiIdentifySession* session_;
+    QPointer<MultiIdentifySession> session_;
     QTreeWidget* albums_{nullptr};
     QStackedWidget* pages_{nullptr};
     std::map<std::size_t, IdentifyAlbumPage*> pages_by_album_;

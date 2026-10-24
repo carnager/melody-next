@@ -17,7 +17,7 @@ class TaggerSession;
 // ADR-0238/0262: what Apply does, chosen in one small panel -- Save tags,
 // Rename and Move by a naming layout into a destination, ReplayGain, the
 // scripts -- over a tagger session, its choices the session's. The tag
-// editor and Identify albums… both open it, so both apply alike.
+// editor opens it.
 class ApplyActionsPopover final : public QFrame {
     Q_OBJECT
   public:

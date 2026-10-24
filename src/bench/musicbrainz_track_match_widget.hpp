@@ -26,7 +26,7 @@ class TrackMatchSession;
                                                        std::function<void()> back, QWidget* parent);
 
 // Only its panes and their buttons, inside a window that names the release,
-// says how the pairing stands and stages it (Identify albums…).
+// says how the pairing stands and stages it (Identify, ADR-0311).
 [[nodiscard]] QWidget* createMusicBrainzTrackMatchPanes(TrackMatchSession* session,
                                                         QWidget* parent);
 

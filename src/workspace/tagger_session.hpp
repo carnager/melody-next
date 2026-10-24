@@ -388,12 +388,12 @@ class TaggerSession final : public QObject {
     void startProposals();
     // What the Identify window starts from; none when it cannot open.
     // The albums the files chosen -- else all -- hold, to identify one at a
-    // time (ADR-0311): grouped as Identify albums groups them (ADR-0261).
+    // time (ADR-0311): grouped by release id, tags or folder (ADR-0261).
     // None while Identify cannot run.
     [[nodiscard]] std::vector<Identify> identifyAlbums() const;
     void applyMusicBrainzProposals(metadata::MetadataProposalSet proposals);
 
-    // ADR-0261: what Identify albums… asks of the files open here.
+    // What the files open here are: how many, as read, and how long.
     [[nodiscard]] std::size_t itemCount() const;
     // An item's file as it was read (or, until read, cached).
     [[nodiscard]] const metadata::StagedMetadataSource* itemSource(std::size_t item) const;
@@ -403,24 +403,14 @@ class TaggerSession final : public QObject {
     // nothing else is being staged. proposalsSettled says when one was.
     [[nodiscard]] bool canStageProposals() const;
 
-    // ADR-0261: Identify albums… writes some of the files itself. While it
-    // does, nothing here is edited or applied; then the files it wrote are
-    // read again -- at their new paths, when moved -- and the draft of the
-    // rest kept, the files' own drafts having been written.
+    // A file a write changed, read again -- at its new path, when moved --
+    // the draft of the rest kept, its own having been written.
     struct Rewritten {
         std::size_t item{0U};
         std::string raw_path;
     };
-    [[nodiscard]] bool canWriteElsewhere() const;
-    [[nodiscard]] bool writingElsewhere() const { return writing_elsewhere_; }
-    // What such a write starts from.
+    // What the files open here are, as read.
     [[nodiscard]] std::shared_ptr<const metadata::StagedMetadataSelection> sharedSelection() const;
-    [[nodiscard]] const metadata::StagedMetadataPatchSet* draft() const;
-    [[nodiscard]] std::optional<operations::OutputLayoutProfile> layoutProfile(int index) const;
-    bool beginWriteElsewhere();
-    // `stale`: files found changed since they were read, read again too,
-    // their drafts kept, so the next write can take them.
-    void finishWriteElsewhere(std::vector<Rewritten> written, std::vector<std::size_t> stale = {});
     // ADR-0268: Apply found these files changed since they were read --
     // another tagger, another window. Read again, the draft carried onto
     // what they now hold, for the person to look at and apply again.
@@ -447,10 +437,6 @@ class TaggerSession final : public QObject {
         return reading_written_ || !written_items_.empty();
     }
     void undoWrite();
-    // Writes Identify albums… made from here, kept until this closes too;
-    // forgotten once it undoes them itself.
-    void keepUndoCopies(const std::vector<operations::UndoRequest>& requests);
-    void forgetUndoCopies(const std::vector<operations::UndoRequest>& requests);
 
     // Closing: what it needs first. Waiting, it has asked the work in
     // flight to stop, and said so.
@@ -494,8 +480,6 @@ class TaggerSession final : public QObject {
     // ADR-0261: a proposal set has been staged -- or not, saying why in the
     // status.
     void proposalsSettled(bool staged);
-    // A write made elsewhere is over, and the files it wrote read again.
-    void writtenElsewhere();
     // measureBeforeWrite() is over: the gains are in the draft (or there
     // was nothing to measure), or not, saying why in the status.
     void gainsMeasured(bool ok);
@@ -674,11 +658,9 @@ class TaggerSession final : public QObject {
     bool provisional_{false};
     // Reading again files Apply found changed: done, the person is told.
     bool reading_changed_{false};
-    bool writing_elsewhere_{false};
     // ADR-0289: what this tagger's writes kept to undo, oldest first, each
-    // write's newest first; and Identify albums'.
+    // write's newest first.
     std::vector<std::vector<operations::UndoRequest>> writes_;
-    std::vector<operations::UndoRequest> kept_elsewhere_;
     bool undoing_write_{false};
     // The files the last Apply changed, to read again once it is told; and
     // reading them, what the status says after.
@@ -701,7 +683,7 @@ class TaggerSession final : public QObject {
     bool measuring_for_write_{false};
     bool apply_after_gains_{false};
     bool gains_measured_{false};
-    // Read again after a write elsewhere: their drafts were written.
+    // Read again after a write: their drafts were written.
     std::vector<std::size_t> rewritten_items_;
     // The files that could not be read, one a line, for a tooltip.
     QString unreadable_details_;

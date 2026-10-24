@@ -14,7 +14,6 @@
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/engine_folder_dialog.hpp"
-#include "bench/identify_albums_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/list_view_dialog.hpp"
 #include "bench/lists_panel.hpp"
@@ -45,7 +44,6 @@
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "uicommon/local_files_mime_data.hpp"
-#include "workspace/album_batch_session.hpp"
 #include "workspace/color_scheme.hpp"
 #include "workspace/identify_session.hpp"
 #include "workspace/interface_scale.hpp"
@@ -372,13 +370,8 @@ class BenchMainWindowTest final : public QObject {
     void musicBrainzIdentifyStagesChosenVersion();
     void musicBrainzIdentifyLooksUpNamedReleases();
     void musicBrainzIdentifyStepsThroughAlbums();
-    void identifyAlbumsGroupsLooksUpAndStages();
-    void identifyAlbumsReviewsWhatNeedsYou();
-    void identifyAlbumsTakesAFileGroupedApart();
-    void identifyAlbumsWritesWhatIsChosen();
-    void identifyAlbumsOpensFromTools();
+    void identifyOpensTheTagEditorWithIdentify();
     void paintedStatusIconsFollowThePalette();
-    void identifyAlbumsStagesAlongsideAutomaticScripts();
     void cachedRowsAreReadEvenWithARevision();
     void settingsGroupWhatTheyAreAbout();
     void settingsChooseWhereUndoCopiesAreKept();

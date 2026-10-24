@@ -95,6 +95,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0185: refreshes the layout/destination selectors after Settings
     // edits profiles.
     void reloadOutputProfiles();
+    // ADR-0311: Identify opened as soon as the files are read -- the tag
+    // editor opened for it, by Identify… in the main window.
+    void identifyOnceRead();
 
   private:
     // What the session says, shown.
@@ -150,9 +153,6 @@ class MetadataPropertiesDialog final : public QDialog {
     QAction* suggest_action_{nullptr};
     QPushButton* suggest_button_{nullptr};
     QPushButton* identify_button_{nullptr};
-    // ADR-0261: Identify albums… over every album open here.
-    QPushButton* identify_albums_button_{nullptr};
-    QPointer<QDialog> identify_albums_dialog_;
     QPushButton* transform_button_{nullptr};
     QWidget* transformation_panel_{nullptr};
     QWidget* grid_tools_{nullptr};

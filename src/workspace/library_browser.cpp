@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "workspace/library_browser.hpp"
+#include "uicommon/debug_log.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/local_artwork.hpp"
@@ -884,6 +885,12 @@ void LibraryBrowser::refreshInPlace() {
     if (stopped_) {
         return;
     }
+    // ADR-0315: what an earlier refresh still has waiting is asked again
+    // here: one refresh runs, at most one waits, however many changes came.
+    const auto dropped = std::erase_if(tasks_, [](const Task& task) { return task.refreshing; });
+    elapsed_refresh_.start();
+    qCDebug(tkDebug) << "library: refreshing in place after a change;" << dropped
+                     << "waiting queries of an earlier refresh dropped";
     // A query's results, or a tree not yet shown: as a new search.
     if ((query_mode_ && !search_.trimmed().isEmpty()) || model_->rowCount() == 0) {
         reload();
@@ -938,8 +945,13 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
                      return;
                  }
                  mergeLevel(*target, std::move(outcome.page), query, root);
+                 if (std::ranges::none_of(tasks_, &Task::refreshing) &&
+                     elapsed_refresh_.isValid()) {
+                     qCDebug(tkDebug) << "library: refreshed in place in"
+                                      << elapsed_refresh_.elapsed() << "ms";
+                 }
              },
-             true});
+             true, true});
 }
 
 void LibraryBrowser::mergeLevel(LibraryTreeModel::Row& target, persistence::LibraryPage page,

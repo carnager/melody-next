@@ -21,6 +21,7 @@
 #include "trackknife/core/environment.hpp"
 #include "trackknife/engine/album_arrivals.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/change_batch.hpp"
 #include "trackknife/engine/favorites.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -644,9 +645,11 @@ int main(int argc, char** argv) {
     // Held weakly by the catalogue, which may say a change while the engine
     // stops, after this has gone.
     auto arrivals = std::make_shared<trackknife::engine::AlbumArrivals>(catalogue, sink, settle);
-    catalogue.observe([sink, weak = std::weak_ptr{arrivals}](
+    // ADR-0315: told once a write's files are all re-read, not file by file.
+    auto batch = std::make_shared<trackknife::engine::CatalogueChangeBatch>(sink);
+    catalogue.observe([batch, weak = std::weak_ptr{arrivals}](
                           const trackknife::engine::LocalCatalogue::Change& change) {
-        sink(trackknife::engine::catalogue_change_event(change));
+        batch->add(change);
         if (const auto alive = weak.lock()) {
             alive->changed();
         }

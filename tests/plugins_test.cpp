@@ -611,21 +611,45 @@ void PluginsTest::theExamplePluginReads() {
         auto told_settings = told_input.value(QStringLiteral("settings")).toObject();
         told_settings.insert(QStringLiteral("discogs_token"), QStringLiteral("a token"));
         told_input.insert(QStringLiteral("settings"), told_settings);
-        const auto with_discogs = run(*about_panel,
-                                  PluginAction{.id = QStringLiteral("about"),
-                                               .label = QStringLiteral("About"),
-                                               .scope = PluginAction::Scope::tracks,
-                                               .run = about_panel->panels.front().run,
-                                               .result = PluginAction::Result::none,
-                                               .timeout_seconds = 30},
-                                  QJsonDocument{told_input}.toJson(QJsonDocument::Compact));
+        const auto ask = [&] {
+            return run(*about_panel,
+                       PluginAction{.id = QStringLiteral("about"),
+                                    .label = QStringLiteral("About"),
+                                    .scope = PluginAction::Scope::tracks,
+                                    .run = about_panel->panels.front().run,
+                                    .result = PluginAction::Result::none,
+                                    .timeout_seconds = 30},
+                       QJsonDocument{told_input}.toJson(QJsonDocument::Compact));
+        };
+        const auto trial_of = [](const PluginPanelContent& content) {
+            return std::ranges::find_if(content.parts, [](const auto& part) {
+                return part.kind == PluginPanelContent::Part::Kind::track &&
+                       part.text == QStringLiteral("Trial by Fire");
+            });
+        };
+        // ADR-0312: never waited for -- answered without it, asking to be
+        // asked again while it comes.
+        const auto first = ask();
+        QVERIFY2(first.succeeded, qPrintable(first.text));
+        const auto drawn_first = parsePluginPanel(first.text.toUtf8(), &problem);
+        QVERIFY2(drawn_first.has_value(), qPrintable(problem));
+        QVERIFY(trial_of(*drawn_first) != drawn_first->parts.end());
+        QVERIFY(trial_of(*drawn_first)->cover.isEmpty());
+        QCOMPARE(drawn_first->again_after, std::optional<int>{3});
+        // Fetched meanwhile by a process of its own, outliving the run.
+        const auto fetched = kept + QStringLiteral("/covers/") +
+                             QString::fromLatin1(
+                                 QCryptographicHash::hash(
+                                     QStringLiteral("file://%1").arg(thumb).toUtf8(),
+                                     QCryptographicHash::Sha1)
+                                     .toHex()) +
+                             QStringLiteral(".jpg");
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(fetched), 15'000);
+        const auto with_discogs = ask();
         QVERIFY2(with_discogs.succeeded, qPrintable(with_discogs.text));
         const auto drawn_now = parsePluginPanel(with_discogs.text.toUtf8(), &problem);
         QVERIFY2(drawn_now.has_value(), qPrintable(problem));
-        const auto trial = std::ranges::find_if(drawn_now->parts, [](const auto& part) {
-            return part.kind == PluginPanelContent::Part::Kind::track &&
-                   part.text == QStringLiteral("Trial by Fire");
-        });
+        const auto trial = trial_of(*drawn_now);
         QVERIFY(trial != drawn_now->parts.end());
         QVERIFY2(!trial->cover.isEmpty(), "the cover from Discogs");
         QFile shown{trial->cover};
@@ -637,8 +661,9 @@ void PluginsTest::theExamplePluginReads() {
                 "https://coverartarchive.org/release-group/rg-trial/front-250",
                 QCryptographicHash::Sha1)
                 .toHex());
-        QVERIFY(QFile::exists(kept + QStringLiteral("/covers/") + archive +
-                              QStringLiteral(".tried")));
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(kept + QStringLiteral("/covers/") + archive +
+                                               QStringLiteral(".tried")),
+                                 15'000);
     }
     // Only the EP missing: its badge all the same, to hide it and show it
     // again.
@@ -1172,6 +1197,23 @@ void PluginsTest::panelsAreReadAndTheirAnswersToo() {
         problem.clear();
         QVERIFY2(!parsePluginPanel(broken, &problem), broken);
         QVERIFY(!problem.isEmpty());
+    }
+
+    // ADR-0312: asked to be asked again, after whole seconds, 1 to 60.
+    {
+        QString why;
+        const auto again =
+            parsePluginPanel(R"({"title": "x", "parts": [], "again_after": 3})", &why);
+        QVERIFY2(again.has_value(), qPrintable(why));
+        QCOMPARE(again->again_after, std::optional<int>{3});
+        QVERIFY(!parsePluginPanel(R"({"parts": []})", &why)->again_after.has_value());
+        for (const auto* wrong : {R"({"parts": [], "again_after": 0})",
+                                  R"({"parts": [], "again_after": 61})",
+                                  R"({"parts": [], "again_after": 1.5})",
+                                  R"({"parts": [], "again_after": "2"})"}) {
+            QVERIFY2(!parsePluginPanel(wrong, &why).has_value(), wrong);
+            QVERIFY(why.contains(QStringLiteral("again_after")));
+        }
     }
 
     // What it is told: what plays, within its music folder, and its settings.

@@ -642,7 +642,8 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
     }
     const auto object = document.object();
     for (const auto& key : object.keys()) {
-        if (key != QStringLiteral("title") && key != QStringLiteral("parts")) {
+        if (key != QStringLiteral("title") && key != QStringLiteral("parts") &&
+            key != QStringLiteral("again_after")) {
             return fail(QStringLiteral("its answer has an unknown key \"%1\"").arg(key));
         }
     }
@@ -652,6 +653,16 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
     }
     PluginPanelContent content;
     content.title = object.value(QStringLiteral("title")).toString().trimmed();
+    // ADR-0312: whole seconds, not so soon that it is asked without pause.
+    if (const auto again = object.value(QStringLiteral("again_after")); !again.isUndefined()) {
+        const auto seconds = again.toDouble(-1.0);
+        if (!again.isDouble() || seconds != static_cast<int>(seconds) || seconds < 1.0 ||
+            seconds > 60.0) {
+            return fail(QStringLiteral("its again_after is not a whole number of seconds from 1 "
+                                       "to 60"));
+        }
+        content.again_after = static_cast<int>(seconds);
+    }
     using Kind = PluginPanelContent::Part::Kind;
     using Role = PluginPanelContent::Role;
     // ADR-0304: a button's role, normal when it names none.

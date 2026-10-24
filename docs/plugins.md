@@ -229,6 +229,15 @@ A panel that shows a listening room says `"refresh": ["listening-room"]`,
 and is asked again whenever the room changes -- a vote, a friend arriving --
 not only with the track ([ADR-0302](adr/0302-listening-together.md)).
 
+An answer still waiting for something -- images it fetches meanwhile --
+says `"again_after": 3`, whole seconds from 1 to 60: the panel is asked
+again about the same after so long, if it still shows, keeping what it
+shows and where it was scrolled to until the new answer comes. Ten times
+running at most; a new track starts again
+([ADR-0312](adr/0312-a-panel-asks-to-be-asked-again.md)). About answers at
+once with the covers it has kept, and asks again while the others are
+fetched.
+
 A plugin needs actions, panels, or both. Enabled, its panel is beside
 Lyrics, shown and hidden with the other side panels by **Panels**
 ([ADR-0299](adr/0299-the-side-panels-show-together.md)). It asks only while

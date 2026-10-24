@@ -3030,6 +3030,65 @@ printf '{"title": "did %s", "parts": [{"input": "room", "label": "Room"},
     QDir{folder}.removeRecursively();
 }
 
+// ADR-0312: a panel whose answer says so is asked again about the same,
+// after the seconds it names -- and no more once it stops saying so.
+void BenchMainWindowTest::aPanelIsAskedAgainWhenItSays() {
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const auto folder = pluginFolders().value(0) + QStringLiteral("/coming");
+    QVERIFY(QDir{}.mkpath(folder));
+    const auto asked = out.filePath(QStringLiteral("asked"));
+    {
+        QFile manifest{folder + QStringLiteral("/plugin.json")};
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"schema": 1, "name": "Coming", "panels": [{"id": "p",
+                          "label": "Coming", "run": ["./p"], "always": true}]})");
+        QFile script{folder + QStringLiteral("/p")};
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        // Asked three times: twice asking again, the third not.
+        script.write(QStringLiteral(R"sh(#!/bin/sh
+cat > /dev/null
+echo x >> '%1'
+n=$(wc -l < '%1')
+if [ "$n" -lt 3 ]; then
+  printf '{"title": "run %s", "parts": [], "again_after": 1}' "$n"
+else
+  printf '{"title": "run %s", "parts": []}' "$n"
+fi
+)sh")
+                         .arg(asked)
+                         .toUtf8());
+        script.close();
+        script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    QSettings{}.setValue(pluginEnabledKey(QStringLiteral("coming")), true);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-coming-p"));
+    QVERIFY(dock != nullptr);
+    if (dock->isHidden()) {
+        window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
+    }
+    QTRY_VERIFY(dock->isVisible());
+    QTest::qWait(500);
+    window.transport_timer_->stop();
+    window.refreshPluginPanels(EnginePlayback::State{});
+    const auto title = [dock] {
+        auto* label = dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title"));
+        return label == nullptr ? QString{} : label->text();
+    };
+    QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("run 3"), 10'000);
+    // Not asked since: the third answer did not ask.
+    QTest::qWait(2'500);
+    QFile told{asked};
+    QVERIFY(told.open(QIODevice::ReadOnly));
+    QCOMPARE(told.readAll().count('\n'), 3);
+    QSettings{}.remove(QStringLiteral("plugins"));
+    QDir{folder}.removeRecursively();
+}
+
 // ADR-0302: a panel showing the listening room is asked again as the room
 // changes -- a vote, a friend arriving -- coalesced; one that did not ask
 // for it is not.

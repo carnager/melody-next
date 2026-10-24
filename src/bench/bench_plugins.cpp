@@ -212,6 +212,17 @@ void BenchMainWindow::buildPluginPanels() {
             slot->view = view;
             watchSidePanel(dock);
             auto* raw = slot.get();
+            // ADR-0312: asked again about the same when its answer asked,
+            // if it still shows and nothing else is being asked.
+            slot->again = new QTimer(view);
+            slot->again->setSingleShot(true);
+            connect(slot->again, &QTimer::timeout, this, [this, raw] {
+                if (raw->dock->isHidden() || !raw->run.isNull()) {
+                    return;
+                }
+                ++raw->agains;
+                askPluginPanel(*raw);
+            });
             // ADR-0303: pressed, asked again -- told what was pressed.
             connect(view, &PluginPanelView::actionRequested, this,
                     [this, raw](const QString& action, const QString& value) {
@@ -279,9 +290,17 @@ void BenchMainWindow::askPluginPanel(PluginPanelDock& slot) {
     const auto stopped = state.status == QStringLiteral("stopped") || state.entry.isEmpty();
     const auto entry = stopped ? QString{} : state.entry;
     // Asked again about the same -- the room changed, a button pressed -- it
-    // keeps what it shows until the answer comes, rather than flickering.
+    // keeps what it shows until the answer comes, rather than flickering,
+    // and where it was scrolled to.
     const bool again = slot.asked == entry && slot.view->hasContent();
     slot.asked = entry;
+    slot.keep_place = again;
+    if (!slot.again.isNull()) {
+        slot.again->stop();
+    }
+    if (!again) {
+        slot.agains = 0;
+    }
     // A newer question: the one on its way is stopped.
     auto* previous = slot.run.data();
     slot.run = nullptr;
@@ -408,7 +427,13 @@ void BenchMainWindow::showPluginPanelOutcome(PluginPanelDock& slot, QObject* con
                                    .arg(slot.plugin.title, problem));
         return;
     }
-    slot.view->showContent(*content);
+    slot.view->showContent(*content, slot.keep_place);
+    // ADR-0312: asked again about the same, while it shows, as it asked --
+    // a few times running at most, so a plugin cannot keep it asking.
+    constexpr int most_agains = 10;
+    if (content->again_after && slot.agains < most_agains && !slot.again.isNull()) {
+        slot.again->start(*content->again_after * 1000);
+    }
 }
 
 BenchMainWindow::PluginPlaying BenchMainWindow::pluginPlaying(const EnginePlayback::State& state) {

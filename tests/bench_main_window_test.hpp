@@ -342,6 +342,7 @@ class BenchMainWindowTest final : public QObject {
     void aTogetherLinkAsksTheEngineToJoin();
     void aRoomPanelIsAskedAgainAsTheRoomChanges();
     void aPanelsControlsAskItAgain();
+    void aPanelIsAskedAgainWhenItSays();
     void theListeningRoomPanelIsTheRoom();
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();

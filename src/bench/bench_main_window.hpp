@@ -461,6 +461,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         QPointer<QObject> run;
         // ADR-0303: what was pressed, told with its next run.
         std::optional<PluginPanelAction> action;
+        // ADR-0312: asked again about the same, as its answer said -- at
+        // most so many times running -- keeping where it was scrolled to.
+        QPointer<QTimer> again;
+        int agains{0};
+        bool keep_place{false};
     };
     std::vector<std::unique_ptr<PluginPanelDock>> plugin_panels_;
     // ADR-0302: the panels showing a listening room, asked again as it

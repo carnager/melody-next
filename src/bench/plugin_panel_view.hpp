@@ -12,6 +12,8 @@ class QLabel;
 class QLineEdit;
 class QVBoxLayout;
 
+class QScrollArea;
+
 namespace trackknife::bench {
 
 // ADR-0291: a plugin's side panel, as the Lyrics panel looks: its name and
@@ -25,7 +27,9 @@ class PluginPanelView final : public QWidget {
 
     // A word in place of an answer: nothing playing, on its way, or why not.
     void showMessage(const QString& message);
-    void showContent(const PluginPanelContent& content);
+    // `keep_place`: an answer about what it showed already -- asked again --
+    // shown where it was scrolled to.
+    void showContent(const PluginPanelContent& content, bool keep_place = false);
     // The line under the panel's name: what it was asked about.
     void setSubject(const QString& subject);
     // Whether it shows an answer -- kept while it is asked again.
@@ -46,6 +50,7 @@ class PluginPanelView final : public QWidget {
     void clearParts();
 
     QLabel* subject_{nullptr};
+    QScrollArea* scroll_{nullptr};
     QWidget* parts_{nullptr};
     QVBoxLayout* parts_layout_{nullptr};
     bool has_content_{false};

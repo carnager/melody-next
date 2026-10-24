@@ -294,6 +294,9 @@ struct PluginPanelContent {
     };
     QString title;
     std::vector<Part> parts;
+    // ADR-0312: asked again about the same after so many seconds, 1 to 60
+    // -- what it shows still on its way, its covers -- while it shows.
+    std::optional<int> again_after;
 };
 [[nodiscard]] std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json,
                                                                  QString* problem);

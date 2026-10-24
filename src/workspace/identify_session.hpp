@@ -169,6 +169,11 @@ class IdentifySession final : public QObject {
     void scan();
     // The candidate at `row`, its track list loaded to be matched.
     void use(int row);
+    // The candidate at `row` previewed: loaded as use() does -- once what
+    // is loading has come, when something is (ADR-0311).
+    void preview(int row);
+    // The row whose matching match() is; -1 for none.
+    [[nodiscard]] int matchedRow() const { return matched_row_; }
     // From matching back to the candidates.
     void back();
 
@@ -185,6 +190,8 @@ class IdentifySession final : public QObject {
     void loadScanCandidate(std::size_t rank);
     void finishSearch(core::Result<QByteArray> body);
     void finishLookup(core::Result<QByteArray> body);
+    // The release a row is, with its tracks: its matching opened.
+    void opened(core::Result<musicbrainz::Release> release);
     // What named the release or album looked up.
     enum class Named : std::uint8_t { tagged, release, group };
     void lookUp(const std::string& release_id, bool tagged);
@@ -212,16 +219,23 @@ class IdentifySession final : public QObject {
     std::vector<std::pair<std::string, std::size_t>> scan_candidates_;
     std::size_t scan_matched_files_{0U};
     QPointer<TrackMatchSession> match_;
+    int matched_row_{-1};
+    int loading_row_{-1};
+    // What was said of the versions, said again once one has loaded.
+    QString listed_status_;
+    // Previewed while something loaded: loaded next.
+    std::optional<int> wanted_row_;
+    // The matching shown goes: its candidates are about to be replaced.
+    void dropMatch();
 };
 
 // ADR-0311: Identify over the albums a tagger's files hold, one at a time,
 // each its own IdentifySession -- its own search, versions and matching.
 // Those ahead of the one shown are looked up in the background, one at a
 // time, from their tagged release or their tags, so each is there when it
-// is reached. The pairing confirmed for an album is its choice, or it is
-// skipped; apply() stages every album chosen into the tagger's draft, one
-// after another -- written with the tagger's own Write. A single album's
-// choice is applied at once.
+// is reached. The version previewed for an album, and its pairing, is its
+// choice; apply() stages every album with one into the tagger's draft --
+// but those skipped -- one after another, written with the tagger's Write.
 class MultiIdentifySession final : public QObject {
     Q_OBJECT
 
@@ -231,8 +245,8 @@ class MultiIdentifySession final : public QObject {
         looking_up,
         found,
         nothing_found,
-        // Its pairing confirmed, to be applied.
-        chosen,
+        // A version previewed and paired: applied with the others.
+        ready,
         skipped,
         // Applied, waiting for the tagger to take it.
         staging,
@@ -245,21 +259,18 @@ class MultiIdentifySession final : public QObject {
 
     [[nodiscard]] std::size_t count() const { return albums_.size(); }
     [[nodiscard]] IdentifySession* album(std::size_t index) const;
-    // "Artist — Album", as its tags say, else its first file's name.
+    // "Artist — Album", as its tags say, else its first file's folder.
     [[nodiscard]] QString name(std::size_t index) const;
     [[nodiscard]] State state(std::size_t index) const;
     [[nodiscard]] QString stateText(std::size_t index) const;
     [[nodiscard]] std::size_t current() const { return current_; }
     // The album shown: looked up at once if it has not been.
     void setCurrent(std::size_t index);
-    // The next album after `after`, wrapping round, neither chosen,
-    // skipped nor applied.
-    [[nodiscard]] std::optional<std::size_t> nextToDo(std::size_t after) const;
-    // Passed over: left out of apply() until a version is chosen for it.
-    void skip(std::size_t index);
-    // The albums chosen and not yet applied.
-    [[nodiscard]] std::size_t chosenCount() const;
-    // Every album chosen staged into the tagger's draft, one after another;
+    // Left out of apply(), or back in.
+    void setSkipped(std::size_t index, bool skipped);
+    // The albums apply() would stage.
+    [[nodiscard]] std::size_t readyCount() const;
+    // Every album ready staged into the tagger's draft, one after another;
     // finished() once all are.
     void apply();
     // Applied albums not yet taken by the tagger.
@@ -278,15 +289,14 @@ class MultiIdentifySession final : public QObject {
         TaggerSession::Identify files;
         QPointer<IdentifySession> session;
         bool started{false};
-        std::optional<metadata::MetadataProposalSet> chosen;
         bool skipped{false};
         bool applied{false};
         bool staged{false};
         QString note;
     };
+    [[nodiscard]] bool ready(const Album& album) const;
     void lookUp(std::size_t index);
     void lookAhead();
-    void accepted(std::size_t index, metadata::MetadataProposalSet proposals);
     void stageNext();
     void settled(bool staged);
 

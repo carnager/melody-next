@@ -687,7 +687,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-search"));
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     QVERIFY(artist && album);
     QCOMPARE(artist->text(), untagged ? QString{} : QStringLiteral("Band"));
     QCOMPARE(album->text(), untagged ? QString{} : QStringLiteral("Alpha"));
@@ -705,11 +705,11 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
     QCOMPARE(results->topLevelItem(0)->text(2), QStringLiteral("Band"));
     QVERIFY(results->topLevelItem(0)->text(5).contains(QStringLiteral("1999-09-09")));
-    QTRY_VERIFY(use->isEnabled());
-    QTest::mouseClick(use, Qt::LeftButton);
-    auto* stage_matches =
-        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
-    QVERIFY(stage_matches);
+    // The version chosen is previewed beneath it: its pairing, to change
+    // there; Apply stages it (ADR-0311).
+    QTRY_VERIFY(dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files")) !=
+                nullptr);
+    auto* stage_matches = use;
     if (untagged) {
         auto* pairs =
             dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
@@ -790,8 +790,9 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
     QTRY_VERIFY(status->text().contains(QStringLiteral("MusicBrainz")));
-    // Tagged, searched by its tags as it opened too (ADR-0311).
-    QCOMPARE(fetches, untagged ? 2 : 3);
+    // Tagged, searched by its tags as it opened too, and its best version
+    // previewed: its track list (ADR-0311).
+    QCOMPARE(fetches, untagged ? 2 : 4);
     if (untagged) {
         const auto title = grid_model->fieldColumn(QStringLiteral("Title"));
         QVERIFY(title);
@@ -938,7 +939,7 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
         dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-search"));
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     QVERIFY(album && search && results && use);
 
     const auto rows = [results] {
@@ -975,21 +976,20 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     album->setText(QStringLiteral(
         "https://musicbrainz.org/release-group/99999999-8888-7777-6666-555555555555"));
     QTest::mouseClick(search, Qt::LeftButton);
-    QTRY_VERIFY(search->isEnabled() && asked.size() == 5);
+    // Listed, and the first previewed: its track list.
+    QTRY_VERIFY(search->isEnabled() && asked.size() == 6);
     QTRY_COMPARE(rows(), (QStringList{QStringLiteral("Same album · same track count: Alpha/2"),
                                       QStringLiteral(
                                           "Same album · same track count: Alpha (Deluxe)/2"),
                                       QStringLiteral("Same album: Alpha/3")}));
 
-    // Another version chosen, matched and staged as a found one is.
+    // Another version chosen, previewed and applied as a found one is.
     results->setCurrentItem(results->topLevelItem(1));
+    QTRY_VERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-identify-match-heading"))
+                    ->text()
+                    .contains(QStringLiteral("Alpha (Deluxe)")));
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
-    QPushButton* stage = nullptr;
-    QTRY_VERIFY((stage = dialog->findChild<QPushButton*>(
-                     QStringLiteral("bench-musicbrainz-match-stage"))) != nullptr);
-    QTRY_VERIFY(stage->isEnabled());
-    QTest::mouseClick(stage, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
@@ -1139,64 +1139,37 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     QCOMPARE(albums->topLevelItemCount(), 2);
     QCOMPARE(albums->topLevelItem(0)->text(0), QStringLiteral("Band — Alpha"));
     QCOMPARE(albums->topLevelItem(1)->text(0), QStringLiteral("Band — Beta"));
+    // The second's versions there; the first's best version previewed,
+    // and with it chosen.
     QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("1 version"));
-    QTRY_COMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("1 version"));
+    QTRY_COMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("✓ Alpha · CD"));
     QVERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
-
-    const auto shown = [dialog] {
-        QWidget* page = nullptr;
-        for (auto* each :
-             dialog->findChildren<QWidget*>(QStringLiteral("bench-musicbrainz-identify-album"))) {
-            if (each->isVisible()) {
-                page = each;
-            }
-        }
-        return page;
-    };
-    const auto accept = [&shown] {
-        auto* page = shown();
-        QVERIFY(page != nullptr);
-        auto* results =
-            page->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-        auto* use = page->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
-        QVERIFY(results != nullptr && use != nullptr);
-        QTRY_VERIFY(use->isEnabled());
-        QTest::mouseClick(use, Qt::LeftButton);
-        QPushButton* stage = nullptr;
-        QTRY_VERIFY((stage = page->findChild<QPushButton*>(
-                         QStringLiteral("bench-musicbrainz-match-stage"))) != nullptr &&
-                    stage->isVisible());
-        QTRY_VERIFY(stage->isEnabled());
-        QTest::mouseClick(stage, Qt::LeftButton);
-    };
     auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     auto* skip = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-skip"));
-    QVERIFY(apply != nullptr && skip != nullptr);
-    QVERIFY(!apply->isEnabled());
-    accept();
-    if (QTest::currentTestFailed()) {
-        return;
-    }
-    // Chosen, not staged: on to the next, its versions there already.
+    auto* next = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-next"));
+    QVERIFY(apply != nullptr && skip != nullptr && next != nullptr);
+    QTRY_COMPARE(apply->text(), QStringLiteral("Apply 1 album"));
+    QVERIFY(apply->isEnabled());
+
+    // Next: the second, its best version previewed too.
+    next->click();
     QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
-    QCOMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("Chosen"));
+    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("✓ Beta · CD"));
+    QTRY_COMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
     QCOMPARE(grid_model->patches().patch_count(), 0U);
-    QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
-    // Skipped, and come back to.
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/identify-albums-steps.png")));
+    }
+    // Skipped, then not.
     skip->click();
     QCOMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Skipped"));
-    albums->setCurrentItem(albums->topLevelItem(0));
-    QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
-    albums->setCurrentItem(albums->topLevelItem(1));
-    QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
-    accept();
-    if (QTest::currentTestFailed()) {
-        return;
-    }
-    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Chosen"));
+    QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
+    QCOMPARE(skip->text(), QStringLiteral("Don't skip"));
+    skip->click();
     QCOMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
+
     // Applied: both staged, and done.
-    QVERIFY(apply->isEnabled());
     apply->click();
     QTRY_VERIFY(open.isNull());
     QCOMPARE(asked.count(QStringLiteral("search")), 1);
@@ -1331,7 +1304,7 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
     auto* scan = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-scan"));
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     QVERIFY(scan != nullptr && scan->isEnabled());
     QVERIFY(results != nullptr);
     QVERIFY(use != nullptr);
@@ -1348,11 +1321,6 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
 
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
-    auto* stage_matches =
-        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
-    QVERIFY(stage_matches);
-    QTRY_VERIFY(stage_matches->isEnabled());
-    QTest::mouseClick(stage_matches, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);

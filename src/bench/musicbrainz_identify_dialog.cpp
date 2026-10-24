@@ -34,22 +34,15 @@
 namespace trackknife::bench {
 namespace {
 
-// One album's page over its IdentifySession: the search and its release
-// versions, then the chosen version's matching.
+// One album's page over its IdentifySession (ADR-0311): its search and
+// release versions above, and below them how its files pair with the version
+// chosen -- previewed as it is chosen, changed by dragging files.
 class IdentifyAlbumPage final : public QWidget {
   public:
-    // `many`: one of several albums, whose matching is a choice to apply
-    // with the others, not staged at once.
-    IdentifyAlbumPage(IdentifySession* session, const bool many, QWidget* parent)
+    IdentifyAlbumPage(IdentifySession* session, QWidget* parent)
         : QWidget(parent), session_(session) {
         setObjectName(QStringLiteral("bench-musicbrainz-identify-album"));
-        auto* root = new QVBoxLayout(this);
-        root->setContentsMargins(0, 0, 0, 0);
-        pages_ = new QStackedWidget(this);
-        root->addWidget(pages_);
-        auto* search_page = new QWidget(pages_);
-        pages_->addWidget(search_page);
-        auto* layout = new QVBoxLayout(search_page);
+        auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         auto* form = new QFormLayout;
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -70,9 +63,11 @@ class IdentifyAlbumPage final : public QWidget {
         form_row->addLayout(form, 1);
         search_ = new QPushButton(QStringLiteral("Search"), this);
         search_->setObjectName(QStringLiteral("bench-musicbrainz-identify-search"));
+        search_->setAutoDefault(false);
         form_row->addWidget(search_, 0, Qt::AlignBottom);
         scan_ = new QPushButton(QStringLiteral("Fingerprint files"), this);
         scan_->setObjectName(QStringLiteral("bench-musicbrainz-identify-scan"));
+        scan_->setAutoDefault(false);
         scan_->setToolTip(
             QStringLiteral("Identify by audio fingerprint (AcoustID) — works with no usable "
                            "tags at all; candidates are ranked by how many selected files "
@@ -85,7 +80,9 @@ class IdentifyAlbumPage final : public QWidget {
         status_->setWordWrap(true);
         layout->addWidget(status_);
 
-        results_ = new QTreeWidget(this);
+        auto* splitter = new QSplitter(Qt::Vertical, this);
+        splitter->setChildrenCollapsible(false);
+        results_ = new QTreeWidget(splitter);
         results_->setObjectName(QStringLiteral("bench-musicbrainz-identify-results"));
         results_->setAccessibleName(QStringLiteral("MusicBrainz release versions"));
         results_->setColumnCount(6);
@@ -100,17 +97,20 @@ class IdentifyAlbumPage final : public QWidget {
         results_->setEditTriggers(QAbstractItemView::NoEditTriggers);
         results_->header()->setSectionResizeMode(1, QHeaderView::Stretch);
         results_->header()->setStretchLastSection(true);
-        layout->addWidget(results_, 1);
-
-        auto* buttons = new QHBoxLayout;
-        buttons->addStretch(1);
-        use_ = new QPushButton(QStringLiteral("Match this version…"), this);
-        use_->setObjectName(QStringLiteral("bench-musicbrainz-identify-use"));
-        use_->setToolTip(
-            QStringLiteral("Load the release tracks and review their assignments to local files"));
-        use_->setEnabled(false);
-        buttons->addWidget(use_);
-        layout->addLayout(buttons);
+        match_holder_ = new QWidget(splitter);
+        match_holder_->setObjectName(QStringLiteral("bench-musicbrainz-identify-matching"));
+        auto* holder_layout = new QVBoxLayout(match_holder_);
+        holder_layout->setContentsMargins(0, 0, 0, 0);
+        match_heading_ = new QLabel(match_holder_);
+        match_heading_->setObjectName(QStringLiteral("bench-musicbrainz-identify-match-heading"));
+        match_heading_->setTextFormat(Qt::PlainText);
+        match_heading_->setWordWrap(true);
+        holder_layout->addWidget(match_heading_);
+        splitter->addWidget(results_);
+        splitter->addWidget(match_holder_);
+        splitter->setStretchFactor(0, 2);
+        splitter->setStretchFactor(1, 3);
+        layout->addWidget(splitter, 1);
 
         // Enter in a search field searches.
         for (auto* field : {artist_, release_}) {
@@ -119,47 +119,32 @@ class IdentifyAlbumPage final : public QWidget {
         connect(search_, &QPushButton::clicked, this,
                 [this] { session_->search(artist_->text(), release_->text()); });
         connect(scan_, &QPushButton::clicked, session_, &IdentifySession::scan);
-        connect(results_, &QTreeWidget::itemSelectionChanged, this, &IdentifyAlbumPage::sync);
-        connect(results_, &QTreeWidget::itemDoubleClicked, this,
-                [this](QTreeWidgetItem*, int) { useSelected(); });
-        connect(use_, &QPushButton::clicked, this, [this] { useSelected(); });
-        connect(session_, &IdentifySession::changed, this, &IdentifyAlbumPage::sync);
-        connect(session_, &IdentifySession::matchOpened, this, [this, many](TrackMatchSession* match) {
-            auto* review =
-                createMusicBrainzTrackMatchView(match, [this] { session_->back(); }, pages_);
-            if (auto* use = review->findChild<QPushButton*>(
-                    QStringLiteral("bench-musicbrainz-match-stage"));
-                use != nullptr && many) {
-                use->setText(QStringLiteral("Use these matches"));
-                use->setToolTip(QStringLiteral(
-                    "Choose this pairing for the album and go on to the next; Apply stages "
-                    "every album chosen"));
+        // A version chosen: its pairing previewed beneath.
+        connect(results_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
+            if (item != nullptr) {
+                session_->preview(results_->indexOfTopLevelItem(item));
             }
-            pages_->addWidget(review);
-            pages_->setCurrentWidget(review);
+        });
+        connect(session_, &IdentifySession::changed, this, &IdentifyAlbumPage::sync);
+        connect(session_, &IdentifySession::matchOpened, this, [this](TrackMatchSession* match) {
+            delete panes_.data();
+            panes_ = createMusicBrainzTrackMatchPanes(match, match_holder_);
+            match_holder_->layout()->addWidget(panes_);
+            match_heading_->setText(match->heading());
         });
         connect(session_, &IdentifySession::matchClosed, this, [this] {
-            auto* current = pages_->currentWidget();
-            pages_->setCurrentIndex(0);
-            if (current != pages_->widget(0)) {
-                pages_->removeWidget(current);
-                current->deleteLater();
-            }
+            delete panes_.data();
+            match_heading_->clear();
         });
         sync();
     }
 
   private:
-    void useSelected() {
-        if (auto* current = results_->currentItem()) {
-            session_->use(results_->indexOfTopLevelItem(current));
-        }
-    }
-
     void sync() {
         const auto& rows = session_->candidates();
         // Rows come a search at a time, or one candidate after another.
         if (results_->topLevelItemCount() > static_cast<int>(rows.size())) {
+            const QSignalBlocker blocker{results_};
             results_->clear();
         }
         for (auto row = static_cast<std::size_t>(results_->topLevelItemCount()); row < rows.size();
@@ -176,6 +161,7 @@ class IdentifyAlbumPage final : public QWidget {
             item->setText(5, candidate.version);
             item->setToolTip(5, candidate.version);
         }
+        // The best one previewed by itself once the versions are all there.
         if (results_->currentItem() == nullptr && !session_->busy() && session_->suggested() >= 0 &&
             session_->suggested() < results_->topLevelItemCount()) {
             results_->setCurrentItem(results_->topLevelItem(session_->suggested()));
@@ -183,7 +169,11 @@ class IdentifyAlbumPage final : public QWidget {
         status_->setText(session_->status());
         search_->setEnabled(session_->canSearch());
         scan_->setEnabled(session_->canScan());
-        use_->setEnabled(!session_->busy() && results_->currentItem() != nullptr);
+        if (session_->match() == nullptr) {
+            match_heading_->setText(results_->topLevelItemCount() > 0 && session_->busy()
+                                        ? QStringLiteral("Loading its track list…")
+                                        : QString{});
+        }
     }
 
     IdentifySession* session_;
@@ -191,10 +181,11 @@ class IdentifyAlbumPage final : public QWidget {
     QLineEdit* release_{nullptr};
     QPushButton* search_{nullptr};
     QPushButton* scan_{nullptr};
-    QPushButton* use_{nullptr};
     QLabel* status_{nullptr};
     QTreeWidget* results_{nullptr};
-    QStackedWidget* pages_{nullptr};
+    QWidget* match_holder_{nullptr};
+    QLabel* match_heading_{nullptr};
+    QPointer<QWidget> panes_;
 };
 
 // The albums, one page at a time (ADR-0311): a list of them beside the page
@@ -251,8 +242,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         next_->setToolTip(QStringLiteral("The album after (Alt+Page Down)"));
         skip_ = new QPushButton(QStringLiteral("Skip"), this);
         skip_->setObjectName(QStringLiteral("bench-musicbrainz-identify-skip"));
-        skip_->setToolTip(
-            QStringLiteral("Leave this album as it is and go on to the next one to do"));
+        skip_->setToolTip(QStringLiteral("Leave this album as it is, and go on to the next"));
         for (auto* button : {previous_, next_, skip_}) {
             button->setAutoDefault(false);
             button->setVisible(many);
@@ -263,11 +253,8 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         apply_ = buttons->addButton(QStringLiteral("Apply"), QDialogButtonBox::AcceptRole);
         apply_->setObjectName(QStringLiteral("bench-musicbrainz-identify-apply"));
         apply_->setAutoDefault(false);
-        apply_->setVisible(many);
         buttons->button(QDialogButtonBox::Close)
-            ->setToolTip(many ? QStringLiteral("Close; albums chosen and not applied are left as "
-                                               "they are")
-                              : QString{});
+            ->setToolTip(QStringLiteral("Close without applying"));
         bottom->addWidget(buttons);
         root->addLayout(bottom);
 
@@ -277,9 +264,10 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         connect(next_, &QPushButton::clicked, this, [this] { step(1); });
         connect(skip_, &QPushButton::clicked, this, [this] {
             const auto at = session_->current();
-            session_->skip(at);
-            if (const auto next = session_->nextToDo(at)) {
-                show(*next);
+            const auto skipping = session_->state(at) != MultiIdentifySession::State::skipped;
+            session_->setSkipped(at, skipping);
+            if (skipping) {
+                step(1);
             }
         });
         if (many) {
@@ -296,19 +284,6 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         connect(session_, &MultiIdentifySession::changed, this, &MusicBrainzIdentifyDialog::sync);
         // Every album applied staged: done.
         connect(session_, &MultiIdentifySession::finished, this, &QDialog::close);
-        for (std::size_t index = 0; index < session_->count(); ++index) {
-            // Chosen: on to the next album to do, this one's versions shown
-            // again for when it is come back to.
-            connect(session_->album(index), &IdentifySession::accepted, this, [this, index] {
-                if (session_->count() < 2U) {
-                    return;
-                }
-                session_->album(index)->back();
-                if (const auto next = session_->nextToDo(index)) {
-                    show(*next);
-                }
-            });
-        }
         show(0U);
     }
 
@@ -335,7 +310,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         }
         auto*& page = pages_by_album_[index];
         if (page == nullptr) {
-            page = new IdentifyAlbumPage(session_->album(index), session_->count() > 1U, pages_);
+            page = new IdentifyAlbumPage(session_->album(index), pages_);
             pages_->addWidget(page);
         }
         pages_->setCurrentWidget(page);
@@ -366,12 +341,16 @@ class MusicBrainzIdentifyDialog final : public QDialog {
                                                : QString{});
         previous_->setEnabled(at > 0U);
         next_->setEnabled(at + 1U < session_->count());
-        const auto chosen = session_->chosenCount();
-        apply_->setText(chosen == 0U   ? QStringLiteral("Apply")
-                        : chosen == 1U ? QStringLiteral("Apply 1 album")
-                                       : QStringLiteral("Apply %1 albums").arg(chosen));
-        apply_->setToolTip(QStringLiteral("Stage every album chosen into the tag editor's draft"));
-        apply_->setEnabled(chosen > 0U && !session_->staging());
+        const auto ready = session_->readyCount();
+        apply_->setText(session_->count() < 2U ? QStringLiteral("Apply")
+                        : ready == 1U          ? QStringLiteral("Apply 1 album")
+                                               : QStringLiteral("Apply %1 albums").arg(ready));
+        apply_->setToolTip(QStringLiteral(
+            "Stage the version chosen for every album not skipped into the tag editor's draft"));
+        apply_->setEnabled(ready > 0U && !session_->staging());
+        skip_->setText(session_->state(at) == MultiIdentifySession::State::skipped
+                           ? QStringLiteral("Don't skip")
+                           : QStringLiteral("Skip"));
         skip_->setEnabled(!session_->staging());
     }
 

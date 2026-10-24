@@ -432,9 +432,14 @@ bool localEngineOutdated(const LocalEngine& engine) {
         if (running.native().ends_with(" (deleted)")) {
             return true;
         }
-        // Or not the engine this build would start at all.
+        // Or not the engine this build would start at all -- where it is
+        // this window's to start: a service's engine is whatever its service
+        // manager runs, which a restart does not change. Restarting it for
+        // that would be restarting it for ever, a window of a build tree
+        // beside the installed service, every time it connects.
         if (!program.isEmpty() &&
-            !std::filesystem::equivalent(running, path_from_text(program), error) && !error) {
+            !std::filesystem::equivalent(running, path_from_text(program), error) && !error &&
+            !localEngineIsService(engine)) {
             return true;
         }
     }

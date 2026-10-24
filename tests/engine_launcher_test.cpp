@@ -558,6 +558,34 @@ void EngineLauncherTest::anOutdatedEngineIsSeenAndStopped() {
     QVERIFY(stopLocalEngine(scratch.engine).has_value());
     QVERIFY(!processRunning(pid));
     QVERIFY(lockHolders(scratch.engine.state / "engine.lock").empty());
+
+    // Not the program this build would start -- a window of a build tree
+    // beside the installed engine: outdated where the window starts it...
+    const auto other = scratch.directory.filePath(QStringLiteral("melodyd-other"));
+    QVERIFY(QFile::copy(QStringLiteral(MELODY_ENGINE_BINARY), other));
+    QVERIFY(connectLocalEngine(scratch.engine).has_value());
+    qputenv("MELODY_ENGINE", other.toLocal8Bit());
+    QVERIFY(localEngineOutdated(scratch.engine));
+    QVERIFY(stopLocalEngine(scratch.engine).has_value());
+    // ...but not where its service runs it, which a restart would not
+    // change: it would be restarted every time the window connects. Started
+    // as systemd starts a unit, which says so in INVOCATION_ID.
+    QProcess service;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("INVOCATION_ID"), QStringLiteral("a-service"));
+    service.setProcessEnvironment(environment);
+    service.setStandardOutputFile(QProcess::nullDevice());
+    service.setStandardErrorFile(QProcess::nullDevice());
+    service.start(program, {QStringLiteral("--socket"), QString::fromStdString(scratch.engine.socket.string()),
+                            QStringLiteral("--state"),
+                            QString::fromStdString(scratch.engine.state.string()),
+                            QStringLiteral("--config"),
+                            QString::fromStdString((scratch.engine.state / "melodyd.conf").string())});
+    QVERIFY(service.waitForStarted());
+    QTRY_VERIFY(localEngineIsService(scratch.engine));
+    QVERIFY(!localEngineOutdated(scratch.engine));
+    QVERIFY(stopLocalEngine(scratch.engine).has_value());
+    QVERIFY(service.waitForFinished(10'000));
 }
 
 } // namespace trackknife::bench

@@ -64,7 +64,10 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         release_ = new QLineEdit(session_->initialRelease(), this);
         release_->setObjectName(QStringLiteral("bench-musicbrainz-identify-release"));
         release_->setPlaceholderText(
-            QStringLiteral("Type an album title — existing tags are not required"));
+            QStringLiteral("An album title, or a MusicBrainz release's link or id"));
+        release_->setToolTip(QStringLiteral(
+            "A release's link or id — musicbrainz.org/release/… — looks up that release "
+            "instead of searching"));
         form->addRow(QStringLiteral("Album:"), release_);
         auto* form_row = new QHBoxLayout;
         form_row->addLayout(form, 1);
@@ -145,6 +148,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
                     close();
                 });
         sync();
+        session_->start();
     }
 
   private:
@@ -201,11 +205,12 @@ class MusicBrainzIdentifyDialog final : public QDialog {
 QDialog* createMusicBrainzIdentifyDialog(
     MusicBrainzLookupService service, std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-    const QString initial_artist, const QString initial_release,
+    const QString initial_artist, const QString initial_release, const QString tagged_release,
     std::function<void(metadata::MetadataProposalSet)> accepted, QWidget* parent) {
     return new MusicBrainzIdentifyDialog(
         new IdentifySession(std::move(service), std::move(local_tracks), std::move(local_paths),
-                            std::move(item_indexes), initial_artist, initial_release),
+                            std::move(item_indexes), initial_artist, initial_release,
+                            tagged_release),
         std::move(accepted), parent);
 }
 

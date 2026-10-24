@@ -1798,6 +1798,7 @@ std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
     }
     const auto& selection = grid_model_->selection();
     Identify request;
+    std::optional<std::string> release_id;
     request.descriptors.reserve(items.size());
     request.local_paths.reserve(items.size());
     for (const auto item_index : items) {
@@ -1829,7 +1830,18 @@ std::optional<TaggerSession::Identify> TaggerSession::identifyRequest() const {
                 album_artist && !album_artist->empty() ? *album_artist : descriptor.artist);
         }
         request.descriptors.push_back(std::move(descriptor));
+        auto tagged = baseline.first_effective_value("musicbrainz_albumid");
+        if (!tagged || tagged->empty()) {
+            tagged = baseline.first_effective_value("musicbrainzalbumid");
+        }
+        const auto id = tagged.value_or(std::string{});
+        if (!release_id) {
+            release_id = id;
+        } else if (*release_id != id) {
+            release_id = std::string{};
+        }
     }
+    request.release_id = display_utf8(release_id.value_or(std::string{}));
     request.items = std::move(items);
     return request;
 }

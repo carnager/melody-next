@@ -48,6 +48,12 @@ struct ReleaseSearchQuery {
 // must be a MusicBrainz UUID.
 [[nodiscard]] core::Result<std::string> build_release_lookup_url(std::string_view release_id);
 
+// The release a person names: a bare release id, or a MusicBrainz link to a
+// release (musicbrainz.org/release/<id>, any page of it) -- lowercased, as
+// MusicBrainz writes ids. None for anything else, a release group's link
+// included: it names an album, not one of its versions.
+[[nodiscard]] std::optional<std::string> release_id_in(std::string_view text);
+
 struct ArtistCredit {
     std::string name;
     std::string join_phrase;

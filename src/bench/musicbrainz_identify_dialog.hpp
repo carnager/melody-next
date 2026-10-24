@@ -24,10 +24,12 @@ namespace trackknife::bench {
 // MusicBrainz id, every release version presented as a distinct candidate,
 // and the chosen version delivered as ADR-0086 proposals for ordinary
 // colored draft staging. The dialog never writes anything itself.
+// `tagged_release`, the release the files are tagged with, is looked up as
+// it opens (ADR-0310).
 [[nodiscard]] QDialog* createMusicBrainzIdentifyDialog(
     MusicBrainzLookupService service, std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes, QString initial_artist,
-    QString initial_release, std::function<void(metadata::MetadataProposalSet)> accepted,
-    QWidget* parent);
+    QString initial_release, QString tagged_release,
+    std::function<void(metadata::MetadataProposalSet)> accepted, QWidget* parent);
 
 } // namespace trackknife::bench

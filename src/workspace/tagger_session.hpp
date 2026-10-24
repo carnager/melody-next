@@ -194,6 +194,9 @@ class TaggerSession final : public QObject {
         std::vector<std::size_t> items;
         QString artist;
         QString release;
+        // The MusicBrainz release every file is tagged with; none where
+        // they differ or one has none.
+        QString release_id;
     };
     // The exact ordered values of a field on the selected files, to edit.
     struct ExactValues {

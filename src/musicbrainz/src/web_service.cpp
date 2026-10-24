@@ -362,6 +362,44 @@ core::Result<std::string> build_release_lookup_url(const std::string_view releas
            "+isrcs+recording-level-rels+work-rels&fmt=json";
 }
 
+std::optional<std::string> release_id_in(std::string_view text) {
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
+        text.remove_prefix(1U);
+    }
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) {
+        text.remove_suffix(1U);
+    }
+    const auto lowered = [](std::string_view id) {
+        std::string found{id};
+        std::ranges::transform(found, found.begin(), [](const char character) {
+            return character >= 'A' && character <= 'F' ? static_cast<char>(character - 'A' + 'a')
+                                                         : character;
+        });
+        return found;
+    };
+    if (is_musicbrainz_id(text)) {
+        return lowered(text);
+    }
+    constexpr std::string_view host = "musicbrainz.org/release/";
+    const auto at = text.find(host);
+    if (at == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto before = text.substr(0U, at);
+    // Only MusicBrainz's own site: musicbrainz.org, or one of its
+    // subdomains (beta.), after a scheme or nothing.
+    if (!before.empty() && !before.ends_with("://") && !before.ends_with(".")) {
+        return std::nullopt;
+    }
+    const auto id = text.substr(at + host.size(), 36U);
+    const auto rest = text.substr(std::min(text.size(), at + host.size() + 36U));
+    if (!is_musicbrainz_id(id) ||
+        (!rest.empty() && rest.front() != '/' && rest.front() != '?' && rest.front() != '#')) {
+        return std::nullopt;
+    }
+    return lowered(id);
+}
+
 core::Result<ReleaseSearchResult> parse_release_search(const std::string_view body,
                                                        const WebServiceLimits& limits) {
     auto root = parse_body(body, limits);

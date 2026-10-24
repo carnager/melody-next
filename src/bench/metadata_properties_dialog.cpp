@@ -1082,7 +1082,7 @@ void MetadataPropertiesDialog::startIdentify() {
     auto* dialog = createMusicBrainzIdentifyDialog(
         session_->services().musicbrainz, std::move(request->descriptors),
         std::move(request->local_paths), std::move(request->items), request->artist,
-        request->release,
+        request->release, request->release_id,
         [session = QPointer{session_}](metadata::MetadataProposalSet proposals) {
             if (session) {
                 session->applyMusicBrainzProposals(std::move(proposals));

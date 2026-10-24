@@ -375,10 +375,12 @@ IdentifySession::IdentifySession(MusicBrainzLookupService service,
                                  std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                                  std::vector<QString> local_paths,
                                  std::vector<std::size_t> item_indexes, QString initial_artist,
-                                 QString initial_release, QObject* parent)
+                                 QString initial_release, QString tagged_release,
+                                 QObject* parent)
     : QObject(parent), service_(std::move(service)), local_tracks_(std::move(local_tracks)),
       local_paths_(std::move(local_paths)), item_indexes_(std::move(item_indexes)),
       initial_artist_(std::move(initial_artist)), initial_release_(std::move(initial_release)),
+      tagged_release_(std::move(tagged_release)),
       status_(QStringLiteral("Searches MusicBrainz by text — no MusicBrainz tags are needed")) {}
 
 IdentifySession::~IdentifySession() = default;
@@ -550,9 +552,22 @@ void IdentifySession::loadScanCandidate(const std::size_t rank) {
     });
 }
 
+void IdentifySession::start() {
+    if (const auto id = musicbrainz::release_id_in(tagged_release_.toStdString())) {
+        lookUp(*id, true);
+    }
+}
+
 void IdentifySession::search(const QString& artist, const QString& release) {
     if (busy_ || !service_.fetch) {
         return;
+    }
+    // A link or id pasted in either field: that release, not a search.
+    for (const auto* named : {&release, &artist}) {
+        if (const auto id = musicbrainz::release_id_in(named->toStdString())) {
+            lookUp(*id, false);
+            return;
+        }
     }
     const auto url = musicbrainz::build_release_search_url(musicbrainz::ReleaseSearchQuery{
         .artist = artist.trimmed().toStdString(),
@@ -622,6 +637,63 @@ void IdentifySession::finishSearch(core::Result<QByteArray> body) {
                                                     : QStringLiteral("versions"));
         suggested_ = 0;
     }
+    emit changed();
+}
+
+void IdentifySession::lookUp(const std::string& release_id, const bool tagged) {
+    if (busy_ || !service_.fetch) {
+        return;
+    }
+    const auto url = musicbrainz::build_release_lookup_url(release_id);
+    if (!url) {
+        return;
+    }
+    status_ = QStringLiteral("Looking up the release…");
+    rows_.clear();
+    row_candidates_.clear();
+    candidates_.clear();
+    suggested_ = -1;
+    setBusy(true);
+    const QPointer self{this};
+    service_.fetch(QString::fromStdString(*url), [self, tagged](core::Result<QByteArray> body) {
+        if (!self.isNull()) {
+            self->finishReleaseLookup(std::move(body), tagged);
+        }
+    });
+}
+
+void IdentifySession::finishReleaseLookup(core::Result<QByteArray> body, const bool tagged) {
+    busy_ = false;
+    auto release = body ? musicbrainz::parse_release_lookup(std::string_view{
+                              body->constData(), static_cast<std::size_t>(body->size())})
+                        : core::Result<musicbrainz::Release>{std::unexpected(body.error())};
+    if (!release) {
+        status_ = tagged ? QStringLiteral("The release the files are tagged with could not be "
+                                          "looked up · %1 — search for it instead")
+                               .arg(text(release.error().message))
+                         : QStringLiteral("The release could not be looked up · %1")
+                               .arg(text(release.error().message));
+        emit changed();
+        return;
+    }
+    row_candidates_.push_back(0U);
+    rows_.push_back(Candidate{
+        .match = tagged ? QStringLiteral("Tagged release") : QStringLiteral("Release named"),
+        .match_tool_tip = release->track_count == local_tracks_.size()
+                              ? QStringLiteral("Same track count")
+                              : QStringLiteral("Different track count"),
+        .album = text(release->title),
+        .album_tool_tip = text(release->id),
+        .artist = credit_text(release->artist_credits),
+        .tracks = QString::number(release->track_count),
+        .media = media_text(*release),
+        .version = version_text(*release),
+    });
+    candidates_.push_back(std::move(*release));
+    suggested_ = 0;
+    status_ = tagged ? QStringLiteral("The release the files are tagged with — search to look "
+                                      "for another")
+                     : QStringLiteral("The release named by its id");
     emit changed();
 }
 

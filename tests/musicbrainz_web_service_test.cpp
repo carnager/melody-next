@@ -59,6 +59,30 @@ void lookupUrlRequiresAReleaseId() {
     CHECK(!build_release_lookup_url("2f2ac1b7-1111-4f4f-8f8f-123456789ab/../x").has_value());
 }
 
+// A release named by its id or its link; nothing else, a release group's
+// link included.
+void releaseIdsAreFoundInLinks() {
+    constexpr std::string_view id = "2f2ac1b7-1111-4f4f-8f8f-123456789abc";
+    CHECK(release_id_in(id) == std::string{id});
+    CHECK(release_id_in("  2F2AC1B7-1111-4F4F-8F8F-123456789ABC\t") == std::string{id});
+    CHECK(release_id_in("https://musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abc") ==
+          std::string{id});
+    CHECK(release_id_in("musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abc/discids") ==
+          std::string{id});
+    CHECK(release_id_in("https://beta.musicbrainz.org/release/"
+                        "2f2ac1b7-1111-4f4f-8f8f-123456789abc?tport=8000") == std::string{id});
+    CHECK(!release_id_in("").has_value());
+    CHECK(!release_id_in("Alpha").has_value());
+    CHECK(!release_id_in("https://musicbrainz.org/release-group/"
+                         "2f2ac1b7-1111-4f4f-8f8f-123456789abc")
+               .has_value());
+    CHECK(!release_id_in("https://musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abcd")
+               .has_value());
+    CHECK(!release_id_in("https://notmusicbrainz.org/release/"
+                         "2f2ac1b7-1111-4f4f-8f8f-123456789abc")
+               .has_value());
+}
+
 constexpr std::string_view search_fixture = R"json({
   "count": 42,
   "offset": 0,
@@ -333,6 +357,7 @@ void acoustidBodyAndParsingAreBounded() {
 int main() {
     searchUrlEscapesLuceneAndPercentEncodes();
     lookupUrlRequiresAReleaseId();
+    releaseIdsAreFoundInLinks();
     searchParsingCarriesVersionDetail();
     lookupParsingAlignsTracksAndRecordings();
     malformedAndOversizedPayloadsFailTyped();

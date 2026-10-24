@@ -120,6 +120,10 @@ class TrackMatchSession final : public QObject {
 // text search needing no MusicBrainz tags, or audio fingerprints through
 // AcoustID, each release version its own candidate; the chosen one opens a
 // TrackMatchSession. It never writes anything itself.
+//
+// ADR-0310: a release named by its link or id is looked up rather than
+// searched for -- typed where the search is, or the one the files are
+// tagged with, looked up by start().
 class IdentifySession final : public QObject {
     Q_OBJECT
 
@@ -138,7 +142,8 @@ class IdentifySession final : public QObject {
     IdentifySession(MusicBrainzLookupService service,
                     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-                    QString initial_artist, QString initial_release, QObject* parent = nullptr);
+                    QString initial_artist, QString initial_release,
+                    QString tagged_release = {}, QObject* parent = nullptr);
     ~IdentifySession() override;
 
     [[nodiscard]] QString initialArtist() const { return initial_artist_; }
@@ -152,6 +157,10 @@ class IdentifySession final : public QObject {
     [[nodiscard]] int suggested() const { return suggested_; }
     [[nodiscard]] TrackMatchSession* match() const { return match_; }
 
+    // The release the files are tagged with, looked up, where there is one.
+    void start();
+    // Searched for -- or, where either names a release by its link or id,
+    // that release looked up.
     void search(const QString& artist, const QString& release);
     void scan();
     // The candidate at `row`, its track list loaded to be matched.
@@ -172,6 +181,8 @@ class IdentifySession final : public QObject {
     void loadScanCandidate(std::size_t rank);
     void finishSearch(core::Result<QByteArray> body);
     void finishLookup(core::Result<QByteArray> body);
+    void lookUp(const std::string& release_id, bool tagged);
+    void finishReleaseLookup(core::Result<QByteArray> body, bool tagged);
 
     MusicBrainzLookupService service_;
     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks_;
@@ -179,6 +190,7 @@ class IdentifySession final : public QObject {
     std::vector<std::size_t> item_indexes_;
     QString initial_artist_;
     QString initial_release_;
+    QString tagged_release_;
     std::vector<musicbrainz::Release> candidates_;
     // Parallel to rows_: the candidate each row is.
     std::vector<std::size_t> row_candidates_;

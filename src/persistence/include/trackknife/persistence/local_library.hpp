@@ -191,6 +191,8 @@ struct LibraryFolder {
 struct LibraryScanResult {
     bool cancelled{false};
     bool incomplete{false};
+    // Paths a scan was asked to walk that are in no library folder.
+    std::vector<std::string> outside;
 };
 
 // Synchronous, Qt-free service. Each worker owns its own connection; all
@@ -277,8 +279,13 @@ class LocalLibrary final {
     // its files' tags carry, from what was indexed. Returns how many were
     // rated.
     core::Result<std::size_t> import_indexed_tag_ratings();
+    // Walks every library folder, or with `within` only those paths: a
+    // folder is walked as a scan walks a root, and what is no longer in it
+    // is dropped, the rest of its root left as it was; a file is re-read as
+    // refresh() reads it. A path holding a library folder scans it whole.
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
-                                         LibraryScanProgress& progress);
+                                         LibraryScanProgress& progress,
+                                         const std::vector<std::string>& within = {});
     // Re-reads the named files now, without a walk: after they were tagged
     // or moved by someone else. A file inside a library folder is indexed
     // as a scan would; one that is gone is dropped from the index, as a

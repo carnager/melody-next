@@ -302,7 +302,8 @@ RemoteCatalogue::scan(const core::CancellationToken& cancellation,
     progress.indexed.store(outcome->value("indexed", std::size_t{0}));
     progress.failed.store(outcome->value("failed", std::size_t{0}));
     return persistence::LibraryScanResult{.cancelled = outcome->value("cancelled", false),
-                                          .incomplete = outcome->value("incomplete", false)};
+                                          .incomplete = outcome->value("incomplete", false),
+                                          .outside = {}};
 }
 
 core::Result<void> RemoteCatalogue::add_root(const std::string& raw_path) {

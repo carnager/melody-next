@@ -129,6 +129,10 @@ void usage(std::ostream& out) {
            "                              and cover kept, named by its naming layout or\n"
            "                              kept below the music folder, ReplayGain measured\n"
            "                              afresh; what is there is passed over (--help)\n"
+           "  update [PATH...]            the engine rescans its library folders, or\n"
+           "                              only these folders and files -- its own paths,\n"
+           "                              relative ones taken from here: new files read,\n"
+           "                              changed ones re-read, gone ones dropped\n"
            "  revision                    changes when the library does, for caches\n"
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
@@ -1379,6 +1383,61 @@ int run(const Options& options) {
         }
         std::cout << lines;
         return tracks.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+    } else if (command == "update") {
+        // A rescan by the engine: of every library folder, or of the paths
+        // given -- as the shell gave them, the engine's own paths.
+        Json params = Json::object();
+        if (words.size() > 1U) {
+            // An engine before level 24 would scan all of it instead.
+            if (const auto info = call(*client, "engine.info");
+                trackknife::protocol::peer_version(info).level < 24) {
+                fail("this engine is too old to update only some paths; update it, or run "
+                     "update without paths");
+            }
+            auto paths = Json::array();
+            for (std::size_t index = 1; index < words.size(); ++index) {
+                std::error_code error;
+                const auto absolute = std::filesystem::absolute(words[index], error);
+                paths.push_back(trackknife::protocol::encode_raw_path(
+                    error ? words[index] : absolute.lexically_normal().string()));
+            }
+            params["paths"] = std::move(paths);
+        }
+        const bool interactive = !options.json && ::isatty(STDERR_FILENO) == 1;
+        auto outcome = client->run_job("catalogue.scan", params, [interactive](const Json& progress) {
+            if (interactive) {
+                std::cerr << "\r\033[Kupdating: " << progress.value("visited", 0) << " seen, "
+                          << progress.value("indexed", 0) << " read" << std::flush;
+            }
+        });
+        if (interactive) {
+            std::cerr << "\r\033[K";
+        }
+        if (!outcome) {
+            fail(outcome.error().message);
+        }
+        if (options.json) {
+            std::cout << outcome->dump() << "\n";
+        }
+        if (const auto error = outcome->find("error"); error != outcome->end()) {
+            fail(error->is_string() ? error->get<std::string>() : "the engine could not update");
+        }
+        bool whole = !outcome->value("incomplete", false) && !outcome->value("cancelled", false);
+        for (const auto& path : outcome->value("outside", Json::array())) {
+            auto raw = trackknife::protocol::decode_raw_path(
+                path.is_string() ? path.get<std::string>() : std::string{});
+            std::cerr << "melody-cli: not in a library folder: "
+                      << (raw ? trackknife::core::display_raw_path(*raw) : std::string{"a path"})
+                      << "\n";
+            whole = false;
+        }
+        if (!options.json) {
+            std::cout << outcome->value("visited", 0) << " files seen, "
+                      << outcome->value("indexed", 0) << " read, " << outcome->value("failed", 0)
+                      << " failed" << (outcome->value("incomplete", false) ? "; incomplete" : "")
+                      << "\n";
+        }
+        return whole ? EXIT_SUCCESS : EXIT_FAILURE;
     } else if (command == "revision") {
         // The library's revision: a picker keeps its list while it stays
         // the same. An engine too old to say fails, and it lists afresh.

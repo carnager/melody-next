@@ -163,9 +163,29 @@ void register_job_methods(protocol::Dispatcher& dispatcher, JobRegistry& registr
 }
 
 void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
-    jobs.on("catalogue.scan", [&catalogue](const Json&) -> core::Result<JobRegistry::Work> {
-        return [&catalogue](const core::CancellationToken& token,
-                            const JobRegistry::Reporter& report) {
+    // catalogue.scan {paths?}: every library folder, or only these paths
+    // (encoded) -- see LocalLibrary::scan.
+    jobs.on("catalogue.scan", [&catalogue](const Json& params) -> core::Result<JobRegistry::Work> {
+        std::vector<std::string> within;
+        if (const auto paths = params.find("paths"); paths != params.end()) {
+            if (!paths->is_array()) {
+                return std::unexpected(bad_params("paths must be a list", "paths"));
+            }
+            for (const auto& encoded : *paths) {
+                auto decoded = encoded.is_string()
+                                   ? protocol::decode_raw_path(encoded.get<std::string>())
+                                   : core::Result<std::string>{};
+                if (!encoded.is_string() || !decoded || decoded->empty()) {
+                    return std::unexpected(bad_params("a path is not an encoded path", "paths"));
+                }
+                within.push_back(std::move(*decoded));
+            }
+            if (within.empty()) {
+                return std::unexpected(bad_params("paths, when given, name one", "paths"));
+            }
+        }
+        return [&catalogue, within = std::move(within)](const core::CancellationToken& token,
+                                                         const JobRegistry::Reporter& report) {
             // scan() blocks and updates atomic counters, so progress is
             // sampled beside it. This is the same shape the workspace used
             // with a timer; the engine now owns the sampling because a remote
@@ -188,7 +208,7 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
                 }
             }};
 
-            auto outcome = catalogue.scan(token, progress);
+            auto outcome = catalogue.scan(within, token, progress);
             {
                 const std::lock_guard lock{mutex};
                 running = false;
@@ -206,6 +226,13 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
             }
             result["cancelled"] = outcome->cancelled;
             result["incomplete"] = outcome->incomplete;
+            if (!outcome->outside.empty()) {
+                auto outside = Json::array();
+                for (const auto& path : outcome->outside) {
+                    outside.push_back(protocol::encode_raw_path(path));
+                }
+                result["outside"] = std::move(outside);
+            }
             return result;
         };
     });

@@ -7,6 +7,18 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 24 (2026-10-24)
+
+A rescan of only some of the library.
+
+- The `catalogue.scan` job takes `paths` -- encoded, the engine's own: only
+  those are scanned. A folder is walked as a library folder is, what is no
+  longer in it dropped and the rest of the library left as it was; a file is
+  read as `catalogue.refresh` reads it; a path holding a library folder
+  scans that folder whole. Its outcome answers `outside`, the paths in no
+  library folder, when there are any. An older engine ignores `paths` and
+  scans everything.
+
 ### Level 23 (2026-10-24)
 
 Scrobbling only the library's tracks.

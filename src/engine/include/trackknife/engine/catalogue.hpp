@@ -219,6 +219,10 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<persistence::LibraryScanResult>
     scan(const core::CancellationToken& cancellation,
          persistence::LibraryScanProgress& progress) override;
+    // Only these paths: see LocalLibrary::scan.
+    [[nodiscard]] core::Result<persistence::LibraryScanResult>
+    scan(const std::vector<std::string>& within, const core::CancellationToken& cancellation,
+         persistence::LibraryScanProgress& progress);
 
     [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const override;
     // See LocalLibrary::albums_arrived_since.

@@ -277,9 +277,12 @@ bool confirmed_missing(const std::string& raw_path, const std::string& revision,
     return false;
 }
 
+// Below the root, or with `from` and `to` (a subtree_range) only the part of
+// it a scan was asked to walk.
 void prune_missing(sqlite3* db, const std::string& root, const std::string& generation,
-                   const core::CancellationToken& cancellation) {
-    std::string after;
+                   const core::CancellationToken& cancellation, const std::string& from = {},
+                   const std::string& to = {}) {
+    std::string after = from;
     while (!cancellation.is_cancellation_requested()) {
         std::vector<std::pair<std::string, std::string>> candidates;
         {
@@ -287,10 +290,12 @@ void prune_missing(sqlite3* db, const std::string& root, const std::string& gene
             // the root/seen index would repeatedly sort all missing entries.
             Statement page{db, "SELECT raw_path,revision FROM local_library_tracks "
                                "INDEXED BY sqlite_autoindex_local_library_tracks_1 WHERE "
-                               "root=? AND seen<>? AND raw_path>? ORDER BY raw_path LIMIT 200"};
+                               "root=? AND seen<>? AND raw_path>? AND "
+                               "(length(?4)=0 OR raw_path<?4) ORDER BY raw_path LIMIT 200"};
             page.blob(1, root);
             page.text(2, generation);
             page.blob(3, after);
+            page.blob(4, to);
             while (page.next()) {
                 candidates.emplace_back(page.bytes(0), page.bytes(1));
             }
@@ -2782,19 +2787,89 @@ core::Result<LibraryInventoryPage> LocalLibrary::inventory(const std::string& fo
 }
 
 core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken& cancellation,
-                                                   LibraryScanProgress& progress) {
-    return checked([&] {
+                                                   LibraryScanProgress& progress,
+                                                   const std::vector<std::string>& within) {
+    std::vector<std::string> files;
+    auto scanned = checked([&] {
         auto* db = implementation_->db;
         const auto generation = core::StableId::random().to_string();
         LibraryScanResult result;
-        for (const auto& root : read_roots(db)) {
+        // What is walked: every root, or of the paths asked for, each folder
+        // inside one -- and a root inside one, whole. A file, or a path that
+        // is gone, is re-read or dropped as refresh() does it, after.
+        struct Walk {
+            LibraryRoot root;
+            std::string folder;
+        };
+        std::vector<Walk> walks;
+        const auto roots = read_roots(db);
+        if (within.empty()) {
+            for (const auto& root : roots) {
+                walks.push_back({root, root.raw_path});
+            }
+        }
+        for (auto path : within) {
+            while (path.size() > 1U && path.back() == '/') {
+                path.pop_back();
+            }
+            bool placed = false;
+            for (const auto& root : roots) {
+                if (contained(root.raw_path, path)) {
+                    walks.push_back({root, root.raw_path});
+                    placed = true;
+                } else if (contained(path, root.raw_path)) {
+                    placed = true;
+                    if (core::hidden_below_root(path, root.raw_path)) {
+                        continue;
+                    }
+                    std::error_code ignored;
+                    if (std::filesystem::is_directory(std::filesystem::path{path}, ignored)) {
+                        walks.push_back({root, path});
+                    } else {
+                        files.push_back(path);
+                    }
+                }
+            }
+            if (!placed) {
+                result.outside.push_back(path);
+            }
+        }
+        // A folder inside another one walked is walked with it.
+        std::ranges::sort(walks, [](const Walk& left, const Walk& right) {
+            return left.folder < right.folder;
+        });
+        std::vector<Walk> distinct;
+        for (auto& walk : walks) {
+            if (std::ranges::none_of(distinct, [&walk](const Walk& kept) {
+                    return contained(walk.folder, kept.folder);
+                })) {
+                distinct.push_back(std::move(walk));
+            }
+        }
+        std::erase_if(files, [&distinct](const std::string& file) {
+            return std::ranges::any_of(
+                distinct, [&file](const Walk& walk) { return contained(file, walk.folder); });
+        });
+        for (const auto& walk : distinct) {
+            const auto& root = walk.root;
+            const auto& folder = walk.folder;
             if (cancellation.is_cancellation_requested()) {
                 result.cancelled = true;
                 break;
             }
+            // A folder below the root: what is not seen in it is gone, and
+            // the rest of the root is left as it was.
+            const bool whole = folder == root.raw_path;
+            const auto [from, to] = whole ? std::pair<std::string, std::string>{}
+                                          : subtree_range(folder);
             std::error_code error;
-            std::filesystem::recursive_directory_iterator iterator{
-                std::filesystem::path{root.raw_path}, error};
+            std::filesystem::recursive_directory_iterator iterator{std::filesystem::path{folder},
+                                                                   error};
+            if (error && !whole) {
+                // Not the root offline: a folder that could not be read.
+                result.incomplete = true;
+                continue;
+            }
             if (error) {
                 Transaction transaction{db};
                 Statement offline{db, "UPDATE local_library_roots SET "
@@ -2973,30 +3048,45 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             }
             result.incomplete = result.incomplete || !complete;
             Transaction transaction{db};
-            Statement state{db, "UPDATE local_library_roots SET available=1,error=? WHERE "
-                                "raw_path=? AND scan_token=?"};
-            state.text(1, complete ? "" : "Scan incomplete; previous entries retained");
-            state.blob(2, root.raw_path);
-            state.text(3, generation);
-            state.next();
+            // Only a walk of all of it says how the root is.
+            if (whole) {
+                Statement state{db, "UPDATE local_library_roots SET available=1,error=? WHERE "
+                                    "raw_path=? AND scan_token=?"};
+                state.text(1, complete ? "" : "Scan incomplete; previous entries retained");
+                state.blob(2, root.raw_path);
+                state.text(3, generation);
+                state.next();
+            }
             if (complete) {
                 Statement missing{
                     db, "UPDATE local_library_tracks SET available=0 WHERE root=? AND seen<>? "
                         "AND EXISTS(SELECT 1 FROM local_library_roots WHERE raw_path=root AND "
-                        "scan_token=?)"};
+                        "scan_token=?) AND (length(?4)=0 OR (raw_path>=?5 AND raw_path<?4))"};
                 missing.blob(1, root.raw_path);
                 missing.text(2, generation);
                 missing.text(3, generation);
+                missing.blob(4, to);
+                missing.blob(5, from);
                 missing.next();
             }
             transaction.commit();
             if (complete) {
-                prune_missing(db, root.raw_path, generation, cancellation);
+                prune_missing(db, root.raw_path, generation, cancellation, from, to);
             }
         }
         result.cancelled = result.cancelled || cancellation.is_cancellation_requested();
         return result;
     });
+    if (!scanned || files.empty() || scanned->cancelled) {
+        return scanned;
+    }
+    auto refreshed = refresh(files, cancellation);
+    if (!refreshed) {
+        return std::unexpected(std::move(refreshed.error()));
+    }
+    progress.visited += files.size();
+    progress.indexed += *refreshed;
+    return scanned;
 }
 
 core::Result<void> refresh_library_source(sqlite3* db, const std::string& source,

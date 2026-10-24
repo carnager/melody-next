@@ -230,13 +230,20 @@ namespace trackknife::engine {
 core::Result<persistence::LibraryScanResult>
 LocalCatalogue::scan(const core::CancellationToken& cancellation,
                      persistence::LibraryScanProgress& progress) {
+    return scan({}, cancellation, progress);
+}
+
+core::Result<persistence::LibraryScanResult>
+LocalCatalogue::scan(const std::vector<std::string>& within,
+                     const core::CancellationToken& cancellation,
+                     persistence::LibraryScanProgress& progress) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
-    auto scanned = library->scan(cancellation, progress);
+    auto scanned = library->scan(cancellation, progress, within);
     if (scanned) {
-        changed({.paths = {}, .albums = {}, .everything = true});
+        changed({.paths = within, .albums = {}, .everything = true});
     }
     return scanned;
 }

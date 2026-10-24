@@ -118,12 +118,19 @@ with wave.open(sys.argv[1], "wb") as out:
     out.setframerate(44100)
     out.writeframes(b"\0" * 44100 * 4)
 PY
-engine '{"id":8,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+# update: of one folder, given relative to here, then of everything.
+(cd "${work}/music" && cli update second/) | matches "1 read" || fail "update reads the new file"
+cli find delta --format '%path%' | matches -x -F "${work}/music/second/delta.wav" \
+    || fail "update of a folder takes in what came to it"
 second_revision="$(cli revision)"
 [ "${second_revision}" != "${first_revision}" ] || fail "a track that came changes the revision"
 rm "${work}/music/second/delta.wav"
-engine '{"id":9,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+cli update > /dev/null || fail "update of the whole library"
 [ "$(cli revision)" != "${second_revision}" ] || fail "and one that went"
+if cli update "${work}/elsewhere" > /dev/null 2>"${work}/update.txt"; then
+    fail "update of a path in no library folder fails"
+fi
+matches -F "not in a library folder: ${work}/elsewhere" "${work}/update.txt" || fail "and says so"
 
 # The library, by words and by what is newest.
 cli tracks alpha | matches "alpha" || fail "a track is found by its title"

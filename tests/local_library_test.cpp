@@ -140,6 +140,7 @@ class LocalLibraryTest final : public QObject {
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
     void refreshRereadsNamedFilesWithoutAWalk();
+    void scanWithinWalksOnlyThosePaths();
     void hiddenFilesAndFoldersAreNotTheLibrarys();
     void refreshDropsAVanishedFolderAndInventoryPages();
     void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
@@ -313,6 +314,61 @@ void LocalLibraryTest::refreshRereadsNamedFilesWithoutAWalk() {
     const auto ignored = library->refresh({elsewhere});
     QVERIFY(ignored && *ignored == 0U);
     QCOMPARE(library->paths(tracks())->size(), 1U);
+}
+
+// melody-cli update PATH: a scan of only some folders. New files in them
+// are read and gone ones dropped; what changed elsewhere in the root waits
+// for a scan of that. A file is read by name, a path holding the root scans
+// it whole, and one in no library folder is said back.
+void LocalLibraryTest::scanWithinWalksOnlyThosePaths() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto kept = fixture(root / "Album", "01.flac", "Kept");
+    const auto removed = fixture(root / "Album", "02.flac", "Removed");
+    const auto other = fixture(root / "Other", "01.flac", "Other");
+    // Starts like the folder's name, and is not in it.
+    const auto sibling = fixture(root / "Album0", "01.flac", "Sibling");
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress scanned;
+    QVERIFY(library->scan({}, scanned));
+    QCOMPARE(library->paths(tracks())->size(), 4U);
+
+    const auto added = fixture(root / "Album" / "CD2", "03.flac", "Added");
+    std::filesystem::remove(removed);
+    std::filesystem::remove(other);
+    std::filesystem::remove(sibling);
+    persistence::LibraryScanProgress within;
+    auto outcome = library->scan({}, within, {(root / "Album").native() + "/"});
+    QVERIFY(outcome && !outcome->incomplete && outcome->outside.empty());
+    QCOMPARE(within.indexed.load(), 1U);
+    auto paths = *library->paths(tracks());
+    std::ranges::sort(paths);
+    QCOMPARE(paths, (std::vector<std::string>{kept, added, sibling, other}));
+
+    // A file, named: read without a walk.
+    QCOMPARE(fixture(root / "Album", "01.flac", "Retagged"), kept);
+    persistence::LibraryScanProgress file;
+    outcome = library->scan({}, file, {kept});
+    QVERIFY(outcome && outcome->outside.empty());
+    QCOMPARE(library->query(tracks("Retagged"))->entries.size(), 1U);
+    QCOMPARE(library->paths(tracks())->size(), 4U);
+
+    // Outside: said, and nothing else touched.
+    const auto stray = (base / "elsewhere").native();
+    persistence::LibraryScanProgress outside;
+    outcome = library->scan({}, outside, {stray});
+    QVERIFY(outcome && outcome->outside == std::vector<std::string>{stray});
+    QCOMPARE(library->paths(tracks())->size(), 4U);
+
+    // Holding the root: all of it.
+    persistence::LibraryScanProgress whole;
+    outcome = library->scan({}, whole, {base.native()});
+    QVERIFY(outcome && outcome->outside.empty());
+    paths = *library->paths(tracks());
+    std::ranges::sort(paths);
+    QCOMPARE(paths, (std::vector<std::string>{kept, added}));
 }
 
 // ADR-0308: a hidden file beside a track -- a sync tool's fragment, macOS's

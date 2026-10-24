@@ -143,8 +143,9 @@ class LocalLibraryTest final : public QObject {
     void scanWithinWalksOnlyThosePaths();
     void hiddenFilesAndFoldersAreNotTheLibrarys();
     void refreshDropsAVanishedFolderAndInventoryPages();
-    void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
+    void deletedSubfoldersArePrunedEvenByIncompleteScans();
     void missingFilesOnAnotherDeviceAreRetained();
+    void missingFilesOnARemountedShareArePruned();
     void deletionCleanupPagesWithoutChangingWorkingLists();
     void albumIdentityKeepsEditionsSeparate();
     void metadataAndMovesFollowTheListTransaction();
@@ -462,7 +463,7 @@ void LocalLibraryTest::refreshDropsAVanishedFolderAndInventoryPages() {
     QCOMPARE(library->paths(tracks())->size(), 4U);
 }
 
-void LocalLibraryTest::deletedSubfoldersArePrunedOnlyAfterCompleteScans() {
+void LocalLibraryTest::deletedSubfoldersArePrunedEvenByIncompleteScans() {
     QTemporaryDir temporary;
     const std::filesystem::path base{temporary.path().toStdString()};
     const auto root = base / "music";
@@ -476,7 +477,14 @@ void LocalLibraryTest::deletedSubfoldersArePrunedOnlyAfterCompleteScans() {
     QCOMPARE(library->query(tracks())->entries.size(), 2U);
     QCOMPARE(library->query({})->entries.front().albums, 2U);
     std::filesystem::remove_all(root / "removed");
-    // A failed probe makes the traversal incomplete: retain unseen entries.
+    // Cancelled: nothing goes.
+    core::CancellationSource cancel;
+    cancel.request_cancellation();
+    persistence::LibraryScanProgress stopped;
+    QVERIFY(library->scan(cancel.token(), stopped)->cancelled);
+    QCOMPARE(library->query(tracks())->entries.size(), 2U);
+    // A failed probe makes the traversal incomplete: what is confirmed gone
+    // goes all the same (ADR-0313), what is there stays.
     {
         std::ofstream corrupt{root / "broken.flac"};
         corrupt << "not audio";
@@ -484,13 +492,10 @@ void LocalLibraryTest::deletedSubfoldersArePrunedOnlyAfterCompleteScans() {
     persistence::LibraryScanProgress partial;
     const auto incomplete = library->scan({}, partial);
     QVERIFY(incomplete && incomplete->incomplete);
-    QCOMPARE(library->query(tracks())->entries.size(), 2U);
+    QVERIFY(library->query(tracks("Deleted"))->entries.empty());
+    QCOMPARE(library->query(tracks())->entries.size(), 1U);
+    QCOMPARE(library->query(tracks())->entries.front().available, 1U);
     std::filesystem::remove(root / "broken.flac");
-    core::CancellationSource cancel;
-    cancel.request_cancellation();
-    persistence::LibraryScanProgress stopped;
-    QVERIFY(library->scan(cancel.token(), stopped)->cancelled);
-    QCOMPARE(library->query(tracks())->entries.size(), 2U);
     persistence::LibraryScanProgress complete;
     const auto scanned = library->scan({}, complete);
     QVERIFY(scanned && !scanned->incomplete);
@@ -548,6 +553,40 @@ void LocalLibraryTest::missingFilesOnAnotherDeviceAreRetained() {
     persistence::LibraryScanProgress returned;
     QVERIFY(library->scan({}, returned));
     QCOMPARE(library->paths(tracks())->front(), source);
+}
+
+// ADR-0313: a share mounted again is often given another device number; its
+// files are seen on that one, and one deleted meanwhile is confirmed gone on
+// it -- where nothing of the old device is seen, nothing is.
+void LocalLibraryTest::missingFilesOnARemountedShareArePruned() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto kept = fixture(root / "album" / "CD 1", "01.flac", "Kept", "Album");
+    const auto gone = fixture(root / "album" / "CD 2", "01.flac", "Gone", "Album");
+    QVERIFY(!kept.empty() && !gone.empty());
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress initial;
+    QVERIFY(library->scan({}, initial));
+    QCOMPARE(library->query(tracks())->entries.size(), 2U);
+    // Stored as seen on the share's device before it was mounted again.
+    sqlite3* db = nullptr;
+    QCOMPARE(sqlite3_open((base / "state.sqlite").c_str(), &db), SQLITE_OK);
+    QCOMPARE(sqlite3_exec(db,
+                          "UPDATE local_library_tracks SET revision="
+                          "'2:18446744073709551615' || substr(revision,instr(substr(revision,3),"
+                          "':')+2)",
+                          nullptr, nullptr, nullptr),
+             SQLITE_OK);
+    sqlite3_close(db);
+    std::filesystem::remove_all(root / "album" / "CD 2");
+    persistence::LibraryScanProgress again;
+    const auto scanned = library->scan({}, again);
+    QVERIFY(scanned && !scanned->incomplete);
+    QVERIFY(library->query(tracks("Gone"))->entries.empty());
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+    QCOMPARE(library->paths(tracks())->front(), kept);
 }
 
 void LocalLibraryTest::deletionCleanupPagesWithoutChangingWorkingLists() {

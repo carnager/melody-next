@@ -238,12 +238,8 @@ std::string revision_key(const core::LocalSourceRevision& revision) {
            std::to_string(revision.modification_time_nanoseconds);
 }
 
-// A successful walk alone is insufficient: an unmounted volume can leave an
-// accessible empty mountpoint. Require an absent path and a surviving directory
-// on the file's previously observed device; uncertainty retains the cache.
-bool confirmed_missing(const std::string& raw_path, const std::string& revision,
-                       const std::string& root) {
-    std::uint64_t device = 0;
+// The device a stored revision was observed on, where it names one.
+std::optional<std::uint64_t> revision_device(const std::string_view revision) {
     // Rows written since ADR-0150 carry a leading representation-version
     // component; the device follows it. Pre-migration rows start with the
     // device directly.
@@ -253,20 +249,42 @@ bool confirmed_missing(const std::string& raw_path, const std::string& revision,
     }
     const auto separator = text.find(':');
     if (separator == std::string_view::npos) {
-        return false;
+        return std::nullopt;
     }
+    std::uint64_t device = 0;
     const auto parsed = std::from_chars(text.data(), text.data() + separator, device);
     if (parsed.ec != std::errc{} || parsed.ptr != text.data() + separator) {
+        return std::nullopt;
+    }
+    return device;
+}
+
+// Devices a scan saw files move to, by the device they were stored with: a
+// share mounted again -- after a reboot, an NFS or SMB remount -- is often
+// given another device number, and every file on it is seen on that one.
+using DeviceMoves = std::map<std::uint64_t, std::set<std::uint64_t>>;
+
+// A successful walk alone is insufficient: an unmounted volume can leave an
+// accessible empty mountpoint. Require an absent path and a surviving directory
+// on the file's previously observed device -- or on one the scan saw the
+// other files of that device move to; uncertainty retains the cache.
+bool confirmed_missing(const std::string& raw_path, const std::string& revision,
+                       const std::string& root, const DeviceMoves& moves = {}) {
+    const auto device = revision_device(revision);
+    if (!device) {
         return false;
     }
     struct stat state{};
     if (::lstat(raw_path.c_str(), &state) == 0 || errno != ENOENT) {
         return false;
     }
+    const auto moved = moves.find(*device);
     auto parent = std::filesystem::path{raw_path}.parent_path();
     while (!parent.empty()) {
         if (::lstat(parent.c_str(), &state) == 0) {
-            return S_ISDIR(state.st_mode) && static_cast<std::uint64_t>(state.st_dev) == device;
+            const auto now = static_cast<std::uint64_t>(state.st_dev);
+            return S_ISDIR(state.st_mode) &&
+                   (now == *device || (moved != moves.end() && moved->second.contains(now)));
         }
         if (errno != ENOENT || parent == std::filesystem::path{root} ||
             parent == parent.parent_path()) {
@@ -281,7 +299,7 @@ bool confirmed_missing(const std::string& raw_path, const std::string& revision,
 // it a scan was asked to walk.
 void prune_missing(sqlite3* db, const std::string& root, const std::string& generation,
                    const core::CancellationToken& cancellation, const std::string& from = {},
-                   const std::string& to = {}) {
+                   const std::string& to = {}, const DeviceMoves& moves = {}) {
     std::string after = from;
     while (!cancellation.is_cancellation_requested()) {
         std::vector<std::pair<std::string, std::string>> candidates;
@@ -307,7 +325,7 @@ void prune_missing(sqlite3* db, const std::string& root, const std::string& gene
         // Filesystem checks run outside the write transaction and in bounded pages.
         std::erase_if(candidates, [&](const auto& entry) {
             return cancellation.is_cancellation_requested() ||
-                   !confirmed_missing(entry.first, entry.second, root);
+                   !confirmed_missing(entry.first, entry.second, root, moves);
         });
         if (cancellation.is_cancellation_requested()) {
             return;
@@ -2892,6 +2910,7 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             }
             bool complete = true;
             bool root_lost = false;
+            DeviceMoves moves;
             // Decided before anything is stored: a first scan stores tracks
             // too, and they must not make the rest of it look like a later one.
             const bool first_scan = [&] {
@@ -2984,8 +3003,16 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     // re-prepare even when the file itself is unchanged.
                     previous.reset();
                     previous.blob(1, raw);
-                    unchanged = previous.next() && previous.bytes(0) == revision &&
+                    const bool stored = previous.next();
+                    unchanged = stored && previous.bytes(0) == revision &&
                                 previous.number(1) == 1 && !previous.bytes(2).empty();
+                    // Here still, on another device than stored: what went
+                    // from that device may be confirmed on this one.
+                    if (const auto was = stored ? revision_device(previous.bytes(0))
+                                                : std::nullopt;
+                        was && *was != before->device) {
+                        moves[*was].insert(before->device);
+                    }
                 }
                 if (unchanged) {
                     const auto after = core::observe_local_source_revision(raw);
@@ -3070,8 +3097,11 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 missing.next();
             }
             transaction.commit();
-            if (complete) {
-                prune_missing(db, root.raw_path, generation, cancellation, from, to);
+            // What is confirmed gone goes even when some of it could not be
+            // read: a file that is there keeps its row, whatever the walk
+            // missed. Not when cancelled, nor when the root went away.
+            if (!root_lost && !cancellation.is_cancellation_requested()) {
+                prune_missing(db, root.raw_path, generation, cancellation, from, to, moves);
             }
         }
         result.cancelled = result.cancelled || cancellation.is_cancellation_requested();

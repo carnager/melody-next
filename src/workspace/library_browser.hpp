@@ -19,6 +19,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QThreadPool>
+#include <QElapsedTimer>
 #include <QTimer>
 
 #include <deque>
@@ -249,6 +250,9 @@ class LibraryBrowser final : public QObject {
         std::function<Outcome(engine::Catalogue&)> work;
         std::function<void(Outcome)> done;
         bool view_query{false};
+        // ADR-0315: part of a refresh after a change -- one waiting is
+        // dropped by the next refresh, which asks the same again.
+        bool refreshing{false};
     };
     struct ScanOutcome {
         persistence::LibraryScanResult result;
@@ -311,6 +315,8 @@ class LibraryBrowser final : public QObject {
     QTimer search_timer_;
     QTimer poll_timer_;
     QTimer change_timer_;
+    // How long the refresh after a change took, for --debug.
+    QElapsedTimer elapsed_refresh_;
     QString status_;
     QString query_error_;
     QString source_;

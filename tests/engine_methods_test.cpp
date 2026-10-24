@@ -6,6 +6,7 @@
 // and it links no Qt, which is the property that lets the engine be a daemon.
 
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/change_batch.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -348,7 +349,56 @@ void lyrics_come_from_beside_the_file(const std::filesystem::path& directory,
             "a path that is not encoded is refused");
 }
 
+// ADR-0315: the changes of a write told once it is still, together -- a
+// path or album once -- and at least once a second while it goes on.
+void catalogue_changes_are_told_together() {
+    std::mutex mutex;
+    std::vector<trackknife::protocol::Event> told;
+    const auto events = [&] {
+        const std::scoped_lock held{mutex};
+        return told;
+    };
+    const auto wait_for = [&](const std::size_t count, const std::chrono::milliseconds most) {
+        const auto until = std::chrono::steady_clock::now() + most;
+        while (events().size() < count && std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
+        return events().size();
+    };
+    {
+        trackknife::engine::CatalogueChangeBatch batch{
+            [&](const trackknife::protocol::Event& event) {
+                const std::scoped_lock held{mutex};
+                told.push_back(event);
+            },
+            std::chrono::milliseconds{100}, std::chrono::milliseconds{400}};
+        batch.add({.paths = {"/m/a/01.flac"}, .albums = {"a"}, .everything = false});
+        batch.add({.paths = {"/m/a/02.flac"}, .albums = {"a"}, .everything = false});
+        batch.add({.paths = {"/m/a/01.flac", "/m/b/01.flac"}, .albums = {"b"}, .everything = false});
+        require(wait_for(1U, std::chrono::seconds{2}) == 1U, "three changes told as one");
+        const auto first = events().front();
+        require(first.name == "catalogue.changed", "told as catalogue.changed");
+        require(first.data["paths"].size() == 3U, "each path once");
+        require(first.data["albums"].size() == 2U, "each album once");
+        require(!first.data["everything"].get<bool>(), "not everything");
+        std::this_thread::sleep_for(std::chrono::milliseconds{200});
+        require(events().size() == 1U, "nothing more without a change");
+        // Going on and on: told at most `longest` after it began.
+        for (int step = 0; step < 12; ++step) {
+            batch.add({.paths = {"/m/c/" + std::to_string(step) + ".flac"},
+                       .albums = {"c"},
+                       .everything = false});
+            std::this_thread::sleep_for(std::chrono::milliseconds{60});
+        }
+        require(events().size() >= 2U, "a long run told as it goes");
+        batch.add({.paths = {}, .albums = {}, .everything = true});
+        require(wait_for(events().size() + 1U, std::chrono::seconds{2}) >= 3U, "everything told");
+        require(events().back().data["everything"].get<bool>(), "everything, said");
+    }
+}
+
 int main(int argc, char** argv) {
+    catalogue_changes_are_told_together();
     require(argc == 2, "usage: engine_methods_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-engine-methods-" + core::StableId::random().to_string());

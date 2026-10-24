@@ -6,6 +6,7 @@
 // are comes from the engine that has them.
 
 #include "workspace/library_browser.hpp"
+#include "uicommon/debug_log.hpp"
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -422,6 +423,8 @@ void Workspace::loadListHistory(LocalListModel& model, const EngineKey& engine) 
 
 void Workspace::adoptLibraryChange(const EngineKey& engine, const std::vector<std::string>& paths,
                                    const std::vector<std::string>& albums, const bool everything) {
+    qCDebug(tkDebug) << "library: an engine says" << paths.size() << "files and" << albums.size()
+                     << "albums changed" << (everything ? "-- everything" : "");
     if (auto* found = link(engine); found != nullptr && found->browser) {
         found->browser->applyChanges(albums, everything);
     }

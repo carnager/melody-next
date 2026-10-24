@@ -206,8 +206,8 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
 }
 
 TaggerSession::~TaggerSession() {
-    // ADR-0289: closed without closing() -- Identify albums' own -- what it
-    // kept to undo goes all the same.
+    // ADR-0289: closed without closing(), what it kept to undo goes all the
+    // same.
     releaseUndoCopies();
     write_plan_cancellation_.request_cancellation();
     apply_cancellation_.request_cancellation();
@@ -660,16 +660,11 @@ void TaggerSession::finishSelection() {
             setStatus(sticky_status_);
             rewritten_items_.clear();
             reading_written_ = false;
-            const auto after_write = std::exchange(writing_elsewhere_, false);
             emit changed();
-            if (after_write) {
-                emit writtenElsewhere();
-            }
             return;
         }
         const auto rewritten = std::exchange(rewritten_items_, {});
         const auto after_own_write = std::exchange(reading_written_, false);
-        const auto after_write = std::exchange(writing_elsewhere_, false);
         const auto changed_since = std::exchange(reading_changed_, false);
         auto adopted = grid_model_->adoptReadSelection(std::move(**result), rewritten);
         if (!adopted) {
@@ -677,9 +672,6 @@ void TaggerSession::finishSelection() {
                                  .arg(display_utf8(adopted.error().message));
             setStatus(sticky_status_);
             emit changed();
-            if (after_write) {
-                emit writtenElsewhere();
-            }
             return;
         }
         provisional_ = false;
@@ -706,18 +698,6 @@ void TaggerSession::finishSelection() {
             reportUnreadable();
             updateTechnicalSummary();
             emit changed();
-            return;
-        }
-        if (after_write) {
-            // The files' scripts already ran when they were opened.
-            describeSelection(grid_model_->selection());
-            selectAllRows();
-            sticky_status_.clear();
-            setStatus(QStringLiteral("Written files read again"));
-            reportUnreadable();
-            updateTechnicalSummary();
-            emit changed();
-            emit writtenElsewhere();
             return;
         }
         describeSelection(grid_model_->selection());
@@ -1067,7 +1047,7 @@ void TaggerSession::updateApplySummary() {
 // Enablement.
 
 bool TaggerSession::selectionReady() const {
-    return !writing_elsewhere_ && aggregate_model_ != nullptr && aggregate_model_->summaryReady() &&
+    return aggregate_model_ != nullptr && aggregate_model_->summaryReady() &&
            aggregate_model_->selectedItemCount() > 0U;
 }
 
@@ -1080,7 +1060,7 @@ bool TaggerSession::canEditValues() const {
 }
 
 bool TaggerSession::canTransform() const {
-    return !provisional_ && !writing_elsewhere_ && !transformation_dialog_open_ &&
+    return !provisional_ && !transformation_dialog_open_ &&
            grid_model_ != nullptr && selectionReady() && !exact_values_dialog_open_ &&
            !field_name_dialog_open_ && !write_plan_running_ && !apply_running_ &&
            !artwork_operation_running_;
@@ -1099,11 +1079,11 @@ bool TaggerSession::canApply() const {
            (has_metadata_effect || has_path_effect || replaygain_on_apply_ ||
             (artwork_ != nullptr && artwork_->hasPendingChanges())) &&
            !transformation_catalog_loading_ && !write_plan_running_ && !apply_running_ &&
-           !artwork_operation_running_ && !writing_elsewhere_;
+           !artwork_operation_running_;
 }
 
 bool TaggerSession::fileListEnabled() const {
-    return !writing_elsewhere_ && !artwork_operation_running_ &&
+    return !artwork_operation_running_ &&
            (artwork_ == nullptr || !artwork_->hasPendingChanges());
 }
 
@@ -1682,52 +1662,12 @@ std::optional<std::int64_t> TaggerSession::durationOf(const std::size_t item) co
 }
 
 bool TaggerSession::canStageProposals() const {
-    return grid_model_ != nullptr && !proposal_running_ && !provisional_ && !writing_elsewhere_ &&
+    return grid_model_ != nullptr && !proposal_running_ && !provisional_ &&
            !automatic_stage_running_ && !waiting_proposals_;
-}
-
-bool TaggerSession::canWriteElsewhere() const {
-    return grid_model_ != nullptr && !provisional_ && !writing_elsewhere_ && !proposal_running_ &&
-           !write_plan_running_ && !apply_running_ && !artwork_operation_running_ &&
-           !transformation_catalog_loading_;
 }
 
 std::shared_ptr<const metadata::StagedMetadataSelection> TaggerSession::sharedSelection() const {
     return grid_model_ != nullptr ? grid_model_->sharedSelection() : nullptr;
-}
-
-const metadata::StagedMetadataPatchSet* TaggerSession::draft() const {
-    return grid_model_ != nullptr ? &grid_model_->patches() : nullptr;
-}
-
-std::optional<operations::OutputLayoutProfile> TaggerSession::layoutProfile(const int index) const {
-    if (index < 0 || static_cast<std::size_t>(index) >= output_layout_catalog_.size()) {
-        return std::nullopt;
-    }
-    return output_layout_catalog_[static_cast<std::size_t>(index)].profile;
-}
-
-bool TaggerSession::beginWriteElsewhere() {
-    if (!canWriteElsewhere()) {
-        return false;
-    }
-    writing_elsewhere_ = true;
-    invalidateWritePlan();
-    return true;
-}
-
-void TaggerSession::finishWriteElsewhere(std::vector<Rewritten> written,
-                                         std::vector<std::size_t> stale) {
-    if (!writing_elsewhere_) {
-        return;
-    }
-    if ((written.empty() && stale.empty()) || grid_model_ == nullptr) {
-        writing_elsewhere_ = false;
-        emit changed();
-        emit writtenElsewhere();
-        return;
-    }
-    readAgain(std::move(written), std::move(stale));
 }
 
 void TaggerSession::readAgain(std::vector<Rewritten> written, std::vector<std::size_t> stale) {
@@ -3384,22 +3324,10 @@ void TaggerSession::rememberWrite(std::vector<operations::UndoRequest> requests)
     emit changed();
 }
 
-void TaggerSession::keepUndoCopies(const std::vector<operations::UndoRequest>& requests) {
-    kept_elsewhere_.insert(kept_elsewhere_.end(), requests.begin(), requests.end());
-}
-
-void TaggerSession::forgetUndoCopies(const std::vector<operations::UndoRequest>& requests) {
-    std::erase_if(kept_elsewhere_,
-                  [&requests](const auto& kept) { return std::ranges::contains(requests, kept); });
-}
-
 void TaggerSession::releaseUndoCopies() {
     std::vector<operations::UndoRequest> kept;
     for (auto& write : std::exchange(writes_, {})) {
         kept.insert(kept.end(), write.begin(), write.end());
-    }
-    for (auto& request : std::exchange(kept_elsewhere_, {})) {
-        kept.push_back(request);
     }
     if (!kept.empty() && services_.release_undo) {
         services_.release_undo(std::move(kept));
@@ -3419,7 +3347,7 @@ void TaggerSession::readWrittenAgain() {
 bool TaggerSession::canUndoWrite() const {
     return !writes_.empty() && static_cast<bool>(services_.undo) && grid_model_ != nullptr &&
            !undoing_write_ && !apply_running_ && !write_plan_running_ && !provisional_ &&
-           !writing_elsewhere_ && !artwork_operation_running_;
+           !artwork_operation_running_;
 }
 
 void TaggerSession::undoWrite() {

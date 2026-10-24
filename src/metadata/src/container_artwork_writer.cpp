@@ -2,6 +2,7 @@
 
 #include "mp4_item_factory_detail.hpp"
 #include "trackknife/metadata/artwork_writers.hpp"
+#include "trackknife/core/posix.hpp"
 
 #include "container_preservation_detail.hpp"
 #include "text_writer_detail.hpp"
@@ -443,7 +444,7 @@ struct ExpectedItem {
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
     }
-    if (::chmod(prepared_raw_path.c_str(), *source_mode) != 0) {
+    if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared artwork permissions failed", errno,
                                             source_plan.raw_media_path, prepared_raw_path));
     }
@@ -574,7 +575,7 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
         }
         struct stat status{};
         if (::stat(plan.raw_path.c_str(), &status) != 0 ||
-            ::chmod(prepared.c_str(), status.st_mode & 07777) != 0) {
+            core::keep_mode(prepared.c_str(), status.st_mode & 07777) != 0) {
             return fail("could not preserve file permissions");
         }
     } else {
@@ -626,7 +627,7 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
                 }
             }
         }
-        if (::chmod(prepared.c_str(), *copied) != 0) {
+        if (core::keep_mode(prepared.c_str(), *copied) != 0) {
             return fail("could not preserve file permissions");
         }
     }

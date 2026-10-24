@@ -400,14 +400,13 @@ void BenchMainWindow::buildWorkspace() {
     properties_action_->setEnabled(false);
     connect(properties_action_, &QAction::triggered, this,
             &BenchMainWindow::showMetadataProperties);
-    identify_albums_action_ = edit_menu->addAction(QStringLiteral("Identify albums…"));
-    identify_albums_action_->setObjectName(QStringLiteral("action-identify-albums"));
-    identify_albums_action_->setToolTip(
+    identify_action_ = edit_menu->addAction(QStringLiteral("Identify…"));
+    identify_action_->setObjectName(QStringLiteral("action-identify"));
+    identify_action_->setToolTip(
         QStringLiteral("Look up the selected tracks' albums on MusicBrainz -- the whole list "
-                       "when none are selected -- and write them"));
-    identify_albums_action_->setEnabled(false);
-    connect(identify_albums_action_, &QAction::triggered, this,
-            &BenchMainWindow::showIdentifyAlbums);
+                       "when none are selected -- in the tag editor"));
+    identify_action_->setEnabled(false);
+    connect(identify_action_, &QAction::triggered, this, &BenchMainWindow::showIdentify);
     convert_action_ = edit_menu->addAction(QStringLiteral("Convert files…"));
     convert_action_->setObjectName(QStringLiteral("action-convert-files"));
     convert_action_->setEnabled(false);

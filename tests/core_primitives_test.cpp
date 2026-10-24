@@ -5,6 +5,7 @@
 #include "trackknife/core/error.hpp"
 #include "trackknife/core/listen_accounting.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/core/posix.hpp"
 #include "trackknife/core/progress.hpp"
 #include "trackknife/core/revision.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -436,7 +437,33 @@ void rightToLeftLettersAreFound() {
     CHECK(!unicodeHasRightToLeft({}));
 }
 
+// ADR-0314: a mode the filesystem will not have set is no failure -- as a
+// share deciding modes itself refuses it; a mode that could not be set for
+// another reason is.
+void modesTheFilesystemRefusesAreKept() {
+    // Ours: set.
+    const auto ours = std::filesystem::temp_directory_path() /
+                      ("melody-keep-mode-" + std::to_string(::getpid()));
+    { std::ofstream{ours} << "x"; }
+    CHECK(trackknife::core::keep_mode(ours.c_str(), 0600) == 0);
+    struct stat status{};
+    CHECK(::stat(ours.c_str(), &status) == 0 && (status.st_mode & 07777) == 0600);
+    std::filesystem::remove(ours);
+    // Gone: a failure.
+    CHECK(trackknife::core::keep_mode(ours.c_str(), 0600) != 0);
+    // Not ours to change -- refused as a share refuses it -- and asked for
+    // the mode it has, so nothing changes even where it is ours.
+    if (::geteuid() != 0 && ::stat("/etc/passwd", &status) == 0 && status.st_uid != ::geteuid()) {
+        CHECK(trackknife::core::keep_mode("/etc/passwd", status.st_mode & 07777) == 0);
+    }
+    CHECK(trackknife::core::mode_refused_by_filesystem(EPERM));
+    CHECK(trackknife::core::mode_refused_by_filesystem(ENOTSUP));
+    CHECK(!trackknife::core::mode_refused_by_filesystem(ENOENT));
+    CHECK(!trackknife::core::mode_refused_by_filesystem(EIO));
+}
+
 int main() {
+    modesTheFilesystemRefusesAreKept();
     stableIdsRoundTrip();
     rightToLeftLettersAreFound();
     cancellationIsSharedAndMonotonic();

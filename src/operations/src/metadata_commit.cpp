@@ -423,7 +423,7 @@ apply_filesystem_metadata(const Descriptor& source, const struct stat& source_st
             }
         }
     }
-    if (::fchmod(prepared.get(), source_status.st_mode & 07777) != 0) {
+    if (core::keep_mode(prepared.get(), source_status.st_mode & 07777) != 0) {
         return std::unexpected(system_error("preserving prepared permissions failed", errno,
                                             source_raw_path, journal_id));
     }

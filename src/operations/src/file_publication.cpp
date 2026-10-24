@@ -717,7 +717,7 @@ apply_copy_filesystem_metadata(const LockedSource& source, const struct stat& so
             }
         }
     }
-    if (::fchmod(prepared.get(), source_status.st_mode & 07777) != 0) {
+    if (core::keep_mode(prepared.get(), source_status.st_mode & 07777) != 0) {
         if (errno == ENOTSUP || errno == EOPNOTSUPP) {
             applied.mode_preserved = false;
             applied.notes.push_back("File permissions were not preserved: the destination "

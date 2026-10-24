@@ -530,15 +530,16 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showMetadataProperties();
     // ADR-0237: `work` is the engine that does the file work, or null for
     // this process.
-    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader,
-                                std::shared_ptr<engine::RemoteFileWork> work);
+    MetadataPropertiesDialog* openMetadataProperties(std::size_t count,
+                                                     MetadataPropertiesSourceReader reader,
+                                                     std::shared_ptr<engine::RemoteFileWork> work);
     void showConvertDialog();
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);
     void showMetadataForView(QTableView* view);
-    // ADR-0262: Identify albums… by itself, over the selected tracks or, none
-    // selected, the whole tab.
-    void showIdentifyAlbums();
+    // ADR-0311: Identify…, over the selected tracks or, none selected, the
+    // whole tab: the tag editor on them, Identify open in it.
+    void showIdentify();
     void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     // Naming layouts, and the move destinations of `destinations_of`; with
@@ -776,7 +777,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QAction* play_selected_action_{nullptr};
     QAction* properties_action_{nullptr};
     QAction* convert_action_{nullptr};
-    QAction* identify_albums_action_{nullptr};
+    QAction* identify_action_{nullptr};
     QAction* remove_selected_action_{nullptr};
     QAction* undo_list_action_{nullptr};
     QAction* redo_list_action_{nullptr};

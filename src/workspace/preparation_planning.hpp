@@ -18,7 +18,7 @@
 
 namespace trackknife::bench {
 
-// What one Apply writes, as the tagger and Identify albums… ask it: the
+// What one Apply writes, as the tagger asks it: the
 // draft over the files read, which of them, and what is done to them.
 struct PreparationRequest {
     std::shared_ptr<const metadata::StagedMetadataSelection> selection;

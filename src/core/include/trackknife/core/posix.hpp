@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <fcntl.h>
@@ -31,6 +32,31 @@
 #include <sys/xattr.h>
 
 namespace trackknife::core {
+// ADR-0314: a prepared copy given the original's mode, before it takes the
+// original's place. Where the filesystem will not have a mode set -- a share
+// that decides modes itself: NFS with its owners squashed, SMB -- the copy
+// keeps the one the share gave it, as every file made there does; that is
+// no reason to refuse the write. 0, else the call failed for another reason,
+// errno saying which.
+inline bool mode_refused_by_filesystem(const int error) {
+    return error == EPERM || error == EACCES || error == ENOTSUP
+#if defined(EOPNOTSUPP) && EOPNOTSUPP != ENOTSUP
+           || error == EOPNOTSUPP
+#endif
+        ;
+}
+inline int keep_mode(const char* path, const mode_t mode) {
+    if (::chmod(path, mode) == 0) {
+        return 0;
+    }
+    return mode_refused_by_filesystem(errno) ? 0 : -1;
+}
+inline int keep_mode(const int fd, const mode_t mode) {
+    if (::fchmod(fd, mode) == 0) {
+        return 0;
+    }
+    return mode_refused_by_filesystem(errno) ? 0 : -1;
+}
 inline int socket_cloexec(int domain, int type, int protocol) {
     const int fd = ::socket(domain, type, protocol);
     if (fd >= 0) {

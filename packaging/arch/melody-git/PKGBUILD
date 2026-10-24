@@ -2,7 +2,7 @@
 #
 # Melody, the desktop app on Melody's engine: the library, playback, tagging,
 # conversion and ReplayGain. Trackknife until ADR-0287 renamed it; its
-# settings and data move once -- see melody.install.
+# settings and data move once, at its first start.
 pkgname=melody-git
 pkgver=r706.g9c3faa82
 pkgrel=1
@@ -18,7 +18,6 @@ optdepends=('chromaprint: AcoustID fingerprinting in the MusicBrainz Identify di
 provides=(melody trackknife)
 conflicts=(trackknife trackknife-git trackbench-git)
 replaces=(trackknife-git trackbench-git)
-install=melody.install
 source=("melody-next::git+https://github.com/carnager/melody-next.git")
 sha256sums=('SKIP')
 

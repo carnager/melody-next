@@ -588,18 +588,16 @@ def missing_albums(artist_id, artist, owned, settings):
         return [{"heading": "Missing albums"},
                 {"paragraph": "Every album and EP %s lists is in the library."
                               % ("MusicBrainz" if artist_id else "Discogs")}]
-    # Badges for the kinds there are, each with how many; pressed, the panel
-    # is asked again (ADR-0303) and the choice kept.
+    # Badges for the kinds there are, each with how many -- one as well, so
+    # what is missing is counted the same and a hidden kind can be shown
+    # again; pressed, the panel is asked again (ADR-0303) and the choice kept.
     shown = shown_kinds()
     counts = {kind: sum(1 for a in missing if kind_of(a) == kind) for kind, _ in KINDS}
-    parts = [{"heading": "Missing albums (%d)" % len(missing)}]
-    if sum(1 for count in counts.values() if count) > 1:
-        parts.append({"filters": [
-            {"text": "%s %d" % (label, counts[kind]), "action": "filter", "value": kind,
-             "on": kind in shown}
-            for kind, label in KINDS if counts[kind]]})
-    else:
-        shown = set(counts)
+    parts = [{"heading": "Missing albums (%d)" % len(missing)},
+             {"filters": [
+                 {"text": "%s %d" % (label, counts[kind]), "action": "filter", "value": kind,
+                  "on": kind in shown}
+                 for kind, label in KINDS if counts[kind]]}]
     missing = [a for a in missing if kind_of(a) in shown]
     if not missing:
         return parts + [{"paragraph": "Hidden by the filters above."}]

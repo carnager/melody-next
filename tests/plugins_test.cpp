@@ -638,6 +638,16 @@ void PluginsTest::theExamplePluginReads() {
         QVERIFY(QFile::exists(kept + QStringLiteral("/covers/") + archive +
                               QStringLiteral(".tried")));
     }
+    // Only the EP missing: its badge all the same, to hide it and show it
+    // again.
+    library.artist_tracks->push_back(
+        {.path = "/srv/music/Testament/The New Order/01.flac",
+         .tags = {{"album", {"The New Order"}}, {"albumartist", {"Testament"}}}});
+    QCOMPARE(shown_after(std::nullopt),
+             (QStringList{QStringLiteral("ep:on"), QStringLiteral("Trial by Fire")}));
+    QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("ep:off")}));
+    QCOMPARE(shown_after(ep),
+             (QStringList{QStringLiteral("ep:on"), QStringLiteral("Trial by Fire")}));
     qunsetenv("http_proxy");
     qunsetenv("https_proxy");
 

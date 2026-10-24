@@ -188,12 +188,17 @@ class TaggerSession final : public QObject {
         QString name;
         QStringList fields;
     };
+    // One album to identify: its files, as the matcher wants them, and what
+    // their tags say of it.
     struct Identify {
         std::vector<musicbrainz::LocalTrackDescriptor> descriptors;
         std::vector<QString> local_paths;
         std::vector<std::size_t> items;
         QString artist;
         QString release;
+        // The MusicBrainz release every file is tagged with; none where
+        // they differ or one has none.
+        QString release_id;
     };
     // The exact ordered values of a field on the selected files, to edit.
     struct ExactValues {
@@ -382,7 +387,10 @@ class TaggerSession final : public QObject {
     // Suggestions and MusicBrainz.
     void startProposals();
     // What the Identify window starts from; none when it cannot open.
-    [[nodiscard]] std::optional<Identify> identifyRequest() const;
+    // The albums the files chosen -- else all -- hold, to identify one at a
+    // time (ADR-0311): grouped as Identify albums groups them (ADR-0261).
+    // None while Identify cannot run.
+    [[nodiscard]] std::vector<Identify> identifyAlbums() const;
     void applyMusicBrainzProposals(metadata::MetadataProposalSet proposals);
 
     // ADR-0261: what Identify albums… asks of the files open here.

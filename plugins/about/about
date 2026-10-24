@@ -8,12 +8,12 @@ where the album is not found -- and their Wikidata entries name the
 Wikipedia articles, whose summaries the panel shows: the artist's with its
 photo, the album's with its date, kind and label. Links go to both, and to
 where else the album is: Discogs, Bandcamp, Rate Your Music, AllMusic.
-Nothing is asked of anyone's own server and no account is needed. What is
-found is kept a week in the cache folder, so the same artist or album is not
-looked up every track; MusicBrainz is asked at most once a second, as it
-asks -- by every run together, the panel being run anew for each track --
-and a 503, its answer to being asked too often, is asked again after the
-wait it names.
+Nothing is asked of anyone's own server but a dropwatch set in the
+settings, and no account is needed. What is found is kept a week in the
+cache folder, so the same artist or album is not looked up every track;
+MusicBrainz is asked at most once a second, as it asks -- by every run
+together, the panel being run anew for each track -- and a 503, its
+answer to being asked too often, is asked again after the wait it names.
 
 Where the files carry their MusicBrainz ids -- Melody tells a panel every
 tag (ADR-0301) -- they are used, and nothing is searched for by name.
@@ -24,15 +24,23 @@ among the artist's albums in the library, which Melody tells the panel
 (ADR-0301), matched by release group, else by title. For an artist
 MusicBrainz does not know, Discogs's, with a Discogs token. What MusicBrainz
 and Discogs list is kept a day; the library is told anew every time.
+With a dropwatch's address (https://github.com/carnager/dropwatch) the
+artist's albums are its list, which it has at hand, where MusicBrainz is
+asked a page a second -- only the list: what is missing is still worked out
+against the library Melody tells. An artist dropwatch does not watch, or a
+dropwatch that cannot be reached, falls back to MusicBrainz.
 
 Badges above the missing albums show or hide the albums and the EPs, the
 choice kept in the state folder. Albums are drawn as Melody draws a track's
 row (ADR-0304), with their covers: the Cover Art Archive's for a release
 group -- else, with a Discogs token, the thumbnail of the Discogs master
 MusicBrainz links that release group to, for the archive's images are kept
-on archive.org, which at times does not answer at all. Covers are fetched side by side for a few
-seconds at most and kept a week -- and so is knowing there is none; one
-that could not be fetched is tried again after an hour.
+on archive.org, which at times does not answer at all. The panel never
+waits for a cover: it answers with those kept, and those not yet kept are
+fetched side by side by a process of its own, which outlives the run, while
+the answer asks Melody to ask again in a moment (ADR-0312). Covers are kept
+a week -- and so is knowing there is none; one that could not be fetched is
+tried again after an hour.
 """
 import fcntl
 import hashlib
@@ -40,6 +48,7 @@ import json
 import os
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -59,12 +68,16 @@ KINDS = (("album", "Albums"), ("ep", "EPs"))
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                      "melody", "plugins", "about")
 TRIES = 4
-# How long a run waits for covers it has not kept: those not there by then
-# are shown the next time it is asked.
-COVERS_WAIT = 6.0
+# How long a cover is waited for, in the process that fetches covers.
+FETCH_TIMEOUT = 10
 # How long a cover that could not be fetched is left before trying again.
 RETRY = 3600
-COVERS_UNTIL = None
+# Covers not kept yet, on their way: the panel asks to be asked again.
+COMING = set()
+# How soon it asks, while they come.
+AGAIN_AFTER = 3
+# How long the Discogs thumbnails of missing albums are waited for.
+THUMBS_WAIT = 3.0
 
 # Where else an album is, by the host of a MusicBrainz link -- and, where it
 # has none, a search there.
@@ -184,61 +197,55 @@ def kind_of(album):
     return "ep" if (album.get("kind") or "").casefold() == "ep" else "album"
 
 
-def cover_file(url):
-    """The cover at `url`, kept as a file, or None: fetched at most once a
-    week, a missing one too. Never fails the run -- a cover is not needed.
-
-    A fetch that failed, or was still on its way when its run ended, is not
-    tried again for an hour: a server that hangs -- archive.org, at times --
-    costs one wait, not one every track."""
+def cover_files(url):
+    """Where the cover at `url` is kept, and what is known of it: the image;
+    that there is none; that fetching it failed; that it is being fetched."""
     name = hashlib.sha1(url.encode("utf-8")).hexdigest()
     folder = os.path.join(CACHE, "covers")
-    path = os.path.join(folder, name + ".jpg")
-    none = os.path.join(folder, name + ".none")
-    tried = os.path.join(folder, name + ".tried")
-    for there, answer, kept_for in ((path, path, KEPT), (none, None, KEPT), (tried, None, RETRY)):
-        try:
-            if time.time() - os.path.getmtime(there) < kept_for:
-                return answer
-        except OSError:
-            pass
-    os.makedirs(folder, exist_ok=True)
-    # Said before asking: a run that ends while this one waits leaves it.
-    open(tried, "w").close()
+    return tuple(os.path.join(folder, name + suffix)
+                 for suffix in (".jpg", ".none", ".tried", ".fetching"))
+
+
+def fresh(path, kept_for):
+    try:
+        return time.time() - os.path.getmtime(path) < kept_for
+    except OSError:
+        return False
+
+
+def fetch_cover(url):
+    """The cover at `url` fetched and kept, or that there is none -- a week
+    -- or that fetching it failed: left an hour, so a server that hangs,
+    archive.org at times, costs one wait, not one every track."""
+    path, none, tried, fetching = cover_files(url)
     request = urllib.request.Request(url, headers={"User-Agent": AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=COVERS_WAIT + 4) as response:
+        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT) as response:
             body = response.read()
+        if body:
+            partial = "%s.%d.partial" % (path, os.getpid())
+            with open(partial, "wb") as kept:
+                kept.write(body)
+            os.replace(partial, path)
+        else:
+            open(tried, "w").close()
     except urllib.error.HTTPError as error:
-        if error.code == 404:
-            open(none, "w").close()
-        return None
+        open(none if error.code == 404 else tried, "w").close()
     except Exception:
-        return None
-    if not body:
-        return None
-    partial = "%s.%d.partial" % (path, os.getpid())
-    with open(partial, "wb") as kept:
-        kept.write(body)
-    os.replace(partial, path)
-    try:
-        os.remove(tried)
-    except OSError:
-        pass
-    return path
+        open(tried, "w").close()
+    finally:
+        try:
+            os.remove(fetching)
+        except OSError:
+            pass
 
 
-def covers_of(urls):
-    """The covers of `urls`, by URL, those that came within COVERS_WAIT --
-    fetched side by side, a few threads for each server, so that one that
-    hangs -- archive.org, at times -- holds up none of another's; one still
-    on its way when the time is up is tried again in an hour (cover_file)."""
-    urls = list(dict.fromkeys(u for u in urls if u))
-    found = {}
+def fetch_covers(urls):
+    """The covers of `urls` fetched side by side, a few threads for each
+    server, so that one that hangs holds up none of another's."""
     by_server = {}
     for url in urls:
         by_server.setdefault(urllib.parse.urlsplit(url).netloc, queue.Queue()).put(url)
-    done = threading.Semaphore(0)
 
     def work(waiting):
         while True:
@@ -246,22 +253,44 @@ def covers_of(urls):
                 url = waiting.get_nowait()
             except queue.Empty:
                 return
-            found[url] = cover_file(url)
-            done.release()
+            fetch_cover(url)
 
-    for waiting in by_server.values():
-        for _ in range(min(4, waiting.qsize())):
-            threading.Thread(target=work, args=(waiting,), daemon=True).start()
-    # One wait for the run, however many times it asks: the album's cover
-    # and the missing albums' together.
-    global COVERS_UNTIL
-    if COVERS_UNTIL is None:
-        COVERS_UNTIL = time.monotonic() + COVERS_WAIT
-    until = COVERS_UNTIL
-    for _ in urls:
-        if not done.acquire(timeout=max(0.0, until - time.monotonic())):
-            break
-    return {url: path for url, path in dict(found).items() if path}
+    threads = [threading.Thread(target=work, args=(waiting,))
+               for waiting in by_server.values() for _ in range(min(4, waiting.qsize()))]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def covers_of(urls):
+    """The covers of `urls` kept already, by URL -- never waited for. Those
+    not yet kept are fetched by a process of their own, left running after
+    this one has answered, and said to be coming (COMING), so the panel asks
+    to be asked again once they may be there (ADR-0312)."""
+    found = {}
+    wanted = []
+    for url in dict.fromkeys(u for u in urls if u):
+        path, none, tried, fetching = cover_files(url)
+        if fresh(path, KEPT):
+            found[url] = path
+            continue
+        if fresh(none, KEPT) or fresh(tried, RETRY):
+            continue
+        COMING.add(url)
+        # Being fetched already, by an earlier run's process: not again.
+        if not fresh(fetching, FETCH_TIMEOUT + 5):
+            os.makedirs(os.path.dirname(fetching), exist_ok=True)
+            open(fetching, "w").close()
+            wanted.append(url)
+    if wanted:
+        fetcher = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--fetch-covers"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, start_new_session=True,
+                                   close_fds=True)
+        fetcher.stdin.write("\n".join(wanted).encode("utf-8"))
+        fetcher.stdin.close()
+    return found
 
 
 def master_of(url):
@@ -308,7 +337,7 @@ def master_thumbs(masters, token):
     threads = [threading.Thread(target=ask, args=(m,), daemon=True) for m in masters[:12]]
     for thread in threads:
         thread.start()
-    until = time.monotonic() + COVERS_WAIT / 2
+    until = time.monotonic() + THUMBS_WAIT
     for thread in threads:
         thread.join(max(0.0, until - time.monotonic()))
     return dict(found)
@@ -564,18 +593,79 @@ def discogs_albums(artist, token):
     return albums
 
 
+class Unreachable(Exception):
+    pass
+
+
+def ask_dropwatch(base, token, path):
+    request = urllib.request.Request(base + path, headers={"User-Agent": AGENT})
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise Unreachable("dropwatch refused the API token" if token else
+                              "dropwatch wants an API token: create one under its settings, "
+                              "Account, and set it in About's settings")
+        raise Unreachable("dropwatch answered %s" % error.code)
+    except (OSError, ValueError) as error:
+        raise Unreachable("dropwatch at %s: %s" % (base, getattr(error, "reason", error)))
+
+
+def dropwatch_albums(base, token, artist_id, artist):
+    """The artist's albums and EPs as the dropwatch at `base` lists them --
+    none it is told to ignore -- or None where it does not watch the artist.
+    Only the list: what is missing is worked out against the library Melody
+    tells, which is never behind as dropwatch's last sync may be."""
+    artists = ask_dropwatch(base, token, "/api/artists").get("artists") or []
+    watched = next((a for a in artists if artist_id and a.get("id") == artist_id), None) \
+        or next((a for a in artists if folded(a.get("name") or "") == folded(artist)), None)
+    if watched is None:
+        return None
+    # By default its albums and EPs, none of a secondary kind.
+    releases = ask_dropwatch(base, token, "/api/artists/%s/releases"
+                             % urllib.parse.quote(watched["id"])).get("releases") or []
+    albums = []
+    for release in releases:
+        if release.get("state") == "ignored":
+            continue
+        group = release.get("mbid") or ""
+        master = str(release.get("discogsMasterId") or "")
+        albums.append({"id": group, "title": release.get("title") or "",
+                       "date": release.get("firstReleaseDate") or "",
+                       "kind": release.get("primaryType") or "",
+                       "url": "https://musicbrainz.org/release-group/" + group if group
+                       else "https://www.discogs.com/master/" + master if master
+                       else "%s/#artist/%s" % (base, urllib.parse.quote(watched["id"])),
+                       "master": master})
+    return albums
+
+
 def missing_albums(artist_id, artist, owned, settings):
     """The parts for the artist's albums not in the library -- `owned`, the
     albums Melody says the library has of them -- beneath a heading."""
     token = str(settings.get("discogs_token") or "").strip()
-    if artist_id:
-        listed = musicbrainz_albums(artist_id)
-    elif token:
-        listed = discogs_albums(artist, token)
-    else:
-        return [{"heading": "Missing albums"},
-                {"paragraph": "MusicBrainz knows no artist of that name for certain; a Discogs "
-                              "token in About's settings would ask Discogs."}]
+    base = str(settings.get("dropwatch_url") or "").strip().rstrip("/")
+    listed, source, said = None, "dropwatch", []
+    # A dropwatch's, which has them at hand; else MusicBrainz's, asked a
+    # page a second -- where dropwatch does not watch the artist, or cannot
+    # be reached, which is said.
+    if base:
+        try:
+            listed = dropwatch_albums(base, str(settings.get("dropwatch_token") or "").strip(),
+                                      artist_id, artist)
+        except Unreachable as error:
+            said = [{"paragraph": "%s; from MusicBrainz instead." % error}]
+    if listed is None and artist_id:
+        listed, source = musicbrainz_albums(artist_id), "MusicBrainz"
+    elif listed is None and token:
+        listed, source = discogs_albums(artist, token), "Discogs"
+    elif listed is None:
+        return [{"heading": "Missing albums"}] + said + [
+            {"paragraph": "MusicBrainz knows no artist of that name for certain; a Discogs "
+                          "token in About's settings would ask Discogs."}]
     groups = set()
     titles = set()
     for album in owned:
@@ -585,15 +675,14 @@ def missing_albums(artist_id, artist, owned, settings):
                       if a["id"] not in groups and folded(a["title"]) not in titles),
                      key=lambda a: a["date"] or "9999")
     if not missing:
-        return [{"heading": "Missing albums"},
-                {"paragraph": "Every album and EP %s lists is in the library."
-                              % ("MusicBrainz" if artist_id else "Discogs")}]
+        return [{"heading": "Missing albums"}] + said + [
+            {"paragraph": "Every album and EP %s lists is in the library." % source}]
     # Badges for the kinds there are, each with how many -- one as well, so
     # what is missing is counted the same and a hidden kind can be shown
     # again; pressed, the panel is asked again (ADR-0303) and the choice kept.
     shown = shown_kinds()
     counts = {kind: sum(1 for a in missing if kind_of(a) == kind) for kind, _ in KINDS}
-    parts = [{"heading": "Missing albums (%d)" % len(missing)},
+    parts = [{"heading": "Missing albums (%d)" % len(missing)}] + said + [
              {"filters": [
                  {"text": "%s %d" % (label, counts[kind]), "action": "filter", "value": kind,
                   "on": kind in shown}
@@ -711,8 +800,15 @@ def main():
                   for site in order if site in found]
     if show_missing:
         parts += missing_albums(artist_id, artist, owned, settings)
-    print(json.dumps({"title": title, "parts": parts}))
+    answer = {"title": title, "parts": parts}
+    # Covers on their way: asked again once they may be there.
+    if COMING:
+        answer["again_after"] = AGAIN_AFTER
+    print(json.dumps(answer))
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--fetch-covers"]:
+        fetch_covers([line.strip() for line in sys.stdin if line.strip()])
+    else:
+        main()

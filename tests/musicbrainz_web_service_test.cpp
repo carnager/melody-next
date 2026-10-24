@@ -59,6 +59,54 @@ void lookupUrlRequiresAReleaseId() {
     CHECK(!build_release_lookup_url("2f2ac1b7-1111-4f4f-8f8f-123456789ab/../x").has_value());
 }
 
+// A release named by its id or its link; nothing else, a release group's
+// link included.
+void releaseIdsAreFoundInLinks() {
+    constexpr std::string_view id = "2f2ac1b7-1111-4f4f-8f8f-123456789abc";
+    CHECK(release_id_in(id) == std::string{id});
+    CHECK(release_id_in("  2F2AC1B7-1111-4F4F-8F8F-123456789ABC\t") == std::string{id});
+    CHECK(release_id_in("https://musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abc") ==
+          std::string{id});
+    CHECK(release_id_in("musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abc/discids") ==
+          std::string{id});
+    CHECK(release_id_in("https://beta.musicbrainz.org/release/"
+                        "2f2ac1b7-1111-4f4f-8f8f-123456789abc?tport=8000") == std::string{id});
+    CHECK(!release_id_in("").has_value());
+    CHECK(!release_id_in("Alpha").has_value());
+    CHECK(!release_id_in("https://musicbrainz.org/release-group/"
+                         "2f2ac1b7-1111-4f4f-8f8f-123456789abc")
+               .has_value());
+    CHECK(!release_id_in("https://musicbrainz.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abcd")
+               .has_value());
+    CHECK(!release_id_in("https://notmusicbrainz.org/release/"
+                         "2f2ac1b7-1111-4f4f-8f8f-123456789abc")
+               .has_value());
+    // An album's link names its release group; a bare id is a release's.
+    CHECK(release_group_id_in("https://musicbrainz.org/release-group/"
+                              "2F2AC1B7-1111-4f4f-8f8f-123456789abc") == std::string{id});
+    CHECK(!release_group_id_in(id).has_value());
+    CHECK(!release_group_id_in("https://musicbrainz.org/release/"
+                               "2f2ac1b7-1111-4f4f-8f8f-123456789abc")
+               .has_value());
+}
+
+// Every version of an album: a release group's releases, read as a search's.
+void releaseGroupReleasesAreListed() {
+    const auto url = build_release_group_releases_url("2f2ac1b7-1111-4f4f-8f8f-123456789abc");
+    CHECK(url.has_value());
+    CHECK(*url == "https://musicbrainz.org/ws/2/release?release-group="
+                  "2f2ac1b7-1111-4f4f-8f8f-123456789abc"
+                  "&inc=artist-credits+labels+media+release-groups&fmt=json&limit=100");
+    CHECK(!build_release_group_releases_url("not-a-uuid").has_value());
+    const auto listed = parse_release_search(R"json({"release-count": 140, "releases": [
+        {"id": "2f2ac1b7-1111-4f4f-8f8f-123456789abc", "title": "Alpha",
+         "media": [{"format": "CD", "track-count": 2}, {"format": "CD", "track-count": 3}]}]})json");
+    CHECK(listed.has_value());
+    CHECK(listed->total_count == 140U);
+    CHECK(listed->releases.size() == 1U);
+    CHECK(listed->releases.front().track_count == 5U);
+}
+
 constexpr std::string_view search_fixture = R"json({
   "count": 42,
   "offset": 0,
@@ -333,6 +381,8 @@ void acoustidBodyAndParsingAreBounded() {
 int main() {
     searchUrlEscapesLuceneAndPercentEncodes();
     lookupUrlRequiresAReleaseId();
+    releaseIdsAreFoundInLinks();
+    releaseGroupReleasesAreListed();
     searchParsingCarriesVersionDetail();
     lookupParsingAlignsTracksAndRecordings();
     malformedAndOversizedPayloadsFailTyped();

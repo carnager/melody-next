@@ -3,16 +3,8 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
-#include "trackknife/core/result.hpp"
-#include "trackknife/metadata/proposal.hpp"
-#include "trackknife/musicbrainz/acoustid.hpp"
-#include "trackknife/musicbrainz/matching.hpp"
+#include "workspace/tagger_session.hpp"
 
-#include <QByteArray>
-#include <QString>
-
-#include <cstddef>
-#include <functional>
 #include <vector>
 
 class QDialog;
@@ -22,12 +14,13 @@ namespace trackknife::bench {
 
 // The in-app identification surface (ADR-0090): text search needing no
 // MusicBrainz id, every release version presented as a distinct candidate,
-// and the chosen version delivered as ADR-0086 proposals for ordinary
-// colored draft staging. The dialog never writes anything itself.
-[[nodiscard]] QDialog* createMusicBrainzIdentifyDialog(
-    MusicBrainzLookupService service, std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
-    std::vector<QString> local_paths, std::vector<std::size_t> item_indexes, QString initial_artist,
-    QString initial_release, std::function<void(metadata::MetadataProposalSet)> accepted,
-    QWidget* parent);
+// and the chosen version staged into the tagger's draft as ADR-0086
+// proposals. The dialog never writes anything itself. The release the files
+// are tagged with is looked up as it opens (ADR-0310). Several albums are
+// identified one at a time, beside a list of them (ADR-0311).
+[[nodiscard]] QDialog* createMusicBrainzIdentifyDialog(TaggerSession& tagger,
+                                                       MusicBrainzLookupService service,
+                                                       std::vector<TaggerSession::Identify> albums,
+                                                       QWidget* parent);
 
 } // namespace trackknife::bench

@@ -17,6 +17,8 @@
 #include <QPainterPath>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -537,6 +539,7 @@ PluginPanelView::PluginPanelView(const QString& label, QWidget* parent) : QWidge
     layout->addLayout(heading);
 
     auto* scroll = new QScrollArea(this);
+    scroll_ = scroll;
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -579,7 +582,8 @@ void PluginPanelView::showMessage(const QString& message) {
     parts_layout_->insertWidget(0, label);
 }
 
-void PluginPanelView::showContent(const PluginPanelContent& content) {
+void PluginPanelView::showContent(const PluginPanelContent& content, const bool keep_place) {
+    const auto place = keep_place ? scroll_->verticalScrollBar()->value() : 0;
     clearParts();
     has_content_ = true;
     int at = 0;
@@ -888,6 +892,14 @@ void PluginPanelView::showContent(const PluginPanelContent& content) {
         auto* nothing = partLabel(QStringLiteral("Nothing"), parts_);
         nothing->setForegroundRole(QPalette::PlaceholderText);
         add(nothing);
+    }
+    // Where it was, once the parts are laid out: now, and again once they
+    // have their sizes.
+    if (place > 0) {
+        scroll_->verticalScrollBar()->setValue(place);
+        QTimer::singleShot(0, scroll_, [scroll = scroll_, place] {
+            scroll->verticalScrollBar()->setValue(place);
+        });
     }
 }
 

@@ -14,6 +14,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -609,21 +611,45 @@ void PluginsTest::theExamplePluginReads() {
         auto told_settings = told_input.value(QStringLiteral("settings")).toObject();
         told_settings.insert(QStringLiteral("discogs_token"), QStringLiteral("a token"));
         told_input.insert(QStringLiteral("settings"), told_settings);
-        const auto with_discogs = run(*about_panel,
-                                  PluginAction{.id = QStringLiteral("about"),
-                                               .label = QStringLiteral("About"),
-                                               .scope = PluginAction::Scope::tracks,
-                                               .run = about_panel->panels.front().run,
-                                               .result = PluginAction::Result::none,
-                                               .timeout_seconds = 30},
-                                  QJsonDocument{told_input}.toJson(QJsonDocument::Compact));
+        const auto ask = [&] {
+            return run(*about_panel,
+                       PluginAction{.id = QStringLiteral("about"),
+                                    .label = QStringLiteral("About"),
+                                    .scope = PluginAction::Scope::tracks,
+                                    .run = about_panel->panels.front().run,
+                                    .result = PluginAction::Result::none,
+                                    .timeout_seconds = 30},
+                       QJsonDocument{told_input}.toJson(QJsonDocument::Compact));
+        };
+        const auto trial_of = [](const PluginPanelContent& content) {
+            return std::ranges::find_if(content.parts, [](const auto& part) {
+                return part.kind == PluginPanelContent::Part::Kind::track &&
+                       part.text == QStringLiteral("Trial by Fire");
+            });
+        };
+        // ADR-0312: never waited for -- answered without it, asking to be
+        // asked again while it comes.
+        const auto first = ask();
+        QVERIFY2(first.succeeded, qPrintable(first.text));
+        const auto drawn_first = parsePluginPanel(first.text.toUtf8(), &problem);
+        QVERIFY2(drawn_first.has_value(), qPrintable(problem));
+        QVERIFY(trial_of(*drawn_first) != drawn_first->parts.end());
+        QVERIFY(trial_of(*drawn_first)->cover.isEmpty());
+        QCOMPARE(drawn_first->again_after, std::optional<int>{3});
+        // Fetched meanwhile by a process of its own, outliving the run.
+        const auto fetched = kept + QStringLiteral("/covers/") +
+                             QString::fromLatin1(
+                                 QCryptographicHash::hash(
+                                     QStringLiteral("file://%1").arg(thumb).toUtf8(),
+                                     QCryptographicHash::Sha1)
+                                     .toHex()) +
+                             QStringLiteral(".jpg");
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(fetched), 15'000);
+        const auto with_discogs = ask();
         QVERIFY2(with_discogs.succeeded, qPrintable(with_discogs.text));
         const auto drawn_now = parsePluginPanel(with_discogs.text.toUtf8(), &problem);
         QVERIFY2(drawn_now.has_value(), qPrintable(problem));
-        const auto trial = std::ranges::find_if(drawn_now->parts, [](const auto& part) {
-            return part.kind == PluginPanelContent::Part::Kind::track &&
-                   part.text == QStringLiteral("Trial by Fire");
-        });
+        const auto trial = trial_of(*drawn_now);
         QVERIFY(trial != drawn_now->parts.end());
         QVERIFY2(!trial->cover.isEmpty(), "the cover from Discogs");
         QFile shown{trial->cover};
@@ -635,8 +661,9 @@ void PluginsTest::theExamplePluginReads() {
                 "https://coverartarchive.org/release-group/rg-trial/front-250",
                 QCryptographicHash::Sha1)
                 .toHex());
-        QVERIFY(QFile::exists(kept + QStringLiteral("/covers/") + archive +
-                              QStringLiteral(".tried")));
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(kept + QStringLiteral("/covers/") + archive +
+                                               QStringLiteral(".tried")),
+                                 15'000);
     }
     // Only the EP missing: its badge all the same, to hide it and show it
     // again.
@@ -648,6 +675,97 @@ void PluginsTest::theExamplePluginReads() {
     QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("ep:off")}));
     QCOMPARE(shown_after(ep),
              (QStringList{QStringLiteral("ep:on"), QStringLiteral("Trial by Fire")}));
+    // With a dropwatch's address, its list of the artist's albums -- asked
+    // for the artist by its MusicBrainz id, with the token, none it is told
+    // to ignore -- and what is missing still worked out against the library.
+    {
+        QTcpServer dropwatch;
+        QVERIFY(dropwatch.listen(QHostAddress::LocalHost));
+        QStringList asked;
+        QObject::connect(
+            &dropwatch, &QTcpServer::newConnection, &dropwatch, [&dropwatch, &asked, mbid, group] {
+                auto* peer = dropwatch.nextPendingConnection();
+                QObject::connect(peer, &QTcpSocket::readyRead, peer, [peer, &asked, mbid, group] {
+                    const auto request = peer->readAll();
+                    if (!request.contains("\r\n\r\n")) {
+                        return;
+                    }
+                    const auto path = QString::fromLatin1(request.split(' ').value(1));
+                    asked << path +
+                                 (request.contains("Authorization: Bearer t0ken") ? "" : " untold");
+                    const auto body =
+                        path == QStringLiteral("/api/artists")
+                            ? QStringLiteral(R"({"artists": [{"id": "%1", "name": "Testament"}]})")
+                                  .arg(mbid)
+                                  .toUtf8()
+                            : QStringLiteral(R"({"releases": [
+                          {"title": "The Legacy", "firstReleaseDate": "1987-04-21",
+                           "primaryType": "Album", "mbid": "%1"},
+                          {"title": "Practice What You Preach", "firstReleaseDate": "1989-08-08",
+                           "primaryType": "Album", "mbid": "rg-practice"},
+                          {"title": "First Strike", "firstReleaseDate": "1986",
+                           "primaryType": "EP", "discogsMasterId": 42},
+                          {"title": "Dark Roots", "firstReleaseDate": "2012",
+                           "primaryType": "Album", "mbid": "rg-dark", "state": "ignored"}]})")
+                                  .arg(group)
+                                  .toUtf8();
+                    peer->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: "
+                                "close\r\nContent-Length: " +
+                                QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                    peer->disconnectFromHost();
+                });
+            });
+        qputenv("no_proxy", "127.0.0.1");
+        const auto with_dropwatch = [&](const QString& address) {
+            auto input = QJsonDocument::fromJson(missing_input(std::nullopt)).object();
+            auto settings = input.value(QStringLiteral("settings")).toObject();
+            settings.insert(QStringLiteral("dropwatch_url"), address);
+            settings.insert(QStringLiteral("dropwatch_token"), QStringLiteral("t0ken"));
+            input.insert(QStringLiteral("settings"), settings);
+            const auto result = run(*about_panel,
+                                    PluginAction{.id = QStringLiteral("about"),
+                                                 .label = QStringLiteral("About"),
+                                                 .scope = PluginAction::Scope::tracks,
+                                                 .run = about_panel->panels.front().run,
+                                                 .result = PluginAction::Result::none,
+                                                 .timeout_seconds = 30},
+                                    QJsonDocument{input}.toJson(QJsonDocument::Compact));
+            QStringList shown;
+            if (const auto read = parsePluginPanel(result.text.toUtf8(), nullptr)) {
+                const auto at = std::ranges::find_if(read->parts, [](const auto& part) {
+                    return part.kind == PluginPanelContent::Part::Kind::heading &&
+                           part.text.startsWith(QStringLiteral("Missing"));
+                });
+                for (auto each = at; each != read->parts.end(); ++each) {
+                    if (each->kind == PluginPanelContent::Part::Kind::track) {
+                        shown << each->text + QLatin1Char(' ') + each->url;
+                    } else if (each->kind == PluginPanelContent::Part::Kind::paragraph) {
+                        shown << each->text.section(QLatin1Char(':'), 0, 0);
+                    }
+                }
+            } else {
+                shown << result.text;
+            }
+            return shown;
+        };
+        QCOMPARE(with_dropwatch(QStringLiteral("http://127.0.0.1:%1/").arg(dropwatch.serverPort())),
+                 (QStringList{
+                     QStringLiteral("First Strike https://www.discogs.com/master/42"),
+                     QStringLiteral(
+                         "Practice What You Preach https://musicbrainz.org/release-group/rg-practice")}));
+        QCOMPARE(asked, (QStringList{QStringLiteral("/api/artists"),
+                                     QStringLiteral("/api/artists/%1/releases").arg(mbid)}));
+        // Not reached: said, and MusicBrainz's list instead.
+        QTcpServer closed;
+        QVERIFY(closed.listen(QHostAddress::LocalHost));
+        const auto port = closed.serverPort();
+        closed.close();
+        QCOMPARE(with_dropwatch(QStringLiteral("http://127.0.0.1:%1").arg(port)),
+                 (QStringList{QStringLiteral("dropwatch at http"),
+                              QStringLiteral(
+                                  "Trial by Fire https://musicbrainz.org/release-group/rg-trial")}));
+        qunsetenv("no_proxy");
+    }
     qunsetenv("http_proxy");
     qunsetenv("https_proxy");
 
@@ -1079,6 +1197,23 @@ void PluginsTest::panelsAreReadAndTheirAnswersToo() {
         problem.clear();
         QVERIFY2(!parsePluginPanel(broken, &problem), broken);
         QVERIFY(!problem.isEmpty());
+    }
+
+    // ADR-0312: asked to be asked again, after whole seconds, 1 to 60.
+    {
+        QString why;
+        const auto again =
+            parsePluginPanel(R"({"title": "x", "parts": [], "again_after": 3})", &why);
+        QVERIFY2(again.has_value(), qPrintable(why));
+        QCOMPARE(again->again_after, std::optional<int>{3});
+        QVERIFY(!parsePluginPanel(R"({"parts": []})", &why)->again_after.has_value());
+        for (const auto* wrong : {R"({"parts": [], "again_after": 0})",
+                                  R"({"parts": [], "again_after": 61})",
+                                  R"({"parts": [], "again_after": 1.5})",
+                                  R"({"parts": [], "again_after": "2"})"}) {
+            QVERIFY2(!parsePluginPanel(wrong, &why).has_value(), wrong);
+            QVERIFY(why.contains(QStringLiteral("again_after")));
+        }
     }
 
     // What it is told: what plays, within its music folder, and its settings.

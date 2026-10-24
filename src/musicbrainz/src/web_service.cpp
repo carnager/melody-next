@@ -362,6 +362,74 @@ core::Result<std::string> build_release_lookup_url(const std::string_view releas
            "+isrcs+recording-level-rels+work-rels&fmt=json";
 }
 
+namespace {
+
+[[nodiscard]] std::string_view trimmed(std::string_view text) {
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
+        text.remove_prefix(1U);
+    }
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) {
+        text.remove_suffix(1U);
+    }
+    return text;
+}
+
+[[nodiscard]] std::string lowered(const std::string_view id) {
+    std::string found{id};
+    std::ranges::transform(found, found.begin(), [](const char character) {
+        return character >= 'A' && character <= 'F' ? static_cast<char>(character - 'A' + 'a')
+                                                     : character;
+    });
+    return found;
+}
+
+// The id a MusicBrainz link to a `kind` ("release", "release-group") names.
+[[nodiscard]] std::optional<std::string> linked_id(const std::string_view text,
+                                                   const std::string_view kind) {
+    const auto host = "musicbrainz.org/" + std::string{kind} + "/";
+    const auto at = text.find(host);
+    if (at == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto before = text.substr(0U, at);
+    // Only MusicBrainz's own site: musicbrainz.org, or one of its
+    // subdomains (beta.), after a scheme or nothing.
+    if (!before.empty() && !before.ends_with("://") && !before.ends_with(".")) {
+        return std::nullopt;
+    }
+    const auto id = text.substr(at + host.size(), 36U);
+    const auto rest = text.substr(std::min(text.size(), at + host.size() + 36U));
+    if (!is_musicbrainz_id(id) ||
+        (!rest.empty() && rest.front() != '/' && rest.front() != '?' && rest.front() != '#')) {
+        return std::nullopt;
+    }
+    return lowered(id);
+}
+
+} // namespace
+
+std::optional<std::string> release_id_in(std::string_view text) {
+    text = trimmed(text);
+    if (is_musicbrainz_id(text)) {
+        return lowered(text);
+    }
+    return linked_id(text, "release");
+}
+
+std::optional<std::string> release_group_id_in(const std::string_view text) {
+    return linked_id(trimmed(text), "release-group");
+}
+
+core::Result<std::string> build_release_group_releases_url(const std::string_view group_id) {
+    if (!is_musicbrainz_id(group_id)) {
+        return std::unexpected(service_error(core::ErrorCode::invalid_argument,
+                                             "a MusicBrainz release group's releases need its id"));
+    }
+    return std::string{web_service_root} + "/release?release-group=" + std::string{group_id} +
+           "&inc=artist-credits+labels+media+release-groups&fmt=json&limit=" +
+           std::to_string(release_group_releases_limit);
+}
+
 core::Result<ReleaseSearchResult> parse_release_search(const std::string_view body,
                                                        const WebServiceLimits& limits) {
     auto root = parse_body(body, limits);
@@ -369,8 +437,11 @@ core::Result<ReleaseSearchResult> parse_release_search(const std::string_view bo
         return std::unexpected(std::move(root.error()));
     }
     ReleaseSearchResult result{
-        .total_count =
-            static_cast<std::size_t>(std::max(root->value(QStringLiteral("count")).toInt(0), 0)),
+        // A search says "count", a release group's listing "release-count".
+        .total_count = static_cast<std::size_t>(
+            std::max(root->value(QStringLiteral("count"))
+                         .toInt(root->value(QStringLiteral("release-count")).toInt(0)),
+                     0)),
         .releases = {},
     };
     const auto releases = root->value(QStringLiteral("releases"));

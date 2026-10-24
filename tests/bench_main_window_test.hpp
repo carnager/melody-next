@@ -342,6 +342,7 @@ class BenchMainWindowTest final : public QObject {
     void aTogetherLinkAsksTheEngineToJoin();
     void aRoomPanelIsAskedAgainAsTheRoomChanges();
     void aPanelsControlsAskItAgain();
+    void aPanelIsAskedAgainWhenItSays();
     void theListeningRoomPanelIsTheRoom();
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
@@ -369,6 +370,8 @@ class BenchMainWindowTest final : public QObject {
     void musicBrainzMatchingHandlesUnequalCounts();
     void musicBrainzIdentifyStagesChosenVersion_data();
     void musicBrainzIdentifyStagesChosenVersion();
+    void musicBrainzIdentifyLooksUpNamedReleases();
+    void musicBrainzIdentifyStepsThroughAlbums();
     void identifyAlbumsGroupsLooksUpAndStages();
     void identifyAlbumsReviewsWhatNeedsYou();
     void identifyAlbumsTakesAFileGroupedApart();

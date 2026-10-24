@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
+#include "workspace/tagger_session.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/matching.hpp"
@@ -13,6 +14,8 @@
 #include <QString>
 
 #include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
@@ -120,6 +123,11 @@ class TrackMatchSession final : public QObject {
 // text search needing no MusicBrainz tags, or audio fingerprints through
 // AcoustID, each release version its own candidate; the chosen one opens a
 // TrackMatchSession. It never writes anything itself.
+//
+// ADR-0310: a release named by its link or id is looked up rather than
+// searched for -- typed where the search is, or the one the files are
+// tagged with, looked up by start() -- with its album's other versions
+// beneath it; a release group's link lists them all.
 class IdentifySession final : public QObject {
     Q_OBJECT
 
@@ -138,7 +146,8 @@ class IdentifySession final : public QObject {
     IdentifySession(MusicBrainzLookupService service,
                     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-                    QString initial_artist, QString initial_release, QObject* parent = nullptr);
+                    QString initial_artist, QString initial_release,
+                    QString tagged_release = {}, QObject* parent = nullptr);
     ~IdentifySession() override;
 
     [[nodiscard]] QString initialArtist() const { return initial_artist_; }
@@ -152,10 +161,19 @@ class IdentifySession final : public QObject {
     [[nodiscard]] int suggested() const { return suggested_; }
     [[nodiscard]] TrackMatchSession* match() const { return match_; }
 
+    // The release the files are tagged with, looked up, where there is one.
+    void start();
+    // Searched for -- or, where either names a release by its link or id,
+    // that release looked up.
     void search(const QString& artist, const QString& release);
     void scan();
     // The candidate at `row`, its track list loaded to be matched.
     void use(int row);
+    // The candidate at `row` previewed: loaded as use() does -- once what
+    // is loading has come, when something is (ADR-0311).
+    void preview(int row);
+    // The row whose matching match() is; -1 for none.
+    [[nodiscard]] int matchedRow() const { return matched_row_; }
     // From matching back to the candidates.
     void back();
 
@@ -172,6 +190,16 @@ class IdentifySession final : public QObject {
     void loadScanCandidate(std::size_t rank);
     void finishSearch(core::Result<QByteArray> body);
     void finishLookup(core::Result<QByteArray> body);
+    // The release a row is, with its tracks: its matching opened.
+    void opened(core::Result<musicbrainz::Release> release);
+    // What named the release or album looked up.
+    enum class Named : std::uint8_t { tagged, release, group };
+    void lookUp(const std::string& release_id, bool tagged);
+    void finishReleaseLookup(core::Result<QByteArray> body, bool tagged);
+    // A release group's releases: every version of the album, after the
+    // release named where one was.
+    void lookUpGroup(const std::string& group_id, Named named);
+    void finishGroup(core::Result<QByteArray> body, Named named);
 
     MusicBrainzLookupService service_;
     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks_;
@@ -179,6 +207,7 @@ class IdentifySession final : public QObject {
     std::vector<std::size_t> item_indexes_;
     QString initial_artist_;
     QString initial_release_;
+    QString tagged_release_;
     std::vector<musicbrainz::Release> candidates_;
     // Parallel to rows_: the candidate each row is.
     std::vector<std::size_t> row_candidates_;
@@ -190,6 +219,95 @@ class IdentifySession final : public QObject {
     std::vector<std::pair<std::string, std::size_t>> scan_candidates_;
     std::size_t scan_matched_files_{0U};
     QPointer<TrackMatchSession> match_;
+    int matched_row_{-1};
+    int loading_row_{-1};
+    // What was said of the versions, said again once one has loaded.
+    QString listed_status_;
+    // Previewed while something loaded: loaded next.
+    std::optional<int> wanted_row_;
+    // The matching shown goes: its candidates are about to be replaced.
+    void dropMatch();
+};
+
+// ADR-0311: Identify over the albums a tagger's files hold, one at a time,
+// each its own IdentifySession -- its own search, versions and matching.
+// Those ahead of the one shown are looked up in the background, one at a
+// time, from their tagged release or their tags, so each is there when it
+// is reached. The version previewed for an album, and its pairing, is its
+// choice; apply() stages every album with one into the tagger's draft --
+// but those skipped -- one after another, written with the tagger's Write.
+class MultiIdentifySession final : public QObject {
+    Q_OBJECT
+
+  public:
+    enum class State : std::uint8_t {
+        waiting,
+        looking_up,
+        found,
+        nothing_found,
+        // A version previewed and paired: applied with the others.
+        ready,
+        skipped,
+        // Applied, waiting for the tagger to take it.
+        staging,
+        staged,
+    };
+
+    MultiIdentifySession(TaggerSession& tagger, MusicBrainzLookupService service,
+                         std::vector<TaggerSession::Identify> albums, QObject* parent = nullptr);
+    ~MultiIdentifySession() override;
+
+    [[nodiscard]] std::size_t count() const { return albums_.size(); }
+    [[nodiscard]] IdentifySession* album(std::size_t index) const;
+    // "Artist — Album", as its tags say, else its first file's folder.
+    [[nodiscard]] QString name(std::size_t index) const;
+    [[nodiscard]] State state(std::size_t index) const;
+    [[nodiscard]] QString stateText(std::size_t index) const;
+    [[nodiscard]] std::size_t current() const { return current_; }
+    // The album shown: looked up at once if it has not been.
+    void setCurrent(std::size_t index);
+    // Left out of apply(), or back in.
+    void setSkipped(std::size_t index, bool skipped);
+    // The albums apply() would stage.
+    [[nodiscard]] std::size_t readyCount() const;
+    // Every album ready staged into the tagger's draft, one after another;
+    // finished() once all are.
+    void apply();
+    // Applied albums not yet taken by the tagger.
+    [[nodiscard]] bool staging() const { return staging_.has_value() || !to_stage_.empty(); }
+    // Goes once nothing it was given is left to stage: the window that
+    // showed it may close before.
+    void release();
+
+  signals:
+    void changed();
+    // Every album applied is staged.
+    void finished();
+
+  private:
+    struct Album {
+        TaggerSession::Identify files;
+        QPointer<IdentifySession> session;
+        bool started{false};
+        bool skipped{false};
+        bool applied{false};
+        bool staged{false};
+        QString note;
+    };
+    [[nodiscard]] bool ready(const Album& album) const;
+    void lookUp(std::size_t index);
+    void lookAhead();
+    void stageNext();
+    void settled(bool staged);
+
+    QPointer<TaggerSession> tagger_;
+    std::vector<Album> albums_;
+    std::size_t current_{0U};
+    std::deque<std::pair<std::size_t, metadata::MetadataProposalSet>> to_stage_;
+    std::optional<std::size_t> staging_;
+    // The tagger refused one of the albums applied last: said, not closed.
+    bool refused_{false};
+    bool released_{false};
 };
 
 } // namespace trackknife::bench

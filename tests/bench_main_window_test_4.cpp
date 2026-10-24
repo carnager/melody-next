@@ -687,7 +687,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-search"));
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     QVERIFY(artist && album);
     QCOMPARE(artist->text(), untagged ? QString{} : QStringLiteral("Band"));
     QCOMPARE(album->text(), untagged ? QString{} : QStringLiteral("Alpha"));
@@ -705,11 +705,11 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
     QCOMPARE(results->topLevelItem(0)->text(2), QStringLiteral("Band"));
     QVERIFY(results->topLevelItem(0)->text(5).contains(QStringLiteral("1999-09-09")));
-    QTRY_VERIFY(use->isEnabled());
-    QTest::mouseClick(use, Qt::LeftButton);
-    auto* stage_matches =
-        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
-    QVERIFY(stage_matches);
+    // The version chosen is previewed beneath it: its pairing, to change
+    // there; Apply stages it (ADR-0311).
+    QTRY_VERIFY(dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files")) !=
+                nullptr);
+    auto* stage_matches = use;
     if (untagged) {
         auto* pairs =
             dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
@@ -790,7 +790,9 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
     QTRY_VERIFY(status->text().contains(QStringLiteral("MusicBrainz")));
-    QCOMPARE(fetches, 2);
+    // Tagged, searched by its tags as it opened too, and its best version
+    // previewed: its track list (ADR-0311).
+    QCOMPARE(fetches, untagged ? 2 : 4);
     if (untagged) {
         const auto title = grid_model->fieldColumn(QStringLiteral("Title"));
         QVERIFY(title);
@@ -815,6 +817,371 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
             grid_model->index(row, *date_column).data(metadata_cell_values_role).toStringList(),
             QStringList{QStringLiteral("1999-09-09")});
     }
+    delete properties;
+}
+
+// ADR-0310: the release the files are tagged with, looked up as Identify
+// opens; and a release named by its link where the album is typed, looked
+// up rather than searched for -- each with its album's other versions
+// beneath it, to change to; an album's link lists them all.
+void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
+    const auto field = [](std::string name, std::vector<std::string> values) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = std::move(values),
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    const auto make_source = [&field](const QString& title, const QString& track_number) {
+        return MetadataPropertiesSource{
+            .source =
+                metadata::StagedMetadataSource{
+                    .raw_path = "/music/" + title.toLower().toStdString() + ".flac",
+                    .source_revision = std::nullopt,
+                    .baseline =
+                        metadata::MetadataDocument{
+                            .fields = {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}),
+                                       field("TITLE", {title.toStdString()}),
+                                       field("TRACKNUMBER", {track_number.toStdString()}),
+                                       field("MUSICBRAINZ_ALBUMID",
+                                             {"11111111-2222-3333-4444-555555555555"})},
+                            .unsupported_native_objects = {},
+                        },
+                },
+            .track_label = title,
+        };
+    };
+    const std::vector sources{make_source(QStringLiteral("One"), QStringLiteral("1")),
+                              make_source(QStringLiteral("Two"), QStringLiteral("2"))};
+    const auto release_body = [](const char* id, const char* title) {
+        return QStringLiteral(R"json({
+          "id": "%1", "title": "%2", "status": "Official", "date": "1999-09-09",
+          "country": "DE", "release-group": {"id": "99999999-8888-7777-6666-555555555555"},
+          "artist-credit": [{"name": "Band",
+            "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+          "media": [{"position": 1, "format": "CD", "track-count": 2, "tracks": [
+            {"id": "aaaa1111-0000-0000-0000-000000000001", "position": 1, "number": "1",
+             "title": "One", "length": 61000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000001", "title": "One"}},
+            {"id": "aaaa1111-0000-0000-0000-000000000002", "position": 2, "number": "2",
+             "title": "Two", "length": 59000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000002", "title": "Two"}}
+          ]}]
+        })json")
+            .arg(QLatin1String{id}, QLatin1String{title})
+            .toUtf8();
+    };
+    // The album's versions: the two above, and one of three tracks.
+    static constexpr auto group_body = R"json({
+      "release-count": 3, "release-offset": 0,
+      "releases": [
+        {"id": "33333333-2222-3333-4444-555555555555", "title": "Alpha", "date": "1998",
+         "media": [{"format": "Vinyl", "track-count": 3}]},
+        {"id": "22222222-2222-3333-4444-555555555555", "title": "Alpha (Deluxe)",
+         "date": "2005", "media": [{"format": "CD", "track-count": 2}]},
+        {"id": "11111111-2222-3333-4444-555555555555", "title": "Alpha", "date": "1999-09-09",
+         "media": [{"format": "CD", "track-count": 2}]}
+      ]
+    })json";
+    QStringList asked;
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&asked, &release_body](const QString& url,
+                                    std::function<void(core::Result<QByteArray>)> completion) {
+                asked << url.section(QLatin1Char('?'), 0, 0).section(QLatin1Char('/'), -1);
+                if (url.contains(QStringLiteral(
+                        "release?release-group=99999999-8888-7777-6666-555555555555&"))) {
+                    completion(QByteArray{group_body});
+                    return;
+                }
+                if (url.contains(QStringLiteral("11111111-2222-3333-4444-555555555555?inc="))) {
+                    completion(release_body("11111111-2222-3333-4444-555555555555", "Alpha"));
+                    return;
+                }
+                if (url.contains(QStringLiteral("22222222-2222-3333-4444-555555555555?inc="))) {
+                    completion(
+                        release_body("22222222-2222-3333-4444-555555555555", "Alpha (Deluxe)"));
+                    return;
+                }
+                completion(std::unexpected(core::Error{
+                    .code = core::ErrorCode::invalid_argument,
+                    .message = "unexpected url",
+                    .context = {},
+                }));
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, service);
+    properties->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = properties->fileListView()) != nullptr);
+    auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
+    auto* identify = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify"));
+    QVERIFY(grid_model != nullptr && identify != nullptr);
+    files->selectAll();
+    QTRY_VERIFY(identify->isEnabled());
+    QTest::mouseClick(identify, Qt::LeftButton);
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = properties->findChild<QDialog*>(
+                     QStringLiteral("bench-musicbrainz-identify"))) != nullptr);
+    auto* album =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-musicbrainz-identify-release"));
+    auto* search =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-search"));
+    auto* results =
+        dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    QVERIFY(album && search && results && use);
+
+    const auto rows = [results] {
+        QStringList shown;
+        for (int row = 0; row < results->topLevelItemCount(); ++row) {
+            shown << results->topLevelItem(row)->text(0) + QStringLiteral(": ") +
+                         results->topLevelItem(row)->text(1) + QLatin1Char('/') +
+                         results->topLevelItem(row)->text(3);
+        }
+        return shown;
+    };
+    // The tagged release, looked up by its id -- no search -- and its
+    // album's other versions beneath it, those of as many tracks first.
+    QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Tagged release: Alpha/2"),
+                                  QStringLiteral("Same album · same track count: Alpha (Deluxe)/2"),
+                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(asked, (QStringList{QStringLiteral("11111111-2222-3333-4444-555555555555"),
+                                 QStringLiteral("release")}));
+    QCOMPARE(results->currentItem(), results->topLevelItem(0));
+
+    // Another, by its link where the album is typed.
+    album->setText(QStringLiteral(
+        " https://musicbrainz.org/release/22222222-2222-3333-4444-555555555555/discids "));
+    QTest::mouseClick(search, Qt::LeftButton);
+    QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Release named: Alpha (Deluxe)/2"),
+                                  QStringLiteral("Same album · same track count: Alpha/2"),
+                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(asked.size(), 4);
+    QCOMPARE(asked[2], QStringLiteral("22222222-2222-3333-4444-555555555555"));
+
+    // The album by its link: every version of it.
+    album->setText(QStringLiteral(
+        "https://musicbrainz.org/release-group/99999999-8888-7777-6666-555555555555"));
+    QTest::mouseClick(search, Qt::LeftButton);
+    // Listed, and the first previewed: its track list.
+    QTRY_VERIFY(search->isEnabled() && asked.size() == 6);
+    QTRY_COMPARE(rows(), (QStringList{QStringLiteral("Same album · same track count: Alpha/2"),
+                                      QStringLiteral(
+                                          "Same album · same track count: Alpha (Deluxe)/2"),
+                                      QStringLiteral("Same album: Alpha/3")}));
+
+    // Another version chosen, previewed and applied as a found one is.
+    results->setCurrentItem(results->topLevelItem(1));
+    QTRY_VERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-identify-match-heading"))
+                    ->text()
+                    .contains(QStringLiteral("Alpha (Deluxe)")));
+    QTRY_VERIFY(use->isEnabled());
+    QTest::mouseClick(use, Qt::LeftButton);
+    QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
+                nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
+    const auto album_column = grid_model->fieldColumn(QStringLiteral("Album"));
+    QVERIFY(album_column.has_value());
+    QCOMPARE(grid_model->index(0, *album_column).data(metadata_cell_values_role).toStringList(),
+             QStringList{QStringLiteral("Alpha (Deluxe)")});
+    delete properties;
+}
+
+// ADR-0311: several albums chosen are identified one at a time -- each its
+// own search, versions and matching -- beside a list of them; those ahead
+// looked up meanwhile; each one's pairing chosen, or the album skipped, and
+// the next shown; Apply stages every album chosen.
+void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
+    const auto field = [](std::string name, std::vector<std::string> values) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = std::move(values),
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    const auto make_source = [&field](const std::string& album, const std::string& title,
+                                      const std::string& track, const std::string& release) {
+        std::vector fields{field("ALBUM", {album}), field("ARTIST", {"Band"}),
+                           field("TITLE", {title}), field("TRACKNUMBER", {track})};
+        if (!release.empty()) {
+            fields.push_back(field("MUSICBRAINZ_ALBUMID", {release}));
+        }
+        return MetadataPropertiesSource{
+            .source =
+                metadata::StagedMetadataSource{
+                    .raw_path = "/music/" + album + "/" + track + ".flac",
+                    .source_revision = std::nullopt,
+                    .baseline = metadata::MetadataDocument{.fields = std::move(fields),
+                                                           .unsupported_native_objects = {}},
+                },
+            .track_label = QString::fromStdString(title),
+        };
+    };
+    const std::string alpha_id = "11111111-2222-3333-4444-555555555555";
+    const std::vector sources{make_source("Alpha", "One", "1", alpha_id),
+                              make_source("Alpha", "Two", "2", alpha_id),
+                              make_source("Beta", "Three", "1", {}),
+                              make_source("Beta", "Four", "2", {})};
+    const auto release_body = [](const char* id, const char* title, const char* group,
+                                 const char* first, const char* second) {
+        return QStringLiteral(R"json({
+          "id": "%1", "title": "%2", "status": "Official", "date": "1999-09-09",
+          "country": "DE", "release-group": {"id": "%3"},
+          "artist-credit": [{"name": "Band",
+            "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+          "media": [{"position": 1, "format": "CD", "track-count": 2, "tracks": [
+            {"id": "aaaa1111-0000-0000-0000-000000000001", "position": 1, "number": "1",
+             "title": "%4", "length": 61000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000001", "title": "%4"}},
+            {"id": "aaaa1111-0000-0000-0000-000000000002", "position": 2, "number": "2",
+             "title": "%5", "length": 59000,
+             "recording": {"id": "bbbb1111-0000-0000-0000-000000000002", "title": "%5"}}
+          ]}]
+        })json")
+            .arg(QLatin1String{id}, QLatin1String{title}, QLatin1String{group},
+                 QLatin1String{first}, QLatin1String{second})
+            .toUtf8();
+    };
+    static constexpr auto beta_search = R"json({
+      "count": 1,
+      "releases": [{
+        "id": "44444444-2222-3333-4444-555555555555",
+        "score": 100, "title": "Beta", "status": "Official", "track-count": 2,
+        "artist-credit": [{"name": "Band",
+          "artist": {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "name": "Band"}}],
+        "release-group": {"id": "88888888-8888-7777-6666-555555555555"},
+        "media": [{"format": "CD", "track-count": 2}]
+      }]
+    })json";
+    QStringList asked;
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&asked, &release_body](const QString& url,
+                                    std::function<void(core::Result<QByteArray>)> completion) {
+                const auto plain = QUrl::fromPercentEncoding(url.toUtf8());
+                if (plain.contains(QStringLiteral("?query="))) {
+                    asked << QStringLiteral("search");
+                    completion(plain.contains(QStringLiteral("Beta")) ? QByteArray{beta_search}
+                                                                      : QByteArray{});
+                    return;
+                }
+                if (plain.contains(QStringLiteral("release?release-group="))) {
+                    asked << QStringLiteral("versions");
+                    completion(QByteArray{R"json({"release-count": 0, "releases": []})json"});
+                    return;
+                }
+                if (plain.contains(QStringLiteral("11111111-2222-3333-4444-555555555555?inc="))) {
+                    asked << QStringLiteral("alpha");
+                    completion(release_body("11111111-2222-3333-4444-555555555555", "Alpha",
+                                            "99999999-8888-7777-6666-555555555555", "One",
+                                            "Two"));
+                    return;
+                }
+                if (plain.contains(QStringLiteral("44444444-2222-3333-4444-555555555555?inc="))) {
+                    asked << QStringLiteral("beta");
+                    completion(release_body("44444444-2222-3333-4444-555555555555", "Beta",
+                                            "88888888-8888-7777-6666-555555555555", "Three",
+                                            "Four"));
+                    return;
+                }
+                completion(std::unexpected(core::Error{
+                    .code = core::ErrorCode::invalid_argument,
+                    .message = "unexpected url",
+                    .context = {},
+                }));
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, service);
+    properties->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = properties->fileListView()) != nullptr);
+    auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
+    auto* identify = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify"));
+    QVERIFY(grid_model != nullptr && identify != nullptr);
+    files->selectAll();
+    QTRY_VERIFY(identify->isEnabled());
+    QTest::mouseClick(identify, Qt::LeftButton);
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = properties->findChild<QDialog*>(
+                     QStringLiteral("bench-musicbrainz-identify"))) != nullptr);
+    QPointer<QDialog> open = dialog;
+
+    // The two albums, listed; the first shown, the second looked up
+    // meanwhile -- by its tags, having no release id.
+    auto* albums =
+        dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-albums"));
+    auto* place = dialog->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-identify-place"));
+    QVERIFY(albums != nullptr && place != nullptr);
+    QVERIFY(albums->isVisible());
+    QCOMPARE(albums->topLevelItemCount(), 2);
+    QCOMPARE(albums->topLevelItem(0)->text(0), QStringLiteral("Band — Alpha"));
+    QCOMPARE(albums->topLevelItem(1)->text(0), QStringLiteral("Band — Beta"));
+    // The second's versions there; the first's best version previewed,
+    // and with it chosen.
+    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("1 version"));
+    QTRY_COMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("✓ Alpha · CD"));
+    QVERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    auto* skip = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-skip"));
+    auto* next = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-next"));
+    QVERIFY(apply != nullptr && skip != nullptr && next != nullptr);
+    QTRY_COMPARE(apply->text(), QStringLiteral("Apply 1 album"));
+    QVERIFY(apply->isEnabled());
+
+    // Next: the second, its best version previewed too.
+    next->click();
+    QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
+    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("✓ Beta · CD"));
+    QTRY_COMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
+    QCOMPARE(grid_model->patches().patch_count(), 0U);
+    if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/identify-albums-steps.png")));
+    }
+    // Skipped, then not.
+    skip->click();
+    QCOMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Skipped"));
+    QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
+    QCOMPARE(skip->text(), QStringLiteral("Don't skip"));
+    skip->click();
+    QCOMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
+
+    // Applied: both staged, and done.
+    apply->click();
+    QTRY_VERIFY(open.isNull());
+    QCOMPARE(asked.count(QStringLiteral("search")), 1);
+    const auto title = grid_model->fieldColumn(QStringLiteral("Album"));
+    const auto release = grid_model->fieldColumn(QStringLiteral("MUSICBRAINZ_ALBUMID"));
+    QVERIFY(title.has_value() && release.has_value());
+    QTRY_COMPARE(grid_model->index(3, *release).data(metadata_cell_values_role).toStringList(),
+                 QStringList{QStringLiteral("44444444-2222-3333-4444-555555555555")});
+    QCOMPARE(grid_model->index(0, *release).data(metadata_cell_values_role).toStringList(),
+             QStringList{QString::fromStdString(alpha_id)});
+    QCOMPARE(grid_model->index(2, *title).data(metadata_cell_values_role).toStringList(),
+             QStringList{QStringLiteral("Beta")});
     delete properties;
 }
 
@@ -937,7 +1304,7 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
     auto* scan = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-scan"));
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
-    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
+    auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     QVERIFY(scan != nullptr && scan->isEnabled());
     QVERIFY(results != nullptr);
     QVERIFY(use != nullptr);
@@ -954,11 +1321,6 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
 
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
-    auto* stage_matches =
-        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
-    QVERIFY(stage_matches);
-    QTRY_VERIFY(stage_matches->isEnabled());
-    QTest::mouseClick(stage_matches, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);

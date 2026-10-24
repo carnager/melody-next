@@ -6,6 +6,11 @@
 #include "trackknife/core/local_sources.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <dirent.h>
+#include <fstream>
+#include <map>
+#include <set>
 #include <cerrno>
 #include <cstddef>
 #include <fcntl.h>
@@ -238,6 +243,10 @@ std::string_view output_path_preflight_issue_kind_name(const OutputPathPreflight
         return "path too long";
     case OutputPathPreflightIssueKind::filesystem_observation_failed:
         return "filesystem observation failed";
+    case OutputPathPreflightIssueKind::companion_target_conflict:
+        return "companion target conflict";
+    case OutputPathPreflightIssueKind::cue_reference_broken:
+        return "cue reference broken";
     }
     return "output path preflight issue";
 }
@@ -430,6 +439,192 @@ preflight_output_paths(const OutputPathPlan& plan, const core::CancellationToken
         result.sources.push_back(std::move(source));
     }
     return result;
+}
+
+namespace {
+
+// ADR-0318: what travels with an album's audio.
+[[nodiscard]] bool companion_name(const std::string& name) {
+    if (name.empty() || name.front() == '.') {
+        return false;
+    }
+    const auto dot = name.find_last_of('.');
+    if (dot == std::string::npos) {
+        return false;
+    }
+    std::string extension = name.substr(dot + 1U);
+    std::ranges::transform(extension, extension.begin(),
+                           [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    static const std::set<std::string> kinds{"jpg", "jpeg", "png", "gif",  "bmp",  "webp",
+                                             "tif", "tiff", "cue", "m3u", "m3u8", "pls"};
+    return kinds.contains(extension);
+}
+
+[[nodiscard]] bool cue_name(const std::string& name) {
+    return name.size() > 4U && (name.ends_with(".cue") || name.ends_with(".CUE") ||
+                                name.ends_with(".Cue"));
+}
+
+// The files a CUE sheet names, as written in its FILE lines.
+[[nodiscard]] std::vector<std::string> cue_files(const std::filesystem::path& sheet) {
+    std::vector<std::string> named;
+    std::ifstream in{sheet, std::ios::binary};
+    std::string line;
+    while (std::getline(in, line)) {
+        auto at = line.find_first_not_of(" \t");
+        if (at == std::string::npos || line.compare(at, 5, "FILE ") != 0) {
+            continue;
+        }
+        at += 5U;
+        while (at < line.size() && line[at] == ' ') {
+            ++at;
+        }
+        if (at < line.size() && line[at] == '"') {
+            const auto end = line.find('"', at + 1U);
+            if (end != std::string::npos) {
+                named.push_back(line.substr(at + 1U, end - at - 1U));
+            }
+        } else {
+            const auto end = line.find(' ', at);
+            named.push_back(line.substr(at, end == std::string::npos ? end : end - at));
+        }
+    }
+    return named;
+}
+
+} // namespace
+
+core::Result<OutputPathPreflight>
+preflight_output_paths_with_companions(const OutputPathPlan& plan,
+                                       const core::CancellationToken& cancellation) {
+    if (!plan.ready()) {
+        return preflight_output_paths(plan, cancellation);
+    }
+    auto with = plan;
+    std::vector<OutputPathPreflightIssue> issues;
+    // The folders the plan moves files out of, and where to.
+    struct Leaving {
+        std::set<std::string> targets;
+        std::set<std::string> files;
+        // The audio files renamed: source name -> target name.
+        std::map<std::string, std::string> renamed;
+    };
+    std::map<std::string, Leaving> folders;
+    for (const auto& source : plan.sources) {
+        const std::filesystem::path from{source.source_raw_path};
+        const std::filesystem::path to{source.target_raw_path};
+        auto& folder = folders[from.parent_path().native()];
+        folder.targets.insert(source.no_change ? from.parent_path().native()
+                                               : to.parent_path().native());
+        folder.files.insert(from.filename().native());
+        if (!source.no_change && from.filename() != to.filename()) {
+            folder.renamed[from.filename().native()] = to.filename().native();
+        }
+    }
+    std::set<std::string> taken;
+    for (const auto& source : plan.sources) {
+        taken.insert(source.target_raw_path);
+    }
+    for (const auto& [folder, leaving] : folders) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                               .message = "filesystem preflight was cancelled",
+                                               .context = {}});
+        }
+        // All of it to one other folder: what stays is nothing of the album.
+        if (leaving.targets.size() != 1U || *leaving.targets.begin() == folder) {
+            continue;
+        }
+        const auto& target_folder = *leaving.targets.begin();
+        DIR* directory = ::opendir(folder.c_str());
+        if (directory == nullptr) {
+            continue;
+        }
+        std::vector<std::string> companions;
+        bool audio_left = false;
+        while (const auto* entry = ::readdir(directory)) {
+            const std::string name{entry->d_name};
+            if (name == "." || name == "..") {
+                continue;
+            }
+            const auto path = std::filesystem::path{folder} / name;
+            struct stat status{};
+            if (::lstat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
+                continue;
+            }
+            if (core::is_audio_path(path.native())) {
+                // Audio the plan does not move: the album is not all leaving.
+                audio_left = audio_left || !leaving.files.contains(name);
+                continue;
+            }
+            if (companion_name(name)) {
+                companions.push_back(name);
+            }
+        }
+        ::closedir(directory);
+        if (audio_left) {
+            continue;
+        }
+        std::ranges::sort(companions);
+        for (const auto& name : companions) {
+            const auto from = std::filesystem::path{folder} / name;
+            const auto to = std::filesystem::path{target_folder} / name;
+            struct stat status{};
+            if (::lstat(from.c_str(), &status) != 0) {
+                continue;
+            }
+            PlannedOutputPathSource companion{
+                .source_raw_path = from.native(),
+                .source_revision = core::LocalSourceRevision{
+                    .device = static_cast<std::uint64_t>(status.st_dev),
+                    .inode = static_cast<std::uint64_t>(status.st_ino),
+                    .size = static_cast<std::uint64_t>(status.st_size),
+                    .modification_time_seconds = status.st_mtim.tv_sec,
+                    .modification_time_nanoseconds = status.st_mtim.tv_nsec},
+                .target_raw_path = to.native(),
+                .raw_relative_directory = {},
+                .sanitized_relative_directory = {},
+                .raw_basename = name,
+                .sanitized_basename = name,
+                .item_indexes = {},
+                .sanitized = false,
+                .no_change = false,
+                .companion = true};
+            if (!taken.insert(to.native()).second) {
+                issues.push_back(OutputPathPreflightIssue{
+                    .kind = OutputPathPreflightIssueKind::companion_target_conflict,
+                    .blocking = true,
+                    .message = "Another file is already going to " + to.filename().string() +
+                               " in the folder the album moves to",
+                    .item_indexes = {},
+                    .source_raw_path = from.native(),
+                    .target_raw_path = to.native()});
+                continue;
+            }
+            if (cue_name(name)) {
+                for (const auto& named : cue_files(from)) {
+                    if (const auto renamed = leaving.renamed.find(named);
+                        renamed != leaving.renamed.end()) {
+                        issues.push_back(OutputPathPreflightIssue{
+                            .kind = OutputPathPreflightIssueKind::cue_reference_broken,
+                            .blocking = true,
+                            .message = "The CUE sheet " + name + " names " + named +
+                                       ", which would be renamed " + renamed->second +
+                                       "; the sheet would no longer find it",
+                            .item_indexes = {},
+                            .source_raw_path = from.native(),
+                            .target_raw_path = to.native()});
+                    }
+                }
+            }
+            with.sources.push_back(std::move(companion));
+        }
+    }
+    auto checked = preflight_output_paths(with, cancellation);
+    if (checked) {
+        checked->issues.insert(checked->issues.end(), issues.begin(), issues.end());
+    }
+    return checked;
 }
 
 } // namespace trackknife::operations

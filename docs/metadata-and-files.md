@@ -230,7 +230,7 @@ reviews exact folder destinations and create/replace decisions before Save.
 Existing images retain recovery backups; different images targeting one shared
 folder are blocked. Folder-only front additions do not require embedded-write
 support. Remove affects embedded fronts only; external images are not deleted.
-Save folder covers before using Rename/Move. Folder and media writes have
+Save folder covers before moving files away from them; a file Rename or Move leaves where it is gets its folder cover with its tags. An album moved whole takes its images, CUE sheets and playlists along, and its emptied folder goes (ADR-0318). Folder and media writes have
 separate journals: a later media failure explicitly reports an already saved
 folder image, and retry safely recognizes identical bytes. Conversion retains
 its separate artwork preference.

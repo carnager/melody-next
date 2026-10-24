@@ -591,6 +591,93 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
 // engine over a real connection.
 // ADR-0237 stage 5: a path plan built here, looked at and published by the
 // engine, with the engine's lists, queue and library following the file.
+// ADR-0318: an album moved by the engine takes its cover, CUE sheet and
+// playlist along, its old folder goes once empty, and undone, everything is
+// back in it, the folder made again.
+void companions_travel_with_their_album(const std::filesystem::path& directory,
+                                        const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    namespace operations = trackknife::operations;
+    const auto root = directory / "companions";
+    const auto album = root / "Album";
+    std::filesystem::create_directories(album);
+    std::filesystem::create_directories(root / "sorted");
+    const auto staged = materialize(fixtures, "tagged-tone-flac", album / "staged.flac").string();
+    const auto first = metadata::read_local_metadata(staged);
+    require(first.has_value(), "the album's track is read");
+    const auto title = first->document.effective_values("title").front();
+    // Named as the layout names it: the CUE sheet still finds it.
+    const auto flac = (album / (title + ".flac")).string();
+    std::filesystem::rename(staged, flac);
+    const auto read = metadata::read_local_metadata(flac);
+    require(read.has_value(), "and read where it is");
+    {
+        std::ofstream{album / "cover.jpg"} << "jpeg";
+        std::ofstream{album / "album.cue"} << "FILE \"" << title << ".flac\" WAVE\n";
+        std::ofstream{album / "album.m3u"} << title << ".flac\n";
+    }
+    Jobs jobs{directory / "companions.sqlite3"};
+    const std::array items{operations::OutputPathPlanningItem{.item_index = 0U,
+                                                              .source_raw_path = flac,
+                                                              .source_revision =
+                                                                  read->source_revision,
+                                                              .final_metadata = read->document}};
+    const auto plan = operations::plan_output_paths(
+        items, {.rename_files = true, .move_files = true},
+        operations::OutputLayoutProfile{.schema_version = 1U,
+                                        .name = "Title",
+                                        .dialect = {},
+                                        .relative_directory_expression = "Moved",
+                                        .basename_expression = "%title%",
+                                        .sanitization_policy = {"linux", 1U}},
+        operations::DestinationProfile{.schema_version = 1U,
+                                       .name = "Sorted",
+                                       .root_raw_path = (root / "sorted").string(),
+                                       .containment_policy = {"lexical-beneath-root", 1U}});
+    require(plan && plan->ready(), "the album's move is planned");
+    const auto checked = jobs.run("paths.preflight", {{"plan", wire::encode(*plan)}});
+    require(checked.contains("result"), "the engine looks at the album's folder");
+    const auto preflight = wire::decode_path_preflight(checked.at("result"));
+    require(preflight && preflight->ready(), "and finds the move clean");
+    require(std::ranges::count_if(preflight->sources,
+                                  [](const auto& source) { return source.planned.companion; }) ==
+                3,
+            "with the cover, the sheet and the playlist along");
+    auto preparation = operations::assemble_preparation_plan(
+        {.save_tags = false, .rename_files = true, .move_files = true, .replaygain = false}, 0U,
+        std::nullopt, preflight->plan, *preflight);
+    require(preparation && preparation->ready(), "the preparation is ready");
+    const auto moved = jobs.run("preparation.apply", {{"plan", wire::encode(*preparation)}});
+    require(moved.contains("result"), "the engine moves the album");
+    const auto result = wire::decode_publication_apply_result(moved.at("result"));
+    require(result && result->committed_source_count() == 4U, "all four files");
+    const auto target = root / "sorted" / "Moved";
+    for (const auto* name : {"cover.jpg", "album.cue", "album.m3u"}) {
+        require(std::filesystem::is_regular_file(target / name), "a companion is with the album");
+    }
+    require(std::filesystem::is_regular_file(target / (title + ".flac")), "and so is the track");
+    require(!std::filesystem::exists(album), "the folder it left is gone");
+
+    // Undone: everything back where it was, the folder made again.
+    std::vector<operations::UndoRequest> undo;
+    for (const auto& source : result->sources) {
+        require(source.commit.has_value(), "each move is journaled");
+        undo.push_back({.kind = operations::UndoKind::publication,
+                        .journal_id = source.commit->journal_id});
+    }
+    std::ranges::reverse(undo);
+    const auto undone = jobs.run("operations.undo", {{"operations", wire::encode(undo)}});
+    require(undone.contains("result"), "the engine undoes the move");
+    const auto outcomes = wire::decode_undo_outcomes(undone.at("result"));
+    require(outcomes && outcomes->size() == 4U &&
+                std::ranges::all_of(*outcomes, [](const auto& each) { return !each.issue; }),
+            "every move undone");
+    require(std::filesystem::is_regular_file(flac), "the track is back");
+    for (const auto* name : {"cover.jpg", "album.cue", "album.m3u"}) {
+        require(std::filesystem::is_regular_file(album / name), "and each companion");
+    }
+}
+
 void the_engine_moves_what_was_previewed(const std::filesystem::path& directory,
                                          const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1992,6 +2079,7 @@ int main(int argc, char** argv) {
     a_large_apply_answers_small(directory, argv[1]);
     undo_copies_are_kept_until_let_go_of(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
+    companions_travel_with_their_album(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_visit_only_what_lacks_them(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);

@@ -106,6 +106,10 @@ class Reader final {
         }
         return value != nullptr && value->get<bool>();
     }
+    // Absent: false -- a field newer than the other side.
+    [[nodiscard]] bool optional_flag(const std::string_view name) {
+        return find(name) != nullptr && flag(name);
+    }
     [[nodiscard]] std::string text(const std::string_view name) {
         const auto* value = need(name);
         return value == nullptr ? std::string{} : take(decode_text(*value));

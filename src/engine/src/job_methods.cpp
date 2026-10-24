@@ -400,7 +400,7 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
         }
         return [plan = std::move(*plan)](const core::CancellationToken& token,
                                          const JobRegistry::Reporter&) {
-            auto checked = operations::preflight_output_paths(plan, token);
+            auto checked = operations::preflight_output_paths_with_companions(plan, token);
             if (!checked) {
                 return Json{{"error", wire::encode(checked.error())}};
             }

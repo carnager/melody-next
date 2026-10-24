@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/engine/file_work_methods.hpp"
+#include "trackknife/core/local_sources.hpp"
 
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/list_methods.hpp"
@@ -41,6 +42,11 @@ MoveFollower follow_moves(Workspace& workspace, LocalCatalogue& catalogue, Playe
     return [&workspace, &catalogue, player, sink = std::move(sink)](
                const operations::FilePublicationCommitResult& result,
                const metadata::MetadataDocument* published) -> core::Result<void> {
+        // ADR-0318: an image, CUE sheet or playlist travelling with an album
+        // is no track: nothing of the library, a list or the player follows.
+        if (!core::is_audio_path(result.source_raw_path)) {
+            return {};
+        }
         auto relocated = workspace.relocate_local_source(persistence::LocalSourceRelocation{
             .operation_id = result.journal_id,
             .source_reference = result.source_raw_path,

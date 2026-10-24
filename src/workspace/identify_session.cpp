@@ -562,10 +562,15 @@ void IdentifySession::search(const QString& artist, const QString& release) {
     if (busy_ || !service_.fetch) {
         return;
     }
-    // A link or id pasted in either field: that release, not a search.
+    // A link or id pasted in either field: that release -- or that
+    // album's versions -- not a search.
     for (const auto* named : {&release, &artist}) {
         if (const auto id = musicbrainz::release_id_in(named->toStdString())) {
             lookUp(*id, false);
+            return;
+        }
+        if (const auto group = musicbrainz::release_group_id_in(named->toStdString())) {
+            lookUpGroup(*group, Named::group);
             return;
         }
     }
@@ -663,7 +668,6 @@ void IdentifySession::lookUp(const std::string& release_id, const bool tagged) {
 }
 
 void IdentifySession::finishReleaseLookup(core::Result<QByteArray> body, const bool tagged) {
-    busy_ = false;
     auto release = body ? musicbrainz::parse_release_lookup(std::string_view{
                               body->constData(), static_cast<std::size_t>(body->size())})
                         : core::Result<musicbrainz::Release>{std::unexpected(body.error())};
@@ -673,7 +677,7 @@ void IdentifySession::finishReleaseLookup(core::Result<QByteArray> body, const b
                                .arg(text(release.error().message))
                          : QStringLiteral("The release could not be looked up · %1")
                                .arg(text(release.error().message));
-        emit changed();
+        setBusy(false);
         return;
     }
     row_candidates_.push_back(0U);
@@ -689,12 +693,119 @@ void IdentifySession::finishReleaseLookup(core::Result<QByteArray> body, const b
         .media = media_text(*release),
         .version = version_text(*release),
     });
+    const auto group = release->release_group_id;
     candidates_.push_back(std::move(*release));
     suggested_ = 0;
-    status_ = tagged ? QStringLiteral("The release the files are tagged with — search to look "
-                                      "for another")
-                     : QStringLiteral("The release named by its id");
-    emit changed();
+    // The album's other versions beneath it, to change to.
+    lookUpGroup(group, tagged ? Named::tagged : Named::release);
+}
+
+void IdentifySession::lookUpGroup(const std::string& group_id, const Named named) {
+    const auto url = musicbrainz::build_release_group_releases_url(group_id);
+    if (!url) {
+        finishGroup(std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                                .message = "the release names no album",
+                                                .context = {}}),
+                    named);
+        return;
+    }
+    if (named == Named::group) {
+        status_ = QStringLiteral("Listing the album's versions…");
+        rows_.clear();
+        row_candidates_.clear();
+        candidates_.clear();
+        suggested_ = -1;
+        setBusy(true);
+    } else {
+        status_ = QStringLiteral("Listing the album's other versions…");
+        emit changed();
+    }
+    const QPointer self{this};
+    service_.fetch(QString::fromStdString(*url), [self, named](core::Result<QByteArray> body) {
+        if (!self.isNull()) {
+            self->finishGroup(std::move(body), named);
+        }
+    });
+}
+
+void IdentifySession::finishGroup(core::Result<QByteArray> body, const Named named) {
+    auto listed =
+        body ? musicbrainz::parse_release_search(
+                   std::string_view{body->constData(), static_cast<std::size_t>(body->size())},
+                   musicbrainz::WebServiceLimits{
+                       .releases = musicbrainz::release_group_releases_limit})
+             : core::Result<musicbrainz::ReleaseSearchResult>{std::unexpected(body.error())};
+    const auto first = named == Named::tagged
+                           ? QStringLiteral("The release the files are tagged with")
+                           : QStringLiteral("The release named");
+    if (!listed) {
+        status_ = named == Named::group
+                      ? QStringLiteral("The album's versions could not be listed · %1")
+                            .arg(text(listed.error().message))
+                      : QStringLiteral("%1 · its album's other versions could not be listed · %2")
+                            .arg(first, text(listed.error().message));
+        setBusy(false);
+        return;
+    }
+    // Those with as many tracks as files first, then by date.
+    auto& releases = listed->releases;
+    std::erase_if(releases, [this](const musicbrainz::Release& release) {
+        return std::ranges::any_of(candidates_, [&release](const auto& candidate) {
+            return candidate.id == release.id;
+        });
+    });
+    std::ranges::stable_sort(releases, [this](const auto& left, const auto& right) {
+        const auto left_fits = left.track_count == local_tracks_.size();
+        const auto right_fits = right.track_count == local_tracks_.size();
+        if (left_fits != right_fits) {
+            return left_fits;
+        }
+        return (left.date.empty() ? std::string{"9999"} : left.date) <
+               (right.date.empty() ? std::string{"9999"} : right.date);
+    });
+    const auto others = releases.size();
+    for (auto& release : releases) {
+        row_candidates_.push_back(candidates_.size());
+        rows_.push_back(Candidate{
+            .match = release.track_count == local_tracks_.size()
+                         ? QStringLiteral("Same album · same track count")
+                         : QStringLiteral("Same album"),
+            .match_tool_tip = QStringLiteral("Another version of the album"),
+            .album = text(release.title),
+            .album_tool_tip = text(release.id),
+            .artist = credit_text(release.artist_credits),
+            .tracks = QString::number(release.track_count),
+            .media = media_text(release),
+            .version = version_text(release),
+        });
+        candidates_.push_back(std::move(release));
+    }
+    // Where there are more than one page lists.
+    const auto more =
+        listed->total_count > musicbrainz::release_group_releases_limit
+            ? QStringLiteral(" · the first %1 of %2")
+                  .arg(musicbrainz::release_group_releases_limit)
+                  .arg(listed->total_count)
+            : QString{};
+    if (named == Named::group) {
+        suggested_ = candidates_.empty() ? -1 : 0;
+        status_ = candidates_.empty()
+                      ? QStringLiteral("The album has no versions on MusicBrainz")
+                      : QStringLiteral("%1 %2 of the album%3")
+                            .arg(others)
+                            .arg(others == 1U ? QStringLiteral("version")
+                                              : QStringLiteral("versions"))
+                            .arg(more);
+    } else {
+        status_ = QStringLiteral("%1, and %2 other %3 of its album%4%5")
+                      .arg(first)
+                      .arg(others)
+                      .arg(others == 1U ? QStringLiteral("version") : QStringLiteral("versions"))
+                      .arg(more,
+                           named == Named::tagged ? QStringLiteral(" — search to look for another")
+                                                  : QString{});
+    }
+    setBusy(false);
 }
 
 void IdentifySession::use(const int row) {

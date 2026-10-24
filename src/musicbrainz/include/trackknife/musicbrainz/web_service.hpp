@@ -53,6 +53,17 @@ struct ReleaseSearchQuery {
 // MusicBrainz writes ids. None for anything else, a release group's link
 // included: it names an album, not one of its versions.
 [[nodiscard]] std::optional<std::string> release_id_in(std::string_view text);
+// The release group a MusicBrainz link names (musicbrainz.org/release-group/
+// <id>); none for a bare id, which release_id_in takes as a release's.
+[[nodiscard]] std::optional<std::string> release_group_id_in(std::string_view text);
+
+// How many of a release group's releases are listed: one page.
+inline constexpr std::size_t release_group_releases_limit = 100U;
+// Builds the ws/2 URL listing a release group's releases -- every version
+// of an album -- with their media, labels and artist credits, the first
+// release_group_releases_limit of them. Parsed by parse_release_search,
+// with limits allowing that many.
+[[nodiscard]] core::Result<std::string> build_release_group_releases_url(std::string_view group_id);
 
 struct ArtistCredit {
     std::string name;
@@ -118,7 +129,8 @@ struct ReleaseSearchResult {
     friend bool operator==(const ReleaseSearchResult&, const ReleaseSearchResult&) = default;
 };
 
-// Parses a ws/2 fmt=json release-search payload. Malformed JSON, missing
+// Parses a ws/2 fmt=json release-search payload, or a release group's
+// listing of its releases. Malformed JSON, missing
 // release identities, and exceeded limits fail typed; optional detail that
 // is absent or mistyped is dropped, never invented.
 [[nodiscard]] core::Result<ReleaseSearchResult>

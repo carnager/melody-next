@@ -64,10 +64,11 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         release_ = new QLineEdit(session_->initialRelease(), this);
         release_->setObjectName(QStringLiteral("bench-musicbrainz-identify-release"));
         release_->setPlaceholderText(
-            QStringLiteral("An album title, or a MusicBrainz release's link or id"));
+            QStringLiteral("An album title, or a MusicBrainz release's or album's link"));
         release_->setToolTip(QStringLiteral(
             "A release's link or id — musicbrainz.org/release/… — looks up that release "
-            "instead of searching"));
+            "instead of searching, with its album's other versions; an album's link — "
+            "musicbrainz.org/release-group/… — lists every version of it"));
         form->addRow(QStringLiteral("Album:"), release_);
         auto* form_row = new QHBoxLayout;
         form_row->addLayout(form, 1);

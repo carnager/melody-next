@@ -13,6 +13,7 @@
 #include <QString>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -123,7 +124,8 @@ class TrackMatchSession final : public QObject {
 //
 // ADR-0310: a release named by its link or id is looked up rather than
 // searched for -- typed where the search is, or the one the files are
-// tagged with, looked up by start().
+// tagged with, looked up by start() -- with its album's other versions
+// beneath it; a release group's link lists them all.
 class IdentifySession final : public QObject {
     Q_OBJECT
 
@@ -181,8 +183,14 @@ class IdentifySession final : public QObject {
     void loadScanCandidate(std::size_t rank);
     void finishSearch(core::Result<QByteArray> body);
     void finishLookup(core::Result<QByteArray> body);
+    // What named the release or album looked up.
+    enum class Named : std::uint8_t { tagged, release, group };
     void lookUp(const std::string& release_id, bool tagged);
     void finishReleaseLookup(core::Result<QByteArray> body, bool tagged);
+    // A release group's releases: every version of the album, after the
+    // release named where one was.
+    void lookUpGroup(const std::string& group_id, Named named);
+    void finishGroup(core::Result<QByteArray> body, Named named);
 
     MusicBrainzLookupService service_;
     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks_;

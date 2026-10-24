@@ -820,7 +820,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
 
 // ADR-0310: the release the files are tagged with, looked up as Identify
 // opens; and a release named by its link where the album is typed, looked
-// up rather than searched for.
+// up rather than searched for -- each with its album's other versions
+// beneath it, to change to; an album's link lists them all.
 void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{
@@ -870,12 +871,29 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
             .arg(QLatin1String{id}, QLatin1String{title})
             .toUtf8();
     };
+    // The album's versions: the two above, and one of three tracks.
+    static constexpr auto group_body = R"json({
+      "release-count": 3, "release-offset": 0,
+      "releases": [
+        {"id": "33333333-2222-3333-4444-555555555555", "title": "Alpha", "date": "1998",
+         "media": [{"format": "Vinyl", "track-count": 3}]},
+        {"id": "22222222-2222-3333-4444-555555555555", "title": "Alpha (Deluxe)",
+         "date": "2005", "media": [{"format": "CD", "track-count": 2}]},
+        {"id": "11111111-2222-3333-4444-555555555555", "title": "Alpha", "date": "1999-09-09",
+         "media": [{"format": "CD", "track-count": 2}]}
+      ]
+    })json";
     QStringList asked;
     const MusicBrainzLookupService service{
         .fetch =
             [&asked, &release_body](const QString& url,
                                     std::function<void(core::Result<QByteArray>)> completion) {
                 asked << url.section(QLatin1Char('?'), 0, 0).section(QLatin1Char('/'), -1);
+                if (url.contains(QStringLiteral(
+                        "release?release-group=99999999-8888-7777-6666-555555555555&"))) {
+                    completion(QByteArray{group_body});
+                    return;
+                }
                 if (url.contains(QStringLiteral("11111111-2222-3333-4444-555555555555?inc="))) {
                     completion(release_body("11111111-2222-3333-4444-555555555555", "Alpha"));
                     return;
@@ -922,24 +940,48 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
     QVERIFY(album && search && results && use);
 
-    // The tagged release, looked up by its id: no search.
-    QTRY_COMPARE(results->topLevelItemCount(), 1);
-    QCOMPARE(results->topLevelItem(0)->text(0), QStringLiteral("Tagged release"));
-    QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
-    QCOMPARE(asked, QStringList{QStringLiteral("11111111-2222-3333-4444-555555555555")});
+    const auto rows = [results] {
+        QStringList shown;
+        for (int row = 0; row < results->topLevelItemCount(); ++row) {
+            shown << results->topLevelItem(row)->text(0) + QStringLiteral(": ") +
+                         results->topLevelItem(row)->text(1) + QLatin1Char('/') +
+                         results->topLevelItem(row)->text(3);
+        }
+        return shown;
+    };
+    // The tagged release, looked up by its id -- no search -- and its
+    // album's other versions beneath it, those of as many tracks first.
+    QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Tagged release: Alpha/2"),
+                                  QStringLiteral("Same album · same track count: Alpha (Deluxe)/2"),
+                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(asked, (QStringList{QStringLiteral("11111111-2222-3333-4444-555555555555"),
+                                 QStringLiteral("release")}));
+    QCOMPARE(results->currentItem(), results->topLevelItem(0));
 
     // Another, by its link where the album is typed.
     album->setText(QStringLiteral(
         " https://musicbrainz.org/release/22222222-2222-3333-4444-555555555555/discids "));
-    QTRY_VERIFY(search->isEnabled());
     QTest::mouseClick(search, Qt::LeftButton);
-    QTRY_COMPARE(results->topLevelItemCount(), 1);
-    QTRY_COMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha (Deluxe)"));
-    QCOMPARE(results->topLevelItem(0)->text(0), QStringLiteral("Release named"));
-    QCOMPARE(asked.size(), 2);
-    QCOMPARE(asked.back(), QStringLiteral("22222222-2222-3333-4444-555555555555"));
+    QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Release named: Alpha (Deluxe)/2"),
+                                  QStringLiteral("Same album · same track count: Alpha/2"),
+                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(asked.size(), 4);
+    QCOMPARE(asked[2], QStringLiteral("22222222-2222-3333-4444-555555555555"));
 
-    // Matched and staged as a found one is.
+    // The album by its link: every version of it.
+    album->setText(QStringLiteral(
+        "https://musicbrainz.org/release-group/99999999-8888-7777-6666-555555555555"));
+    QTest::mouseClick(search, Qt::LeftButton);
+    QTRY_VERIFY(search->isEnabled() && asked.size() == 5);
+    QTRY_COMPARE(rows(), (QStringList{QStringLiteral("Same album · same track count: Alpha/2"),
+                                      QStringLiteral(
+                                          "Same album · same track count: Alpha (Deluxe)/2"),
+                                      QStringLiteral("Same album: Alpha/3")}));
+
+    // Another version chosen, matched and staged as a found one is.
+    results->setCurrentItem(results->topLevelItem(1));
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
     QPushButton* stage = nullptr;

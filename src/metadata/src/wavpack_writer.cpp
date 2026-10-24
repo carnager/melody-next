@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/wavpack_writer.hpp"
+#include "trackknife/core/posix.hpp"
 
 #include "apev2_trailer_detail.hpp"
 #include "text_writer_detail.hpp"
@@ -229,7 +230,7 @@ prepare_wavpack_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
     }
-    if (::chmod(prepared_raw_path.c_str(), *source_mode) != 0) {
+    if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared WavPack permissions failed", errno,
                                             source_plan.raw_path, prepared_raw_path));
     }

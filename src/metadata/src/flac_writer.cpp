@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/flac_writer.hpp"
+#include "trackknife/core/posix.hpp"
 
 #include "container_preservation_detail.hpp"
 #include "text_writer_detail.hpp"
@@ -727,7 +728,7 @@ prepare_flac_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
     }
-    if (::chmod(prepared_raw_path.c_str(), *source_mode) != 0) {
+    if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared FLAC permissions failed", errno,
                                             source_plan.raw_path, prepared_raw_path));
     }
@@ -904,7 +905,7 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
     }
-    if (::chmod(prepared_raw_path.c_str(), *source_mode) != 0) {
+    if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared FLAC permissions failed", errno,
                                             source_plan.raw_media_path, prepared_raw_path));
     }

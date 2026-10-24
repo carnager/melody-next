@@ -176,7 +176,7 @@ core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& n
             return discard(io_error());
         offset += static_cast<std::size_t>(count);
     }
-    if (::fchmod(copy.fd, status.st_mode & 07777) != 0 || ::fsync(copy.fd) != 0)
+    if (core::keep_mode(copy.fd, status.st_mode & 07777) != 0 || ::fsync(copy.fd) != 0)
         return discard(io_error());
     const int written = std::exchange(copy.fd, -1);
     if (::close(written) != 0)
@@ -433,7 +433,7 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
     if (*current) {
         struct stat original_status{};
         if (::fstatat(directory.fd, name.c_str(), &original_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-            ::fchmod(output.fd, original_status.st_mode & 0777) != 0)
+            core::keep_mode(output.fd, original_status.st_mode & 0777) != 0)
             return fail(io_error());
     }
     if (::fsync(output.fd) != 0)

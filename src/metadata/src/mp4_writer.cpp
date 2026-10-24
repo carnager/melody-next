@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/mp4_writer.hpp"
+#include "trackknife/core/posix.hpp"
 
 #include "container_preservation_detail.hpp"
 #include "mp4_item_factory_detail.hpp"
@@ -546,7 +547,7 @@ prepare_mp4_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
     }
-    if (::chmod(prepared_raw_path.c_str(), *source_mode) != 0) {
+    if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared MP4 permissions failed", errno,
                                             source_plan.raw_path, prepared_raw_path));
     }

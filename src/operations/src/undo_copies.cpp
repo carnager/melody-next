@@ -215,7 +215,7 @@ core::Result<core::LocalSourceRevision> copy_file_verified(const std::string& fr
         }
         offset += count;
     }
-    if (::fchmod(copy.get(), status.st_mode & 07777) != 0 || ::fsync(copy.get()) != 0 ||
+    if (core::keep_mode(copy.get(), status.st_mode & 07777) != 0 || ::fsync(copy.get()) != 0 ||
         !copy.close()) {
         return discard(io_failure("finishing an undo copy failed", to));
     }

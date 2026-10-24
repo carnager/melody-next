@@ -344,6 +344,7 @@ class BenchMainWindowTest final : public QObject {
     void theListeningRoomPanelIsTheRoom();
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
+    void aFileAlreadyWhereRenamingPutsItGetsItsCover();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();
     void fileWorkWithoutAnEngineSaysWhy();

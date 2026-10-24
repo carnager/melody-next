@@ -119,7 +119,9 @@ Refresh can rebuild metadata lost after a power failure.
 Only plausible audio extensions are probed; directory and file symlinks are
 skipped, and so are hidden files and folders below a library folder -- a sync
 tool's fragments, macOS's `._` files, a trash (ADR-0308). Scans stop after one million visited entries and report incompleteness.
-Cancellation and incomplete traversal retain previously indexed entries.
+Cancellation retains previously indexed entries; an incomplete traversal
+retains every entry whose file is there, and removes those confirmed missing
+(ADR-0313).
 
 Migration 35 adds track and album ratings (ADR-0179): the `local_ratings`
 table stores an integer 0-10 keyed by sha256 content-identity hashes, and each track row carries its
@@ -136,10 +138,12 @@ A separate artwork worker shares the local-list thumbnail reader, with a
 are cancelled on view changes and bounded to 16 MiB encoded input, 16 million
 source pixels, and 10,000 sibling entries. Images are not stored in SQLite.
 
-A complete scan removes confirmed missing files from the index, so deleted
-albums disappear even inside an online network mount (ADR-0126). Cleanup requires
-an absent path and an existing parent directory on the recorded filesystem;
-uncertain paths and changed-device mountpoints retain unavailable entries.
+A scan removes confirmed missing files from the index, so deleted albums
+disappear even inside an online network mount (ADR-0126) -- also when some
+other file could not be read (ADR-0313). Cleanup requires an absent path and an
+existing parent directory on the recorded filesystem, or on the one the scan
+saw that filesystem's other files move to -- a share mounted again under
+another device number; uncertain paths retain unavailable entries.
 An inaccessible root marks its cached files unavailable without deleting them;
 later reconnection restores them after an explicit refresh. Scans run only when
 you press **Refresh**;

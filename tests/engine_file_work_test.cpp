@@ -678,6 +678,82 @@ void companions_travel_with_their_album(const std::filesystem::path& directory,
     }
 }
 
+// ADR-0320: a track renamed as it moves, its CUE sheet travels rewritten to
+// name it so; undone, the sheet is as it was.
+void a_cue_sheet_follows_its_renamed_track(const std::filesystem::path& directory,
+                                           const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    namespace operations = trackknife::operations;
+    const auto root = directory / "cue";
+    const auto album = root / "Album";
+    std::filesystem::create_directories(album);
+    std::filesystem::create_directories(root / "sorted");
+    const auto flac = materialize(fixtures, "tagged-tone-flac", album / "image.flac").string();
+    const auto read = metadata::read_local_metadata(flac);
+    require(read.has_value(), "the album's image is read");
+    const auto title = read->document.effective_values("title").front();
+    const std::string sheet = "REM COMMENT kept\r\nFILE \"image.flac\" WAVE\r\n  TRACK 01 AUDIO\r\n";
+    {
+        std::ofstream out{album / "image.cue", std::ios::binary};
+        out << sheet;
+    }
+    Jobs jobs{directory / "cue.sqlite3"};
+    const std::array items{operations::OutputPathPlanningItem{.item_index = 0U,
+                                                              .source_raw_path = flac,
+                                                              .source_revision =
+                                                                  read->source_revision,
+                                                              .final_metadata = read->document}};
+    const auto plan = operations::plan_output_paths(
+        items, {.rename_files = true, .move_files = true},
+        operations::OutputLayoutProfile{.schema_version = 1U,
+                                        .name = "Title",
+                                        .dialect = {},
+                                        .relative_directory_expression = "Moved",
+                                        .basename_expression = "%title%",
+                                        .sanitization_policy = {"linux", 1U}},
+        operations::DestinationProfile{.schema_version = 1U,
+                                       .name = "Sorted",
+                                       .root_raw_path = (root / "sorted").string(),
+                                       .containment_policy = {"lexical-beneath-root", 1U}});
+    require(plan && plan->ready(), "the renaming move is planned");
+    const auto checked = jobs.run("paths.preflight", {{"plan", wire::encode(*plan)}});
+    const auto preflight = wire::decode_path_preflight(checked.at("result"));
+    require(preflight && preflight->ready(), "and is clean, the sheet along");
+    auto preparation = operations::assemble_preparation_plan(
+        {.save_tags = false, .rename_files = true, .move_files = true, .replaygain = false}, 0U,
+        std::nullopt, preflight->plan, *preflight);
+    require(preparation && preparation->ready(), "the preparation is ready");
+    // Kept to undo, as a tagger asks.
+    const auto moved = jobs.run("preparation.apply",
+                                {{"plan", wire::encode(*preparation)}, {"keep_undo", true}});
+    const auto result = wire::decode_publication_apply_result(moved.at("result"));
+    require(result && result->committed_source_count() == 2U, "the image and its sheet move");
+    const auto target = root / "sorted" / "Moved";
+    std::ifstream moved_in{target / "image.cue", std::ios::binary};
+    const std::string moved_sheet{std::istreambuf_iterator<char>{moved_in},
+                                  std::istreambuf_iterator<char>{}};
+    require(moved_sheet == "REM COMMENT kept\r\nFILE \"" + title +
+                               ".flac\" WAVE\r\n  TRACK 01 AUDIO\r\n",
+            "the sheet names the image as renamed, the rest as it was");
+    require(std::filesystem::is_regular_file(target / (title + ".flac")), "the image is there");
+
+    std::vector<operations::UndoRequest> undo;
+    for (const auto& source : result->sources) {
+        undo.push_back({.kind = operations::UndoKind::publication,
+                        .journal_id = source.commit->journal_id});
+    }
+    std::ranges::reverse(undo);
+    const auto undone = jobs.run("operations.undo", {{"operations", wire::encode(undo)}});
+    const auto outcomes = wire::decode_undo_outcomes(undone.at("result"));
+    require(outcomes && std::ranges::all_of(*outcomes, [](const auto& each) { return !each.issue; }),
+            "the move is undone");
+    std::ifstream back_in{album / "image.cue", std::ios::binary};
+    const std::string back{std::istreambuf_iterator<char>{back_in},
+                           std::istreambuf_iterator<char>{}};
+    require(back == sheet, "the sheet is as it was");
+    require(std::filesystem::is_regular_file(flac), "and the image where it was");
+}
+
 void the_engine_moves_what_was_previewed(const std::filesystem::path& directory,
                                          const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -2080,6 +2156,7 @@ int main(int argc, char** argv) {
     undo_copies_are_kept_until_let_go_of(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     companions_travel_with_their_album(directory, argv[1]);
+    a_cue_sheet_follows_its_renamed_track(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_visit_only_what_lacks_them(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);

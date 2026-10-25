@@ -460,38 +460,6 @@ namespace {
     return kinds.contains(extension);
 }
 
-[[nodiscard]] bool cue_name(const std::string& name) {
-    return name.size() > 4U && (name.ends_with(".cue") || name.ends_with(".CUE") ||
-                                name.ends_with(".Cue"));
-}
-
-// The files a CUE sheet names, as written in its FILE lines.
-[[nodiscard]] std::vector<std::string> cue_files(const std::filesystem::path& sheet) {
-    std::vector<std::string> named;
-    std::ifstream in{sheet, std::ios::binary};
-    std::string line;
-    while (std::getline(in, line)) {
-        auto at = line.find_first_not_of(" \t");
-        if (at == std::string::npos || line.compare(at, 5, "FILE ") != 0) {
-            continue;
-        }
-        at += 5U;
-        while (at < line.size() && line[at] == ' ') {
-            ++at;
-        }
-        if (at < line.size() && line[at] == '"') {
-            const auto end = line.find('"', at + 1U);
-            if (end != std::string::npos) {
-                named.push_back(line.substr(at + 1U, end - at - 1U));
-            }
-        } else {
-            const auto end = line.find(' ', at);
-            named.push_back(line.substr(at, end == std::string::npos ? end : end - at));
-        }
-    }
-    return named;
-}
-
 } // namespace
 
 core::Result<OutputPathPreflight>
@@ -506,8 +474,6 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
     struct Leaving {
         std::set<std::string> targets;
         std::set<std::string> files;
-        // The audio files renamed: source name -> target name.
-        std::map<std::string, std::string> renamed;
     };
     std::map<std::string, Leaving> folders;
     for (const auto& source : plan.sources) {
@@ -517,9 +483,6 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
         folder.targets.insert(source.no_change ? from.parent_path().native()
                                                : to.parent_path().native());
         folder.files.insert(from.filename().native());
-        if (!source.no_change && from.filename() != to.filename()) {
-            folder.renamed[from.filename().native()] = to.filename().native();
-        }
     }
     std::set<std::string> taken;
     for (const auto& source : plan.sources) {
@@ -601,22 +564,6 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
                     .target_raw_path = to.native()});
                 continue;
             }
-            if (cue_name(name)) {
-                for (const auto& named : cue_files(from)) {
-                    if (const auto renamed = leaving.renamed.find(named);
-                        renamed != leaving.renamed.end()) {
-                        issues.push_back(OutputPathPreflightIssue{
-                            .kind = OutputPathPreflightIssueKind::cue_reference_broken,
-                            .blocking = true,
-                            .message = "The CUE sheet " + name + " names " + named +
-                                       ", which would be renamed " + renamed->second +
-                                       "; the sheet would no longer find it",
-                            .item_indexes = {},
-                            .source_raw_path = from.native(),
-                            .target_raw_path = to.native()});
-                    }
-                }
-            }
             with.sources.push_back(std::move(companion));
         }
     }
@@ -625,6 +572,72 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
         checked->issues.insert(checked->issues.end(), issues.begin(), issues.end());
     }
     return checked;
+}
+
+std::optional<std::string>
+rewrite_cue_file_names(const std::string_view sheet,
+                       const std::map<std::string, std::string>& renamed) {
+    std::string out;
+    out.reserve(sheet.size() + 64U);
+    bool changed = false;
+    std::size_t position = 0U;
+    while (position < sheet.size()) {
+        const auto newline = sheet.find('\n', position);
+        const auto line_end = newline == std::string_view::npos ? sheet.size() : newline + 1U;
+        const auto line = sheet.substr(position, line_end - position);
+        position = line_end;
+        auto body = line;
+        while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) {
+            body.remove_suffix(1U);
+        }
+        const auto ending = line.substr(body.size());
+        const auto at = body.find_first_not_of(" \t");
+        if (at == std::string_view::npos || body.substr(at, 5U) != "FILE ") {
+            out.append(line);
+            continue;
+        }
+        auto start = at + 5U;
+        while (start < body.size() && body[start] == ' ') {
+            ++start;
+        }
+        std::size_t end = 0U;
+        std::string_view name;
+        const bool quoted = start < body.size() && body[start] == '"';
+        if (quoted) {
+            const auto close = body.find('"', start + 1U);
+            if (close == std::string_view::npos) {
+                out.append(line);
+                continue;
+            }
+            name = body.substr(start + 1U, close - start - 1U);
+            end = close + 1U;
+        } else {
+            end = std::min(body.find(' ', start), body.size());
+            name = body.substr(start, end - start);
+        }
+        const auto found = renamed.find(std::string{name});
+        if (found == renamed.end()) {
+            out.append(line);
+            continue;
+        }
+        out.append(body.substr(0U, start));
+        // Quoted as it was, or where the new name has a space.
+        const bool quote = quoted || found->second.find(' ') != std::string::npos;
+        if (quote) {
+            out.push_back('"');
+        }
+        out.append(found->second);
+        if (quote) {
+            out.push_back('"');
+        }
+        out.append(body.substr(end));
+        out.append(ending);
+        changed = true;
+    }
+    if (!changed) {
+        return std::nullopt;
+    }
+    return out;
 }
 
 } // namespace trackknife::operations

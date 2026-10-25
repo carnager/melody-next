@@ -61,6 +61,11 @@ class MetadataServices final {
     };
     [[nodiscard]] static Throttle throttle(long status, std::int64_t retry_after_seconds,
                                            int attempt);
+    // ADR-0329: a service that did not answer (`answered` false: a timeout,
+    // a connection refused or dropped) or failed on its side (500, 502, 504)
+    // is asked again after a pause -- twice, then given up on. `attempt`
+    // counts the failures so far.
+    [[nodiscard]] static Throttle transient(bool answered, long status, int attempt);
 
   private:
     // Waits until `interval` has passed since the last dispatch of its kind.

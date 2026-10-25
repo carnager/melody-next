@@ -2814,7 +2814,8 @@ LocalLibrary::albums_touching(const std::vector<std::string>& raw_paths) const {
 }
 
 core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& raw_paths,
-                                                const core::CancellationToken& cancellation) {
+                                                const core::CancellationToken& cancellation,
+                                                const bool changed_only) {
     return checked([&] {
         if (raw_paths.size() > filter_match_cap) {
             fail("Refresh exceeds 100000 files", core::ErrorCode::limit_exceeded);
@@ -2879,11 +2880,35 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
                 core::hidden_below_root(raw_path, root->raw_path)) {
                 continue;
             }
+            const auto revision = revision_key(*before);
+            if (changed_only) {
+                // ADR-0322: indexed as it is now -- a file read and closed
+                // unwritten, or one a scan read already -- is not read again;
+                // one stored unavailable is there after all.
+                Statement stored{db, "SELECT revision,field_index_complete,rating_hash,available "
+                                     "FROM local_library_tracks WHERE raw_path=?"};
+                stored.blob(1, raw_path);
+                if (stored.next() && same_file_data(stored.bytes(0), revision) &&
+                    stored.number(1) == 1 && !stored.bytes(2).empty()) {
+                    const bool was_available = stored.number(3) != 0;
+                    if (!was_available || stored.bytes(0) != revision) {
+                        Statement touch{db, "UPDATE local_library_tracks SET available=1,"
+                                            "revision=? WHERE raw_path=?"};
+                        touch.text(1, revision);
+                        touch.blob(2, raw_path);
+                        touch.next();
+                    }
+                    if (!was_available) {
+                        ++refreshed;
+                    }
+                    continue;
+                }
+            }
             // Read as a scan reads it, and stored under the root's current
             // scan token, so the next scan treats it as seen.
             auto prepared = prepare_file(ScanRequest{.raw_path = raw_path,
                                                      .root = root->raw_path,
-                                                     .revision = revision_key(*before),
+                                                     .revision = revision,
                                                      .before = *before},
                                          cancellation);
             // A file refreshed into a known root is new to the library now.

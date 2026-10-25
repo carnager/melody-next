@@ -75,11 +75,13 @@ qt_add_library(
     profiles_session.cpp
     undo_location_session.cpp
     playlist_folder_session.cpp
+    library_watch_session.cpp
     shortcut_session.cpp
     shortcut_session.hpp
     profiles_session.hpp
     undo_location_session.hpp
     playlist_folder_session.hpp
+    library_watch_session.hpp
     search_session.cpp
     search_session.hpp
     settings_session.cpp

@@ -275,7 +275,10 @@ class Watcher final {
             }
             // The engine reads each file over its mount; a batch can take a
             // while, which is the engine working, not the connection gone.
-            auto answer = client_->call("catalogue.refresh", Json{{"paths", std::move(batch)}},
+            // Changed only: the engine may watch these folders too, where
+            // it is (ADR-0322); a file it has read already is not read twice.
+            auto answer = client_->call("catalogue.refresh",
+                                        Json{{"paths", std::move(batch)}, {"changed_only", true}},
                                         std::chrono::minutes{10});
             if (!answer) {
                 failed("could not send changes", answer.error());

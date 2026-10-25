@@ -97,7 +97,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                                std::function<QWidget*(QWidget*)> library_folders,
                                std::function<QWidget*(QWidget*)> lastfm, QList<QAction*> shortcuts,
                                std::function<QWidget*(QWidget*)> undo_locations,
-                               std::function<QWidget*(QWidget*)> playlist_folders)
+                               std::function<QWidget*(QWidget*)> playlist_folders,
+                               std::function<QWidget*(QWidget*)> library_watch)
     : QDialog(parent) {
     setWindowTitle(QStringLiteral("Settings"));
     setObjectName(QStringLiteral("bench-settings-dialog"));
@@ -374,6 +375,22 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_buttons->addStretch(1);
     engine_buttons->addWidget(found_engines);
     engines_layout->addLayout(engine_buttons);
+    // ADR-0322: whether the engine chosen above watches its library's
+    // folders -- asked of it, and changed on it at once.
+    library_watch_ = new QStackedWidget(engines_box);
+    library_watch_->setObjectName(QStringLiteral("bench-settings-library-watch"));
+    if (library_watch) {
+        auto* pages = library_watch(library_watch_);
+        for (auto* page : pages->findChildren<QWidget*>(Qt::FindDirectChildrenOnly)) {
+            if (page->property("engine-address").isValid()) {
+                page->setParent(nullptr);
+                library_watch_->addWidget(page);
+            }
+        }
+        pages->deleteLater();
+    }
+    library_watch_->setVisible(false);
+    engines_layout->addWidget(library_watch_);
     engine_layout->addWidget(engines_box);
 
     // The library's music folders: the same folders its Folders… opens,
@@ -1287,6 +1304,16 @@ void SettingsDialog::showChosenEngine() {
     const bool elsewhere = engines_view_->currentRow() > 0;
     remote_box_->setVisible(elsewhere);
     remove_engine_->setEnabled(elsewhere);
+    const auto address =
+        elsewhere ? session_->engine().address : QString::fromLatin1(library_engine_local);
+    bool watched = false;
+    for (int index = 0; index < library_watch_->count(); ++index) {
+        if (library_watch_->widget(index)->property("engine-address").toString() == address) {
+            library_watch_->setCurrentIndex(index);
+            watched = true;
+        }
+    }
+    library_watch_->setVisible(watched);
     if (elsewhere) {
         const auto engine = session_->engine();
         remote_box_->setTitle(engine.address.isEmpty() ? QStringLiteral("New engine")

@@ -52,6 +52,9 @@ struct Settings {
     std::uint64_t transcode_cache_mb = 2048;
     bool local_only = false;
     bool upnp_enabled = false;
+    // ADR-0322: the library's folders watched for changes, as MPD's
+    // auto_update; `watch = no` leaves them to Refresh.
+    bool watch_library = true;
     std::string upnp_interface;
     std::string password;
     std::string password_file;

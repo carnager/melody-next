@@ -296,8 +296,12 @@ class LocalLibrary final {
     // drops every track indexed under it (ADR-0232), provided the folder it
     // was in is still there: a share that is not mounted must not read as a
     // library that was deleted.
+    // `changed_only` (ADR-0322): a file indexed with its size and
+    // modification time as they are now is not read again, only marked
+    // available.
     core::Result<std::size_t> refresh(const std::vector<std::string>& raw_paths,
-                                      const core::CancellationToken& cancellation = {});
+                                      const core::CancellationToken& cancellation = {},
+                                      bool changed_only = false);
     // The albums a change at these paths touches, by album key: a track's
     // own; every album under a folder; and for a path with none under it --
     // a cover image -- every album in its folder and below. No filesystem

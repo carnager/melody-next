@@ -6,6 +6,7 @@
 #include "bench/themed_icon.hpp"
 #include "bench/undo_location_widget.hpp"
 #include "workspace/list_view_definitions.hpp"
+#include "workspace/library_watch_session.hpp"
 #include "workspace/playlist_folder_session.hpp"
 #include "workspace/undo_location_session.hpp"
 
@@ -39,7 +40,9 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFrame>
+#include <QCheckBox>
 #include <QHBoxLayout>
+#include <QSignalBlocker>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
@@ -706,10 +709,50 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return widget;
         };
     }
+    // ADR-0322: whether each engine watches its library's folders, asked of
+    // it; the Engines page shows the one chosen there.
+    std::function<QWidget*(QWidget*)> library_watch = [this](QWidget* parent) -> QWidget* {
+        auto* pages = new QWidget(parent);
+        for (const auto& engine : engines_) {
+            if (engine->catalogue == nullptr || !engine->catalogue->endpoint()) {
+                continue;
+            }
+            auto* row = new QWidget(pages);
+            row->setProperty("engine-address",
+                              engine->key.isLocal()
+                                  ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                  : engine->setting.address);
+            auto* layout = new QHBoxLayout(row);
+            layout->setContentsMargins(0, 0, 0, 0);
+            auto* box = new QCheckBox(tr("Watch its library folders for changes"), row);
+            box->setObjectName(QStringLiteral("bench-settings-library-watch-box"));
+            box->setToolTip(
+                tr("Files added, changed, moved or deleted in its music folders are taken in at "
+                   "once, without Refresh. Changes made on another machine -- a NAS writing to "
+                   "its own disk under a share this engine mounts -- are not seen; melody-watch, "
+                   "run there, tells of those. Changing this restarts the engine."));
+            auto* note = new QLabel(row);
+            note->setForegroundRole(QPalette::PlaceholderText);
+            layout->addWidget(box);
+            layout->addWidget(note, 1);
+            auto* session = new LibraryWatchSession(*engine->catalogue->endpoint(), row);
+            const auto show = [box, note, session] {
+                const QSignalBlocker blocker{box};
+                box->setChecked(session->watching());
+                box->setEnabled(session->known() && !session->busy());
+                note->setText(session->status());
+            };
+            connect(session, &LibraryWatchSession::changed, row, show);
+            connect(box, &QCheckBox::toggled, session, &LibraryWatchSession::setWatching);
+            show();
+            session->load();
+        }
+        return pages;
+    };
     auto* dialog = new SettingsDialog(
         this, buildOutputProfileStore(), std::move(library_folders),
         [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_,
-        std::move(undo_locations), std::move(playlist_folders));
+        std::move(undo_locations), std::move(playlist_folders), std::move(library_watch));
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {

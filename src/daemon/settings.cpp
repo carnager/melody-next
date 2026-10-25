@@ -58,6 +58,7 @@ constexpr std::array known_keys{
     Known{"password", Shape::value, true},
     Known{"password-file", Shape::value, true},
     Known{"upnp", Shape::toggle, true},
+    Known{"watch", Shape::toggle, true},
     Known{"upnp-interface", Shape::value, true},
     Known{"http", Shape::value, true},
     Known{"transcode-cache", Shape::value, true},
@@ -173,6 +174,12 @@ constexpr std::array section_keys{
             return std::unexpected(on.error());
         }
         settings.upnp_enabled = *on;
+    } else if (key == "watch") {
+        auto on = toggle_value(where, given);
+        if (!on) {
+            return std::unexpected(on.error());
+        }
+        settings.watch_library = *on;
     } else if (key == "upnp-interface") {
         settings.upnp_interface = value;
         settings.upnp_enabled = true;

@@ -76,7 +76,8 @@ class UnavailableCatalogue final : public engine::Catalogue {
         return refuse<std::optional<metadata::Lyrics>>();
     }
     [[nodiscard]] core::Result<std::size_t> refresh(const std::vector<std::string>&,
-                                                    const core::CancellationToken&) override {
+                                                    const core::CancellationToken&,
+                                                    bool) override {
         return refuse<std::size_t>();
     }
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
@@ -154,9 +155,9 @@ class DeferredCatalogue final : public engine::Catalogue {
         return get().artwork_source(album_key, cancellation);
     }
     [[nodiscard]] core::Result<std::size_t>
-    refresh(const std::vector<std::string>& raw_paths,
-            const core::CancellationToken& cancellation) override {
-        return get().refresh(raw_paths, cancellation);
+    refresh(const std::vector<std::string>& raw_paths, const core::CancellationToken& cancellation,
+            const bool changed_only) override {
+        return get().refresh(raw_paths, cancellation, changed_only);
     }
     [[nodiscard]] core::Result<std::vector<unsigned char>>
     artwork(const std::string& raw_path,

@@ -62,6 +62,7 @@ or with Docker ([Installation](install.md#docker)). Useful options:
 | `--transcode-cache MB` | Space for converted tracks. Default 2048. |
 | `--upnp` | Discover UPnP MediaRenderers and offer them as outputs. Requires a LAN-reachable HTTP stream listener. |
 | `--upnp-interface NAME` | Enable UPnP and restrict discovery to one interface. |
+| `--no-watch` | Do not watch the library's folders for changes (`watch = no` in `melodyd.conf`); Refresh finds them. Watching is on by default, on Linux. |
 
 With a password it listens on port 6603 for clients and agents, 6604 for
 streams, and 5353/udp for multicast DNS. There's no encryption, so keep these

@@ -18,6 +18,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QShortcut>
@@ -522,9 +523,19 @@ class MatchBoard final : public QListWidget {
         QDrag drag{this};
         drag.setMimeData(payload(row));
         if (auto* item_at = itemOfRow(row)) {
-            // The file itself, lifted.
+            // The file itself, lifted -- and see-through, so the track it is
+            // carried over shows beneath it.
             const auto zones = zonesOf(visualItemRect(item_at));
-            drag.setPixmap(viewport()->grab(zones.file));
+            const auto tile = viewport()->grab(zones.file);
+            QPixmap carried{tile.size()};
+            carried.setDevicePixelRatio(tile.devicePixelRatio());
+            carried.fill(Qt::transparent);
+            {
+                QPainter painter{&carried};
+                painter.setOpacity(0.65);
+                painter.drawPixmap(0, 0, tile);
+            }
+            drag.setPixmap(carried);
             drag.setHotSpot(at - zones.file.topLeft());
         }
         viewport()->setCursor(Qt::ClosedHandCursor);

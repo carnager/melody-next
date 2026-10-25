@@ -2,27 +2,29 @@
 
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
+#include "uicommon/queue_item_delegate.hpp"
 #include "workspace/identify_session.hpp"
 
 #include "trackknife/musicbrainz/acoustid.hpp"
 #include "trackknife/musicbrainz/proposal_bridge.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPainter>
 #include <QPointer>
 #include <QPushButton>
-#include <QScreen>
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -36,6 +38,70 @@
 
 namespace trackknife::bench {
 namespace {
+
+// The quieter line beneath an item's text.
+constexpr int second_line_role = Qt::UserRole + 1;
+
+// Two lines to a row: the item's text, and beneath it, smaller and quieter,
+// its second line -- each cut short on its own, as the track lists draw a
+// second line.
+class TwoLineDelegate final : public QStyledItemDelegate {
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override {
+        auto item = option;
+        initStyleOption(&item, index);
+        const auto* widget = item.widget;
+        auto* style = widget != nullptr ? widget->style() : QApplication::style();
+        const auto first = item.text;
+        item.text.clear();
+        style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+        const auto area =
+            style->subElementRect(QStyle::SE_ItemViewItemText, &item, widget).adjusted(3, 0, -3, 0);
+        const bool selected = (item.state & QStyle::State_Selected) != 0;
+        const QFontMetrics metrics{item.font};
+        const auto quiet_font = ui::trackSecondLineFont(item.font);
+        const QFontMetrics quiet_metrics{quiet_font};
+        const auto quiet_height = ui::trackSecondLineHeight(item.font);
+        const auto top = area.top() + (area.height() - metrics.height() - quiet_height) / 2;
+        painter->save();
+        painter->setFont(item.font);
+        painter->setPen(item.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
+        painter->drawText(QRect{area.left(), top, area.width(), metrics.height()},
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          metrics.elidedText(first, Qt::ElideRight, area.width()));
+        painter->setFont(quiet_font);
+        painter->setPen(
+            item.palette.color(selected ? QPalette::HighlightedText : QPalette::PlaceholderText));
+        painter->drawText(
+            QRect{area.left(), top + metrics.height(), area.width(), quiet_height},
+            Qt::AlignLeft | Qt::AlignVCenter,
+            quiet_metrics.elidedText(index.data(second_line_role).toString(), Qt::ElideRight,
+                                     area.width()));
+        painter->restore();
+    }
+
+    [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& option,
+                                 const QModelIndex& index) const override {
+        auto size = QStyledItemDelegate::sizeHint(option, index);
+        size.setHeight(QFontMetrics{option.font}.height() + ui::trackSecondLineHeight(option.font) +
+                       8);
+        return size;
+    }
+};
+
+// A list of two-line rows, one column, no header.
+void twoLines(QTreeWidget* list) {
+    list->setColumnCount(1);
+    list->setHeaderHidden(true);
+    list->setRootIsDecorated(false);
+    list->setUniformRowHeights(true);
+    list->setSelectionMode(QAbstractItemView::SingleSelection);
+    list->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    list->setItemDelegate(new TwoLineDelegate(list));
+}
 
 // One album's page over its IdentifySession (ADR-0311): its search and
 // release versions above, and below them how its files pair with the version
@@ -88,18 +154,10 @@ class IdentifyAlbumPage final : public QWidget {
         results_ = new QTreeWidget(splitter);
         results_->setObjectName(QStringLiteral("bench-musicbrainz-identify-results"));
         results_->setAccessibleName(QStringLiteral("MusicBrainz release versions"));
-        results_->setColumnCount(6);
-        results_->setHeaderLabels({QStringLiteral("Match"), QStringLiteral("Album"),
-                                   QStringLiteral("Artist"), QStringLiteral("Tracks"),
-                                   QStringLiteral("Media"), QStringLiteral("Version")});
-        results_->setRootIsDecorated(false);
+        // Two lines each: artist and album, as the albums are named, then
+        // what tells this version from the others.
+        twoLines(results_);
         results_->setAlternatingRowColors(true);
-        results_->setUniformRowHeights(true);
-        results_->setTextElideMode(Qt::ElideRight);
-        results_->setSelectionMode(QAbstractItemView::SingleSelection);
-        results_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        results_->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-        results_->header()->setStretchLastSection(true);
         match_holder_ = new QWidget(splitter);
         match_holder_->setObjectName(QStringLiteral("bench-musicbrainz-identify-matching"));
         auto* holder_layout = new QVBoxLayout(match_holder_);
@@ -115,8 +173,8 @@ class IdentifyAlbumPage final : public QWidget {
         // pairing the rest: it is what is checked, file by file.
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        const auto row = results_->fontMetrics().height() * 3 / 2 + 2;
-        splitter->setSizes({row * 9 + results_->header()->sizeHint().height(), row * 40});
+        const auto row = results_->fontMetrics().height() * 2 + 10;
+        splitter->setSizes({row * 6, row * 20});
         layout->addWidget(splitter, 1);
 
         // Enter in a search field searches.
@@ -158,15 +216,34 @@ class IdentifyAlbumPage final : public QWidget {
              ++row) {
             const auto& candidate = rows[row];
             auto* item = new QTreeWidgetItem(results_);
-            item->setText(0, candidate.match);
-            item->setToolTip(0, candidate.match_tool_tip);
-            item->setText(1, candidate.album);
-            item->setToolTip(1, candidate.album_tool_tip);
-            item->setText(2, candidate.artist);
-            item->setText(3, candidate.tracks);
-            item->setText(4, candidate.media);
-            item->setText(5, candidate.version);
-            item->setToolTip(5, candidate.version);
+            // Another version of the same album says nothing the list does
+            // not; how a release was found, or its track count, does.
+            auto match = candidate.match;
+            if (match.startsWith(QStringLiteral("Same album"))) {
+                match = match.section(QStringLiteral(" · "), 1);
+            }
+            item->setText(0, candidate.artist.isEmpty()
+                                 ? candidate.album
+                                 : QStringLiteral("%1 — %2").arg(candidate.artist, candidate.album));
+            QStringList details;
+            if (!match.isEmpty()) {
+                details << match;
+            }
+            details << (candidate.tracks == QStringLiteral("1")
+                            ? QStringLiteral("1 track")
+                            : QStringLiteral("%1 tracks").arg(candidate.tracks));
+            for (const auto& part : {candidate.media, candidate.version}) {
+                if (!part.isEmpty()) {
+                    details << part;
+                }
+            }
+            item->setData(0, second_line_role, details.join(QStringLiteral(" · ")));
+            item->setToolTip(0, QStringLiteral("%1\n%2\n%3")
+                                    .arg(item->text(0), details.join(QStringLiteral(" · ")),
+                                         candidate.match_tool_tip.isEmpty()
+                                             ? candidate.match
+                                             : candidate.match + QStringLiteral(" — ") +
+                                                   candidate.match_tool_tip));
         }
         // The best one previewed by itself once the versions are all there.
         if (results_->currentItem() == nullptr && !session_->busy() && session_->suggested() >= 0 &&
@@ -198,7 +275,6 @@ class IdentifyAlbumPage final : public QWidget {
 // The albums, one page at a time (ADR-0311): a list of them beside the page
 // shown, where there is more than one.
 class MusicBrainzIdentifyDialog final : public QDialog {
-    static constexpr auto geometry_key = "identify/geometry";
     static constexpr auto fetch_covers_key = "identify/fetch-covers";
 
   public:
@@ -210,13 +286,12 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         setAttribute(Qt::WA_DeleteOnClose);
         setMinimumSize(720, 480);
         const auto many = session_->count() > 1U;
-        // As large as it was left, else most of the screen: a release's
-        // versions and every file's pairing need the room.
-        if (!restoreGeometry(QSettings{}.value(QLatin1String{geometry_key}).toByteArray())) {
-            const auto* where = parent != nullptr ? parent->screen() : screen();
-            const auto area = where->availableGeometry();
-            const auto share = many ? 0.85 : 0.7;
-            resize(static_cast<int>(area.width() * share), static_cast<int>(area.height() * share));
+        // Over the tag editor it is opened from, as large as it is.
+        if (const auto* over = parent != nullptr ? parent->window() : nullptr) {
+            resize(over->size());
+            move(over->pos());
+        } else {
+            resize(1000, 700);
         }
 
         auto* root = new QVBoxLayout(this);
@@ -225,15 +300,8 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         albums_ = new QTreeWidget(splitter);
         albums_->setObjectName(QStringLiteral("bench-musicbrainz-identify-albums"));
         albums_->setAccessibleName(QStringLiteral("Albums to identify"));
-        albums_->setColumnCount(2);
-        albums_->setHeaderLabels({QStringLiteral("Album"), QStringLiteral("State")});
-        albums_->setRootIsDecorated(false);
-        albums_->setUniformRowHeights(true);
-        albums_->setTextElideMode(Qt::ElideMiddle);
-        albums_->setSelectionMode(QAbstractItemView::SingleSelection);
-        albums_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        albums_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-        albums_->header()->setStretchLastSection(false);
+        // Two lines each: the album, and how far it is.
+        twoLines(albums_);
         for (std::size_t index = 0; index < session_->count(); ++index) {
             auto* item = new QTreeWidgetItem(albums_);
             item->setText(0, session_->name(index));
@@ -244,7 +312,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         splitter->addWidget(albums_);
         splitter->addWidget(pages_);
         splitter->setStretchFactor(1, 1);
-        splitter->setSizes({240, 1000});
+        splitter->setSizes({260, 1000});
         root->addWidget(splitter, 1);
 
         auto* bottom = new QHBoxLayout;
@@ -319,7 +387,6 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     }
 
     ~MusicBrainzIdentifyDialog() override {
-        QSettings{}.setValue(QLatin1String{geometry_key}, saveGeometry());
         // Albums applied and not yet taken by the tagger are still staged --
         // unless the tagger went first, closed with its window, and the
         // session with it.
@@ -366,7 +433,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     void sync() {
         for (std::size_t index = 0; index < session_->count(); ++index) {
             if (auto* item = albums_->topLevelItem(static_cast<int>(index))) {
-                item->setText(1, session_->stateText(index));
+                item->setData(0, second_line_role, session_->stateText(index));
             }
         }
         const auto at = session_->current();

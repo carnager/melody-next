@@ -256,9 +256,11 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     QVERIFY(search_url.contains(QStringLiteral("artist:")));
     QVERIFY(search_url.contains(QStringLiteral("release:")));
     QVERIFY(!search_url.contains(QStringLiteral("tracks:")));
-    QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
-    QCOMPARE(results->topLevelItem(0)->text(2), QStringLiteral("Band"));
-    QVERIFY(results->topLevelItem(0)->text(5).contains(QStringLiteral("1999-09-09")));
+    QCOMPARE(results->topLevelItem(0)->text(0), QStringLiteral("Band — Alpha"));
+    QVERIFY(results->topLevelItem(0)
+                ->data(0, Qt::UserRole + 1)
+                .toString()
+                .contains(QStringLiteral("1999-09-09")));
     // The version chosen is previewed beneath it: its pairing, to change
     // there; Apply stages it (ADR-0311).
     QTRY_VERIFY(dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files")) !=
@@ -499,18 +501,25 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     const auto rows = [results] {
         QStringList shown;
         for (int row = 0; row < results->topLevelItemCount(); ++row) {
-            shown << results->topLevelItem(row)->text(0) + QStringLiteral(": ") +
-                         results->topLevelItem(row)->text(1) + QLatin1Char('/') +
-                         results->topLevelItem(row)->text(3);
+            // The album, and how it was found and how many tracks it has.
+            shown << results->topLevelItem(row)->text(0).section(QStringLiteral(" — "), -1) +
+                         QStringLiteral(": ") +
+                         results->topLevelItem(row)
+                             ->data(0, Qt::UserRole + 1)
+                             .toString()
+                             .split(QStringLiteral(" · "))
+                             .filter(QRegularExpression{QStringLiteral(
+                                 "^(Tagged release|Release named|same track count|\\d+ tracks?)$")})
+                             .join(QStringLiteral(" · "));
         }
         return shown;
     };
     // The tagged release, looked up by its id -- no search -- and its
     // album's other versions beneath it, those of as many tracks first.
     QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
-    QCOMPARE(rows(), (QStringList{QStringLiteral("Tagged release: Alpha/2"),
-                                  QStringLiteral("Same album · same track count: Alpha (Deluxe)/2"),
-                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Alpha: Tagged release · 2 tracks"),
+                                  QStringLiteral("Alpha (Deluxe): same track count · 2 tracks"),
+                                  QStringLiteral("Alpha: 3 tracks")}));
     QCOMPARE(asked, (QStringList{QStringLiteral("11111111-2222-3333-4444-555555555555"),
                                  QStringLiteral("release")}));
     QCOMPARE(results->currentItem(), results->topLevelItem(0));
@@ -520,9 +529,9 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
         " https://musicbrainz.org/release/22222222-2222-3333-4444-555555555555/discids "));
     QTest::mouseClick(search, Qt::LeftButton);
     QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
-    QCOMPARE(rows(), (QStringList{QStringLiteral("Release named: Alpha (Deluxe)/2"),
-                                  QStringLiteral("Same album · same track count: Alpha/2"),
-                                  QStringLiteral("Same album: Alpha/3")}));
+    QCOMPARE(rows(), (QStringList{QStringLiteral("Alpha (Deluxe): Release named · 2 tracks"),
+                                  QStringLiteral("Alpha: same track count · 2 tracks"),
+                                  QStringLiteral("Alpha: 3 tracks")}));
     QCOMPARE(asked.size(), 4);
     QCOMPARE(asked[2], QStringLiteral("22222222-2222-3333-4444-555555555555"));
 
@@ -532,10 +541,9 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     QTest::mouseClick(search, Qt::LeftButton);
     // Listed, and the first previewed: its track list.
     QTRY_VERIFY(search->isEnabled() && asked.size() == 6);
-    QTRY_COMPARE(rows(), (QStringList{QStringLiteral("Same album · same track count: Alpha/2"),
-                                      QStringLiteral(
-                                          "Same album · same track count: Alpha (Deluxe)/2"),
-                                      QStringLiteral("Same album: Alpha/3")}));
+    QTRY_COMPARE(rows(), (QStringList{QStringLiteral("Alpha: same track count · 2 tracks"),
+                                      QStringLiteral("Alpha (Deluxe): same track count · 2 tracks"),
+                                      QStringLiteral("Alpha: 3 tracks")}));
 
     // Another version chosen, previewed and applied as a found one is.
     results->setCurrentItem(results->topLevelItem(1));
@@ -695,8 +703,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     QCOMPARE(albums->topLevelItem(1)->text(0), QStringLiteral("Band — Beta"));
     // The second's versions there; the first's best version previewed,
     // and with it chosen.
-    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("1 version"));
-    QTRY_COMPARE(albums->topLevelItem(0)->text(1), QStringLiteral("✓ Alpha · CD"));
+    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("1 version"));
+    QTRY_COMPARE(albums->topLevelItem(0)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("✓ Alpha · CD"));
     QVERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
     auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     auto* skip = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-skip"));
@@ -708,7 +716,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     // Next: the second, its best version previewed too.
     next->click();
     QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
-    QTRY_COMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("✓ Beta · CD"));
+    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("✓ Beta · CD"));
     QTRY_COMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
     QCOMPARE(grid_model->patches().patch_count(), 0U);
     if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
@@ -717,7 +725,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     }
     // Skipped, then not.
     skip->click();
-    QCOMPARE(albums->topLevelItem(1)->text(1), QStringLiteral("Skipped"));
+    QCOMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("Skipped"));
     QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
     QCOMPARE(skip->text(), QStringLiteral("Don't skip"));
     skip->click();
@@ -870,8 +878,11 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
     QTRY_COMPARE(results->topLevelItemCount(), 1);
     QCOMPARE(fingerprints, 2);
     QCOMPARE(lookups, 2);
-    QCOMPARE(results->topLevelItem(0)->text(0), QStringLiteral("2/2 files"));
-    QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
+    QVERIFY(results->topLevelItem(0)->text(0).endsWith(QStringLiteral("Alpha")));
+    QVERIFY(results->topLevelItem(0)
+                ->data(0, Qt::UserRole + 1)
+                .toString()
+                .startsWith(QStringLiteral("2/2 files")));
 
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);

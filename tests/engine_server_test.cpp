@@ -730,6 +730,70 @@ void a_half_closed_client_does_not_block_shutdown(const std::filesystem::path& p
     (*server)->stop();
 }
 
+// ADR-0327: a job's outcome is its asker's. One larger than the limit on
+// unread events -- a cover fetched, megabytes -- reaches the client that
+// started it as an answer would; every other client hears only that it
+// finished; nobody is let go.
+void a_large_outcome_reaches_only_its_asker(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "stopped"}};
+    });
+    engine::JobCatalog catalogue;
+    catalogue.on("test.cover", [](const protocol::Json&) -> core::Result<engine::JobRegistry::Work> {
+        return [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
+            return protocol::Json{{"bytes", std::string(6U << 20U, 'c')}};
+        };
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the engine must bind");
+    auto* const serving = server->get();
+    engine::JobRegistry jobs{serving->sink(),
+                             [serving](const auto& everyone, const std::uint64_t recipient,
+                                       const auto& for_recipient) {
+                                 serving->publish_addressed(everyone, recipient, for_recipient);
+                             }};
+    engine::register_job_methods(dispatcher, jobs, catalogue);
+    serving->start();
+
+    Client watcher{path};
+    Client asker{path};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (serving->connections() < 2U && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    require(serving->connections() == 2U, "both clients must be connected");
+    asker.send("{\"id\":1,\"method\":\"job.submit\",\"params\":{\"job\":\"test.cover\"}}\n");
+
+    std::size_t carried = 0;
+    for (int line = 0; line < 4 && carried == 0U; ++line) {
+        const auto message = protocol::Json::parse(asker.line(), nullptr, false);
+        if (message.contains("event") && message.at("event") == "job.finished") {
+            carried = message.at("data").at("outcome").at("bytes").get<std::string>().size();
+        }
+    }
+    require(carried == (6U << 20U), "the asker gets the whole outcome");
+
+    bool heard = false;
+    for (int line = 0; line < 4 && !heard; ++line) {
+        const auto message = protocol::Json::parse(watcher.line(), nullptr, false);
+        if (message.contains("event") && message.at("event") == "job.finished") {
+            heard = true;
+            require(!message.at("data").contains("outcome"),
+                    "another client hears it finished, not what it found");
+        }
+    }
+    require(heard, "another client hears the job finish");
+
+    // Both still connected, both still answered.
+    for (auto* client : {&asker, &watcher}) {
+        client->send("{\"id\":2,\"method\":\"playback.state\"}\n");
+        const auto answer = protocol::Json::parse(client->line(), nullptr, false);
+        require(answer.contains("id") && answer.at("id") == 2, "and stays connected");
+    }
+    serving->stop();
+}
+
 int main() {
     const auto directory =
         std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
@@ -751,8 +815,9 @@ int main() {
     a_stranger_has_seconds_to_authenticate();
     a_stranger_that_leaves_is_let_go();
     a_half_closed_client_does_not_block_shutdown(directory / "i.sock");
+    a_large_outcome_reaches_only_its_asker(directory / "j.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 16 scenarios\n";
+    std::cout << "engine server: 17 scenarios\n";
     return EXIT_SUCCESS;
 }

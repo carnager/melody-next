@@ -661,7 +661,19 @@ int main(int argc, char** argv) {
 
     // Jobs report through the sockets, so the registry is given its sink and
     // must be destroyed before the servers it writes to.
-    trackknife::engine::JobRegistry jobs{sink};
+    // ADR-0327: a job's outcome to the client that asked, on whichever
+    // server it is connected to; the others hear only that it finished.
+    auto* const unix_server = server->get();
+    auto* const tcp_server_raw = tcp_server ? &*tcp_server : nullptr;
+    const trackknife::engine::AddressedSink addressed =
+        [unix_server, tcp_server_raw](const auto& everyone, const std::uint64_t recipient,
+                                      const auto& for_recipient) {
+            unix_server->publish_addressed(everyone, recipient, for_recipient);
+            if (tcp_server_raw != nullptr) {
+                tcp_server_raw->publish_addressed(everyone, recipient, for_recipient);
+            }
+        };
+    trackknife::engine::JobRegistry jobs{sink, addressed};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
     // ADR-0296: the saved lists are the files in the playlist folder; every

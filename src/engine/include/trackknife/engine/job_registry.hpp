@@ -7,6 +7,7 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -20,6 +21,30 @@ namespace trackknife::engine {
 // supplies one. It is called from job threads, so an implementation that
 // touches a non-thread-safe transport must marshal.
 using EventSink = std::function<void(const protocol::Event&)>;
+
+// ADR-0327: an event with something only one connection is to hear -- a job's
+// outcome, for the client that started it. Every client is given `everyone`;
+// the connection `recipient` names is given `for_recipient` instead, as it
+// would be an answer to its own request.
+using AddressedSink = std::function<void(const protocol::Event& everyone, std::uint64_t recipient,
+                                         const protocol::Event& for_recipient)>;
+
+// ADR-0327: the connection whose request this thread is handling, or 0. A
+// server sets it around each request it dispatches; what answers later, on
+// its own -- a job's thread -- takes it with it.
+[[nodiscard]] std::uint64_t current_requester() noexcept;
+class RequesterScope final {
+  public:
+    explicit RequesterScope(std::uint64_t connection) noexcept;
+    ~RequesterScope();
+    RequesterScope(const RequesterScope&) = delete;
+    RequesterScope& operator=(const RequesterScope&) = delete;
+    RequesterScope(RequesterScope&&) = delete;
+    RequesterScope& operator=(RequesterScope&&) = delete;
+
+  private:
+    std::uint64_t previous_;
+};
 
 // ADR-0220 and ADR-0222: a long operation is a job, not a slow handler. It is
 // submitted, answers immediately with an identity, reports through events, and
@@ -39,7 +64,9 @@ class JobRegistry final {
     // Returns the outcome document reported by job.finished.
     using Work = std::function<protocol::Json(const core::CancellationToken&, const Reporter&)>;
 
-    explicit JobRegistry(EventSink sink);
+    // `addressed`, where there is one, carries a job's outcome to the client
+    // that started it only (ADR-0327); without it every client hears it.
+    explicit JobRegistry(EventSink sink, AddressedSink addressed = {});
     JobRegistry(const JobRegistry&) = delete;
     JobRegistry(JobRegistry&&) = delete;
     JobRegistry& operator=(const JobRegistry&) = delete;
@@ -69,6 +96,7 @@ class JobRegistry final {
     // Not named emit: Qt defines that as a macro, and these headers must
     // stay includable from Qt code even though they use none of it.
     void publish(const protocol::Event& event);
+    void publish_finished(protocol::Json data, protocol::Json outcome, std::uint64_t owner);
     void retire(const core::StableId& job_id);
     // Joins the threads of jobs that have retired. Their threads are kept,
     // not detached: a detached one still publishing job.finished could
@@ -76,6 +104,7 @@ class JobRegistry final {
     void reap();
 
     EventSink sink_;
+    AddressedSink addressed_;
     // Serialises the sink on its own, so a slow sink never holds up submit
     // or cancel -- those take mutex_ only.
     std::mutex sink_mutex_;

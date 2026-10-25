@@ -2,6 +2,7 @@
 #include "trackknife/core/posix.hpp"
 
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/job_registry.hpp"
 
 #include "trackknife/engine/token.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -121,12 +122,24 @@ void receive_timeout(const int descriptor, const time_t seconds) {
 // is serve(), and a writer, which drains the outbox. Everything written to the
 // client goes through the outbox, so no one -- a job reporting progress, the
 // player announcing a track -- ever waits on this client's socket.
+namespace {
+
+[[nodiscard]] std::uint64_t next_connection_id() {
+    static std::atomic<std::uint64_t> next{1U};
+    return next.fetch_add(1U);
+}
+
+} // namespace
+
 struct Server::Connection final {
     int descriptor{-1};
     // False once the connection is closing: nothing more is queued, and the
     // writer sends what is already queued and stops.
     std::atomic_bool open{true};
     // ADR-0223: whether this peer may do anything, including hear events.
+    // ADR-0327: which connection a job's outcome is for, unique across every
+    // server of the engine.
+    const std::uint64_t id = next_connection_id();
     // True from the start on a unix socket, earned on TCP.
     std::atomic_bool authenticated{false};
     // ADR-0228: a connection this side opened and serves -- an agent's, to
@@ -615,6 +628,9 @@ void Server::serve(Connection& connection_ref) {
                 request = std::move(requests.front());
                 requests.pop_front();
             }
+            // ADR-0327: a job started by this request reports its outcome
+            // to this connection.
+            const RequesterScope asking{connection->id};
             connection->write_line(encode_answer(dispatcher_->dispatch(request)));
         }
     }};
@@ -907,6 +923,35 @@ void Server::broadcast(const std::string& line) {
     if (lost) {
         // A half-closed peer is only discovered by writing to it, so this is
         // where those connections are finally let go.
+        reap();
+    }
+}
+
+void Server::publish_addressed(const protocol::Event& everyone, const std::uint64_t recipient,
+                               const protocol::Event& for_recipient) {
+    std::string everyone_line;
+    std::string recipient_line;
+    try {
+        everyone_line = protocol::encode_message(everyone);
+        recipient_line = protocol::encode_message(for_recipient);
+    } catch (const std::exception&) {
+        return;
+    }
+    std::vector<std::shared_ptr<Connection>> targets;
+    {
+        const std::lock_guard guard{mutex_};
+        targets = connections_;
+    }
+    bool lost = false;
+    for (const auto& connection : targets) {
+        if (!connection->authenticated.load()) {
+            continue;
+        }
+        lost = !(connection->id == recipient ? connection->write_line(recipient_line)
+                                              : connection->write_line(everyone_line, true)) ||
+               lost;
+    }
+    if (lost) {
         reap();
     }
 }

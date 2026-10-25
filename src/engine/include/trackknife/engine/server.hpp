@@ -81,6 +81,11 @@ class Server final {
     // Writes an event to every connected client. This is the sink a
     // JobRegistry is given.
     [[nodiscard]] EventSink sink();
+    // ADR-0327: `everyone` to every client but the one `recipient` names,
+    // which is given `for_recipient` as an answer -- outside the limit on
+    // unread events, since it asked. The other half of a JobRegistry's sink.
+    void publish_addressed(const protocol::Event& everyone, std::uint64_t recipient,
+                           const protocol::Event& for_recipient);
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
     // The TCP port actually bound, or 0 for a unix socket.

@@ -183,20 +183,22 @@ audio::ReplayGainMode Workspace::resolvedReplayGain() const {
 }
 
 void Workspace::syncReplayGain() {
-    // One ReplayGain for every engine this window reaches: whichever plays
-    // next plays as loud as the last.
+    // ADR-0325: an engine keeps each output's ReplayGain. Set here, it is
+    // the playing one's -- never every engine this window reaches, which
+    // overwrote what other outputs, and other clients, had set.
     const auto mode = resolvedReplayGain();
     const audio::ReplayGainPreamps preamps{
         .with_gain_db = static_cast<float>(local_rg_preamp_with_),
         .without_gain_db = static_cast<float>(local_rg_preamp_without_),
     };
-    for (const auto& engine : engines_) {
-        if (engine->playback != nullptr && engine->playback->active()) {
-            engine->playback->setReplayGain(mode, preamps);
+    if (playingOnEngine()) {
+        if (auto* playing = linkOf(transport_);
+            playing != nullptr && playing->playback != nullptr && playing->playback->active()) {
+            playing->playback->setReplayGain(mode, preamps);
+            // What it reports next is the answer to this, not news.
+            engine_replay_gain_ = mode;
         }
     }
-    // What the playing engine reports next is the answer to this, not news.
-    engine_replay_gain_.reset();
 }
 
 void Workspace::applyLocalPlaybackModes() {
@@ -205,7 +207,14 @@ void Workspace::applyLocalPlaybackModes() {
         // The engine decides what plays next, so the modes are its business.
         transport_->setModes(playback_.modes);
     }
-    syncReplayGain();
+    // ReplayGain goes with the modes only where this window's "auto" makes
+    // it follow shuffling, and the playing output plays otherwise. Anything
+    // else -- a connection made, the window started -- sends none: the
+    // output keeps its own (ADR-0325).
+    if (local_replaygain_ == QStringLiteral("auto") && engine_replay_gain_ &&
+        *engine_replay_gain_ != resolvedReplayGain()) {
+        syncReplayGain();
+    }
     view_->refreshLocalPlaybackControls();
 }
 

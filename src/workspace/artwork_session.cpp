@@ -943,7 +943,7 @@ void ArtworkSession::present(const BatchResult& result) {
 // Archive has for the release.
 
 bool ArtworkSession::coverServiceReady() const {
-    return SettingsKeys::artworkPolicy().fetch_source == "coverartarchive" &&
+    return metadata::known_artwork_fetch_source(SettingsKeys::artworkPolicy().fetch_source) &&
            static_cast<bool>(cover_service_.fetch_listing) &&
            static_cast<bool>(cover_service_.fetch_bytes) &&
            static_cast<bool>(cover_service_.store_image);
@@ -1023,7 +1023,8 @@ bool ArtworkSession::openPicker() {
                         .kind = QStringLiteral("archive"),
                         .index = index,
                         .thumbnail = {},
-                        .from = QStringLiteral("Cover Art Archive"),
+                        .from = image.source.empty() ? QStringLiteral("Cover Art Archive")
+                                                     : display_utf8(image.source),
                         .type = archive_type_text(image),
                         .details = details,
                         .tool_tip = {},
@@ -1095,8 +1096,10 @@ void ArtworkSession::useArchiveImage(const musicbrainz::CoverArtImage& image) {
     }
     cover_fetch_running_ = true;
     const auto role = archive_image_role(image);
-    setStatus(QStringLiteral("Fetching the %1 image from the Cover Art Archive…")
-                  .arg(archive_type_text(image)));
+    setStatus(QStringLiteral("Fetching the %1 image from %2…")
+                  .arg(archive_type_text(image),
+                       image.source.empty() ? QStringLiteral("the Cover Art Archive")
+                                            : display_utf8(image.source)));
     emit changed();
     const auto generation = generation_;
     const auto identity = QStringLiteral("%1-%2-%3")
@@ -1273,8 +1276,8 @@ void ArtworkSession::continueArchiveFront() {
         }
         const auto front = musicbrainz::select_front_cover(*listing);
         if (!front) {
-            self->finishArchiveFront(false, QStringLiteral("The Cover Art Archive has no front "
-                                                           "cover for this release"));
+            self->finishArchiveFront(false, QStringLiteral("No front cover was found for this "
+                                                           "release"));
             return;
         }
         self->useArchiveImage(listing->images[*front]);

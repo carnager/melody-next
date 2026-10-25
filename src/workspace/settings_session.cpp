@@ -108,7 +108,8 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     read(QLatin1String(SettingsKeys::artwork_embed_key), true);
     read(QLatin1String(SettingsKeys::artwork_folder_image_key), false);
     read(QLatin1String(SettingsKeys::artwork_folder_image_name_key), QStringLiteral("cover.jpg"));
-    read(QLatin1String(SettingsKeys::artwork_fetch_source_key), QStringLiteral("coverartarchive"));
+    read(QLatin1String(SettingsKeys::artwork_fetch_source_key),
+         QStringLiteral("coverartarchive+bandcamp"));
     read(QLatin1String(SettingsKeys::artwork_max_embedded_edge_key),
          SettingsKeys::artwork_default_max_edge);
     read(QLatin1String(SettingsKeys::artwork_max_folder_edge_key),
@@ -226,7 +227,10 @@ std::vector<SettingsSession::Choice> SettingsSession::ratingScales() {
 }
 
 std::vector<SettingsSession::Choice> SettingsSession::fetchSources() {
-    return {{QStringLiteral("Cover Art Archive (front)"), QStringLiteral("coverartarchive")}};
+    // ADR-0326: Bandcamp where the archive has no front cover.
+    return {{QStringLiteral("Cover Art Archive, then Bandcamp"),
+             QStringLiteral("coverartarchive+bandcamp")},
+            {QStringLiteral("Cover Art Archive only"), QStringLiteral("coverartarchive")}};
 }
 
 QStringList SettingsSession::folderImageNames() {

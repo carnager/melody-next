@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # ADR-0237: what an engine without Qt needs -- building an AcoustID request.
-add_library(trackknife_musicbrainz_core STATIC src/acoustid_request.cpp
-                                              include/trackknife/musicbrainz/acoustid.hpp)
+add_library(trackknife_musicbrainz_core STATIC src/acoustid_request.cpp src/bandcamp.cpp
+                                              include/trackknife/musicbrainz/acoustid.hpp
+                                              include/trackknife/musicbrainz/bandcamp.hpp)
 add_library(Trackknife::MusicBrainzCore ALIAS trackknife_musicbrainz_core)
 target_include_directories(
     trackknife_musicbrainz_core

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/musicbrainz/web_service.hpp"
+#include "trackknife/musicbrainz/bandcamp.hpp"
 
 #include <QByteArray>
 #include <QJsonArray>
@@ -519,6 +520,7 @@ core::Result<CoverArtListing> parse_cover_art_listing(const std::string_view bod
             .types = {},
             .image_url = bounded_text(image.value(QStringLiteral("image")), limits),
             .thumbnail_url = {},
+            .source = {},
         };
         const auto thumbnails = image.value(QStringLiteral("thumbnails")).toObject();
         parsed.thumbnail_url = bounded_text(thumbnails.value(QStringLiteral("250")), limits);
@@ -551,6 +553,65 @@ core::Result<CoverArtListing> parse_cover_art_listing(const std::string_view bod
         }
     }
     return listing;
+}
+
+core::Result<std::string> build_release_links_url(const std::string_view release_id) {
+    if (!is_musicbrainz_id(release_id)) {
+        return std::unexpected(service_error(core::ErrorCode::invalid_argument,
+                                             "a release's links need its id"));
+    }
+    return std::string{web_service_root} + "/release/" + std::string{release_id} +
+           "?inc=url-rels+release-groups&fmt=json";
+}
+
+core::Result<std::string> build_release_group_links_url(const std::string_view group_id) {
+    if (!is_musicbrainz_id(group_id)) {
+        return std::unexpected(service_error(core::ErrorCode::invalid_argument,
+                                             "an album's links need its id"));
+    }
+    return std::string{web_service_root} + "/release-group/" + std::string{group_id} +
+           "?inc=url-rels&fmt=json";
+}
+
+core::Result<ReleaseLinks> parse_release_links(const std::string_view body,
+                                               const WebServiceLimits& limits) {
+    auto root = parse_body(body, limits);
+    if (!root) {
+        return std::unexpected(std::move(root.error()));
+    }
+    ReleaseLinks links;
+    for (const auto& relation : root->value(QStringLiteral("relations")).toArray()) {
+        const auto url = relation.toObject()
+                             .value(QStringLiteral("url"))
+                             .toObject()
+                             .value(QStringLiteral("resource"))
+                             .toString();
+        if (!url.isEmpty() && links.urls.size() < 200U) {
+            links.urls.push_back(url.toStdString());
+        }
+    }
+    const auto group =
+        root->value(QStringLiteral("release-group")).toObject().value(QStringLiteral("id"));
+    if (group.isString() && is_musicbrainz_id(group.toString().toStdString())) {
+        links.release_group_id = group.toString().toStdString();
+    }
+    return links;
+}
+
+std::optional<CoverArtImage> bandcamp_cover(const std::string_view page) {
+    const auto urls = bandcamp_cover_urls(page);
+    if (!urls) {
+        return std::nullopt;
+    }
+    return CoverArtImage{.id = "bandcamp",
+                         .front = true,
+                         .back = false,
+                         .approved = true,
+                         .comment = {},
+                         .types = {"Front"},
+                         .image_url = urls->image,
+                         .thumbnail_url = urls->thumbnail,
+                         .source = "Bandcamp"};
 }
 
 std::optional<std::size_t> select_front_cover(const CoverArtListing& listing) {

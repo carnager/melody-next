@@ -1081,7 +1081,7 @@ void BenchMainWindowTest::coverPolicyRoundTrip() {
     QCOMPARE(policy.max_embedded_edge, 1000U);
     QCOMPARE(policy.max_folder_edge, 3000U);
     QCOMPARE(policy.folder_image_name, std::string{"front.jpg"});
-    QCOMPARE(policy.fetch_source, std::string{"coverartarchive"});
+    QCOMPARE(policy.fetch_source, std::string{"coverartarchive+bandcamp"});
     SettingsDialog reopened;
     QVERIFY(!reopened.findChild<QCheckBox*>(QStringLiteral("bench-artwork-embed"))->isChecked());
     QVERIFY(
@@ -1454,13 +1454,19 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
             .arg(id, QLatin1String{title}, QLatin1String{group})
             .toUtf8();
     };
-    const auto listing = [](const QString& id) {
+    // ADR-0326: Beta has nothing in the archive; its links name a Bandcamp
+    // album page, whose cover is fetched instead.
+    const auto listing = [&beta_id](const QString& id) {
+        if (id == beta_id) {
+            return QByteArray{R"json({"images": []})json"};
+        }
         return QStringLiteral(R"json({"images": [{"id": 7, "front": true, "approved": true,
             "types": ["Front"], "image": "https://coverartarchive.org/release/%1/7.png"}]})json")
             .arg(id)
             .toUtf8();
     };
     QStringList covers_asked;
+    QStringList bandcamp_asked;
     const MusicBrainzLookupService service{
         .fetch =
             [&](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
@@ -1479,6 +1485,25 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
                 }
                 if (plain.contains(QStringLiteral("release?release-group="))) {
                     completion(QByteArray{R"json({"release-count": 0, "releases": []})json"});
+                    return;
+                }
+                if (plain.contains(beta_id + QStringLiteral("?inc=url-rels"))) {
+                    completion(QByteArray{R"json({"id": "x", "relations": [
+                        {"type": "purchase for download",
+                         "url": {"resource": "http://band.bandcamp.com/album/beta"}}],
+                        "release-group": {"id": "88888888-8888-7777-6666-555555555555"}})json"});
+                    return;
+                }
+                if (plain == QStringLiteral("https://band.bandcamp.com/album/beta")) {
+                    bandcamp_asked << plain;
+                    completion(QByteArray{R"(<html><head><meta property="og:image" )"
+                                          R"(content="https://f4.bcbits.com/img/a0123456789_5.jpg">)"
+                                          R"(</head></html>)"});
+                    return;
+                }
+                if (plain == QStringLiteral("https://f4.bcbits.com/img/a0123456789_10.jpg")) {
+                    bandcamp_asked << plain;
+                    completion(png);
                     return;
                 }
                 for (const auto& [id, title, group] :
@@ -1569,6 +1594,10 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
     QTRY_VERIFY2_WITH_TIMEOUT(status->text().contains(QStringLiteral("Covers fetched for 2 albums")),
                               qPrintable(status->text()), 20'000);
     QCOMPARE(covers_asked.size(), 2);
+    // Beta's from Bandcamp, at 1200 pixels.
+    QCOMPARE(bandcamp_asked,
+             (QStringList{QStringLiteral("https://band.bandcamp.com/album/beta"),
+                          QStringLiteral("https://f4.bcbits.com/img/a0123456789_10.jpg")}));
     auto* artwork = properties->findChild<ArtworkSession*>();
     QVERIFY(artwork != nullptr);
     std::set<std::string> covered;

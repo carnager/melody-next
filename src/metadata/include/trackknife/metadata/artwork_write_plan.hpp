@@ -98,11 +98,19 @@ struct FolderImageWritePlan {
     friend bool operator==(const FolderImageWritePlan&, const FolderImageWritePlan&) = default;
 };
 
+// Where covers are fetched from (Cover settings): the Cover Art Archive, or
+// -- ADR-0326 -- the archive, then Bandcamp where it has no front cover.
+inline constexpr std::string_view artwork_fetch_source_archive = "coverartarchive";
+inline constexpr std::string_view artwork_fetch_source_with_bandcamp = "coverartarchive+bandcamp";
+[[nodiscard]] inline bool known_artwork_fetch_source(const std::string_view source) {
+    return source == artwork_fetch_source_archive || source == artwork_fetch_source_with_bandcamp;
+}
+
 struct ArtworkStoragePolicy {
     bool embed{true};
     bool write_folder_image{false};
     std::string folder_image_name{"cover.jpg"};
-    std::string fetch_source{"coverartarchive"};
+    std::string fetch_source{artwork_fetch_source_with_bandcamp};
     // Longest edge, in pixels, of a newly written cover; 0 means no limit. A
     // larger front image is converted before it is embedded or saved, each
     // destination from the original rather than from the other's copy.

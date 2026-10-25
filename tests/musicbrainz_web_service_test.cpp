@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/musicbrainz/acoustid.hpp"
+#include "trackknife/musicbrainz/bandcamp.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 
 #include <iostream>
@@ -376,6 +377,52 @@ void acoustidBodyAndParsingAreBounded() {
     CHECK(!rejected && rejected.error().message.find("invalid API key") != std::string::npos);
 }
 
+// ADR-0326: Bandcamp's album pages and images, and nothing that only looks
+// like them -- an engine fetches what these allow.
+void bandcampPagesAndCoversAreRecognised() {
+    CHECK(is_bandcamp_album_page("https://band.bandcamp.com/album/beta"));
+    CHECK(is_bandcamp_album_page("https://Some-Band.bandcamp.com/album/x?from=y"));
+    CHECK(!is_bandcamp_album_page("http://band.bandcamp.com/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://band.bandcamp.com/track/beta"));
+    CHECK(!is_bandcamp_album_page("https://band.bandcamp.com/album/"));
+    CHECK(!is_bandcamp_album_page("https://bandcamp.com/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://band.bandcamp.com.example.org/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://evil.org/x.bandcamp.com/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://user@band.bandcamp.com/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://band.bandcamp.com:8443/album/beta"));
+    CHECK(!is_bandcamp_album_page("https://a.b.bandcamp.com/album/beta"));
+    CHECK(is_bandcamp_image("https://f4.bcbits.com/img/a0123456789_10.jpg"));
+    CHECK(!is_bandcamp_image("https://f4.bcbits.com/other/a.jpg"));
+    CHECK(!is_bandcamp_image("https://f4.bcbits.com.evil.org/img/a.jpg"));
+
+    CHECK(bandcamp_album_page({"https://www.discogs.com/master/1",
+                               "http://band.bandcamp.com/album/beta"}) ==
+          std::optional<std::string>{"https://band.bandcamp.com/album/beta"});
+    CHECK(!bandcamp_album_page({"https://band.bandcamp.com/"}));
+
+    const auto urls = bandcamp_cover_urls(
+        R"(<meta name="x"><meta property="og:image" content="https://f4.bcbits.com/img/a42_5.jpg">)");
+    CHECK(urls && urls->image == "https://f4.bcbits.com/img/a42_10.jpg");
+    CHECK(urls && urls->thumbnail == "https://f4.bcbits.com/img/a42_2.jpg");
+    CHECK(!bandcamp_cover_urls(R"(<meta property="og:image" content="https://evil.org/a_5.jpg">)"));
+    CHECK(!bandcamp_cover_urls("<html>no cover</html>"));
+
+    const auto cover = bandcamp_cover(
+        R"(<meta property="og:image" content="https://f4.bcbits.com/img/a42_5.jpg">)");
+    CHECK(cover && cover->front && cover->source == "Bandcamp");
+
+    const auto links = parse_release_links(R"json({"relations": [
+        {"url": {"resource": "https://band.bandcamp.com/album/beta"}},
+        {"url": {"resource": "https://www.discogs.com/release/1"}}],
+        "release-group": {"id": "88888888-8888-7777-6666-555555555555"}})json");
+    CHECK(links && links->urls.size() == 2U);
+    CHECK(links && links->release_group_id == "88888888-8888-7777-6666-555555555555");
+    CHECK(build_release_links_url("11111111-2222-3333-4444-555555555555").value_or("") ==
+          "https://musicbrainz.org/ws/2/release/11111111-2222-3333-4444-555555555555"
+          "?inc=url-rels+release-groups&fmt=json");
+    CHECK(!build_release_group_links_url("not an id"));
+}
+
 } // namespace
 
 int main() {
@@ -389,6 +436,7 @@ int main() {
     coverArtUrlRequiresAReleaseId();
     coverArtParsingUpgradesAndSelectsTheFront();
     acoustidBodyAndParsingAreBounded();
+    bandcampPagesAndCoversAreRecognised();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";
         return 1;

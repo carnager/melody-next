@@ -5,6 +5,7 @@
 #include "trackknife/core/posix.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/musicbrainz/acoustid.hpp"
+#include "trackknife/musicbrainz/bandcamp.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 #include "trackknife/persistence/musicbrainz_cache.hpp"
 
@@ -166,8 +167,11 @@ MetadataServices::Throttle MetadataServices::throttle(const long status,
 }
 
 bool MetadataServices::fetchable(const std::string_view url) {
+    // ADR-0326: and Bandcamp's album pages and their images, found through
+    // a release's MusicBrainz links.
     return url.starts_with("https://musicbrainz.org/ws/2/") ||
-           url.starts_with("https://coverartarchive.org/");
+           url.starts_with("https://coverartarchive.org/") ||
+           musicbrainz::is_bandcamp_album_page(url) || musicbrainz::is_bandcamp_image(url);
 }
 
 void MetadataServices::pace(std::chrono::steady_clock::time_point& last,
@@ -187,7 +191,8 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
     if (!fetchable(url)) {
         return std::unexpected(service_error(
             core::ErrorCode::invalid_argument,
-            "an engine fetches only MusicBrainz and the Cover Art Archive, over HTTPS"));
+            "an engine fetches only MusicBrainz, the Cover Art Archive and Bandcamp's album "
+            "pages, over HTTPS"));
     }
     const auto now = static_cast<std::int64_t>(std::time(nullptr));
     // A release's listing of covers, as against one of its images.
@@ -252,6 +257,10 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
         return std::unexpected(
             service_error(status == 404 ? core::ErrorCode::not_found : core::ErrorCode::io,
                           "the Cover Art Archive answered " + std::to_string(status)));
+    } else if (!url.starts_with("https://musicbrainz.org/")) {
+        return std::unexpected(
+            service_error(status == 404 ? core::ErrorCode::not_found : core::ErrorCode::io,
+                          "Bandcamp answered " + std::to_string(status)));
     }
     return body;
 }

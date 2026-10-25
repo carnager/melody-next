@@ -23,7 +23,12 @@ function(melody_isolate_tests)
     endif()
     foreach(test IN LISTS tests)
         set(home "${CMAKE_CURRENT_BINARY_DIR}/test-home/${test}")
+        # HOME too: Qt's test mode keeps settings in ~/.qttest, and a test's
+        # settings once pointed its window at the user's own engine --
+        # nothing of the user's home is a test's.
         set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
+            "HOME=${home}"
+            "XDG_CONFIG_HOME=${home}/config"
             "XDG_DATA_HOME=${home}/data"
             "XDG_CACHE_HOME=${home}/cache"
             # And state: melody-together keeps its rooms there.

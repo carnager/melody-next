@@ -41,11 +41,16 @@ namespace {
             {.key = "errno", .value = std::error_code{errno, std::generic_category()}.message()}}};
 }
 
-// A line longer than this is refused rather than buffered without bound: the
-// control path carries no binary, and nothing a client asks needs a megabyte
-// -- a list travels as its edits, never whole. An admitted client is answered
-// and stays connected; one that has not authenticated is let go.
+// A line longer than this is refused rather than buffered without bound. The
+// control path carries no binary -- covers are uploaded in parts, a list
+// travels as its edits -- but a tagger's write plan names every file it
+// changes and each change: 124 files with their MusicBrainz tags were 1.3 MB,
+// past the megabyte this once was (ADR-0328). An admitted client may send a
+// plan of thousands of files; one that has not authenticated, a megabyte,
+// and is let go past it. An admitted client past its limit is answered and
+// stays connected.
 constexpr std::size_t maximum_line_bytes = 1U << 20U;
+constexpr std::size_t maximum_admitted_line_bytes = 64U << 20U;
 
 // The id and method of a request, read from the start of a line too long to
 // parse. Clients write "id" first and "method" second -- the keys sorted, as
@@ -660,10 +665,10 @@ void Server::serve(Connection& connection_ref) {
         const auto call = refused_call(refused_head);
         const auto method = call && !call->second.empty() ? call->second : std::string{"?"};
         std::cerr << "melodyd: refused a " << refused_bytes << "-byte message (" << method
-                  << "); the limit is " << maximum_line_bytes << " bytes\n";
+                  << "); the limit is " << maximum_admitted_line_bytes << " bytes\n";
         const auto message = "the message is " + std::to_string(refused_bytes) +
                              " bytes; the engine takes at most " +
-                             std::to_string(maximum_line_bytes);
+                             std::to_string(maximum_admitted_line_bytes);
         if (!call) {
             protocol::Event rejected{.name = "protocol.rejected", .data = protocol::Json::object()};
             rejected.data["reason"] = message;
@@ -827,7 +832,8 @@ void Server::serve(Connection& connection_ref) {
             // both are dropped rather than escalated.
         }
         pending.erase(0, start);
-        if (pending.size() > maximum_line_bytes) {
+        if (pending.size() > (connection->authenticated.load() ? maximum_admitted_line_bytes
+                                                                : maximum_line_bytes)) {
             if (!connection->authenticated.load()) {
                 protocol::Event rejected{.name = "protocol.rejected",
                                          .data = protocol::Json::object()};

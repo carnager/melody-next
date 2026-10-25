@@ -211,11 +211,18 @@ void the_socket_answers_plain_lines(const std::filesystem::path& path) {
     const auto after = protocol::Json::parse(client.line(), nullptr, false);
     require(after.at("id") == 7, "a notification produces no response");
 
+    // ADR-0328: a write plan of a few hundred files is megabytes, and taken.
+    client.send("{\"id\":10,\"method\":\"playback.state\",\"params\":{\"plan\":\"" +
+                std::string(3U << 20U, 'x') + "\"}}\n");
+    const auto taken = protocol::Json::parse(client.line(), nullptr, false);
+    require(taken.at("id") == 10 && taken.contains("result"),
+            "a request of a few megabytes is taken");
+
     // A line past the limit is answered as the call it was, and the
     // connection carries on: dropping it had a client reconnect and send the
     // same line again, for good.
     client.send("{\"id\":8,\"method\":\"list.save\",\"params\":{\"items\":\"" +
-                std::string(3U << 20U, 'x') + "\"}}\n");
+                std::string(65U << 20U, 'x') + "\"}}\n");
     const auto refused = protocol::Json::parse(client.line(), nullptr, false);
     require(refused.at("id") == 8 && refused.at("error").at("code") == "limit_exceeded",
             "an over-long request is refused as itself");

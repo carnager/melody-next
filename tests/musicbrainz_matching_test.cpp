@@ -558,7 +558,35 @@ void albumsAreLookedUpAndJudged() {
 
 } // namespace
 
+// ADR-0330: a pair coloured as Picard does: green when length and title
+// agree, orange where one is off a little or nothing is known, red when the
+// length is far off or the titles are not alike.
+void pairsAreRatedByLengthAndTitle() {
+    const auto local = [](std::string title, std::optional<std::int64_t> length) {
+        LocalTrackDescriptor described;
+        described.title = std::move(title);
+        described.duration_ms = length;
+        return described;
+    };
+    const auto track = [](std::string title, std::optional<std::int64_t> length) {
+        ReleaseTrack release_track;
+        release_track.title = std::move(title);
+        release_track.length_ms = length;
+        return release_track;
+    };
+    CHECK(pair_fit(local("Aden", 227'000), track("Aden", 228'000)) == PairFit::good);
+    CHECK(pair_fit(local("", 227'000), track("Aden", 228'000)) == PairFit::good);
+    CHECK(pair_fit(local("Aden", std::nullopt), track("Aden", std::nullopt)) == PairFit::good);
+    CHECK(pair_fit(local("Aden", 227'000), track("Aden", 235'000)) == PairFit::doubtful);
+    CHECK(pair_fit(local("Adenoid", 227'000), track("Aden", 227'000)) == PairFit::doubtful);
+    CHECK(pair_fit(local("", std::nullopt), track("Aden", 228'000)) == PairFit::doubtful);
+    CHECK(pair_fit(local("Aden", 227'000), track("Aden", 260'000)) == PairFit::poor);
+    CHECK(pair_fit(local("Machinehead", 256'000), track("Bomb", 202'000)) == PairFit::poor);
+    CHECK(pair_fit(local("Machinehead", 202'000), track("Bomb", 202'000)) == PairFit::poor);
+}
+
 int main() {
+    pairsAreRatedByLengthAndTitle();
     manualMappingValidatesIdentityAndAllowsUntaggedFiles();
     rankingCorroboratesTrackCount();
     alignsByDiscAndTrackNumberPermutation();

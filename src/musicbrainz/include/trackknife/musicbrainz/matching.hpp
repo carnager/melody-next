@@ -105,6 +105,17 @@ struct ClearMatchRule {
     friend bool operator==(const ClearMatchRule&, const ClearMatchRule&) = default;
 };
 
+// ADR-0330: how well one file fits the release track it is paired with, as
+// Picard colours a pair: by the file's title against the track's (the
+// file's own title, or what its name says) and its length against the
+// track's. Good: lengths within the clear-match rule's difference and titles
+// at least as alike, or one of them sure and the other unknown. Poor: a
+// length off by more than fifteen seconds, or titles hardly alike. Doubtful
+// between, and where nothing is known.
+enum class PairFit : std::uint8_t { good, doubtful, poor };
+[[nodiscard]] PairFit pair_fit(const LocalTrackDescriptor& local, const ReleaseTrack& track,
+                               const ClearMatchRule& rule = {});
+
 // As many files as release tracks, every one paired -- by track numbers or
 // in order, not guessed from titles -- every length known on both sides and
 // within the rule's difference, and every title at least that alike.

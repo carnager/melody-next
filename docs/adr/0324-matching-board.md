@@ -3,6 +3,7 @@
 ## Status
 
 Accepted, 2026-10-25. Replaces ADR-0265's two panes; keeps its operations.
+Its layout is replaced by ADR-0330.
 
 ## Context
 

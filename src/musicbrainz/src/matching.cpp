@@ -169,6 +169,29 @@ constexpr std::int64_t plausible_duration_ms = 10'000;
 
 } // namespace
 
+PairFit pair_fit(const LocalTrackDescriptor& local, const ReleaseTrack& track,
+                 const ClearMatchRule& rule) {
+    constexpr std::int64_t far_ms = 15'000;
+    constexpr double unlike = 0.4;
+    std::optional<std::int64_t> delta;
+    if (local.duration_ms && track.length_ms) {
+        delta = std::llabs(*local.duration_ms - *track.length_ms);
+    }
+    std::optional<double> title;
+    if (!local.title.empty() && !track.title.empty()) {
+        title = similarity(local.title, track.title);
+    }
+    if ((delta && *delta > far_ms) || (title && *title < unlike)) {
+        return PairFit::poor;
+    }
+    const bool length_sure = delta && *delta <= rule.maximum_duration_delta_ms;
+    const bool title_sure = title && *title >= rule.minimum_title_similarity;
+    if ((length_sure && title_sure) || (length_sure && !title) || (title_sure && !delta)) {
+        return PairFit::good;
+    }
+    return PairFit::doubtful;
+}
+
 std::vector<RankedRelease>
 rank_release_candidates(const std::span<const LocalTrackDescriptor> local_tracks,
                         const ReleaseSearchResult& candidates) {

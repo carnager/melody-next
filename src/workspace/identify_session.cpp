@@ -8,6 +8,7 @@
 #include <QCollator>
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QFutureWatcher>
 #include <QLocale>
 #include <QStringList>
@@ -19,6 +20,15 @@
 namespace trackknife::bench {
 
 namespace {
+
+// ADR-0330: what a file's name says its title is -- without its extension,
+// and without a leading track number: "01-Aden.flac", "1. Aden", "01 - Aden".
+[[nodiscard]] QString titleFromName(const QString& path) {
+    auto name = QFileInfo{path}.completeBaseName();
+    static const QRegularExpression number{QStringLiteral(R"(^\s*\d{1,3}\s*[-._)]?\s*)")};
+    name.remove(number);
+    return name.trimmed();
+}
 
 [[nodiscard]] QString text(const std::string& value) { return QString::fromUtf8(value); }
 
@@ -181,6 +191,48 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
 }
 
 TrackMatchSession::~TrackMatchSession() { cancellation_.request_cancellation(); }
+
+QString TrackMatchSession::fitSummary() const {
+    if (!ready_) {
+        return {};
+    }
+    std::size_t good = 0;
+    std::size_t doubtful = 0;
+    std::size_t poor = 0;
+    for (const auto& row : rows_) {
+        if (!row.fit) {
+            continue;
+        }
+        switch (*row.fit) {
+        case musicbrainz::PairFit::good:
+            ++good;
+            break;
+        case musicbrainz::PairFit::doubtful:
+            ++doubtful;
+            break;
+        case musicbrainz::PairFit::poor:
+            ++poor;
+            break;
+        }
+    }
+    if (good + doubtful + poor == 0U) {
+        return {};
+    }
+    if (doubtful + poor == 0U) {
+        return good == 1U ? tr("It fits") : tr("All %1 fit").arg(good);
+    }
+    QStringList parts;
+    if (good > 0U) {
+        parts << tr("%1 fit").arg(good);
+    }
+    if (doubtful > 0U) {
+        parts << tr("%1 worth a look").arg(doubtful);
+    }
+    if (poor > 0U) {
+        parts << tr("%1 likely wrong").arg(poor);
+    }
+    return parts.join(QStringLiteral(" · "));
+}
 
 QString TrackMatchSession::heading() const {
     QStringList named{text(release_.title)};
@@ -436,6 +488,15 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
                 const auto delta = *local_tracks_[*local].duration_ms - *track.track.length_ms;
                 entry.delta_seconds = static_cast<int>((delta + (delta < 0 ? -500 : 500)) / 1000);
                 entry.doubtful = delta > 3'000 || delta < -3'000;
+            }
+            if (const auto local = slots_[row]) {
+                // ADR-0330: untagged, a file's name says its title.
+                auto described = local_tracks_[*local];
+                if (described.title.empty()) {
+                    described.title = titleFromName(localPath(*local)).toStdString();
+                }
+                entry.fit = musicbrainz::pair_fit(described, track.track);
+                entry.doubtful = entry.doubtful || *entry.fit != musicbrainz::PairFit::good;
             }
         } else if (const auto local = slots_[row]; local && *local >= own_count_) {
             const auto& album = other_albums_[*local - own_count_];

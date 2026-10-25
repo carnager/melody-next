@@ -109,10 +109,13 @@ class Catalogue {
 
     // Re-reads the named files now, after they were tagged or moved from
     // elsewhere: the ones in the library are indexed again, the ones gone
-    // are dropped. Returns how many changed.
+    // are dropped. Returns how many changed. `changed_only` (ADR-0322):
+    // a file indexed with its size and modification time as they are now
+    // is not read again -- for a watcher's reports, which a file read and
+    // closed unwritten makes too.
     [[nodiscard]] virtual core::Result<std::size_t>
     refresh(const std::vector<std::string>& raw_paths,
-            const core::CancellationToken& cancellation = {}) = 0;
+            const core::CancellationToken& cancellation = {}, bool changed_only = false) = 0;
 
     // A track's cover, as encoded bytes read on the engine's machine --
     // embedded, else a folder image beside it. Only for a track in the
@@ -259,7 +262,8 @@ class LocalCatalogue final : public Catalogue {
            const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::size_t>
     refresh(const std::vector<std::string>& raw_paths,
-            const core::CancellationToken& cancellation = {}) override;
+            const core::CancellationToken& cancellation = {},
+            bool changed_only = false) override;
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;

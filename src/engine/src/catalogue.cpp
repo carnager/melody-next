@@ -103,7 +103,8 @@ LocalCatalogue::folder(const std::string& raw_path,
 }
 
 core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>& raw_paths,
-                                                  const core::CancellationToken& cancellation) {
+                                                  const core::CancellationToken& cancellation,
+                                                  const bool changed_only) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -112,8 +113,9 @@ core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>
     // deleted -- and after.
     auto before =
         observer_ ? library->albums_touching(raw_paths) : core::Result<std::vector<std::string>>{};
-    auto refreshed = library->refresh(raw_paths, cancellation);
-    if (refreshed && observer_) {
+    auto refreshed = library->refresh(raw_paths, cancellation, changed_only);
+    // Nothing changed is nothing to tell: a watcher's report of a file read.
+    if (refreshed && observer_ && (*refreshed > 0U || !changed_only)) {
         // After, for what is there: a track that moved to another album, a
         // cover written. What is gone said all it had to before.
         std::vector<std::string> present;

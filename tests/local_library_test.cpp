@@ -147,6 +147,7 @@ class LocalLibraryTest final : public QObject {
     void aShareNotMountedKeepsItsFiles();
     void missingFilesOnARemountedShareArePruned();
     void aRemountedShareIsNotReadAgain();
+    void aWatchersRefreshReadsOnlyWhatChanged();
     void deletionCleanupPagesWithoutChangingWorkingLists();
     void albumIdentityKeepsEditionsSeparate();
     void metadataAndMovesFollowTheListTransaction();
@@ -675,6 +676,29 @@ void LocalLibraryTest::aRemountedShareIsNotReadAgain() {
     sqlite3_close(db);
     QCOMPARE(library->paths(tracks())->size(), 2U);
     QCOMPARE(library->query(tracks("First"))->entries.size(), 1U);
+}
+
+// ADR-0322: a watcher's report of a file indexed as it is now -- one read
+// and closed unwritten -- reads nothing; one changed since is read.
+void LocalLibraryTest::aWatchersRefreshReadsOnlyWhatChanged() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto path = fixture(root, "01.flac", "Watched");
+    QVERIFY(!path.empty());
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress initial;
+    QVERIFY(library->scan({}, initial));
+    QCOMPARE(library->refresh({path}, {}, true), 0U);
+    QCOMPARE(library->refresh({path}), 1U);
+    std::filesystem::last_write_time(
+        path, std::filesystem::last_write_time(path) + std::chrono::seconds{5});
+    QCOMPARE(library->refresh({path}, {}, true), 1U);
+    QCOMPARE(library->refresh({path}, {}, true), 0U);
+    std::filesystem::remove(path);
+    QCOMPARE(library->refresh({path}, {}, true), 1U);
+    QVERIFY(library->query(tracks("Watched"))->entries.empty());
 }
 
 void LocalLibraryTest::deletionCleanupPagesWithoutChangingWorkingLists() {

@@ -8,6 +8,9 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/change_batch.hpp"
 #include "trackknife/engine/job_methods.hpp"
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+#include "trackknife/engine/library_watch.hpp"
+#endif
 #include "trackknife/protocol/message.hpp"
 
 #include <chrono>
@@ -397,6 +400,75 @@ void catalogue_changes_are_told_together() {
     }
 }
 
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+// ADR-0322: the library's folders watched -- a file added is taken in, one
+// read and closed unwritten changes nothing (and so is no loop), one
+// deleted goes; no Refresh.
+void the_library_is_watched(const std::filesystem::path& directory,
+                            const std::filesystem::path& fixtures) {
+    const auto music = directory / "watched";
+    std::filesystem::create_directories(music);
+    std::string flac;
+    {
+        std::ifstream input{fixtures / "art-tone-flac.b64"};
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+        std::erase(base64, '\n');
+        const auto decoded = protocol::decode_raw_path(base64);
+        require(decoded.has_value(), "the fixture decodes");
+        flac = *decoded;
+    }
+    engine::LocalCatalogue catalogue{directory / "watched.sqlite3"};
+    require(catalogue.prepare().has_value(), "the catalogue opens");
+    require(catalogue.add_root(music.string()).has_value(), "the folder is added");
+    std::mutex mutex;
+    std::size_t changes = 0;
+    catalogue.observe([&](const engine::LocalCatalogue::Change&) {
+        const std::lock_guard lock{mutex};
+        ++changes;
+    });
+    const auto told = [&] {
+        const std::lock_guard lock{mutex};
+        return changes;
+    };
+    ::setenv("MELODY_WATCH_QUIET_MS", "100", 1); // NOLINT(concurrency-mt-unsafe)
+    engine::LibraryWatch watch{catalogue};
+    watch.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+
+    const auto file = music / "album" / "art.flac";
+    const auto indexed = [&] {
+        const auto described = catalogue.described_tracks({file.string()});
+        return described && described->size() == 1U && described->front().has_value();
+    };
+    const auto within = [](const auto& condition) {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+        while (!condition() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        }
+        return condition();
+    };
+    std::filesystem::create_directories(file.parent_path());
+    {
+        std::ofstream output{file, std::ios::binary};
+        output.write(flac.data(), static_cast<std::streamsize>(flac.size()));
+    }
+    require(within(indexed), "a file added is taken in without a Refresh");
+    require(within([&] { return told() >= 1U; }), "and told");
+    const auto before = told();
+    {
+        // Opened for writing and closed unwritten, as a lazy tag reader does.
+        std::ofstream touched{file, std::ios::binary | std::ios::app};
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{800});
+    require(told() == before, "a file closed unwritten changes nothing");
+    std::filesystem::remove(file);
+    require(within([&] { return !indexed(); }), "a file deleted goes");
+    watch.stop();
+    ::unsetenv("MELODY_WATCH_QUIET_MS"); // NOLINT(concurrency-mt-unsafe)
+}
+#endif
+
 int main(int argc, char** argv) {
     catalogue_changes_are_told_together();
     require(argc == 2, "usage: engine_methods_test <fixture-dir>");
@@ -409,6 +481,9 @@ int main(int argc, char** argv) {
     covers_come_by_album_and_by_size(directory, argv[1]);
     covers_of_held_files_need_no_library(directory, argv[1]);
     lyrics_come_from_beside_the_file(directory, argv[1]);
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+    the_library_is_watched(directory, argv[1]);
+#endif
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
     return EXIT_SUCCESS;

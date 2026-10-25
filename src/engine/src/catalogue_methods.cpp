@@ -641,7 +641,14 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             raw_paths.push_back(std::move(*decoded));
         }
-        auto refreshed = catalogue.refresh(raw_paths);
+        // ADR-0322: a watcher's reports -- melody-watch's -- with
+        // changed_only: a file indexed as it is now is not read again.
+        const auto changed_only = params.find("changed_only");
+        if (changed_only != params.end() && !changed_only->is_boolean()) {
+            return std::unexpected(bad_params("changed_only is true or false", "changed_only"));
+        }
+        auto refreshed = catalogue.refresh(
+            raw_paths, {}, changed_only != params.end() && changed_only->get<bool>());
         if (!refreshed) {
             return std::unexpected(std::move(refreshed.error()));
         }

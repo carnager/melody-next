@@ -611,6 +611,12 @@ void BenchMainWindowTest::settingsGroupWhatTheyAreAbout() {
         dialog->findChild<QRadioButton*>(QStringLiteral("bench-settings-library-holder-0"));
     QVERIFY(holder != nullptr && holder->isChecked());
     QVERIFY(holder->text().startsWith(QStringLiteral("This computer")));
+    // ADR-0322: whether this computer's engine watches its library's
+    // folders, as the engine itself says -- on, its default.
+    auto* watch = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-library-watch-box"));
+    QVERIFY(watch != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(watch->isEnabled(), 10'000);
+    QVERIFY(watch->isChecked());
     dialog->close();
 }
 

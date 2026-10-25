@@ -22,6 +22,9 @@
 #include "trackknife/engine/album_arrivals.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/change_batch.hpp"
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+#include "trackknife/engine/library_watch.hpp"
+#endif
 #include "trackknife/engine/favorites.hpp"
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -348,6 +351,7 @@ int main(int argc, char** argv) {
     auto& http_address = settings.http_address;
     const auto transcode_cache_mb = settings.transcode_cache_mb;
     auto& local_only = settings.local_only;
+    const bool watch_library = settings.watch_library;
 #if MELODY_ENABLE_UPNP
     const bool upnp_enabled = settings.upnp_enabled;
     const auto& upnp_interface = settings.upnp_interface;
@@ -1108,6 +1112,20 @@ int main(int argc, char** argv) {
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
 
+    // ADR-0322: the library's folders watched, unless told not to.
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+    std::unique_ptr<trackknife::engine::LibraryWatch> library_watch;
+    if (watch_library) {
+        library_watch = std::make_unique<trackknife::engine::LibraryWatch>(catalogue);
+        library_watch->start();
+    }
+#else
+    if (watch_library) {
+        std::cerr << "melodyd: the library is not watched for changes on this system; "
+                     "Refresh finds them\n";
+    }
+#endif
+
     trackknife::core::CancellationSource tidying_stopped;
     std::thread tidying{[&database, &left_undo_copies, token = tidying_stopped.token()] {
         trackknife::engine::tidy_undo_copies(database, left_undo_copies, token);
@@ -1117,6 +1135,9 @@ int main(int argc, char** argv) {
 
     tidying_stopped.request_cancellation();
     tidying.join();
+#ifdef MELODY_ENABLE_LIBRARY_WATCH
+    library_watch.reset();
+#endif
 
     std::cerr << "melodyd: stopping\n";
 #if MELODY_ENABLE_UPNP

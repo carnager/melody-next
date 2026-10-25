@@ -158,7 +158,11 @@ core::Result<void> RemoteCatalogue::set_rating(const std::string& hash, const bo
 }
 
 core::Result<std::size_t> RemoteCatalogue::refresh(const std::vector<std::string>& raw_paths,
-                                                   const core::CancellationToken&) {
+                                                   const core::CancellationToken&,
+                                                   const bool changed_only) {
+    // A client asks for files it changed itself: those are read again.
+    // Only a watcher, which runs where the engine is, asks for changed ones.
+    static_cast<void>(changed_only);
     auto encoded = Json::array();
     for (const auto& raw_path : raw_paths) {
         encoded.push_back(protocol::encode_raw_path(raw_path));

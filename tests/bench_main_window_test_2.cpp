@@ -1338,6 +1338,137 @@ void BenchMainWindowTest::aFileAlreadyWhereRenamingPutsItGetsItsCover() {
     QVERIFY(window_test::closeTaggerAfterWrite(guard));
 }
 
+// ADR-0318: an album moved with a folder cover staged -- its old cover
+// travels along and is replaced by the new one in the folder it moved to,
+// the old folder gone; undone, the old cover is back where it was.
+void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved_data() {
+    QTest::addColumn<bool>("undone");
+    QTest::newRow("undone") << true;
+    QTest::newRow("kept") << false;
+}
+
+void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
+    QFETCH(bool, undone);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::artwork_embed_key), true);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::artwork_folder_image_key), true);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::artwork_folder_image_name_key),
+                         QStringLiteral("cover.jpg"));
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    QVERIFY(QDir{media.path()}.mkpath(QStringLiteral("Old")));
+    QVERIFY(QDir{media.path()}.mkpath(QStringLiteral("Sorted")));
+    const auto staging = media.filePath(QStringLiteral("Old/staging.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), staging));
+    const auto read = metadata::read_local_metadata(QFile::encodeName(staging).toStdString());
+    QVERIFY(read.has_value());
+    const auto title = QString::fromStdString(read->document.effective_values("title").front());
+    const auto source_path = media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
+    QVERIFY(QFile::rename(staging, source_path));
+    const auto raw_path = QFile::encodeName(source_path).toStdString();
+    QImage old_cover{30, 30, QImage::Format_RGB32};
+    old_cover.fill(Qt::red);
+    QVERIFY(old_cover.save(media.filePath(QStringLiteral("Old/cover.jpg")), "JPEG"));
+    const auto picked_file = media.filePath(QStringLiteral("picked.png"));
+    QImage picked{40, 40, QImage::Format_RGB32};
+    picked.fill(Qt::yellow);
+    QVERIFY(picked.save(picked_file, "PNG"));
+    const auto colour_of = [](const QString& path) {
+        return QImage{path}.pixelColor(10, 10);
+    };
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    bool layout_saved = false;
+    window.persistence_->saveOutputLayoutProfile(
+        persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::OutputLayoutProfile{
+                    .schema_version = 1U,
+                    .name = "Moved",
+                    .dialect = {},
+                    .relative_directory_expression = "Album",
+                    .basename_expression = "%title%",
+                    .sanitization_policy = {"linux", 1U},
+                },
+        },
+        [&layout_saved](const QString& error) { layout_saved = error.isEmpty(); });
+    QTRY_VERIFY(layout_saved);
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr && properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    properties_action->trigger();
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    TaggerSession* session = nullptr;
+    ArtworkSession* artwork = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((session = properties->findChild<TaggerSession*>()) != nullptr &&
+                                 (artwork = properties->findChild<ArtworkSession*>()) != nullptr,
+                             10'000);
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
+    QVERIFY(apply && status);
+    QTRY_VERIFY_WITH_TIMEOUT(session->renameAvailable(), 10'000);
+    session->chooseMoveFolder(QFile::encodeName(media.filePath(QStringLiteral("Sorted")))
+                                  .toStdString());
+    QTRY_VERIFY_WITH_TIMEOUT(session->moveAvailable(), 10'000);
+    session->chooseMove(true);
+    artwork->setActive(true);
+    QTRY_VERIFY_WITH_TIMEOUT(artwork->canAdd(), 10'000);
+    artwork->add(picked_file, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(artwork->hasPendingChanges(), 10'000);
+    QTRY_VERIFY(apply->isEnabled());
+    QTest::mouseClick(apply, Qt::LeftButton);
+    QDialog* review = nullptr;
+    QTRY_VERIFY2_WITH_TIMEOUT((review = properties->findChild<QDialog*>(
+                                   QStringLiteral("bench-folder-cover-review"))) != nullptr,
+                              qPrintable(status->text()), 15'000);
+    review->findChild<QDialogButtonBox*>(QStringLiteral("bench-folder-cover-review-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    const auto moved = media.filePath(QStringLiteral("Sorted/Album/") + title +
+                                      QStringLiteral(".flac"));
+    const auto cover = media.filePath(QStringLiteral("Sorted/Album/cover.jpg"));
+    QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(moved), qPrintable(status->text()), 15'000);
+    QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(cover) && colour_of(cover).green() > 200 &&
+                                  colour_of(cover).red() > 200,
+                              qPrintable(status->text()), 10'000);
+    // Nothing of the album left where it was: the file it moved from is kept
+    // hidden, to undo the move while the tagger is open.
+    QVERIFY(QDir{media.filePath(QStringLiteral("Old"))}
+                .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
+                .isEmpty());
+    if (!undone) {
+        // Closed, the kept file let go of, and the folder with it.
+        QPointer kept_guard{properties};
+        QVERIFY(window_test::closeTaggerAfterWrite(kept_guard));
+        QTRY_VERIFY_WITH_TIMEOUT(!QDir{media.filePath(QStringLiteral("Old"))}.exists(), 10'000);
+        return;
+    }
+    // Undone: the album back, with its own cover.
+    QTRY_VERIFY_WITH_TIMEOUT(session->canUndoWrite(), 10'000);
+    session->undoWrite();
+    QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(source_path), qPrintable(status->text()), 15'000);
+    const auto old_back = media.filePath(QStringLiteral("Old/cover.jpg"));
+    QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(old_back) && colour_of(old_back).red() > 200 &&
+                                  colour_of(old_back).green() < 60,
+                              qPrintable(status->text()), 10'000);
+    QPointer guard{properties};
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
+}
+
 void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -2419,6 +2550,7 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
                             .state = operations::FilePublicationApplySourceState::committed,
                             .commit = std::move(commit),
                             .metadata_commit = std::nullopt,
+                            .folder_image_commit = std::nullopt,
                             .published_metadata = std::nullopt,
                             .issue = std::nullopt,
                         }},

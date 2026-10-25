@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/operations/file_publication_apply.hpp"
+#include "trackknife/metadata/artwork.hpp"
 
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
@@ -293,6 +294,7 @@ apply_file_publications(const OutputPathPreflight& preflight, FilePublicationJou
                                : FilePublicationApplySourceState::pending,
             .commit = std::nullopt,
             .metadata_commit = std::nullopt,
+            .folder_image_commit = std::nullopt,
             .published_metadata = std::nullopt,
             .issue = std::nullopt,
         });
@@ -503,6 +505,38 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
         metadata_sources[index] = &metadata_source;
     }
 
+    // ADR-0318: a file that moves writes its tags and embedded cover into
+    // its new copy; its folder cover is written in the folder it moves to
+    // once every file -- and what travels with them -- is there.
+    std::vector<std::optional<metadata::MetadataWritePlanSource>> moving_metadata(
+        preflight.sources.size());
+    std::vector<std::optional<metadata::FolderImageWritePlan>> folder_after(
+        preflight.sources.size());
+    for (std::size_t index = 0U; index < preflight.sources.size(); ++index) {
+        const auto* metadata_source = metadata_sources[index];
+        if (metadata_source == nullptr ||
+            preflight.sources[index].publication == OutputPathPublicationKind::no_change ||
+            !metadata_source->artwork || !metadata_source->artwork->folder_image) {
+            continue;
+        }
+        folder_after[index] = *metadata_source->artwork->folder_image;
+        auto stripped = *metadata_source;
+        if (metadata_source->artwork->embed) {
+            auto embedded =
+                std::make_shared<metadata::ArtworkWritePlanSource>(*metadata_source->artwork);
+            embedded->folder_image.reset();
+            stripped.artwork = std::move(embedded);
+        } else {
+            stripped.artwork.reset();
+        }
+        moving_metadata[index] = std::move(stripped);
+        // Nothing left for the file itself: only moved.
+        metadata_sources[index] = moving_metadata[index]->changes.empty() &&
+                                          !moving_metadata[index]->artwork
+                                      ? nullptr
+                                      : &*moving_metadata[index];
+    }
+
     FilePublicationApplyResult result;
     result.sources.reserve(preflight.sources.size());
     std::vector<std::size_t> work_sources;
@@ -520,6 +554,7 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
                               : FilePublicationApplySourceState::unchanged,
             .commit = std::nullopt,
             .metadata_commit = std::nullopt,
+            .folder_image_commit = std::nullopt,
             .published_metadata = std::nullopt,
             .issue = std::nullopt,
         });
@@ -721,6 +756,38 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
                         "Preparation Apply was cancelled before this source started",
                         source_result.source_raw_path, source_result.target_raw_path);
         report(index, source_result.state, true, source_result.issue);
+    }
+    // ADR-0318: the folder covers of the files that moved, in their new
+    // folders: once each, kept as the files are, the image they replace --
+    // the old cover that travelled along -- kept to undo.
+    std::set<std::string> covered;
+    for (std::size_t index = 0U; index < folder_after.size(); ++index) {
+        auto& source_result = result.sources[index];
+        if (!folder_after[index] ||
+            source_result.state != FilePublicationApplySourceState::committed ||
+            cancellation.is_cancellation_requested() ||
+            !covered.insert(folder_after[index]->raw_path).second) {
+            continue;
+        }
+        auto image = *folder_after[index];
+        // The image it replaces came along with the album: the same image,
+        // where a copy across filesystems gave it another revision.
+        if (image.original) {
+            if (auto there = metadata::read_artwork_image_file(image.raw_path);
+                there && there->content_fingerprint == image.original->content_fingerprint) {
+                image.original = std::move(*there);
+            }
+        }
+        auto written = commit_folder_image(image, metadata_journal, cancellation);
+        if (written) {
+            source_result.folder_image_commit = std::move(*written);
+        } else {
+            source_result.issue = apply_error(
+                written.error().code,
+                "Moved; its folder cover was not saved: " + written.error().message,
+                source_result.source_raw_path, source_result.target_raw_path);
+            source_result.state = FilePublicationApplySourceState::failed;
+        }
     }
     result.cancellation_requested =
         cancellation.is_cancellation_requested() || result.cancelled_source_count() > 0U;

@@ -345,6 +345,8 @@ class BenchMainWindowTest final : public QObject {
     void lyricsProvidersAreAskedWhenTheFileHasNone();
     void metadataRenameMovesTheFileAndItsRow();
     void aFileAlreadyWhereRenamingPutsItGetsItsCover();
+    void aMovedAlbumGetsItsFolderCoverWhereItMoved_data();
+    void aMovedAlbumGetsItsFolderCoverWhereItMoved();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();
     void fileWorkWithoutAnEngineSaysWhy();

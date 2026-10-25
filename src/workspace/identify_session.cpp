@@ -102,30 +102,66 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
                                                                     .confidence = 0.0,
                                                                     .user_confirmed = false});
         }
-        slots_.resize(alignment_.release_tracks.size());
+        const auto track_count = alignment_.release_tracks.size();
+        slots_.resize(track_count);
+        // ADR-0324: a track another album of this Identify has is left to
+        // it; a file aligned to one goes to one of the same title not taken.
+        const auto avoided = [this, track_count](const std::size_t index) {
+            if (index >= track_count) {
+                return false;
+            }
+            const auto& track = alignment_.release_tracks[index];
+            return avoid_.contains(TrackKey{track.medium_position, track.track.position});
+        };
+        const auto title = [this](const std::size_t index) {
+            return text(alignment_.release_tracks[index].track.title).simplified().toCaseFolded();
+        };
         std::vector<bool> placed(local_tracks_.size(), false);
         for (std::size_t local = 0; local < own_count_; ++local) {
             const auto& match = alignment_.tracks[local];
-            if (match.confidence >= 0.5 && match.release_track_index &&
-                *match.release_track_index < slots_.size() && !slots_[*match.release_track_index]) {
-                slots_[*match.release_track_index] = local;
+            if (match.confidence < 0.5 || !match.release_track_index ||
+                *match.release_track_index >= track_count) {
+                continue;
+            }
+            auto target = *match.release_track_index;
+            if (avoided(target)) {
+                std::optional<std::size_t> other;
+                for (std::size_t index = 0; index < track_count && !other; ++index) {
+                    if (index != target && !avoided(index) && !slots_[index] &&
+                        title(index) == title(target)) {
+                        other = index;
+                    }
+                }
+                if (!other) {
+                    continue;
+                }
+                target = *other;
+            }
+            if (!slots_[target]) {
+                slots_[target] = local;
                 placed[local] = true;
             }
         }
         // Fill remaining gaps in file order as reviewable proposals, not
-        // confidence claims.
-        std::size_t gap = 0;
-        for (std::size_t local = 0; local < own_count_; ++local) {
-            if (placed[local]) {
-                continue;
-            }
-            while (gap < slots_.size() && slots_[gap]) {
-                ++gap;
-            }
-            if (gap == slots_.size()) {
-                slots_.push_back(local);
-            } else {
-                slots_[gap] = local;
+        // confidence claims -- those no other album has first.
+        for (const bool any : {false, true}) {
+            std::size_t gap = 0;
+            for (std::size_t local = 0; local < own_count_; ++local) {
+                if (placed[local]) {
+                    continue;
+                }
+                while (gap < slots_.size() && (slots_[gap] || (!any && avoided(gap)))) {
+                    ++gap;
+                }
+                if (gap >= track_count && !any) {
+                    break;
+                }
+                if (gap == slots_.size()) {
+                    slots_.push_back(local);
+                } else {
+                    slots_[gap] = local;
+                }
+                placed[local] = true;
             }
         }
         for (auto local = own_count_; local < local_tracks_.size(); ++local) {
@@ -147,8 +183,13 @@ TrackMatchSession::TrackMatchSession(musicbrainz::Release release,
 TrackMatchSession::~TrackMatchSession() { cancellation_.request_cancellation(); }
 
 QString TrackMatchSession::heading() const {
-    return tr("Match files to %1 · %2 · %3")
-        .arg(text(release_.title), text(release_.date), text(release_.country));
+    QStringList named{text(release_.title)};
+    for (const auto& part : {release_.date, release_.country}) {
+        if (!part.empty()) {
+            named << text(part);
+        }
+    }
+    return tr("Match files to %1").arg(named.join(QStringLiteral(" · ")));
 }
 
 QString TrackMatchSession::help() {
@@ -231,6 +272,61 @@ void TrackMatchSession::placeOn(const std::size_t from, const std::size_t track)
     }
     std::swap(slots_[from], slots_[track]);
     refresh(track);
+}
+
+void TrackMatchSession::moveDisc(const std::size_t from, const std::size_t to) {
+    if (!ready_ || from == to) {
+        return;
+    }
+    std::vector<std::size_t> taken;
+    std::vector<std::size_t> given;
+    for (std::size_t index = 0; index < alignment_.release_tracks.size(); ++index) {
+        const auto disc = alignment_.release_tracks[index].medium_position;
+        if (disc == from) {
+            taken.push_back(index);
+        } else if (disc == to) {
+            given.push_back(index);
+        }
+    }
+    const auto count = std::min(taken.size(), given.size());
+    if (count == 0U) {
+        return;
+    }
+    for (std::size_t at = 0; at < count; ++at) {
+        std::swap(slots_[taken[at]], slots_[given[at]]);
+    }
+    refresh(given.front());
+}
+
+std::vector<std::size_t> TrackMatchSession::discsWithFiles() const {
+    std::vector<std::size_t> discs;
+    for (std::size_t index = 0;
+         index < alignment_.release_tracks.size() && index < slots_.size(); ++index) {
+        const auto disc = alignment_.release_tracks[index].medium_position;
+        if (slots_[index] && *slots_[index] < own_count_ &&
+            std::ranges::find(discs, disc) == discs.end()) {
+            discs.push_back(disc);
+        }
+    }
+    return discs;
+}
+
+std::size_t TrackMatchSession::discTrackCount(const std::size_t disc) const {
+    return static_cast<std::size_t>(std::ranges::count_if(
+        alignment_.release_tracks,
+        [disc](const auto& track) { return track.medium_position == disc; }));
+}
+
+std::set<TrackMatchSession::TrackKey> TrackMatchSession::pairedTracks() const {
+    std::set<TrackKey> paired;
+    for (std::size_t index = 0;
+         index < alignment_.release_tracks.size() && index < slots_.size(); ++index) {
+        if (slots_[index] && *slots_[index] < own_count_) {
+            const auto& track = alignment_.release_tracks[index];
+            paired.insert(TrackKey{track.medium_position, track.track.position});
+        }
+    }
+    return paired;
 }
 
 void TrackMatchSession::move(const int row, const int direction) {
@@ -322,8 +418,25 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
             entry.gap = true;
         }
         if (row < alignment_.release_tracks.size()) {
+            const auto& track = alignment_.release_tracks[row];
             entry.track = trackLabel(row);
-            entry.track_length = duration(alignment_.release_tracks[row].track.length_ms);
+            entry.track_length = duration(track.track.length_ms);
+            entry.disc = track.medium_position;
+            entry.number = track.track.position;
+            entry.title = text(track.track.title);
+            QStringList heading{tr("Disc %1").arg(track.medium_position)};
+            for (const auto& part : {track.medium_format, track.medium_title}) {
+                if (!part.empty()) {
+                    heading << text(part);
+                }
+            }
+            entry.disc_heading = heading.join(QStringLiteral(" · "));
+            if (const auto local = slots_[row]; local && track.track.length_ms &&
+                                                local_tracks_[*local].duration_ms) {
+                const auto delta = *local_tracks_[*local].duration_ms - *track.track.length_ms;
+                entry.delta_seconds = static_cast<int>((delta + (delta < 0 ? -500 : 500)) / 1000);
+                entry.doubtful = delta > 3'000 || delta < -3'000;
+            }
         } else if (const auto local = slots_[row]; local && *local >= own_count_) {
             const auto& album = other_albums_[*local - own_count_];
             entry.other = true;
@@ -934,7 +1047,23 @@ MultiIdentifySession::MultiIdentifySession(TaggerSession& tagger, MusicBrainzLoo
                     to_stage_.emplace_back(index, std::move(proposals));
                 });
         connect(session, &IdentifySession::matchOpened, this,
-                [this](TrackMatchSession* match) {
+                [this, index](TrackMatchSession* match) {
+                    // ADR-0324: the same release as another album here --
+                    // a set whose discs repeat each other, split in two
+                    // by their tags -- pairs with the tracks that one left.
+                    std::set<TrackMatchSession::TrackKey> taken;
+                    for (std::size_t other = 0; other < albums_.size(); ++other) {
+                        const auto* elsewhere =
+                            other == index || albums_[other].skipped
+                                ? nullptr
+                                : albums_[other].session->match();
+                        if (elsewhere != nullptr && elsewhere != match &&
+                            elsewhere->releaseId() == match->releaseId()) {
+                            auto paired = elsewhere->pairedTracks();
+                            taken.merge(paired);
+                        }
+                    }
+                    match->avoid(std::move(taken));
                     // Ready once paired.
                     connect(match, &TrackMatchSession::changed, this,
                             &MultiIdentifySession::changed);

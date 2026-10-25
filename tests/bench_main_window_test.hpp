@@ -203,6 +203,30 @@ constexpr std::uint32_t wave_sample_rate = 44'100U;
 // by the decoder without being an intrusive test sound.
 constexpr std::int32_t test_wave_peak = 256;
 
+// ADR-0324: the MusicBrainz matching board's pair rows, by their row in the
+// session; the file a row holds is its text (empty for a gap), its track is
+// beside it.
+inline QListWidgetItem* matchRow(const QListWidget* board, const int row) {
+    for (int index = 0; index < board->count(); ++index) {
+        auto* item = board->item(index);
+        if (item->data(Qt::UserRole + 1).toInt() == 1 &&
+            item->data(Qt::UserRole + 2).toInt() == row) {
+            return item;
+        }
+    }
+    return nullptr;
+}
+inline int matchRowCount(const QListWidget* board) {
+    int rows = 0;
+    for (int index = 0; index < board->count(); ++index) {
+        rows += board->item(index)->data(Qt::UserRole + 1).toInt() == 1 ? 1 : 0;
+    }
+    return rows;
+}
+inline QString matchTrack(const QListWidgetItem* item) {
+    return item->data(Qt::UserRole + 4).toString();
+}
+
 inline void append_u16(std::vector<unsigned char>& bytes, const std::uint16_t value) {
     bytes.push_back(static_cast<unsigned char>(value & 0xFFU));
     bytes.push_back(static_cast<unsigned char>((value >> 8U) & 0xFFU));
@@ -369,6 +393,8 @@ class BenchMainWindowTest final : public QObject {
     void metadataSuggestionsStageSelectionConsistency();
     void musicBrainzMatchingHandlesUnequalCounts_data();
     void musicBrainzMatchingHandlesUnequalCounts();
+    void theMatchingBoardPairsByDropClickAndDisc();
+    void aSecondAlbumTakesTheDiscTheFirstLeft();
     void musicBrainzIdentifyStagesChosenVersion_data();
     void musicBrainzIdentifyStagesChosenVersion();
     void musicBrainzIdentifyLooksUpNamedReleases();

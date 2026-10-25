@@ -1322,39 +1322,162 @@ void BenchMainWindowTest::musicBrainzMatchingHandlesUnequalCounts() {
         [&accepted](metadata::MetadataProposalSet proposal) { accepted = std::move(proposal); },
         [] {}, nullptr)};
     widget->show();
-    auto* rows = widget->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
+    auto* board = widget->findChild<QListWidget*>(QStringLiteral("bench-musicbrainz-match-board"));
     auto* up = widget->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-up"));
     auto* down = widget->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-down"));
     auto* stage = widget->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
-    auto* tracks =
-        widget->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
-    QVERIFY(rows && tracks && up && down && stage);
-    QTRY_COMPARE(rows->topLevelItemCount(), std::max(file_count, 2));
-    QCOMPARE(tracks->topLevelItem(0)->text(0), QStringLiteral("1.1 · Disc 1"));
-    QCOMPARE(tracks->topLevelItem(1)->text(0), QStringLiteral("2.1 · Disc 2"));
+    QVERIFY(board && up && down && stage);
+    QTRY_COMPARE(matchRowCount(board), std::max(file_count, 2));
+    QCOMPARE(matchTrack(matchRow(board, 0)), QStringLiteral("1.1 · Disc 1"));
+    QCOMPARE(matchTrack(matchRow(board, 1)), QStringLiteral("2.1 · Disc 2"));
     if (file_count == 1) {
-        QCOMPARE(rows->topLevelItem(1)->text(0), QStringLiteral("No local file"));
-        rows->setCurrentItem(rows->topLevelItem(0));
+        QVERIFY(matchRow(board, 1)->text().isEmpty());
+        board->setCurrentItem(matchRow(board, 0));
         down->click();
-        QCOMPARE(rows->topLevelItem(0)->text(0), QStringLiteral("No local file"));
+        QVERIFY(matchRow(board, 0)->text().isEmpty());
     } else {
-        QVERIFY(rows->topLevelItem(2)->text(2).contains(QStringLiteral("Unmatched")));
-        rows->setCurrentItem(rows->topLevelItem(2));
+        QVERIFY(matchTrack(matchRow(board, 2)).contains(QStringLiteral("No tags")));
+        board->setCurrentItem(matchRow(board, 2));
         up->click();
-        QCOMPARE(rows->topLevelItem(1)->text(0), QStringLiteral("file-2.flac"));
-        QCOMPARE(rows->topLevelItem(2)->text(0), QStringLiteral("file-1.flac"));
+        QCOMPARE(matchRow(board, 1)->text(), QStringLiteral("file-2.flac"));
+        QCOMPARE(matchRow(board, 2)->text(), QStringLiteral("file-1.flac"));
     }
-    QCOMPARE(tracks->topLevelItem(1)->text(0), QStringLiteral("2.1 · Disc 2"));
+    QCOMPARE(matchTrack(matchRow(board, 1)), QStringLiteral("2.1 · Disc 2"));
     if (file_count > 3) {
-        QTRY_VERIFY(rows->verticalScrollBar()->maximum() > 0);
-        rows->verticalScrollBar()->setValue(rows->verticalScrollBar()->maximum());
-        QCOMPARE(tracks->verticalScrollBar()->value(), rows->verticalScrollBar()->value());
+        // One list: the files and their tracks cannot scroll apart.
+        QTRY_VERIFY(board->verticalScrollBar()->maximum() > 0);
     }
     QVERIFY(!accepted);
     stage->click();
     QVERIFY(accepted.has_value());
     QCOMPARE(accepted->items.size(), static_cast<std::size_t>(std::min(file_count, 2)));
     QCOMPARE(accepted->items.back().item_index, file_count == 1 ? 10U : 12U);
+}
+
+namespace {
+
+// Two discs of the same two titles: a set whose second disc repeats the
+// first, recorded again.
+musicbrainz::Release repeatingDiscs() {
+    musicbrainz::Release release{};
+    release.id = "3f3ac1b7-1111-4f4f-8f8f-123456789abc";
+    release.title = "Again";
+    for (std::size_t disc = 1; disc <= 2; ++disc) {
+        musicbrainz::ReleaseMedium medium{};
+        medium.position = disc;
+        medium.format = "CD";
+        medium.track_count = 2;
+        for (std::size_t number = 1; number <= 2; ++number) {
+            musicbrainz::ReleaseTrack track{};
+            track.position = number;
+            track.title = number == 1 ? "One" : "Two";
+            track.length_ms = disc == 1 ? 180'000 : 200'000;
+            medium.tracks.push_back(track);
+        }
+        release.media.push_back(medium);
+    }
+    return release;
+}
+
+std::vector<musicbrainz::LocalTrackDescriptor> twoFiles(const std::int64_t length_ms) {
+    std::vector<musicbrainz::LocalTrackDescriptor> files(2U);
+    files[0].title = "One";
+    files[1].title = "Two";
+    for (auto& file : files) {
+        file.duration_ms = length_ms;
+    }
+    return files;
+}
+
+} // namespace
+
+// ADR-0324: on the board a file goes onto a track by being dropped there or
+// by a click on it and then on the track; a disc without files takes those
+// of another in one go; a pairing whose lengths disagree is marked.
+void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
+    std::unique_ptr<QWidget> widget{createMusicBrainzTrackMatchWidget(
+        repeatingDiscs(), twoFiles(180'000),
+        {QStringLiteral("/music/1.flac"), QStringLiteral("/music/2.flac")}, {10U, 11U},
+        [](metadata::MetadataProposalSet) {}, [] {}, nullptr)};
+    widget->resize(900, 500);
+    widget->show();
+    auto* board = widget->findChild<QListWidget*>(QStringLiteral("bench-musicbrainz-match-board"));
+    auto* hint = widget->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-match-hint"));
+    QVERIFY(board && hint);
+    QTRY_COMPARE(matchRowCount(board), 4);
+    QCOMPARE(matchRow(board, 0)->text(), QStringLiteral("1.flac"));
+    QCOMPARE(matchRow(board, 1)->text(), QStringLiteral("2.flac"));
+    // Two disc headings among the rows.
+    QCOMPARE(board->count(), 6);
+    QCOMPARE(board->item(0)->text(), QStringLiteral("Disc 1 · CD"));
+
+    const auto file_side = [board](const int row) {
+        const auto rect = board->visualItemRect(matchRow(board, row));
+        return QPoint{rect.left() + 40, rect.center().y()};
+    };
+    const auto track_side = [board](const int row) {
+        const auto rect = board->visualItemRect(matchRow(board, row));
+        return QPoint{rect.right() - 60, rect.center().y()};
+    };
+
+    // Dropped on disc 2's first track.
+    std::unique_ptr<QMimeData> mime{
+        board->model()->mimeData({board->indexFromItem(matchRow(board, 0))})};
+    const auto onto = track_side(2);
+    QDragEnterEvent enter{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+                          Qt::NoModifier};
+    QApplication::sendEvent(board->viewport(), &enter);
+    QVERIFY(enter.isAccepted());
+    QDragMoveEvent move{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+                        Qt::NoModifier};
+    QApplication::sendEvent(board->viewport(), &move);
+    QVERIFY(move.isAccepted());
+    QVERIFY2(hint->text().contains(QStringLiteral("2.1")), qPrintable(hint->text()));
+    QDropEvent drop{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(board->viewport(), &drop);
+    QVERIFY(drop.isAccepted());
+    QTRY_COMPARE(matchRow(board, 2)->text(), QStringLiteral("1.flac"));
+    QVERIFY(matchRow(board, 0)->text().isEmpty());
+    // Disc 2 is longer than these files: that pairing is worth a look.
+    QVERIFY(matchRow(board, 2)->toolTip().contains(QStringLiteral("20 s shorter")));
+
+    // Clicked, then its track clicked.
+    QTest::mouseClick(board->viewport(), Qt::LeftButton, {}, file_side(1));
+    QVERIFY(hint->text().contains(QStringLiteral("picked up")));
+    QTest::mouseClick(board->viewport(), Qt::LeftButton, {}, track_side(3));
+    QTRY_COMPARE(matchRow(board, 3)->text(), QStringLiteral("2.flac"));
+    QVERIFY(matchRow(board, 1)->text().isEmpty());
+
+    // Disc 1, empty now, takes disc 2's files back by its heading.
+    const auto heading = board->visualItemRect(board->item(0));
+    QTest::mouseClick(board->viewport(), Qt::LeftButton, {},
+                      QPoint{heading.right() - 20, heading.center().y()});
+    QTRY_COMPARE(matchRow(board, 0)->text(), QStringLiteral("1.flac"));
+    QCOMPARE(matchRow(board, 1)->text(), QStringLiteral("2.flac"));
+    QVERIFY(matchRow(board, 2)->text().isEmpty());
+}
+
+// ADR-0324: one Identify, two albums of the same release -- its discs
+// repeating each other, the files split by their tags -- the second pairs
+// with the disc the first left.
+void BenchMainWindowTest::aSecondAlbumTakesTheDiscTheFirstLeft() {
+    TrackMatchSession first{repeatingDiscs(), twoFiles(180'000),
+                            {QStringLiteral("/a/1.flac"), QStringLiteral("/a/2.flac")},
+                            {0U, 1U}};
+    QTRY_VERIFY(first.ready());
+    QCOMPARE(first.rows()[0].file, QStringLiteral("1.flac"));
+    QCOMPARE(first.rows()[1].file, QStringLiteral("2.flac"));
+    TrackMatchSession second{repeatingDiscs(), twoFiles(200'000),
+                             {QStringLiteral("/b/1.flac"), QStringLiteral("/b/2.flac")},
+                             {2U, 3U}};
+    second.avoid(first.pairedTracks());
+    QTRY_VERIFY(second.ready());
+    QVERIFY(second.rows()[0].gap);
+    QVERIFY(second.rows()[1].gap);
+    QCOMPARE(second.rows()[2].file, QStringLiteral("1.flac"));
+    QCOMPARE(second.rows()[3].file, QStringLiteral("2.flac"));
+    QCOMPARE(second.rows()[2].disc, 2U);
+    QVERIFY(!second.rows()[2].doubtful);
 }
 
 // ADR-0262: Move into a folder that is no saved destination, the layout's

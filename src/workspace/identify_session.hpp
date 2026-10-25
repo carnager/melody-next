@@ -52,7 +52,19 @@ class TrackMatchSession final : public QObject {
         bool gap{false};
         QString track;
         QString track_length;
+        // ADR-0324: the album track's disc and number, its title alone, and
+        // its disc's heading; 0 for a row below the album's tracks.
+        std::size_t disc{0};
+        std::size_t number{0};
+        QString title;
+        QString disc_heading;
+        // The file's length against the track's, in seconds, where both are
+        // known; far apart, the pairing is worth a look.
+        std::optional<int> delta_seconds;
+        bool doubtful{false};
     };
+    // A release track by its disc and its number on it.
+    using TrackKey = std::pair<std::size_t, std::size_t>;
 
     // `other_albums`: for the last files, one each, the album each is in --
     // offered, not the album's own.
@@ -85,6 +97,21 @@ class TrackMatchSession final : public QObject {
     // A file put on the album track at `track`: in its gap, or swapped with
     // the file there.
     void placeOn(std::size_t from, std::size_t track);
+    // ADR-0324: the files on disc `from`'s tracks put on disc `to`'s, track
+    // for track; any there take their places.
+    void moveDisc(std::size_t from, std::size_t to);
+    // The discs with a file of this album on them, in order.
+    [[nodiscard]] std::vector<std::size_t> discsWithFiles() const;
+    [[nodiscard]] std::size_t discTrackCount(std::size_t disc) const;
+    // The release's tracks this album's files are on.
+    [[nodiscard]] std::set<TrackKey> pairedTracks() const;
+    [[nodiscard]] const std::string& releaseId() const { return release_.id; }
+    // ADR-0324: tracks another album of the same Identify already has. Set
+    // before the suggested matches are ready, a file aligned to one goes to
+    // a track of the same title elsewhere in the release -- the other disc
+    // of a set whose discs repeat each other -- and gaps are filled with the
+    // others first.
+    void avoid(std::set<TrackKey> tracks) { avoid_ = std::move(tracks); }
     void move(int row, int direction);
     // Below the album's tracks, leaving a gap; it gets no tags.
     void unmatch(int row);
@@ -113,6 +140,7 @@ class TrackMatchSession final : public QObject {
     std::vector<std::optional<std::size_t>> assignments_;
     std::vector<std::optional<std::size_t>> slots_;
     std::vector<Row> rows_;
+    std::set<TrackKey> avoid_;
     QString status_;
     std::size_t paired_count_{0U};
     bool ready_{false};

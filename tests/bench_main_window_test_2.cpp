@@ -3512,9 +3512,10 @@ void BenchMainWindowTest::aTogetherLinkAsksTheEngineToJoin() {
     QVERIFY(window.openLink(QStringLiteral("melody://together/join?invite=") +
                             QString::fromLatin1(QUrl::toPercentEncoding(
                                 QStringLiteral("http://127.0.0.1:9/rooms/r#k")))));
-    QTRY_VERIFY_WITH_TIMEOUT(window.statusBar()->currentMessage().startsWith(
-                                 QStringLiteral("Could not join the listening room")),
-                             15'000);
+    // What it said instead, where it did not say this.
+    QTRY_VERIFY2_WITH_TIMEOUT(window.statusBar()->currentMessage().startsWith(
+                                  QStringLiteral("Could not join the listening room")),
+                              qPrintable(window.statusBar()->currentMessage()), 15'000);
 }
 
 // ADR-0301: a panel is told every tag the library has of what plays, and,

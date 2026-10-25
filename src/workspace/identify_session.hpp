@@ -3,11 +3,11 @@
 #pragma once
 
 #include "bench/musicbrainz_lookup.hpp"
-#include "workspace/tagger_session.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/musicbrainz/matching.hpp"
 #include "trackknife/musicbrainz/proposal_bridge.hpp"
+#include "workspace/tagger_session.hpp"
 
 #include <QObject>
 #include <QPointer>
@@ -180,8 +180,8 @@ class IdentifySession final : public QObject {
     IdentifySession(MusicBrainzLookupService service,
                     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-                    QString initial_artist, QString initial_release,
-                    QString tagged_release = {}, QObject* parent = nullptr);
+                    QString initial_artist, QString initial_release, QString tagged_release = {},
+                    QObject* parent = nullptr);
     ~IdentifySession() override;
 
     [[nodiscard]] QString initialArtist() const { return initial_artist_; }

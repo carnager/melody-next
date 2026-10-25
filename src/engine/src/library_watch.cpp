@@ -135,8 +135,8 @@ void LibraryWatch::run(const core::CancellationToken& token) {
         pending.clear();
         for (std::size_t at = 0; at < paths.size() && !token.is_cancellation_requested();
              at += part) {
-            const auto end = paths.begin() + static_cast<std::ptrdiff_t>(
-                                                  std::min(paths.size(), at + part));
+            const auto end =
+                paths.begin() + static_cast<std::ptrdiff_t>(std::min(paths.size(), at + part));
             const std::vector<std::string> some{paths.begin() + static_cast<std::ptrdiff_t>(at),
                                                 end};
             if (auto refreshed = catalogue_.refresh(some, token, true); !refreshed) {

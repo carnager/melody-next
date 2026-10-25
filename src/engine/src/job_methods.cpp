@@ -185,7 +185,7 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
             }
         }
         return [&catalogue, within = std::move(within)](const core::CancellationToken& token,
-                                                         const JobRegistry::Reporter& report) {
+                                                        const JobRegistry::Reporter& report) {
             // scan() blocks and updates atomic counters, so progress is
             // sampled beside it. This is the same shape the workspace used
             // with a timer; the engine now owns the sampling because a remote

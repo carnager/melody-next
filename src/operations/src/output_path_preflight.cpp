@@ -7,16 +7,16 @@
 
 #include <algorithm>
 #include <cctype>
-#include <dirent.h>
-#include <fstream>
-#include <map>
-#include <set>
 #include <cerrno>
 #include <cstddef>
+#include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
+#include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
@@ -453,9 +453,10 @@ namespace {
         return false;
     }
     std::string extension = name.substr(dot + 1U);
-    std::ranges::transform(extension, extension.begin(),
-                           [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    static const std::set<std::string> kinds{"jpg", "jpeg", "png", "gif",  "bmp",  "webp",
+    std::ranges::transform(extension, extension.begin(), [](const unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    static const std::set<std::string> kinds{"jpg", "jpeg", "png", "gif", "bmp",  "webp",
                                              "tif", "tiff", "cue", "m3u", "m3u8", "pls"};
     return kinds.contains(extension);
 }
@@ -538,12 +539,13 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
             }
             PlannedOutputPathSource companion{
                 .source_raw_path = from.native(),
-                .source_revision = core::LocalSourceRevision{
-                    .device = static_cast<std::uint64_t>(status.st_dev),
-                    .inode = static_cast<std::uint64_t>(status.st_ino),
-                    .size = static_cast<std::uint64_t>(status.st_size),
-                    .modification_time_seconds = status.st_mtim.tv_sec,
-                    .modification_time_nanoseconds = status.st_mtim.tv_nsec},
+                .source_revision =
+                    core::LocalSourceRevision{.device = static_cast<std::uint64_t>(status.st_dev),
+                                              .inode = static_cast<std::uint64_t>(status.st_ino),
+                                              .size = static_cast<std::uint64_t>(status.st_size),
+                                              .modification_time_seconds = status.st_mtim.tv_sec,
+                                              .modification_time_nanoseconds =
+                                                  status.st_mtim.tv_nsec},
                 .target_raw_path = to.native(),
                 .raw_relative_directory = {},
                 .sanitized_relative_directory = {},

@@ -399,13 +399,13 @@ void BenchMainWindow::runPluginPanelWith(PluginPanelDock& slot, QObject* context
                                          PluginPlaying told, const PluginPanelLibrary& library) {
     auto* raw = &slot;
     const auto action = std::exchange(slot.action, std::nullopt);
-    runPluginPanel(
-        slot.plugin, slot.panel,
-        pluginPanelInput(slot.panel, told.engine, told.track, told.duration_ms, told.music_folders,
-                         pluginSettings(slot.plugin), library, action),
-        context, [raw, context](const PluginOutcome& outcome) {
-            showPluginPanelOutcome(*raw, context, outcome);
-        });
+    runPluginPanel(slot.plugin, slot.panel,
+                   pluginPanelInput(slot.panel, told.engine, told.track, told.duration_ms,
+                                    told.music_folders, pluginSettings(slot.plugin), library,
+                                    action),
+                   context, [raw, context](const PluginOutcome& outcome) {
+                       showPluginPanelOutcome(*raw, context, outcome);
+                   });
 }
 
 void BenchMainWindow::showPluginPanelOutcome(PluginPanelDock& slot, QObject* context,
@@ -417,14 +417,15 @@ void BenchMainWindow::showPluginPanelOutcome(PluginPanelDock& slot, QObject* con
     slot.run = nullptr;
     context->deleteLater();
     if (!outcome.succeeded) {
-        slot.view->showMessage(QStringLiteral("%1 failed: %2").arg(slot.plugin.title, outcome.text));
+        slot.view->showMessage(
+            QStringLiteral("%1 failed: %2").arg(slot.plugin.title, outcome.text));
         return;
     }
     QString problem;
     const auto content = parsePluginPanel(outcome.text.toUtf8(), &problem);
     if (!content) {
-        slot.view->showMessage(QStringLiteral("%1 answered what cannot be shown: %2")
-                                   .arg(slot.plugin.title, problem));
+        slot.view->showMessage(
+            QStringLiteral("%1 answered what cannot be shown: %2").arg(slot.plugin.title, problem));
         return;
     }
     slot.view->showContent(*content, slot.keep_place);

@@ -28,21 +28,20 @@ bool BenchMainWindow::openLink(const QString& link) {
     if (url.host() == QStringLiteral("together") &&
         (url.path() == QStringLiteral("/vote") || url.path() == QStringLiteral("/remove"))) {
         bool number = false;
-        const auto id =
-            QUrlQuery{url}.queryItemValue(QStringLiteral("id")).toULongLong(&number);
+        const auto id = QUrlQuery{url}.queryItemValue(QStringLiteral("id")).toULongLong(&number);
         auto* engine = transport_;
         if (!number || engine == nullptr || !engine->active()) {
             return true;
         }
         const bool voting = url.path() == QStringLiteral("/vote");
-        engine->request(voting ? QStringLiteral("together.vote") : QStringLiteral("together.remove"),
-                        protocol::Json{{"id", id}},
-                        [this, voting](const core::Result<protocol::Json>& done) {
-                            showMessage(done ? (voting ? QStringLiteral("Voted")
-                                                       : QStringLiteral("Suggestion removed"))
-                                             : QString::fromStdString(done.error().message),
-                                        5'000);
-                        });
+        engine->request(
+            voting ? QStringLiteral("together.vote") : QStringLiteral("together.remove"),
+            protocol::Json{{"id", id}}, [this, voting](const core::Result<protocol::Json>& done) {
+                showMessage(
+                    done ? (voting ? QStringLiteral("Voted") : QStringLiteral("Suggestion removed"))
+                         : QString::fromStdString(done.error().message),
+                    5'000);
+            });
         return true;
     }
     if (url.host() != QStringLiteral("together") || url.path() != QStringLiteral("/join")) {

@@ -1097,9 +1097,9 @@ void ArtworkSession::useArchiveImage(const musicbrainz::CoverArtImage& image) {
     cover_fetch_running_ = true;
     const auto role = archive_image_role(image);
     setStatus(QStringLiteral("Fetching the %1 image from %2…")
-                  .arg(archive_type_text(image),
-                       image.source.empty() ? QStringLiteral("the Cover Art Archive")
-                                            : display_utf8(image.source)));
+                  .arg(archive_type_text(image), image.source.empty()
+                                                     ? QStringLiteral("the Cover Art Archive")
+                                                     : display_utf8(image.source)));
     emit changed();
     const auto generation = generation_;
     const auto identity = QStringLiteral("%1-%2-%3")
@@ -1166,11 +1166,10 @@ void ArtworkSession::asCover(std::function<core::Result<QByteArray>()> read,
                              std::function<void(core::Result<QByteArray>)> then) {
     const auto edge = largestCoverEdge(SettingsKeys::artworkPolicy());
     auto* watcher = new QFutureWatcher<core::Result<QByteArray>>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this,
-            [watcher, then = std::move(then)] {
-                watcher->deleteLater();
-                then(watcher->result());
-            });
+    connect(watcher, &QFutureWatcherBase::finished, this, [watcher, then = std::move(then)] {
+        watcher->deleteLater();
+        then(watcher->result());
+    });
     watcher->setFuture(QtConcurrent::run([read = std::move(read), edge] {
         auto bytes = read();
         return bytes ? coverJpeg(*bytes, edge) : bytes;
@@ -1258,34 +1257,33 @@ void ArtworkSession::continueArchiveFront() {
     }
     const auto generation = generation_;
     const QPointer self{this};
-    cover_service_.fetch_listing(*cover_release_id_, [self, generation](
-                                                         core::Result<musicbrainz::CoverArtListing>
-                                                             listing) {
-        if (self.isNull() || self->archive_front_ == nullptr) {
-            return;
-        }
-        if (self->generation_ != generation) {
-            self->finishArchiveFront(false, QStringLiteral("The files changed while fetching"));
-            return;
-        }
-        if (!listing) {
-            self->finishArchiveFront(false, QStringLiteral("The Cover Art Archive could not be "
-                                                           "asked · %1")
-                                                .arg(display_utf8(listing.error().message)));
-            return;
-        }
-        const auto front = musicbrainz::select_front_cover(*listing);
-        if (!front) {
-            self->finishArchiveFront(false, QStringLiteral("No front cover was found for this "
-                                                           "release"));
-            return;
-        }
-        self->useArchiveImage(listing->images[*front]);
-        // Not fetched after all -- busy, not ready: said, not waited for.
-        if (!self->cover_fetch_running_ && self->archive_front_ != nullptr) {
-            self->finishArchiveFront(false, self->status_);
-        }
-    });
+    cover_service_.fetch_listing(
+        *cover_release_id_, [self, generation](core::Result<musicbrainz::CoverArtListing> listing) {
+            if (self.isNull() || self->archive_front_ == nullptr) {
+                return;
+            }
+            if (self->generation_ != generation) {
+                self->finishArchiveFront(false, QStringLiteral("The files changed while fetching"));
+                return;
+            }
+            if (!listing) {
+                self->finishArchiveFront(false, QStringLiteral("The Cover Art Archive could not be "
+                                                               "asked · %1")
+                                                    .arg(display_utf8(listing.error().message)));
+                return;
+            }
+            const auto front = musicbrainz::select_front_cover(*listing);
+            if (!front) {
+                self->finishArchiveFront(false, QStringLiteral("No front cover was found for this "
+                                                               "release"));
+                return;
+            }
+            self->useArchiveImage(listing->images[*front]);
+            // Not fetched after all -- busy, not ready: said, not waited for.
+            if (!self->cover_fetch_running_ && self->archive_front_ != nullptr) {
+                self->finishArchiveFront(false, self->status_);
+            }
+        });
 }
 
 void ArtworkSession::finishArchiveFront(const bool staged, const QString& why) {

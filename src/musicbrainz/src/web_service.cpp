@@ -379,7 +379,7 @@ namespace {
     std::string found{id};
     std::ranges::transform(found, found.begin(), [](const char character) {
         return character >= 'A' && character <= 'F' ? static_cast<char>(character - 'A' + 'a')
-                                                     : character;
+                                                    : character;
     });
     return found;
 }
@@ -557,8 +557,8 @@ core::Result<CoverArtListing> parse_cover_art_listing(const std::string_view bod
 
 core::Result<std::string> build_release_links_url(const std::string_view release_id) {
     if (!is_musicbrainz_id(release_id)) {
-        return std::unexpected(service_error(core::ErrorCode::invalid_argument,
-                                             "a release's links need its id"));
+        return std::unexpected(
+            service_error(core::ErrorCode::invalid_argument, "a release's links need its id"));
     }
     return std::string{web_service_root} + "/release/" + std::string{release_id} +
            "?inc=url-rels+release-groups&fmt=json";
@@ -566,8 +566,8 @@ core::Result<std::string> build_release_links_url(const std::string_view release
 
 core::Result<std::string> build_release_group_links_url(const std::string_view group_id) {
     if (!is_musicbrainz_id(group_id)) {
-        return std::unexpected(service_error(core::ErrorCode::invalid_argument,
-                                             "an album's links need its id"));
+        return std::unexpected(
+            service_error(core::ErrorCode::invalid_argument, "an album's links need its id"));
     }
     return std::string{web_service_root} + "/release-group/" + std::string{group_id} +
            "?inc=url-rels&fmt=json";

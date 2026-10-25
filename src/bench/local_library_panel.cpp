@@ -15,7 +15,6 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
-#include <QSettings>
 #include <QDialogButtonBox>
 #include <QEvent>
 #include <QFile>
@@ -29,6 +28,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QStyle>
 #include <QTimer>
@@ -156,25 +156,28 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
         }
         browser_->request(tree_->selectionModel()->selectedRows(), action);
     });
-    tree_->setItemDelegate(delegate_ = new ui::LibraryTreeDelegate(
-        library_view, libraryActionIcons(this), [](const QModelIndex& index) {
-            const auto value = index.data(entry_role);
-            const auto entry = value.value<persistence::LibraryEntry>();
-            return ui::LibraryTreeDelegate::Presentation{
-                .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
-                .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
-                .root = !index.parent().isValid(),
-                // A view's group is drawn as an artist is: one line and a
-                // count of its albums.
-                .artist = value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
-                                              entry.kind == persistence::LibraryEntryKind::group),
-                .secondary = index.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
-                .count = value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
-                                             entry.kind == persistence::LibraryEntryKind::group)
-                             ? QString::number(entry.albums)
-                             : QString{},
-                .album_rating = value.isValid() ? entry.rating : 0U};
-        }));
+    tree_->setItemDelegate(
+        delegate_ = new ui::LibraryTreeDelegate(
+            library_view, libraryActionIcons(this), [](const QModelIndex& index) {
+                const auto value = index.data(entry_role);
+                const auto entry = value.value<persistence::LibraryEntry>();
+                return ui::LibraryTreeDelegate::Presentation{
+                    .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
+                    .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
+                    .root = !index.parent().isValid(),
+                    // A view's group is drawn as an artist is: one line and a
+                    // count of its albums.
+                    .artist =
+                        value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
+                                            entry.kind == persistence::LibraryEntryKind::group),
+                    .secondary = index.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
+                    .count =
+                        value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
+                                            entry.kind == persistence::LibraryEntryKind::group)
+                            ? QString::number(entry.albums)
+                            : QString{},
+                    .album_rating = value.isValid() ? entry.rating : 0U};
+            }));
     applyAppearance();
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);

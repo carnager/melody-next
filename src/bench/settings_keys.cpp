@@ -35,28 +35,28 @@ std::string SettingsKeys::ratingBackupTag() {
 
 metadata::ArtworkStoragePolicy SettingsKeys::artworkPolicy() {
     const QSettings settings;
-    return {.embed = settings.value(QLatin1String(artwork_embed_key), true).toBool(),
-            .write_folder_image =
-                settings.value(QLatin1String(artwork_folder_image_key), false).toBool(),
-            .folder_image_name =
-                QFile::encodeName(settings
-                                      .value(QLatin1String(artwork_folder_image_name_key),
-                                             QStringLiteral("cover.jpg"))
-                                      .toString())
-                    .toStdString(),
-            .fetch_source = settings
-                                .value(QLatin1String(artwork_fetch_source_key),
-                                       QStringLiteral("coverartarchive+bandcamp"))
-                                .toString()
-                                .toStdString(),
-            .max_embedded_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_embedded_edge_key),
-                                  artwork_default_max_edge)
-                       .toInt())),
-            .max_folder_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_folder_edge_key),
-                                  artwork_default_max_edge)
-                       .toInt()))};
+    return {
+        .embed = settings.value(QLatin1String(artwork_embed_key), true).toBool(),
+        .write_folder_image =
+            settings.value(QLatin1String(artwork_folder_image_key), false).toBool(),
+        .folder_image_name =
+            QFile::encodeName(settings
+                                  .value(QLatin1String(artwork_folder_image_name_key),
+                                         QStringLiteral("cover.jpg"))
+                                  .toString())
+                .toStdString(),
+        .fetch_source = settings
+                            .value(QLatin1String(artwork_fetch_source_key),
+                                   QStringLiteral("coverartarchive+bandcamp"))
+                            .toString()
+                            .toStdString(),
+        .max_embedded_edge = static_cast<std::uint32_t>(std::max(
+            0,
+            settings.value(QLatin1String(artwork_max_embedded_edge_key), artwork_default_max_edge)
+                .toInt())),
+        .max_folder_edge = static_cast<std::uint32_t>(std::max(
+            0, settings.value(QLatin1String(artwork_max_folder_edge_key), artwork_default_max_edge)
+                   .toInt()))};
 }
 
 } // namespace trackknife::bench

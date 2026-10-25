@@ -1498,13 +1498,15 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
 // repeating each other, the files split by their tags -- the second pairs
 // with the disc the first left.
 void BenchMainWindowTest::aSecondAlbumTakesTheDiscTheFirstLeft() {
-    TrackMatchSession first{repeatingDiscs(), twoFiles(180'000),
+    TrackMatchSession first{repeatingDiscs(),
+                            twoFiles(180'000),
                             {QStringLiteral("/a/1.flac"), QStringLiteral("/a/2.flac")},
                             {0U, 1U}};
     QTRY_VERIFY(first.ready());
     QCOMPARE(first.rows()[0].file, QStringLiteral("1.flac"));
     QCOMPARE(first.rows()[1].file, QStringLiteral("2.flac"));
-    TrackMatchSession second{repeatingDiscs(), twoFiles(200'000),
+    TrackMatchSession second{repeatingDiscs(),
+                             twoFiles(200'000),
                              {QStringLiteral("/b/1.flac"), QStringLiteral("/b/2.flac")},
                              {2U, 3U}};
     second.avoid(first.pairedTracks());

@@ -183,7 +183,8 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
         return std::unexpected(apply_error(core::ErrorCode::invalid_argument,
                                            "Cover review requires 1–100000 intents"));
     const auto& name = policy.folder_image_name;
-    if ((!policy.embed && !policy.write_folder_image) || !metadata::known_artwork_fetch_source(policy.fetch_source) ||
+    if ((!policy.embed && !policy.write_folder_image) ||
+        !metadata::known_artwork_fetch_source(policy.fetch_source) ||
         (policy.write_folder_image && (name.empty() || name == "." || name == ".." ||
                                        name.find_first_of("/\\") != std::string::npos ||
                                        name.find('\0') != std::string::npos))) {

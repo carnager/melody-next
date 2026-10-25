@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "trackknife/core/posix.hpp"
 
-#include "trackknife/engine/server.hpp"
 #include "trackknife/engine/job_registry.hpp"
+#include "trackknife/engine/server.hpp"
 
 #include "trackknife/engine/token.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -832,8 +832,8 @@ void Server::serve(Connection& connection_ref) {
             // both are dropped rather than escalated.
         }
         pending.erase(0, start);
-        if (pending.size() > (connection->authenticated.load() ? maximum_admitted_line_bytes
-                                                                : maximum_line_bytes)) {
+        if (pending.size() >
+            (connection->authenticated.load() ? maximum_admitted_line_bytes : maximum_line_bytes)) {
             if (!connection->authenticated.load()) {
                 protocol::Event rejected{.name = "protocol.rejected",
                                          .data = protocol::Json::object()};
@@ -954,7 +954,7 @@ void Server::publish_addressed(const protocol::Event& everyone, const std::uint6
             continue;
         }
         lost = !(connection->id == recipient ? connection->write_line(recipient_line)
-                                              : connection->write_line(everyone_line, true)) ||
+                                             : connection->write_line(everyone_line, true)) ||
                lost;
     }
     if (lost) {

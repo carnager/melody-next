@@ -8,20 +8,20 @@
 #include "trackknife/metadata/mp3_writer.hpp"
 
 #include <algorithm>
-#include <iterator>
-#include <cctype>
-#include <map>
-#include <fstream>
-#include <filesystem>
-#include <unistd.h>
-#include <set>
 #include <atomic>
+#include <cctype>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <set>
 #include <span>
 #include <thread>
+#include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -281,9 +281,9 @@ namespace {
 
 // The rewritten sheet written as the prepared copy a publication puts in place.
 [[nodiscard]] FilePublicationDestinationArtifactPreparer sheet_preparer(std::string sheet) {
-    return [sheet = std::move(sheet)](const std::string& prepared_raw_path,
-                                      const core::CancellationToken&)
-               -> core::Result<core::LocalSourceRevision> {
+    return [sheet = std::move(sheet)](
+               const std::string& prepared_raw_path,
+               const core::CancellationToken&) -> core::Result<core::LocalSourceRevision> {
         {
             std::ofstream out{prepared_raw_path, std::ios::binary | std::ios::trunc};
             out.write(sheet.data(), static_cast<std::streamsize>(sheet.size()));
@@ -604,10 +604,10 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
         }
         moving_metadata[index] = std::move(stripped);
         // Nothing left for the file itself: only moved.
-        metadata_sources[index] = moving_metadata[index]->changes.empty() &&
-                                          !moving_metadata[index]->artwork
-                                      ? nullptr
-                                      : &*moving_metadata[index];
+        metadata_sources[index] =
+            moving_metadata[index]->changes.empty() && !moving_metadata[index]->artwork
+                ? nullptr
+                : &*moving_metadata[index];
     }
 
     FilePublicationApplyResult result;
@@ -773,8 +773,8 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
                 } else {
                     outcome = std::unexpected(std::move(committed.error()));
                 }
-            } else if (auto sheet = outcome && refreshed ? rewritten_cue(preflight, index)
-                                                         : std::nullopt;
+            } else if (auto sheet =
+                           outcome && refreshed ? rewritten_cue(preflight, index) : std::nullopt;
                        sheet) {
                 auto committed = commit_destination_artifact_publication(
                     *refreshed, 0U, synchronized_file_journal, sheet_preparer(std::move(*sheet)),
@@ -866,10 +866,10 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
         if (written) {
             source_result.folder_image_commit = std::move(*written);
         } else {
-            source_result.issue = apply_error(
-                written.error().code,
-                "Moved; its folder cover was not saved: " + written.error().message,
-                source_result.source_raw_path, source_result.target_raw_path);
+            source_result.issue =
+                apply_error(written.error().code,
+                            "Moved; its folder cover was not saved: " + written.error().message,
+                            source_result.source_raw_path, source_result.target_raw_path);
             source_result.state = FilePublicationApplySourceState::failed;
         }
     }

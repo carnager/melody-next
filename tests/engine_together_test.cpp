@@ -182,6 +182,7 @@ class TogetherServer final {
     TogetherServer(const std::filesystem::path& binary, const std::filesystem::path& directory) {
         // A free port: one the system gives, let go of for the server to take.
         const int probe = core::socket_cloexec(AF_INET, SOCK_STREAM, 0);
+        require(probe >= 0, "a socket to find a port with");
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -207,6 +208,9 @@ class TogetherServer final {
         require(eventually(
                     [this] {
                         const int attempt = core::socket_cloexec(AF_INET, SOCK_STREAM, 0);
+                        if (attempt < 0) {
+                            return false;
+                        }
                         sockaddr_in to{};
                         to.sin_family = AF_INET;
                         to.sin_port = htons(port_);
@@ -262,8 +266,8 @@ struct Engine final {
         trackknife::persistence::LibraryScanProgress progress;
         require(catalogue.scan({}, progress).has_value(), "and scanned");
         require(player->set_output(&audition).has_value(), "the player plays on the test's output");
-        together = std::make_unique<engine::Together>(*player, catalogue, nullptr,
-                                                      directory / "together");
+        together =
+            std::make_unique<engine::Together>(*player, catalogue, nullptr, directory / "together");
     }
     [[nodiscard]] std::int64_t position() const { return player->state().position_ms; }
 };
@@ -301,10 +305,10 @@ void write_wave(const std::filesystem::path& path) {
 }
 
 void invites_and_queries() {
-    const auto invite = engine::Together::parse_invite(
-        "https://together.example.org/rooms/abc123#key456\n");
-    require(invite && invite->server == "https://together.example.org" && invite->room == "abc123" &&
-                invite->key == "key456",
+    const auto invite =
+        engine::Together::parse_invite("https://together.example.org/rooms/abc123#key456\n");
+    require(invite && invite->server == "https://together.example.org" &&
+                invite->room == "abc123" && invite->key == "key456",
             "an invite is the server, the room and the key");
     require(engine::Together::invite_text(*invite) ==
                 "https://together.example.org/rooms/abc123#key456",
@@ -316,9 +320,10 @@ void invites_and_queries() {
         {"musicbrainztrackid", "id-1"}, {"title", "Say \"Hi\""}, {"artist", "A"}, {"album", "B"}});
     require(queries.size() == 3U, "by id, by name and album, by name");
     require(queries[0] == R"(musicbrainztrackid IS "id-1")", "the id first");
-    require(queries[1] ==
-                R"(title IS "Say ""Hi""" AND (artist IS "A" OR albumartist IS "A") AND album IS "B")",
-            "then what it is called, quotes doubled");
+    require(
+        queries[1] ==
+            R"(title IS "Say ""Hi""" AND (artist IS "A" OR albumartist IS "A") AND album IS "B")",
+        "then what it is called, quotes doubled");
 }
 
 } // namespace
@@ -368,8 +373,9 @@ int main(int argc, char** argv) {
             "where the host is");
     require(friend_.together->status().track.find("Metadata Fixture") != std::string::npos,
             "and knows what plays");
-    require(eventually([&] { return host.together->status().listeners ==
-                                    std::vector<std::string>{"Ana"}; }),
+    require(eventually([&] {
+                return host.together->status().listeners == std::vector<std::string>{"Ana"};
+            }),
             "the host sees her listening");
 
     // A seek, followed.
@@ -396,7 +402,11 @@ int main(int argc, char** argv) {
     // fetched by the friend's, played where the host is -- and its cover, the
     // folder's, sent beside it for the room's web page.
     {
-        static constexpr char png[] = "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0d\x49\x44\x41\x54\x78\xda\x63\xfc\xcf\xc0\x50\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c\x21\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+        static constexpr char png[] =
+            "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00"
+            "\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0d\x49\x44\x41\x54\x78"
+            "\xda\x63\xfc\xcf\xc0\x50\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c\x21\x00\x00\x00\x00\x49"
+            "\x45\x4e\x44\xae\x42\x60\x82";
         std::ofstream cover{directory / "host/music/Other/cover.png", std::ios::binary};
         cover.write(png, sizeof png - 1);
     }
@@ -470,7 +480,8 @@ int main(int argc, char** argv) {
     host.player->replace_queue({own});
     require(host.player->play_entry(own.entry_id).has_value(), "the host's own track begins");
     std::this_thread::sleep_for(4s);
-    require(host.player->request_entries().empty() && host.together->status().suggestions.size() == 2U,
+    require(host.player->request_entries().empty() &&
+                host.together->status().suggestions.size() == 2U,
             "nothing taken while it plays: the votes still count");
     require(host.player->seek_ms(600'000 - 15'000).has_value(), "the host's track nears its end");
     require(eventually([&] { return !host.player->request_entries().empty(); }, 30s),
@@ -497,8 +508,8 @@ int main(int argc, char** argv) {
     require(eventually([&] {
                 // Hers, two seconds long, are each taken as the last ends.
                 const auto room = friend_.together->status().suggestions;
-                return std::ranges::any_of(room,
-                                           [](const auto& each) { return each.name == "the host"; });
+                return std::ranges::any_of(
+                    room, [](const auto& each) { return each.name == "the host"; });
             }),
             "and she sees it among hers");
     // As a suggestion ends -- anyone's, not only the host's own tracks -- the
@@ -514,9 +525,8 @@ int main(int argc, char** argv) {
             "and the host sees it");
     require(friend_.together->join(*invite, "Bo").has_value(), "a friend comes back");
     host.together->leave();
-    require(eventually([&] {
-                return friend_.together->status().message == "the host closed the room";
-            }),
+    require(eventually(
+                [&] { return friend_.together->status().message == "the host closed the room"; }),
             "and is told when the host closes the room");
     friend_.together->leave();
 

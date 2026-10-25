@@ -4,6 +4,7 @@
 
 #include "trackknife/metadata/ratings.hpp"
 
+#include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -31,8 +32,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <deque>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -297,7 +298,7 @@ std::string unescape_mount_field(const std::string_view field) {
 // The mounts this process sees, from /proc/self/mountinfo -- or the table
 // MELODY_MOUNTINFO names, for tests.
 std::vector<Mount> read_mounts() {
-    const char* named = std::getenv("MELODY_MOUNTINFO");
+    const char* named = core::environment_variable("MELODY_MOUNTINFO");
     std::ifstream stream{named != nullptr && *named != '\0' ? named : "/proc/self/mountinfo"};
     std::vector<Mount> mounts;
     std::string line;
@@ -319,8 +320,7 @@ std::vector<Mount> read_mounts() {
 }
 
 bool at_or_below(const std::string& path, const std::string& point) {
-    return point == "/" ? path.starts_with('/')
-                        : path == point || path.starts_with(point + '/');
+    return point == "/" ? path.starts_with('/') : path == point || path.starts_with(point + '/');
 }
 
 // The mount a path is on: the deepest mount point at or above it, and of
@@ -3041,9 +3041,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             }
         }
         // A folder inside another one walked is walked with it.
-        std::ranges::sort(walks, [](const Walk& left, const Walk& right) {
-            return left.folder < right.folder;
-        });
+        std::ranges::sort(
+            walks, [](const Walk& left, const Walk& right) { return left.folder < right.folder; });
         std::vector<Walk> distinct;
         for (auto& walk : walks) {
             if (std::ranges::none_of(distinct, [&walk](const Walk& kept) {
@@ -3066,8 +3065,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             // A folder below the root: what is not seen in it is gone, and
             // the rest of the root is left as it was.
             const bool whole = folder == root.raw_path;
-            const auto [from, to] = whole ? std::pair<std::string, std::string>{}
-                                          : subtree_range(folder);
+            const auto [from, to] =
+                whole ? std::pair<std::string, std::string>{} : subtree_range(folder);
             std::error_code error;
             std::filesystem::recursive_directory_iterator iterator{std::filesystem::path{folder},
                                                                    error};

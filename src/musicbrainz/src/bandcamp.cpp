@@ -43,8 +43,8 @@ namespace {
 bool is_bandcamp_album_page(const std::string_view url) {
     const auto host = https_host(url);
     constexpr std::string_view domain = ".bandcamp.com";
-    if (!host.ends_with(domain) || !plain_label(std::string_view{host}.substr(
-                                       0, host.size() - domain.size()))) {
+    if (!host.ends_with(domain) ||
+        !plain_label(std::string_view{host}.substr(0, host.size() - domain.size()))) {
         return false;
     }
     const auto path = path_of(url);

@@ -1076,8 +1076,8 @@ void MetadataPropertiesDialog::startIdentify() {
     if (property("trackknife-identify-hold-lookup").toBool()) {
         service.fetch = [](const QString&, std::function<void(core::Result<QByteArray>)>) {};
     }
-    auto* dialog = createMusicBrainzIdentifyDialog(*session_, std::move(service), std::move(albums),
-                                                   this);
+    auto* dialog =
+        createMusicBrainzIdentifyDialog(*session_, std::move(service), std::move(albums), this);
     identify_dialog_ = dialog;
     session_->setIdentifyDialogOpen(true);
     connect(dialog, &QDialog::finished, this, [this, dialog] {

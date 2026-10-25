@@ -374,8 +374,7 @@ void PluginsTest::theExamplePluginReads() {
                             "MusicBrainz": "https://musicbrainz.org/artist/%1"}})json")
                   .arg(mbid)
                   .toUtf8());
-    writeFile(kept + QStringLiteral("/albums2-") + mbid,
-              QStringLiteral(R"json([
+    writeFile(kept + QStringLiteral("/albums2-") + mbid, QStringLiteral(R"json([
                   {"id": "%1", "title": "The Legacy", "date": "1987-04-21", "kind": "Album",
                    "url": "https://musicbrainz.org/release-group/%1"},
                   {"id": "rg-souls", "title": "Souls of Black", "date": "1990-10-01",
@@ -384,8 +383,8 @@ void PluginsTest::theExamplePluginReads() {
                    "url": "https://musicbrainz.org/release-group/rg-trial", "master": "777"},
                   {"id": "rg-new", "title": "The New Order", "date": "1988-05-05",
                    "kind": "Album", "url": "https://musicbrainz.org/release-group/rg-new"}])json")
-                  .arg(group)
-                  .toUtf8());
+                                                             .arg(group)
+                                                             .toUtf8());
     qputenv("XDG_CACHE_HOME", QFile::encodeName(cache.path()));
     // Anything asked of the network fails: what is kept answers.
     qputenv("http_proxy", "http://127.0.0.1:9");
@@ -491,30 +490,30 @@ void PluginsTest::theExamplePluginReads() {
     // A cover kept for one of them, by its address's hash.
     const auto new_order_cover =
         kept + QStringLiteral("/covers/") +
-        QString::fromLatin1(QCryptographicHash::hash(
-                                "https://coverartarchive.org/release-group/rg-new/front-250",
-                                QCryptographicHash::Sha1)
-                                .toHex()) +
+        QString::fromLatin1(
+            QCryptographicHash::hash("https://coverartarchive.org/release-group/rg-new/front-250",
+                                     QCryptographicHash::Sha1)
+                .toHex()) +
         QStringLiteral(".jpg");
     QVERIFY(QDir{}.mkpath(kept + QStringLiteral("/covers")));
     writeFile(new_order_cover, "a cover");
-    const auto missing = run(*about_panel,
-                             PluginAction{.id = QStringLiteral("about"),
-                                          .label = QStringLiteral("About"),
-                                          .scope = PluginAction::Scope::tracks,
-                                          .run = about_panel->panels.front().run,
-                                          .result = PluginAction::Result::none,
-                                          .timeout_seconds = 30},
-                             pluginPanelInput(about_panel->panels.front(), PluginEngine{},
-                                              PluginTrack{.path = "/srv/music/Testament/01.flac",
-                                                          .title = "Over the Wall",
-                                                          .artist = "Testament",
-                                                          .album = "Legacy (Remaster)",
-                                                          .album_artist = "Testament",
-                                                          .date = "1987",
-                                                          .track_number = "1"},
-                                              std::nullopt, {}, pluginSettings(*about_panel),
-                                              library));
+    const auto missing =
+        run(*about_panel,
+            PluginAction{.id = QStringLiteral("about"),
+                         .label = QStringLiteral("About"),
+                         .scope = PluginAction::Scope::tracks,
+                         .run = about_panel->panels.front().run,
+                         .result = PluginAction::Result::none,
+                         .timeout_seconds = 30},
+            pluginPanelInput(about_panel->panels.front(), PluginEngine{},
+                             PluginTrack{.path = "/srv/music/Testament/01.flac",
+                                         .title = "Over the Wall",
+                                         .artist = "Testament",
+                                         .album = "Legacy (Remaster)",
+                                         .album_artist = "Testament",
+                                         .date = "1987",
+                                         .track_number = "1"},
+                             std::nullopt, {}, pluginSettings(*about_panel), library));
     QVERIFY2(missing.succeeded, qPrintable(missing.text));
     const auto missing_drawn = parsePluginPanel(missing.text.toUtf8(), &problem);
     QVERIFY2(missing_drawn.has_value(), qPrintable(problem));
@@ -556,8 +555,7 @@ void PluginsTest::theExamplePluginReads() {
                                             .album_artist = "Testament",
                                             .date = "1987",
                                             .track_number = "1"},
-                                std::nullopt, {}, pluginSettings(*about_panel), library,
-                                std::move(action));
+                                std::nullopt, {}, pluginSettings(*about_panel), library, action);
     };
     const auto shown_after = [&](std::optional<PluginPanelAction> action) {
         const auto filtered = run(*about_panel,
@@ -588,17 +586,16 @@ void PluginsTest::theExamplePluginReads() {
         }
         return shown;
     };
-    const auto ep = PluginPanelAction{.id = QStringLiteral("filter"),
-                                      .value = QStringLiteral("ep"),
-                                      .inputs = {}};
+    const auto ep = PluginPanelAction{
+        .id = QStringLiteral("filter"), .value = QStringLiteral("ep"), .inputs = {}};
     QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:off"),
                                            QStringLiteral("The New Order")}));
     QCOMPARE(shown_after(std::nullopt),
              (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:off"),
                           QStringLiteral("The New Order")}));
-    QCOMPARE(shown_after(ep), (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:on"),
-                                           QStringLiteral("Trial by Fire"),
-                                           QStringLiteral("The New Order")}));
+    QCOMPARE(shown_after(ep),
+             (QStringList{QStringLiteral("album:on"), QStringLiteral("ep:on"),
+                          QStringLiteral("Trial by Fire"), QStringLiteral("The New Order")}));
     // The Cover Art Archive not answering -- archive.org, at times -- a
     // cover comes, with a token, from the Discogs master MusicBrainz links
     // the album to; and the archive is not waited for again within the hour.
@@ -637,13 +634,13 @@ void PluginsTest::theExamplePluginReads() {
         QVERIFY(trial_of(*drawn_first)->cover.isEmpty());
         QCOMPARE(drawn_first->again_after, std::optional<int>{3});
         // Fetched meanwhile by a process of its own, outliving the run.
-        const auto fetched = kept + QStringLiteral("/covers/") +
-                             QString::fromLatin1(
-                                 QCryptographicHash::hash(
-                                     QStringLiteral("file://%1").arg(thumb).toUtf8(),
-                                     QCryptographicHash::Sha1)
-                                     .toHex()) +
-                             QStringLiteral(".jpg");
+        const auto fetched =
+            kept + QStringLiteral("/covers/") +
+            QString::fromLatin1(
+                QCryptographicHash::hash(QStringLiteral("file://%1").arg(thumb).toUtf8(),
+                                         QCryptographicHash::Sha1)
+                    .toHex()) +
+            QStringLiteral(".jpg");
         QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(fetched), 15'000);
         const auto with_discogs = ask();
         QVERIFY2(with_discogs.succeeded, qPrintable(with_discogs.text));
@@ -657,13 +654,12 @@ void PluginsTest::theExamplePluginReads() {
         QCOMPARE(shown.readAll(), QByteArray{"a thumbnail"});
         // The archive's address tried, and left for the hour.
         const auto archive = QString::fromLatin1(
-            QCryptographicHash::hash(
-                "https://coverartarchive.org/release-group/rg-trial/front-250",
-                QCryptographicHash::Sha1)
+            QCryptographicHash::hash("https://coverartarchive.org/release-group/rg-trial/front-250",
+                                     QCryptographicHash::Sha1)
                 .toHex());
-        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(kept + QStringLiteral("/covers/") + archive +
-                                               QStringLiteral(".tried")),
-                                 15'000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            QFile::exists(kept + QStringLiteral("/covers/") + archive + QStringLiteral(".tried")),
+            15'000);
     }
     // Only the EP missing: its badge all the same, to hide it and show it
     // again.
@@ -748,11 +744,11 @@ void PluginsTest::theExamplePluginReads() {
             }
             return shown;
         };
-        QCOMPARE(with_dropwatch(QStringLiteral("http://127.0.0.1:%1/").arg(dropwatch.serverPort())),
-                 (QStringList{
-                     QStringLiteral("First Strike https://www.discogs.com/master/42"),
-                     QStringLiteral(
-                         "Practice What You Preach https://musicbrainz.org/release-group/rg-practice")}));
+        QCOMPARE(
+            with_dropwatch(QStringLiteral("http://127.0.0.1:%1/").arg(dropwatch.serverPort())),
+            (QStringList{QStringLiteral("First Strike https://www.discogs.com/master/42"),
+                         QStringLiteral("Practice What You Preach "
+                                        "https://musicbrainz.org/release-group/rg-practice")}));
         QCOMPARE(asked, (QStringList{QStringLiteral("/api/artists"),
                                      QStringLiteral("/api/artists/%1/releases").arg(mbid)}));
         // Not reached: said, and MusicBrainz's list instead.
@@ -760,15 +756,15 @@ void PluginsTest::theExamplePluginReads() {
         QVERIFY(closed.listen(QHostAddress::LocalHost));
         const auto port = closed.serverPort();
         closed.close();
-        QCOMPARE(with_dropwatch(QStringLiteral("http://127.0.0.1:%1").arg(port)),
-                 (QStringList{QStringLiteral("dropwatch at http"),
-                              QStringLiteral(
-                                  "Trial by Fire https://musicbrainz.org/release-group/rg-trial")}));
+        QCOMPARE(
+            with_dropwatch(QStringLiteral("http://127.0.0.1:%1").arg(port)),
+            (QStringList{
+                QStringLiteral("dropwatch at http"),
+                QStringLiteral("Trial by Fire https://musicbrainz.org/release-group/rg-trial")}));
         qunsetenv("no_proxy");
     }
     qunsetenv("http_proxy");
     qunsetenv("https_proxy");
-
 }
 
 // ADR-0301: a panel saying so is told the playing artist's albums in the
@@ -798,9 +794,9 @@ void PluginsTest::panelsAreToldTheLibrary() {
                                R"({"id": "a", "label": "A", "run": ["x"],
                                    "library": "artist-albums"})"}) {
         problem.clear();
-        QVERIFY2(!parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"),
-                                      &problem),
-                 broken);
+        QVERIFY2(
+            !parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"), &problem),
+            broken);
         QVERIFY(!problem.isEmpty());
     }
 
@@ -813,26 +809,36 @@ void PluginsTest::panelsAreToldTheLibrary() {
                                    R"(AND artist IS "Guns N' ""Roses""") OR )"
                                    R"(musicbrainzalbumartistid IS "id-1")"));
     QVERIFY2(query::compile_tkq(query.toStdString()).has_value(), qPrintable(query));
-    QCOMPARE(pluginArtistQuery({{"artist", {"Slash"}}}),
-             QStringLiteral(R"(albumartist IS "Slash" OR (albumartist MISSING AND artist IS "Slash"))"));
+    QCOMPARE(
+        pluginArtistQuery({{"artist", {"Slash"}}}),
+        QStringLiteral(R"(albumartist IS "Slash" OR (albumartist MISSING AND artist IS "Slash"))"));
     QVERIFY(pluginArtistQuery({{"title", {"Untitled"}}}).isEmpty());
 
     // One album for each release group, else album and album artist alike,
     // oldest first, with what every track of it shares.
-    const auto albums = pluginArtistAlbums(
-        {{.path = "/srv/music/A/Later/01.flac",
-          .tags = {{"album", {"Later"}}, {"albumartist", {"A"}}, {"date", {"2001"}},
-                   {"title", {"One"}}}},
-         {.path = "/srv/music/A/First/CD1/01.flac",
-          .tags = {{"album", {"First"}}, {"albumartist", {"A"}}, {"date", {"1990"}},
-                   {"musicbrainzreleasegroupid", {"rg-1"}}, {"title", {"Two"}}}},
-         {.path = "/srv/music/A/First/CD2/01.flac",
-          .tags = {{"album", {"First (Disc 2)"}}, {"albumartist", {"A"}}, {"date", {"1990"}},
-                   {"musicbrainzreleasegroupid", {"rg-1"}}, {"title", {"Three"}}}},
-         {.path = "/srv/music/A/Later/02.flac",
-          .tags = {{"album", {"later"}}, {"artist", {"a"}}, {"date", {"2001"}},
-                   {"title", {"Four"}}}}},
-        {"/srv/music"});
+    const auto albums = pluginArtistAlbums({{.path = "/srv/music/A/Later/01.flac",
+                                             .tags = {{"album", {"Later"}},
+                                                      {"albumartist", {"A"}},
+                                                      {"date", {"2001"}},
+                                                      {"title", {"One"}}}},
+                                            {.path = "/srv/music/A/First/CD1/01.flac",
+                                             .tags = {{"album", {"First"}},
+                                                      {"albumartist", {"A"}},
+                                                      {"date", {"1990"}},
+                                                      {"musicbrainzreleasegroupid", {"rg-1"}},
+                                                      {"title", {"Two"}}}},
+                                            {.path = "/srv/music/A/First/CD2/01.flac",
+                                             .tags = {{"album", {"First (Disc 2)"}},
+                                                      {"albumartist", {"A"}},
+                                                      {"date", {"1990"}},
+                                                      {"musicbrainzreleasegroupid", {"rg-1"}},
+                                                      {"title", {"Three"}}}},
+                                            {.path = "/srv/music/A/Later/02.flac",
+                                             .tags = {{"album", {"later"}},
+                                                      {"artist", {"a"}},
+                                                      {"date", {"2001"}},
+                                                      {"title", {"Four"}}}}},
+                                           {"/srv/music"});
     QCOMPARE(albums.size(), 2);
     const auto first = albums.at(0).toObject();
     QCOMPARE(first.value(QStringLiteral("album")).toString(), QStringLiteral("First"));
@@ -858,10 +864,10 @@ void PluginsTest::panelsAreToldTheLibrary() {
                               .album_artist = {},
                               .date = {},
                               .track_number = {}};
-    const auto told = QJsonDocument::fromJson(pluginPanelInput(asking->panels.front(),
-                                                               PluginEngine{}, playing,
-                                                               std::nullopt, {}, {}, library))
-                          .object();
+    const auto told =
+        QJsonDocument::fromJson(pluginPanelInput(asking->panels.front(), PluginEngine{}, playing,
+                                                 std::nullopt, {}, {}, library))
+            .object();
     QCOMPARE(told.value(QStringLiteral("playing"))
                  .toObject()
                  .value(QStringLiteral("tags"))
@@ -872,10 +878,10 @@ void PluginsTest::panelsAreToldTheLibrary() {
                  .toString(),
              QStringLiteral("t-1"));
     QVERIFY(told.value(QStringLiteral("artist_albums")).isArray());
-    const auto untold = QJsonDocument::fromJson(pluginPanelInput(plain->panels.front(),
-                                                                 PluginEngine{}, playing,
-                                                                 std::nullopt, {}, {}, library))
-                            .object();
+    const auto untold =
+        QJsonDocument::fromJson(pluginPanelInput(plain->panels.front(), PluginEngine{}, playing,
+                                                 std::nullopt, {}, {}, library))
+            .object();
     QVERIFY(!untold.contains(QStringLiteral("artist_albums")));
 }
 
@@ -898,12 +904,15 @@ void PluginsTest::panelsHaveControls() {
     const auto& parts = panel->parts;
     QCOMPARE(parts.size(), std::size_t{6U});
     QVERIFY(parts[0].kind == Kind::input && parts[0].key == QStringLiteral("room") &&
-            parts[0].value == QStringLiteral("friday") && parts[0].action == QStringLiteral("start"));
+            parts[0].value == QStringLiteral("friday") &&
+            parts[0].action == QStringLiteral("start"));
     QVERIFY(parts[1].kind == Kind::input && parts[1].secret);
     QVERIFY(parts[2].kind == Kind::toggle && parts[2].on &&
             parts[2].detail == QStringLiteral("Friends vote"));
-    QVERIFY(parts[3].kind == Kind::button && parts[3].on && parts[3].action == QStringLiteral("start"));
-    QVERIFY(parts[4].kind == Kind::button && !parts[4].on && parts[4].value == QStringLiteral("now"));
+    QVERIFY(parts[3].kind == Kind::button && parts[3].on &&
+            parts[3].action == QStringLiteral("start"));
+    QVERIFY(parts[4].kind == Kind::button && !parts[4].on &&
+            parts[4].value == QStringLiteral("now"));
     QCOMPARE(parts[5].buttons.size(), std::size_t{1U});
     QVERIFY(parts[5].buttons[0].on && parts[5].buttons[0].value == QStringLiteral("7"));
     for (const auto* broken :
@@ -919,19 +928,22 @@ void PluginsTest::panelsHaveControls() {
             "always": true}]})",
         QStringLiteral("/p/c"), &problem);
     QVERIFY2(manifest.has_value() && manifest->panels.front().always, qPrintable(problem));
-    const auto told = QJsonDocument::fromJson(
-                          pluginPanelInput(manifest->panels.front(), PluginEngine{}, std::nullopt,
-                                           std::nullopt, {}, {}, {},
-                                           PluginPanelAction{.id = QStringLiteral("vote"),
-                                                             .value = QStringLiteral("7"),
-                                                             .inputs = QJsonObject{{QStringLiteral("room"),
-                                                                                    QStringLiteral("x")}}}))
-                          .object();
+    const auto told =
+        QJsonDocument::fromJson(
+            pluginPanelInput(
+                manifest->panels.front(), PluginEngine{}, std::nullopt, std::nullopt, {}, {}, {},
+                PluginPanelAction{.id = QStringLiteral("vote"),
+                                  .value = QStringLiteral("7"),
+                                  .inputs =
+                                      QJsonObject{{QStringLiteral("room"), QStringLiteral("x")}}}))
+            .object();
     QVERIFY(told.value(QStringLiteral("playing")).isNull());
-    QCOMPARE(told.value(QStringLiteral("action")).toObject().value(QStringLiteral("value")).toString(),
-             QStringLiteral("7"));
-    QCOMPARE(told.value(QStringLiteral("inputs")).toObject().value(QStringLiteral("room")).toString(),
-             QStringLiteral("x"));
+    QCOMPARE(
+        told.value(QStringLiteral("action")).toObject().value(QStringLiteral("value")).toString(),
+        QStringLiteral("7"));
+    QCOMPARE(
+        told.value(QStringLiteral("inputs")).toObject().value(QStringLiteral("room")).toString(),
+        QStringLiteral("x"));
 }
 
 // ADR-0304: parts drawn as Melody draws its own -- a track's row, a status
@@ -980,17 +992,18 @@ void PluginsTest::panelsHaveMelodysOwnParts() {
     QVERIFY(parts[6].role == Role::quiet && !parts[6].on);
     // ADR-0303's `primary: true` is the primary role.
     QVERIFY(parts[7].role == Role::primary);
-    for (const auto* broken :
-         {R"({"parts": [{"track": "x", "cover": "a.jpg"}]})",
-          R"({"parts": [{"track": "x", "colour": "red"}]})",
-          R"({"parts": [{"button": "x", "action": "y", "role": "loud"}]})",
-          R"({"parts": [{"track": "x", "buttons": [{"text": "y", "action": "z", "role": "big"}]}]})",
-          R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})",
-          R"({"parts": [{"filters": "Albums"}]})",
-          R"({"parts": [{"filters": [{"text": "Albums"}]}]})",
-          R"({"parts": [{"status": "x", "buttons": [{"text": "y", "url": "file:///etc"}]}]})",
-          R"({"parts": [{"status": "x", "buttons": [{"text": "y"}]}]})",
-          R"({"parts": [{"status": "x", "buttons": [{"text": "y", "action": "a",
+    for (
+        const auto* broken :
+        {R"({"parts": [{"track": "x", "cover": "a.jpg"}]})",
+         R"({"parts": [{"track": "x", "colour": "red"}]})",
+         R"({"parts": [{"button": "x", "action": "y", "role": "loud"}]})",
+         R"({"parts": [{"track": "x", "buttons": [{"text": "y", "action": "z", "role": "big"}]}]})",
+         R"({"parts": [{"people": "Ana"}]})", R"({"parts": [{"people": [1]}]})",
+         R"({"parts": [{"filters": "Albums"}]})",
+         R"({"parts": [{"filters": [{"text": "Albums"}]}]})",
+         R"({"parts": [{"status": "x", "buttons": [{"text": "y", "url": "file:///etc"}]}]})",
+         R"({"parts": [{"status": "x", "buttons": [{"text": "y"}]}]})",
+         R"({"parts": [{"status": "x", "buttons": [{"text": "y", "action": "a",
                                                        "url": "https://x"}]}]})"}) {
         QVERIFY2(!parsePluginPanel(broken, &problem), broken);
     }
@@ -1065,22 +1078,23 @@ void PluginsTest::settingsAreReadKeptAndHandedOn() {
     QCOMPARE(plugin->settings[3].choices, (QStringList{QStringLiteral("a"), QStringLiteral("b")}));
 
     // Each kept to its shape, or refused saying why.
-    for (const auto* broken :
-         {R"({"key": "URL", "label": "x"})", R"({"key": "a", "label": ""})",
-          R"({"key": "a", "label": "x"}, {"key": "a", "label": "y"})",
-          R"({"key": "a", "label": "x", "kind": "secret", "default": "s"})",
-          R"({"key": "a", "label": "x", "kind": "toggle", "default": "yes"})",
-          R"({"key": "a", "label": "x", "kind": "choice"})",
-          R"({"key": "a", "label": "x", "kind": "choice", "choices": ["b"], "default": "c"})",
-          R"({"key": "a", "label": "x", "choices": ["b"]})",
-          R"({"key": "a", "label": "x", "kind": "colour"})",
-          R"({"key": "a", "label": "x", "hidden": true})",
-          R"({"key": "a", "label": "x", "requires": "b"})",
-          R"({"key": "b", "label": "x"}, {"key": "a", "label": "x", "requires": "b"})",
-          R"({"key": "a", "label": "x", "requires": "b"}, {"key": "b", "label": "x", "kind": "toggle"})",
-          R"({"key": "a", "label": "x", "kind": "toggle", "requires": "a"})",
-          R"({"key": "a", "label": "x", "link": "ftp://example.org"})",
-          R"({"key": "a", "label": "x", "link": "example.org"})", R"("a")"}) {
+    for (
+        const auto* broken :
+        {R"({"key": "URL", "label": "x"})", R"({"key": "a", "label": ""})",
+         R"({"key": "a", "label": "x"}, {"key": "a", "label": "y"})",
+         R"({"key": "a", "label": "x", "kind": "secret", "default": "s"})",
+         R"({"key": "a", "label": "x", "kind": "toggle", "default": "yes"})",
+         R"({"key": "a", "label": "x", "kind": "choice"})",
+         R"({"key": "a", "label": "x", "kind": "choice", "choices": ["b"], "default": "c"})",
+         R"({"key": "a", "label": "x", "choices": ["b"]})",
+         R"({"key": "a", "label": "x", "kind": "colour"})",
+         R"({"key": "a", "label": "x", "hidden": true})",
+         R"({"key": "a", "label": "x", "requires": "b"})",
+         R"({"key": "b", "label": "x"}, {"key": "a", "label": "x", "requires": "b"})",
+         R"({"key": "a", "label": "x", "requires": "b"}, {"key": "b", "label": "x", "kind": "toggle"})",
+         R"({"key": "a", "label": "x", "kind": "toggle", "requires": "a"})",
+         R"({"key": "a", "label": "x", "link": "ftp://example.org"})",
+         R"({"key": "a", "label": "x", "link": "example.org"})", R"("a")"}) {
         problem.clear();
         QVERIFY2(
             !parsePluginManifest(with(QString::fromUtf8(broken)), QStringLiteral("/p"), &problem),
@@ -1207,10 +1221,9 @@ void PluginsTest::panelsAreReadAndTheirAnswersToo() {
         QVERIFY2(again.has_value(), qPrintable(why));
         QCOMPARE(again->again_after, std::optional<int>{3});
         QVERIFY(!parsePluginPanel(R"({"parts": []})", &why)->again_after.has_value());
-        for (const auto* wrong : {R"({"parts": [], "again_after": 0})",
-                                  R"({"parts": [], "again_after": 61})",
-                                  R"({"parts": [], "again_after": 1.5})",
-                                  R"({"parts": [], "again_after": "2"})"}) {
+        for (const auto* wrong :
+             {R"({"parts": [], "again_after": 0})", R"({"parts": [], "again_after": 61})",
+              R"({"parts": [], "again_after": 1.5})", R"({"parts": [], "again_after": "2"})"}) {
             QVERIFY2(!parsePluginPanel(wrong, &why).has_value(), wrong);
             QVERIFY(why.contains(QStringLiteral("again_after")));
         }
@@ -1520,21 +1533,20 @@ esac
         return part.kind == Kind::button && part.action == QStringLiteral("start") && part.on;
     }));
     // Join, its password missing: said, nothing asked.
-    drawn = show(PluginPanelAction{.id = QStringLiteral("join"),
-                                   .value = {},
-                                   .inputs = QJsonObject{{QStringLiteral("room"),
-                                                          QStringLiteral("friday-doom")}}});
+    drawn = show(PluginPanelAction{
+        .id = QStringLiteral("join"),
+        .value = {},
+        .inputs = QJsonObject{{QStringLiteral("room"), QStringLiteral("friday-doom")}}});
     QVERIFY(has(drawn, [](const auto& part) {
         return part.kind == Kind::paragraph && part.text.contains(QStringLiteral("password"));
     }));
 
     // Started, as typed: the room's name and password, the name set.
-    drawn = show(PluginPanelAction{.id = QStringLiteral("start"),
-                                   .value = {},
-                                   .inputs = QJsonObject{{QStringLiteral("room"),
-                                                          QStringLiteral("Friday-Doom")},
-                                                         {QStringLiteral("password"),
-                                                          QStringLiteral("letmein")}}});
+    drawn = show(PluginPanelAction{
+        .id = QStringLiteral("start"),
+        .value = {},
+        .inputs = QJsonObject{{QStringLiteral("room"), QStringLiteral("Friday-Doom")},
+                              {QStringLiteral("password"), QStringLiteral("letmein")}}});
     QFile lines{asked};
     QVERIFY(lines.open(QIODevice::ReadOnly));
     QVERIFY(QString::fromUtf8(lines.readAll())
@@ -1575,9 +1587,8 @@ esac
                part.people == std::vector<QString>{QStringLiteral("Ana")};
     }));
     // A vote, pressed.
-    static_cast<void>(show(PluginPanelAction{.id = QStringLiteral("vote"),
-                                             .value = QStringLiteral("7"),
-                                             .inputs = {}}));
+    static_cast<void>(show(PluginPanelAction{
+        .id = QStringLiteral("vote"), .value = QStringLiteral("7"), .inputs = {}}));
     QFile again{asked};
     QVERIFY(again.open(QIODevice::ReadOnly));
     QVERIFY(QString::fromUtf8(again.readAll())
@@ -1599,7 +1610,8 @@ esac
     QFile third{asked};
     QVERIFY(third.open(QIODevice::ReadOnly));
     QVERIFY(QString::fromUtf8(third.readAll())
-                .contains(QStringLiteral("--json together suggest /srv/music/A/B/01.flac|gemenon:6603|")));
+                .contains(QStringLiteral(
+                    "--json together suggest /srv/music/A/B/01.flac|gemenon:6603|")));
     qputenv("PATH", path);
 }
 

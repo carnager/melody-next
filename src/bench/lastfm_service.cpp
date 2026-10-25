@@ -330,10 +330,10 @@ class Worker final : public QObject {
         // A track outside the library, when only the library's count, is
         // nothing playing: no "now playing" and no listen. Until the library
         // has answered it is not known to be in it.
-        const bool valid = !sample.value("artist").toString().isEmpty() &&
-                           !sample.value("title").toString().isEmpty() &&
-                           (!state_.value("library_only").toBool() ||
-                            sample.value("library").toBool());
+        const bool valid =
+            !sample.value("artist").toString().isEmpty() &&
+            !sample.value("title").toString().isEmpty() &&
+            (!state_.value("library_only").toBool() || sample.value("library").toBool());
         const bool eligible = listen_.observe(
             valid ? sample.value("identity").toString().toStdString() : std::string{},
             sample.value("duration").toDouble(), sample.value("position").toDouble(),

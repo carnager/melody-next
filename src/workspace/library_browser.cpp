@@ -947,8 +947,8 @@ void LibraryBrowser::mergeChildren(const QPersistentModelIndex& parent,
                  mergeLevel(*target, std::move(outcome.page), query, root);
                  if (std::ranges::none_of(tasks_, &Task::refreshing) &&
                      elapsed_refresh_.isValid()) {
-                     qCDebug(tkDebug) << "library: refreshed in place in"
-                                      << elapsed_refresh_.elapsed() << "ms";
+                     qCDebug(tkDebug)
+                         << "library: refreshed in place in" << elapsed_refresh_.elapsed() << "ms";
                  }
              },
              true, true});

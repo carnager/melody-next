@@ -77,9 +77,9 @@ PluginSettingsDialog::PluginSettingsDialog(const Plugin& plugin, QVariantMap cur
         }
         return form;
     };
-    const auto addField = [this, &plugin, &labels, toggle_indent](
-                              const PluginSetting& setting, QFormLayout* into, QWidget* owner,
-                              const int indent) -> QCheckBox* {
+    const auto addField = [this, &plugin, &labels, toggle_indent](const PluginSetting& setting,
+                                                                  QFormLayout* into, QWidget* owner,
+                                                                  const int indent) -> QCheckBox* {
         const auto name =
             QStringLiteral("bench-settings-plugin-%1-%2").arg(plugin.name, setting.key);
         const auto value = values_.value(setting.key, setting.fallback);

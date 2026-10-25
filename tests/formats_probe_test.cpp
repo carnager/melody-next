@@ -415,7 +415,8 @@ void decodesAnEncoderDelayLongerThanAFrame(const std::filesystem::path& fixture_
     if (!binary) {
         return;
     }
-    const auto write = [](const std::filesystem::path& path, const std::vector<unsigned char>& bytes) {
+    const auto write = [](const std::filesystem::path& path,
+                          const std::vector<unsigned char>& bytes) {
         std::ofstream output{path, std::ios::binary};
         output.write(reinterpret_cast<const char*>(bytes.data()),
                      static_cast<std::streamsize>(bytes.size()));

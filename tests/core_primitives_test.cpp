@@ -289,8 +289,11 @@ void temporarySiblingsStayWithinAFileName() {
         std::size_t index = 0U;
         while (index < text.size()) {
             const auto lead = static_cast<unsigned char>(text[index]);
-            const std::size_t length = lead < 0x80U ? 1U : (lead >> 5U) == 0x6U ? 2U
-                                       : (lead >> 4U) == 0xEU ? 3U : (lead >> 3U) == 0x1EU ? 4U : 0U;
+            const std::size_t length = lead < 0x80U            ? 1U
+                                       : (lead >> 5U) == 0x6U  ? 2U
+                                       : (lead >> 4U) == 0xEU  ? 3U
+                                       : (lead >> 3U) == 0x1EU ? 4U
+                                                               : 0U;
             if (length == 0U || index + length > text.size()) {
                 return false;
             }
@@ -320,8 +323,8 @@ void temporarySiblingsStayWithinAFileName() {
     const auto short_sibling = trackknife::core::temporary_sibling(fs::path{"/music/a.flac"}, "x");
     check(short_sibling.filename().native().starts_with(".a.flac.x-"), "a short name kept whole",
           __LINE__);
-    check(trackknife::core::temporary_sibling(target, "tk-part") != sibling,
-          "a new one each time", __LINE__);
+    check(trackknife::core::temporary_sibling(target, "tk-part") != sibling, "a new one each time",
+          __LINE__);
 }
 
 void noReplacePublicationLaddersAndRefusesOccupiedTargets() {
@@ -442,9 +445,11 @@ void rightToLeftLettersAreFound() {
 // another reason is.
 void modesTheFilesystemRefusesAreKept() {
     // Ours: set.
-    const auto ours = std::filesystem::temp_directory_path() /
-                      ("melody-keep-mode-" + std::to_string(::getpid()));
-    { std::ofstream{ours} << "x"; }
+    const auto ours =
+        std::filesystem::temp_directory_path() / ("melody-keep-mode-" + std::to_string(::getpid()));
+    {
+        std::ofstream{ours} << "x";
+    }
     CHECK(trackknife::core::keep_mode(ours.c_str(), 0600) == 0);
     struct stat status{};
     CHECK(::stat(ours.c_str(), &status) == 0 && (status.st_mode & 07777) == 0600);

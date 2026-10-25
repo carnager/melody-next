@@ -596,8 +596,9 @@ int main(int argc, char** argv) {
                 }),
                 "the kitchen plays as it was set");
         const auto kept = workspace->load_engine_state(engine::Outputs::settings_key);
-        require(kept && *kept && (*kept)->find("\"agent:porch\":{\"replay_gain\":\"off\","
-                                               "\"volume\":40}") != std::string::npos,
+        require(kept && *kept &&
+                    (*kept)->find("\"agent:porch\":{\"replay_gain\":\"off\","
+                                  "\"volume\":40}") != std::string::npos,
                 "the engine keeps what each output was set to");
         porch->stop();
     }

@@ -56,9 +56,13 @@ void BenchMainWindowTest::identifyOpensTheTagEditorWithIdentify() {
                 return editor != nullptr;
             }(),
             10'000);
+        if (editor == nullptr) {
+            QFAIL("no tag editor opened");
+            return;
+        }
         QCOMPARE(editor->windowTitle(), title);
-        QVERIFY(editor->findChild<QPushButton*>(
-                    QStringLiteral("bench-metadata-identify-albums")) == nullptr);
+        QVERIFY(editor->findChild<QPushButton*>(QStringLiteral("bench-metadata-identify-albums")) ==
+                nullptr);
         QDialog* dialog = nullptr;
         QTRY_VERIFY_WITH_TIMEOUT((dialog = editor->findChild<QDialog*>(
                                       QStringLiteral("bench-musicbrainz-identify"))) != nullptr &&
@@ -290,8 +294,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         QVERIFY(matchRow(board, 0)->toolTip().contains(QStringLiteral("/music/2-first.flac")));
         // A file carried between files, by the board's own drop handler and
         // the payload its model makes: dropped below the second file.
-        std::unique_ptr<QMimeData> mime{board->model()->mimeData(
-            {board->indexFromItem(matchRow(board, 0))})};
+        std::unique_ptr<QMimeData> mime{
+            board->model()->mimeData({board->indexFromItem(matchRow(board, 0))})};
         const auto rect = board->visualItemRect(matchRow(board, 1));
         const QPoint position{rect.left() + 30, rect.bottom() - 1};
         QDragEnterEvent enter{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton,
@@ -542,9 +546,10 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
 
     // Another version chosen, previewed and applied as a found one is.
     results->setCurrentItem(results->topLevelItem(1));
-    QTRY_VERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-identify-match-heading"))
-                    ->text()
-                    .contains(QStringLiteral("Alpha (Deluxe)")));
+    QTRY_VERIFY(
+        dialog->findChild<QLabel*>(QStringLiteral("bench-musicbrainz-identify-match-heading"))
+            ->text()
+            .contains(QStringLiteral("Alpha (Deluxe)")));
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
@@ -590,10 +595,9 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
         };
     };
     const std::string alpha_id = "11111111-2222-3333-4444-555555555555";
-    const std::vector sources{make_source("Alpha", "One", "1", alpha_id),
-                              make_source("Alpha", "Two", "2", alpha_id),
-                              make_source("Beta", "Three", "1", {}),
-                              make_source("Beta", "Four", "2", {})};
+    const std::vector sources{
+        make_source("Alpha", "One", "1", alpha_id), make_source("Alpha", "Two", "2", alpha_id),
+        make_source("Beta", "Three", "1", {}), make_source("Beta", "Four", "2", {})};
     const auto release_body = [](const char* id, const char* title, const char* group,
                                  const char* first, const char* second) {
         return QStringLiteral(R"json({
@@ -645,8 +649,7 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
                 if (plain.contains(QStringLiteral("11111111-2222-3333-4444-555555555555?inc="))) {
                     asked << QStringLiteral("alpha");
                     completion(release_body("11111111-2222-3333-4444-555555555555", "Alpha",
-                                            "99999999-8888-7777-6666-555555555555", "One",
-                                            "Two"));
+                                            "99999999-8888-7777-6666-555555555555", "One", "Two"));
                     return;
                 }
                 if (plain.contains(QStringLiteral("44444444-2222-3333-4444-555555555555?inc="))) {
@@ -698,10 +701,13 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     QCOMPARE(albums->topLevelItem(1)->text(0), QStringLiteral("Band — Beta"));
     // The second's versions there; the first's best version previewed,
     // and with it chosen.
-    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("1 version"));
-    QTRY_COMPARE(albums->topLevelItem(0)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("✓ Alpha · CD"));
+    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(),
+                 QStringLiteral("1 version"));
+    QTRY_COMPARE(albums->topLevelItem(0)->data(0, Qt::UserRole + 1).toString(),
+                 QStringLiteral("✓ Alpha · CD"));
     QVERIFY(place->text().startsWith(QStringLiteral("Album 1 of 2")));
-    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    auto* apply =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     auto* skip = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-skip"));
     auto* next = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-next"));
     QVERIFY(apply != nullptr && skip != nullptr && next != nullptr);
@@ -711,7 +717,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     // Next: the second, its best version previewed too.
     next->click();
     QTRY_VERIFY(place->text().startsWith(QStringLiteral("Album 2 of 2")));
-    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("✓ Beta · CD"));
+    QTRY_COMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(),
+                 QStringLiteral("✓ Beta · CD"));
     QTRY_COMPARE(apply->text(), QStringLiteral("Apply 2 albums"));
     QCOMPARE(grid_model->patches().patch_count(), 0U);
     if (const auto directory = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");
@@ -720,7 +727,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStepsThroughAlbums() {
     }
     // Skipped, then not.
     skip->click();
-    QCOMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(), QStringLiteral("Skipped"));
+    QCOMPARE(albums->topLevelItem(1)->data(0, Qt::UserRole + 1).toString(),
+             QStringLiteral("Skipped"));
     QCOMPARE(apply->text(), QStringLiteral("Apply 1 album"));
     QCOMPARE(skip->text(), QStringLiteral("Don't skip"));
     skip->click();
@@ -1831,8 +1839,12 @@ void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
         view.setModel(&model);
         ui::LibraryTreeDelegate delegate{&view, {}, [](const QModelIndex&) {
                                              return ui::LibraryTreeDelegate::Presentation{
-                                                 .track = false, .album = false, .root = true,
-                                                 .artist = true, .secondary = {}, .count = {},
+                                                 .track = false,
+                                                 .album = false,
+                                                 .root = true,
+                                                 .artist = true,
+                                                 .secondary = {},
+                                                 .count = {},
                                                  .album_rating = 0U};
                                          }};
         const auto tile_saturation = [&view, &model, &delegate](const bool on) {
@@ -2087,13 +2099,12 @@ printf '{"title": "About %s", "parts": []}' "$artist"
     QVERIFY(other.has_value());
     const auto entry = core::StableId::random().to_string();
     auto entries = protocol::Json::array();
-    entries.push_back(
-        protocol::Json{{"entry", entry},
-                       {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
-                       {"title", "Over the Wall"},
-                       {"group", protocol::Json{{"artist", "Testament"},
-                                                {"album", "The Legacy"},
-                                                {"date", "1987"}}}});
+    entries.push_back(protocol::Json{
+        {"entry", entry},
+        {"path", protocol::encode_raw_path(QFile::encodeName(path).toStdString())},
+        {"title", "Over the Wall"},
+        {"group",
+         protocol::Json{{"artist", "Testament"}, {"album", "The Legacy"}, {"date", "1987"}}}});
     QVERIFY((*other)
                 ->call("playback.replace_queue", protocol::Json{{"entries", std::move(entries)}})
                 .has_value());

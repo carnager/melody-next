@@ -1401,9 +1401,8 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
         };
     };
     std::vector<MetadataPropertiesSource> sources;
-    for (const auto& [album, release] :
-         {std::pair{std::string{"Alpha"}, alpha_id.toStdString()},
-          std::pair{std::string{"Beta"}, std::string{}}}) {
+    for (const auto& [album, release] : {std::pair{std::string{"Alpha"}, alpha_id.toStdString()},
+                                         std::pair{std::string{"Beta"}, std::string{}}}) {
         QVERIFY(QDir{media.path()}.mkpath(QString::fromStdString(album)));
         const auto path = media.filePath(QString::fromStdString(album + "/01.flac"));
         QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), path));
@@ -1496,9 +1495,10 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
                 }
                 if (plain == QStringLiteral("https://band.bandcamp.com/album/beta")) {
                     bandcamp_asked << plain;
-                    completion(QByteArray{R"(<html><head><meta property="og:image" )"
-                                          R"(content="https://f4.bcbits.com/img/a0123456789_5.jpg">)"
-                                          R"(</head></html>)"});
+                    completion(
+                        QByteArray{R"(<html><head><meta property="og:image" )"
+                                   R"(content="https://f4.bcbits.com/img/a0123456789_5.jpg">)"
+                                   R"(</head></html>)"});
                     return;
                 }
                 if (plain == QStringLiteral("https://f4.bcbits.com/img/a0123456789_10.jpg")) {
@@ -1556,8 +1556,9 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
                                    const core::CancellationToken& source_cancellation) {
                             return operations::commit_artwork_source(
                                 source_plan, journal,
-                                [](const operations::MetadataCommitResult&)
-                                    -> core::Result<void> { return {}; },
+                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                                    return {};
+                                },
                                 source_cancellation);
                         },
                         progress, cancellation, operations::ArtworkApplyOptions{});
@@ -1577,8 +1578,10 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
     QTRY_VERIFY((dialog = properties->findChild<QDialog*>(
                      QStringLiteral("bench-musicbrainz-identify"))) != nullptr);
     QPointer<QDialog> open = dialog;
-    auto* fetch = dialog->findChild<QCheckBox*>(QStringLiteral("bench-musicbrainz-identify-fetch-covers"));
-    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
+    auto* fetch =
+        dialog->findChild<QCheckBox*>(QStringLiteral("bench-musicbrainz-identify-fetch-covers"));
+    auto* apply =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-apply"));
     auto* next = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-next"));
     QVERIFY(fetch != nullptr && apply != nullptr && next != nullptr);
     QVERIFY(fetch->isChecked());
@@ -1591,8 +1594,9 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
     // Their covers, each staged for its own album's file.
     auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
     QVERIFY(status != nullptr);
-    QTRY_VERIFY2_WITH_TIMEOUT(status->text().contains(QStringLiteral("Covers fetched for 2 albums")),
-                              qPrintable(status->text()), 20'000);
+    QTRY_VERIFY2_WITH_TIMEOUT(
+        status->text().contains(QStringLiteral("Covers fetched for 2 albums")),
+        qPrintable(status->text()), 20'000);
     QCOMPARE(covers_asked.size(), 2);
     // Beta's from Bandcamp, at 1200 pixels.
     QCOMPARE(bandcamp_asked,
@@ -1990,10 +1994,11 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
     QVERIFY(jpeg_close(second_pending->model()
-                 ->index(1, 5)
-                 .data(Qt::DecorationRole)
-                 .value<QImage>()
-                 .pixelColor(0, 0), QColor{Qt::darkMagenta}));
+                           ->index(1, 5)
+                           .data(Qt::DecorationRole)
+                           .value<QImage>()
+                           .pixelColor(0, 0),
+                       QColor{Qt::darkMagenta}));
     auto* second_discard = second_properties->findChild<QPushButton*>(
         QStringLiteral("bench-metadata-artwork-discard"));
     QVERIFY(second_discard != nullptr);
@@ -2007,10 +2012,11 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
     QVERIFY(jpeg_close(second_pending->model()
-                 ->index(1, 5)
-                 .data(Qt::DecorationRole)
-                 .value<QImage>()
-                 .pixelColor(0, 0), QColor{Qt::darkMagenta}));
+                           ->index(1, 5)
+                           .data(Qt::DecorationRole)
+                           .value<QImage>()
+                           .pixelColor(0, 0),
+                       QColor{Qt::darkMagenta}));
     QVERIFY(!observed.has_value());
     QTest::mouseClick(second_save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);

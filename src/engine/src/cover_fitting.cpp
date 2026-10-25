@@ -92,7 +92,7 @@ using Scaler = std::unique_ptr<SwsContext, ScalerDeleter>;
 }
 
 [[nodiscard]] core::Result<std::vector<std::uint8_t>> encode_jpeg(const AVFrame& picture,
-                                                                   const int quantiser) {
+                                                                  const int quantiser) {
     const auto* codec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
     if (codec == nullptr) {
         return std::unexpected(failure("no JPEG encoder"));

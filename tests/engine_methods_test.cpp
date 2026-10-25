@@ -377,7 +377,8 @@ void catalogue_changes_are_told_together() {
             std::chrono::milliseconds{100}, std::chrono::milliseconds{400}};
         batch.add({.paths = {"/m/a/01.flac"}, .albums = {"a"}, .everything = false});
         batch.add({.paths = {"/m/a/02.flac"}, .albums = {"a"}, .everything = false});
-        batch.add({.paths = {"/m/a/01.flac", "/m/b/01.flac"}, .albums = {"b"}, .everything = false});
+        batch.add(
+            {.paths = {"/m/a/01.flac", "/m/b/01.flac"}, .albums = {"b"}, .everything = false});
         require(wait_for(1U, std::chrono::seconds{2}) == 1U, "three changes told as one");
         const auto first = events().front();
         require(first.name == "catalogue.changed", "told as catalogue.changed");

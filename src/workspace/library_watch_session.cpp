@@ -39,13 +39,15 @@ struct Asked {
 [[nodiscard]] Asked ask(const protocol::Endpoint& endpoint) {
     auto client = protocol::Client::connect(endpoint);
     if (!client) {
-        return {.watching = std::nullopt, .from_flags = false,
+        return {.watching = std::nullopt,
+                .from_flags = false,
                 .error = QString::fromStdString(client.error().message)};
     }
     auto answer = (*client)->call("config.get", protocol::Json::object(), std::chrono::seconds{5});
     (*client)->close();
     if (!answer) {
-        return {.watching = std::nullopt, .from_flags = false,
+        return {.watching = std::nullopt,
+                .from_flags = false,
                 .error = QString::fromStdString(answer.error().message)};
     }
     Asked asked{.watching = true, .from_flags = false, .error = {}};
@@ -56,7 +58,8 @@ struct Asked {
             asked.watching = toggle(watch->get<std::string>()).value_or(true);
         }
     }
-    if (const auto flags = answer->find("from_flags"); flags != answer->end() && flags->is_array()) {
+    if (const auto flags = answer->find("from_flags");
+        flags != answer->end() && flags->is_array()) {
         asked.from_flags = std::ranges::any_of(*flags, [](const protocol::Json& key) {
             return key.is_string() && key.get<std::string>() == "watch";
         });
@@ -112,9 +115,8 @@ void LibraryWatchSession::setWatching(const bool on) {
             error = QString::fromStdString(client.error().message);
         } else {
             // Watching is the engine's default: only off is written.
-            auto change = protocol::Json{{"key", "watch"},
-                                         {"value", on ? protocol::Json(nullptr)
-                                                      : protocol::Json("no")}};
+            auto change = protocol::Json{
+                {"key", "watch"}, {"value", on ? protocol::Json(nullptr) : protocol::Json("no")}};
             auto set = (*client)->call("config.set",
                                        protocol::Json{{"changes", protocol::Json::array({change})}},
                                        std::chrono::seconds{5});
@@ -122,9 +124,8 @@ void LibraryWatchSession::setWatching(const bool on) {
                 error = QString::fromStdString(set.error().message);
             } else {
                 // The engine answers, then stops; its service starts it again.
-                static_cast<void>(
-                    (*client)->call("engine.restart", protocol::Json::object(),
-                                    std::chrono::seconds{5}));
+                static_cast<void>((*client)->call("engine.restart", protocol::Json::object(),
+                                                  std::chrono::seconds{5}));
             }
             (*client)->close();
         }

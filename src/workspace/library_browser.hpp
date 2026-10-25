@@ -12,6 +12,7 @@
 #include "workspace/library_tree_model.hpp"
 
 #include <QCache>
+#include <QElapsedTimer>
 #include <QFutureWatcher>
 #include <QImage>
 #include <QObject>
@@ -19,7 +20,6 @@
 #include <QPointer>
 #include <QSet>
 #include <QThreadPool>
-#include <QElapsedTimer>
 #include <QTimer>
 
 #include <deque>

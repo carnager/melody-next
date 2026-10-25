@@ -2,8 +2,8 @@
 
 #include "bench_main_window_test.hpp"
 
-#include "workspace/sources.hpp"
 #include "workspace/artwork_session.hpp"
+#include "workspace/sources.hpp"
 
 #include <QGroupBox>
 #include <QMessageBox>
@@ -1362,7 +1362,8 @@ void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
     const auto read = metadata::read_local_metadata(QFile::encodeName(staging).toStdString());
     QVERIFY(read.has_value());
     const auto title = QString::fromStdString(read->document.effective_values("title").front());
-    const auto source_path = media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
+    const auto source_path =
+        media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
     QVERIFY(QFile::rename(staging, source_path));
     const auto raw_path = QFile::encodeName(source_path).toStdString();
     QImage old_cover{30, 30, QImage::Format_RGB32};
@@ -1372,9 +1373,7 @@ void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
     QImage picked{40, 40, QImage::Format_RGB32};
     picked.fill(Qt::yellow);
     QVERIFY(picked.save(picked_file, "PNG"));
-    const auto colour_of = [](const QString& path) {
-        return QImage{path}.pixelColor(10, 10);
-    };
+    const auto colour_of = [](const QString& path) { return QImage{path}.pixelColor(10, 10); };
 
     BenchMainWindow window;
     window.show();
@@ -1421,8 +1420,8 @@ void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
     auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
     QVERIFY(apply && status);
     QTRY_VERIFY_WITH_TIMEOUT(session->renameAvailable(), 10'000);
-    session->chooseMoveFolder(QFile::encodeName(media.filePath(QStringLiteral("Sorted")))
-                                  .toStdString());
+    session->chooseMoveFolder(
+        QFile::encodeName(media.filePath(QStringLiteral("Sorted"))).toStdString());
     QTRY_VERIFY_WITH_TIMEOUT(session->moveAvailable(), 10'000);
     session->chooseMove(true);
     artwork->setActive(true);
@@ -1438,8 +1437,8 @@ void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
     review->findChild<QDialogButtonBox*>(QStringLiteral("bench-folder-cover-review-buttons"))
         ->button(QDialogButtonBox::Save)
         ->click();
-    const auto moved = media.filePath(QStringLiteral("Sorted/Album/") + title +
-                                      QStringLiteral(".flac"));
+    const auto moved =
+        media.filePath(QStringLiteral("Sorted/Album/") + title + QStringLiteral(".flac"));
     const auto cover = media.filePath(QStringLiteral("Sorted/Album/cover.jpg"));
     QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(moved), qPrintable(status->text()), 15'000);
     QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(cover) && colour_of(cover).green() > 200 &&
@@ -1484,7 +1483,8 @@ void BenchMainWindowTest::aCoverWrittenWithAMoveShowsInItsTab() {
     const auto read = metadata::read_local_metadata(QFile::encodeName(staging).toStdString());
     QVERIFY(read.has_value());
     const auto title = QString::fromStdString(read->document.effective_values("title").front());
-    const auto source_path = media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
+    const auto source_path =
+        media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
     QVERIFY(QFile::rename(staging, source_path));
     const auto picked_file = media.filePath(QStringLiteral("picked.png"));
     QImage picked{40, 40, QImage::Format_RGB32};
@@ -1541,8 +1541,8 @@ void BenchMainWindowTest::aCoverWrittenWithAMoveShowsInItsTab() {
     auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
     QVERIFY(apply && status);
     QTRY_VERIFY_WITH_TIMEOUT(session->renameAvailable(), 10'000);
-    session->chooseMoveFolder(QFile::encodeName(media.filePath(QStringLiteral("Sorted")))
-                                  .toStdString());
+    session->chooseMoveFolder(
+        QFile::encodeName(media.filePath(QStringLiteral("Sorted"))).toStdString());
     QTRY_VERIFY_WITH_TIMEOUT(session->moveAvailable(), 10'000);
     session->chooseMove(true);
     artwork->setActive(true);
@@ -3083,8 +3083,8 @@ echo "shared:${relative:-$album}"
         QCOMPARE(enabled->text(), QStringLiteral("Echo"));
         // ADR-0300: what it asks to be set, behind its Settings button in a
         // dialog of its own; a secret not shown.
-        QVERIFY(dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server")) ==
-                nullptr);
+        QVERIFY(dialog->findChild<QLineEdit*>(
+                    QStringLiteral("bench-settings-plugin-echo-server")) == nullptr);
         const auto edit = [dialog](const bool keep) {
             dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-plugin-echo-settings"))
                 ->click();
@@ -3092,16 +3092,16 @@ echo "shared:${relative:-$album}"
             QTRY_VERIFY((settings = dialog->findChild<QDialog*>(
                              QStringLiteral("bench-plugin-settings-echo"))) != nullptr &&
                         settings->isVisible());
-            auto* server =
-                settings->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-server"));
+            auto* server = settings->findChild<QLineEdit*>(
+                QStringLiteral("bench-settings-plugin-echo-server"));
             auto* token =
                 settings->findChild<QLineEdit*>(QStringLiteral("bench-settings-plugin-echo-token"));
             QVERIFY(server != nullptr && token != nullptr);
             QCOMPARE(server->text(), QStringLiteral("http://localhost"));
             QCOMPARE(token->echoMode(), QLineEdit::Password);
             // The token needs Remote support: greyed until it is ticked.
-            auto* remote =
-                settings->findChild<QCheckBox*>(QStringLiteral("bench-settings-plugin-echo-remote"));
+            auto* remote = settings->findChild<QCheckBox*>(
+                QStringLiteral("bench-settings-plugin-echo-remote"));
             QVERIFY(remote != nullptr);
             QCOMPARE(remote->text(), QStringLiteral("Remote support"));
             QVERIFY(!remote->isChecked() && !token->isEnabled());
@@ -3198,7 +3198,8 @@ esac
     QVERIFY(QDir{}.mkpath(folder));
     for (const auto* name : {"plugin.json", "together"}) {
         QFile::remove(folder + QLatin1Char('/') + QLatin1String(name));
-        QVERIFY(QFile::copy(QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/../../../plugins/together/") + QLatin1String(name),
+        QVERIFY(QFile::copy(QStringLiteral(MELODY_AUDIO_FIXTURE_DIR "/../../../plugins/together/") +
+                                QLatin1String(name),
                             folder + QLatin1Char('/') + QLatin1String(name)));
     }
     QSettings{}.setValue(pluginEnabledKey(QStringLiteral("together")), true);
@@ -3230,20 +3231,21 @@ esac
     };
     shot(QStringLiteral("room-panel-out.png"));
     QTest::keyClicks(room, QStringLiteral("friday-doom"));
-    for (auto* button : dock->findChildren<QPushButton*>(QStringLiteral("bench-plugin-panel-button"))) {
+    for (auto* button :
+         dock->findChildren<QPushButton*>(QStringLiteral("bench-plugin-panel-button"))) {
         if (button->property("action").toString() == QStringLiteral("start")) {
             button->click();
         }
     }
-    QTRY_VERIFY_WITH_TIMEOUT(
-        dock->findChild<QAbstractButton*>(QStringLiteral("bench-plugin-panel-toggle-party")) !=
-            nullptr,
-        10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(dock->findChild<QAbstractButton*>(
+                                 QStringLiteral("bench-plugin-panel-toggle-party")) != nullptr,
+                             10'000);
     QVERIFY(dock->findChild<QAbstractButton*>(QStringLiteral("bench-plugin-panel-toggle-party"))
                 ->isChecked());
     // Two votes, two removes; the room's web page and Stop.
-    QCOMPARE(dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button")).size(),
-             6);
+    QCOMPARE(
+        dock->findChildren<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button")).size(),
+        6);
     // ADR-0304: drawn as Melody's -- what plays, the next, two suggestions,
     // two played; the status; the people.
     const auto tracks = dock->findChildren<QWidget*>(QStringLiteral("bench-plugin-panel-track"));
@@ -3329,7 +3331,8 @@ printf '{"title": "did %s", "parts": [{"input": "room", "label": "Room"},
     QVERIFY(room != nullptr);
     QTest::keyClicks(room, QStringLiteral("friday-doom"));
     QPushButton* start = nullptr;
-    for (auto* button : dock->findChildren<QPushButton*>(QStringLiteral("bench-plugin-panel-button"))) {
+    for (auto* button :
+         dock->findChildren<QPushButton*>(QStringLiteral("bench-plugin-panel-button"))) {
         if (button->text() == QStringLiteral("Start")) {
             start = button;
         }
@@ -3344,8 +3347,9 @@ printf '{"title": "did %s", "parts": [{"input": "room", "label": "Room"},
     QVERIFY(told.open(QIODevice::ReadOnly));
     const auto lines = told.readAll().trimmed().split('\n');
     const auto last = QJsonDocument::fromJson(lines.last()).object();
-    QCOMPARE(last.value(QStringLiteral("inputs")).toObject().value(QStringLiteral("room")).toString(),
-             QStringLiteral("friday-doom"));
+    QCOMPARE(
+        last.value(QStringLiteral("inputs")).toObject().value(QStringLiteral("room")).toString(),
+        QStringLiteral("friday-doom"));
     QVERIFY(last.value(QStringLiteral("playing")).isNull());
     // Typed, it stays typed over the answer.
     QCOMPARE(dock->findChild<QLineEdit*>(QStringLiteral("bench-plugin-panel-input-room"))->text(),
@@ -3358,9 +3362,10 @@ printf '{"title": "did %s", "parts": [{"input": "room", "label": "Room"},
     auto* vote = dock->findChild<QToolButton*>(QStringLiteral("bench-plugin-panel-item-button"));
     QVERIFY(vote != nullptr);
     vote->click();
-    QTRY_VERIFY_WITH_TIMEOUT(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title"))
-                                     ->text() == QStringLiteral("did vote:7"),
-                             10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title"))->text() ==
+            QStringLiteral("did vote:7"),
+        10'000);
     QSettings{}.remove(QStringLiteral("plugins"));
     QDir{folder}.removeRecursively();
 }
@@ -3460,8 +3465,8 @@ void BenchMainWindowTest::aRoomPanelIsAskedAgainAsTheRoomChanges() {
     window.show();
     QTRY_VERIFY(window.lists_restored_);
     for (const auto* name : {"room", "plain"}) {
-        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("bench-plugin-panel-%1-p")
-                                                        .arg(QLatin1String(name)));
+        auto* dock = window.findChild<QDockWidget*>(
+            QStringLiteral("bench-plugin-panel-%1-p").arg(QLatin1String(name)));
         QVERIFY(dock != nullptr);
         if (dock->isHidden()) {
             window.findChild<QAction*>(QStringLiteral("action-toggle-panels"))->trigger();
@@ -3475,8 +3480,8 @@ void BenchMainWindowTest::aRoomPanelIsAskedAgainAsTheRoomChanges() {
     state.entry = QStringLiteral("e1");
     state.path = QStringLiteral("/srv/music/a.flac");
     window.refreshPluginPanels(state);
-    QTRY_VERIFY_WITH_TIMEOUT(asked(QStringLiteral("room")) >= 1 && asked(QStringLiteral("plain")) >= 1,
-                             10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        asked(QStringLiteral("room")) >= 1 && asked(QStringLiteral("plain")) >= 1, 10'000);
     QTest::qWait(300);
     const auto room_before = asked(QStringLiteral("room"));
     const auto plain_before = asked(QStringLiteral("plain"));
@@ -3576,14 +3581,13 @@ void BenchMainWindowTest::aPluginPanelIsToldTheLibrary() {
     state.entry = QStringLiteral("e1");
     state.path = music + QStringLiteral("/Credit/Rich/one.flac");
     window.refreshPluginPanels(state);
-    QTRY_VERIFY_WITH_TIMEOUT(dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title")) !=
-                                 nullptr,
-                             10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        dock->findChild<QLabel*>(QStringLiteral("bench-plugin-panel-title")) != nullptr, 10'000);
     QFile told_file{input};
     QVERIFY(told_file.open(QIODevice::ReadOnly));
     const auto told = QJsonDocument::fromJson(told_file.readAll()).object();
-    const auto tags = told.value(QStringLiteral("playing")).toObject().value(QStringLiteral("tags"))
-                          .toObject();
+    const auto tags =
+        told.value(QStringLiteral("playing")).toObject().value(QStringLiteral("tags")).toObject();
     QCOMPARE(tags.value(QStringLiteral("musicbrainzalbumartistid")).toArray().first().toString(),
              QStringLiteral("77777777-7777-7777-7777-777777777777"));
     QCOMPARE(tags.value(QStringLiteral("artist")).toArray().size(), 2);
@@ -3706,12 +3710,34 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
                  .text = {},
                  .detail = {},
                  .url = {},
-                 .image = photo_path, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = photo_path,
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::item,
                  .text = QStringLiteral("Group from Berkeley, United States"),
                  .detail = QStringLiteral("since 1983"),
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::paragraph,
                  .text = QStringLiteral(
                      "Testament is an American thrash metal band from Berkeley, California. "
@@ -3722,67 +3748,210 @@ printf '{"title": "About %s", "parts": [{"heading": "About"}, {"paragraph": "%s 
                      "the Bay Area scene, credited with influencing many that followed."),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Wikipedia"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Official site"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("MusicBrainz"),
                  .detail = QStringLiteral("Testament"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::heading,
                  .text = QStringLiteral("The Legacy"),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::item,
                  .text = QStringLiteral("Album · 1987"),
                  .detail = QStringLiteral("Atlantic, Megaforce Worldwide"),
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::paragraph,
                  .text = QStringLiteral("The Legacy is the debut studio album by Testament."),
                  .detail = {},
                  .url = {},
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Wikipedia"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("MusicBrainz"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Discogs"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Bandcamp"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("Rate Your Music"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
             Part{.kind = Part::Kind::link,
                  .text = QStringLiteral("AllMusic"),
                  .detail = QStringLiteral("The Legacy"),
                  .url = QStringLiteral("https://x.org"),
-                 .image = {}, .key = {}, .value = {}, .placeholder = {}, .action = {}, .secret = false, .on = false, .buttons = {}, .artist = {}, .cover = {}, .people = {}, .role = {}},
+                 .image = {},
+                 .key = {},
+                 .value = {},
+                 .placeholder = {},
+                 .action = {},
+                 .secret = false,
+                 .on = false,
+                 .buttons = {},
+                 .artist = {},
+                 .cover = {},
+                 .people = {},
+                 .role = {}},
         };
         PluginPanelView shown{QStringLiteral("About"), nullptr};
         shown.resize(300, 900);

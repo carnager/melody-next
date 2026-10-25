@@ -470,8 +470,7 @@ namespace {
         return false;
     }
     const auto name_end = line.rfind(')');
-    return name_end != std::string::npos && name_end + 2 < line.size() &&
-           line[name_end + 2] == 'Z';
+    return name_end != std::string::npos && name_end + 2 < line.size() && line[name_end + 2] == 'Z';
 }
 
 } // namespace
@@ -549,8 +548,7 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
         long pid = 0;
         // A waiter is listed as "1: -> FLOCK ...": not a holder.
         if (!(fields >> number >> kind) || kind == "->" ||
-            !(fields >> mode >> access >> pid >> file) || pid <= 0 ||
-            !file.ends_with(inode)) {
+            !(fields >> mode >> access >> pid >> file) || pid <= 0 || !file.ends_with(inode)) {
             continue;
         }
         const auto holder = static_cast<pid_t>(pid);
@@ -596,7 +594,8 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
         // socket took the path itself, and stopping took the file with it.
         // Started again, the socket is there to start the engine.
         const auto socket_unit = [&engine] {
-            if (systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status != 0) {
+            if (systemctl({QStringLiteral("start"), QStringLiteral("melodyd.socket")}).status !=
+                0) {
                 return false;
             }
             std::error_code unreadable;

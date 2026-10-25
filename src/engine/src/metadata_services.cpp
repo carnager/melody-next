@@ -171,7 +171,7 @@ MetadataServices::Throttle MetadataServices::throttle(const long status,
 }
 
 MetadataServices::Throttle MetadataServices::transient(const bool answered, const long status,
-                                                      const int attempt) {
+                                                       const int attempt) {
     constexpr int retries = 2;
     const bool failed = !answered || status == 500 || status == 502 || status == 504;
     if (!failed) {

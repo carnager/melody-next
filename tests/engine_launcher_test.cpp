@@ -576,11 +576,11 @@ void EngineLauncherTest::anOutdatedEngineIsSeenAndStopped() {
     service.setProcessEnvironment(environment);
     service.setStandardOutputFile(QProcess::nullDevice());
     service.setStandardErrorFile(QProcess::nullDevice());
-    service.start(program, {QStringLiteral("--socket"), QString::fromStdString(scratch.engine.socket.string()),
-                            QStringLiteral("--state"),
-                            QString::fromStdString(scratch.engine.state.string()),
-                            QStringLiteral("--config"),
-                            QString::fromStdString((scratch.engine.state / "melodyd.conf").string())});
+    service.start(
+        program, {QStringLiteral("--socket"),
+                  QString::fromStdString(scratch.engine.socket.string()), QStringLiteral("--state"),
+                  QString::fromStdString(scratch.engine.state.string()), QStringLiteral("--config"),
+                  QString::fromStdString((scratch.engine.state / "melodyd.conf").string())});
     QVERIFY(service.waitForStarted());
     QTRY_VERIFY(localEngineIsService(scratch.engine));
     QVERIFY(!localEngineOutdated(scratch.engine));

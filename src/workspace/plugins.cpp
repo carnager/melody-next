@@ -189,9 +189,9 @@ constexpr int max_trigger_seconds = 6 * 3600;
 
 [[nodiscard]] std::optional<QString> readSettings(const QJsonArray& listed,
                                                   std::vector<PluginSetting>& settings) {
-    static const QStringList setting_keys{QStringLiteral("key"),     QStringLiteral("label"),
-                                          QStringLiteral("kind"),    QStringLiteral("default"),
-                                          QStringLiteral("choices"), QStringLiteral("help"),
+    static const QStringList setting_keys{QStringLiteral("key"),      QStringLiteral("label"),
+                                          QStringLiteral("kind"),     QStringLiteral("default"),
+                                          QStringLiteral("choices"),  QStringLiteral("help"),
                                           QStringLiteral("requires"), QStringLiteral("link")};
     static const QRegularExpression key_shape{QStringLiteral("^[a-z0-9][a-z0-9_-]*$")};
     for (const auto& value : listed) {
@@ -272,7 +272,8 @@ constexpr int max_trigger_seconds = 6 * 3600;
             setting.link = entry.value(QStringLiteral("link")).toString();
             const QUrl url{setting.link};
             if (!url.isValid() || url.host().isEmpty() ||
-                (url.scheme() != QStringLiteral("http") && url.scheme() != QStringLiteral("https"))) {
+                (url.scheme() != QStringLiteral("http") &&
+                 url.scheme() != QStringLiteral("https"))) {
                 return wrong("its link is an http or https address");
             }
         }
@@ -374,8 +375,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
         }
         plugin.providers.push_back(std::move(provider));
     }
-    static const QStringList panel_keys{QStringLiteral("id"), QStringLiteral("label"),
-                                        QStringLiteral("run"), QStringLiteral("timeout"),
+    static const QStringList panel_keys{QStringLiteral("id"),      QStringLiteral("label"),
+                                        QStringLiteral("run"),     QStringLiteral("timeout"),
                                         QStringLiteral("library"), QStringLiteral("refresh"),
                                         QStringLiteral("always")};
     for (const auto& value : panels.toArray()) {
@@ -432,7 +433,8 @@ std::optional<Plugin> parsePluginManifest(const QByteArray& json, const QString&
         }
         if (entry.contains(QStringLiteral("always"))) {
             if (!entry.value(QStringLiteral("always")).isBool()) {
-                return fail(QStringLiteral("panel \"%1\": \"always\" is true or false").arg(panel.id));
+                return fail(
+                    QStringLiteral("panel \"%1\": \"always\" is true or false").arg(panel.id));
             }
             panel.always = entry.value(QStringLiteral("always")).toBool();
         }
@@ -622,8 +624,7 @@ namespace {
 // listening party: nothing else is opened from a plugin.
 [[nodiscard]] bool openableUrl(const QString& url) {
     return url.startsWith(QStringLiteral("https://")) ||
-           url.startsWith(QStringLiteral("http://")) ||
-           url.startsWith(QStringLiteral("melody://"));
+           url.startsWith(QStringLiteral("http://")) || url.startsWith(QStringLiteral("melody://"));
 }
 
 } // namespace
@@ -748,9 +749,9 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.placeholder = part.value(QStringLiteral("placeholder")).toString();
             read.secret = part.value(QStringLiteral("secret")).toBool(false);
             read.action = part.value(QStringLiteral("action")).toString();
-            allowed = {QStringLiteral("input"),       QStringLiteral("label"),
-                       QStringLiteral("value"),       QStringLiteral("placeholder"),
-                       QStringLiteral("secret"),      QStringLiteral("action")};
+            allowed = {QStringLiteral("input"),  QStringLiteral("label"),
+                       QStringLiteral("value"),  QStringLiteral("placeholder"),
+                       QStringLiteral("secret"), QStringLiteral("action")};
             if (read.key.isEmpty()) {
                 return fail(QStringLiteral("an input needs its key"));
             }
@@ -792,15 +793,17 @@ std::optional<PluginPanelContent> parsePluginPanel(const QByteArray& json, QStri
             read.cover = part.value(QStringLiteral("cover")).toString();
             read.url = part.value(QStringLiteral("url")).toString();
             read.on = part.value(QStringLiteral("playing")).toBool(false);
-            allowed = {QStringLiteral("track"),  QStringLiteral("artist"), QStringLiteral("detail"),
-                       QStringLiteral("cover"),  QStringLiteral("url"),    QStringLiteral("playing"),
+            allowed = {QStringLiteral("track"),  QStringLiteral("artist"),
+                       QStringLiteral("detail"), QStringLiteral("cover"),
+                       QStringLiteral("url"),    QStringLiteral("playing"),
                        QStringLiteral("buttons")};
             if (!read.cover.isEmpty() && !QDir::isAbsolutePath(read.cover)) {
-                return fail(QStringLiteral("a cover is a file's absolute path: %1").arg(read.cover));
+                return fail(
+                    QStringLiteral("a cover is a file's absolute path: %1").arg(read.cover));
             }
             if (!read_buttons(part, read)) {
-                return fail(QStringLiteral(
-                    "a row's button is {text, action or url, value?, on?, role?}"));
+                return fail(
+                    QStringLiteral("a row's button is {text, action or url, value?, on?, role?}"));
             }
         } else if (part.contains(QStringLiteral("status"))) {
             read.kind = Kind::status;
@@ -1221,7 +1224,8 @@ QJsonArray pluginArtistAlbums(const std::vector<PluginLibraryTrack>& tracks,
         ++album->tracks;
     }
     std::ranges::stable_sort(albums, {}, [](const Album& album) {
-        return std::pair{firstOf(album.first->tags, "date"), folded(firstOf(album.first->tags, "album"))};
+        return std::pair{firstOf(album.first->tags, "date"),
+                         folded(firstOf(album.first->tags, "album"))};
     });
     QJsonArray answered;
     for (const auto& album : albums) {
@@ -1233,14 +1237,14 @@ QJsonArray pluginArtistAlbums(const std::vector<PluginLibraryTrack>& tracks,
         if (artist.empty()) {
             artist = firstOf(album.first->tags, "artist");
         }
-        answered.push_back(QJsonObject{
-            {QStringLiteral("album"), text(firstOf(album.first->tags, "album"))},
-            {QStringLiteral("album_artist"), text(artist)},
-            {QStringLiteral("date"), text(firstOf(album.first->tags, "date"))},
-            {QStringLiteral("folder"), text(folder)},
-            {QStringLiteral("relative_folder"), text(relativeTo(folder, root))},
-            {QStringLiteral("tracks"), static_cast<double>(album.tracks)},
-            {QStringLiteral("tags"), tagsJson(album.shared)}});
+        answered.push_back(
+            QJsonObject{{QStringLiteral("album"), text(firstOf(album.first->tags, "album"))},
+                        {QStringLiteral("album_artist"), text(artist)},
+                        {QStringLiteral("date"), text(firstOf(album.first->tags, "date"))},
+                        {QStringLiteral("folder"), text(folder)},
+                        {QStringLiteral("relative_folder"), text(relativeTo(folder, root))},
+                        {QStringLiteral("tracks"), static_cast<double>(album.tracks)},
+                        {QStringLiteral("tags"), tagsJson(album.shared)}});
     }
     return answered;
 }
@@ -1263,8 +1267,9 @@ QByteArray pluginPanelInput(const PluginPanel& panel, const PluginEngine& engine
                       {QStringLiteral("playing"), told},
                       {QStringLiteral("settings"), settings}};
     if (action) {
-        input.insert(QStringLiteral("action"), QJsonObject{{QStringLiteral("id"), action->id},
-                                                           {QStringLiteral("value"), action->value}});
+        input.insert(QStringLiteral("action"),
+                     QJsonObject{{QStringLiteral("id"), action->id},
+                                 {QStringLiteral("value"), action->value}});
         input.insert(QStringLiteral("inputs"), action->inputs);
     }
     if (panel.artist_albums) {

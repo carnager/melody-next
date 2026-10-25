@@ -34,9 +34,9 @@ core::Result<QByteArray> coverJpeg(const QByteArray& encoded, const std::uint32_
     reader.setAutoTransform(true);
     const auto size = reader.size();
     if (!size.isValid())
-        return std::unexpected(fitting_error(
-            core::ErrorCode::unsupported,
-            "The image cannot be read: " + reader.errorString().toStdString()));
+        return std::unexpected(
+            fitting_error(core::ErrorCode::unsupported,
+                          "The image cannot be read: " + reader.errorString().toStdString()));
     if (static_cast<std::int64_t>(size.width()) * size.height() > ui::maximum_artwork_pixels)
         return std::unexpected(
             fitting_error(core::ErrorCode::unsupported, "The image is too large to read"));
@@ -45,9 +45,9 @@ core::Result<QByteArray> coverJpeg(const QByteArray& encoded, const std::uint32_
         reader.setScaledSize(size.scaled(edge, edge, Qt::KeepAspectRatio));
     const auto decoded = reader.read();
     if (decoded.isNull())
-        return std::unexpected(fitting_error(
-            core::ErrorCode::unsupported,
-            "The image cannot be read: " + reader.errorString().toStdString()));
+        return std::unexpected(
+            fitting_error(core::ErrorCode::unsupported,
+                          "The image cannot be read: " + reader.errorString().toStdString()));
     // Transparency, where there is any, over white: a cover is a JPEG.
     QImage flat(decoded.size(), QImage::Format_RGB32);
     flat.fill(Qt::white);

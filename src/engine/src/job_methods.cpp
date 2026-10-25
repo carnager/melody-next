@@ -530,8 +530,10 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                 const operations::FilePublicationDependentStateCommitter moved_back =
                     [&follow](const operations::FilePublicationCommitResult& result)
                     -> core::Result<void> {
+                    // ADR-0320: a CUE sheet moved back rewritten has no tags.
                     if (result.content !=
-                        operations::FilePublicationContentKind::prepared_destination_artifact) {
+                            operations::FilePublicationContentKind::prepared_destination_artifact ||
+                        !core::is_audio_path(result.target_raw_path)) {
                         return follow(result, nullptr);
                     }
                     auto read = metadata::read_local_metadata(result.target_raw_path);

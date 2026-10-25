@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <fstream>
 #include <iostream>
 #include <ranges>
@@ -316,12 +317,14 @@ void companionsTravelWithTheirAlbum() {
     CHECK(part.has_value() && part->ready());
     CHECK(companions_of(*part).empty());
 
-    // The sheet's file renamed: blocked, saying why.
+    // The sheet's file renamed: it travels all the same, to be rewritten
+    // (ADR-0320).
     auto renamed = preflight_output_paths_with_companions(
         plan_of({{"01.flac", "01 - One.flac"}, {"02.flac", "02.flac"}}));
     CHECK(renamed.has_value());
-    CHECK(!renamed->ready());
-    CHECK(has_issue(*renamed, OutputPathPreflightIssueKind::cue_reference_broken));
+    CHECK(renamed->ready());
+    CHECK((companions_of(*renamed) ==
+           std::vector<std::string>{"album.cue", "album.m3u", "cover.jpg"}));
 
     // A cover already at the target: the preflight's own check.
     std::filesystem::create_directories(target);
@@ -341,7 +344,27 @@ void companionsTravelWithTheirAlbum() {
     CHECK(companions_of(*staying).empty());
 }
 
+// ADR-0320: a sheet's FILE names renamed, every other byte kept.
+void cueSheetsNameTheFilesAsRenamed() {
+    using trackknife::operations::rewrite_cue_file_names;
+    const std::map<std::string, std::string> renamed{{"01.flac", "01 - One.flac"},
+                                                     {"two.wav", "Two.wav"}};
+    const std::string sheet = "REM GENRE Rock\r\nFILE \"01.flac\" WAVE\r\n  TRACK 01 AUDIO\r\n"
+                              "FILE two.wav WAVE\r\nFILE \"other.flac\" WAVE\r\n";
+    const auto rewritten = rewrite_cue_file_names(sheet, renamed);
+    CHECK(rewritten.has_value());
+    CHECK(*rewritten == "REM GENRE Rock\r\nFILE \"01 - One.flac\" WAVE\r\n  TRACK 01 AUDIO\r\n"
+                        "FILE Two.wav WAVE\r\nFILE \"other.flac\" WAVE\r\n");
+    // A new name with a space is quoted where the old one was not.
+    const auto spaced =
+        rewrite_cue_file_names("FILE a.flac WAVE\n", {{"a.flac", "A B.flac"}});
+    CHECK(spaced && *spaced == "FILE \"A B.flac\" WAVE\n");
+    // Naming none of them: nothing.
+    CHECK(!rewrite_cue_file_names("FILE \"x.flac\" WAVE\n", renamed).has_value());
+}
+
 int main() {
+    cueSheetsNameTheFilesAsRenamed();
     companionsTravelWithTheirAlbum();
     classifiesSameFilesystemAndMissingDirectoriesWithoutMutation();
     changedHardLinkedOccupiedAndSymlinkedPathsFailClosed();

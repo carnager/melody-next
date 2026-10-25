@@ -8,6 +8,10 @@
 #include "trackknife/metadata/mp3_writer.hpp"
 
 #include <algorithm>
+#include <iterator>
+#include <cctype>
+#include <map>
+#include <fstream>
 #include <filesystem>
 #include <unistd.h>
 #include <set>
@@ -240,6 +244,70 @@ std::size_t FilePublicationApplyResult::cancelled_source_count() const noexcept 
 
 namespace {
 
+// ADR-0320: the sheet a CUE companion travels as -- its FILE names renamed
+// as the plan renames the files beside it -- or none where it names none.
+[[nodiscard]] std::optional<std::string> rewritten_cue(const OutputPathPreflight& preflight,
+                                                       const std::size_t index) {
+    const auto& planned = preflight.sources[index].planned;
+    if (!planned.companion) {
+        return std::nullopt;
+    }
+    std::string extension = std::filesystem::path{planned.source_raw_path}.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](const unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (extension != ".cue") {
+        return std::nullopt;
+    }
+    const auto folder = std::filesystem::path{planned.source_raw_path}.parent_path();
+    std::map<std::string, std::string> renamed;
+    for (const auto& other : preflight.sources) {
+        if (other.planned.companion || other.planned.no_change) {
+            continue;
+        }
+        const std::filesystem::path from{other.planned.source_raw_path};
+        const std::filesystem::path to{other.planned.target_raw_path};
+        if (from.parent_path() == folder && from.filename() != to.filename()) {
+            renamed[from.filename().native()] = to.filename().native();
+        }
+    }
+    if (renamed.empty()) {
+        return std::nullopt;
+    }
+    std::ifstream in{planned.source_raw_path, std::ios::binary};
+    const std::string sheet{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    return rewrite_cue_file_names(sheet, renamed);
+}
+
+// The rewritten sheet written as the prepared copy a publication puts in place.
+[[nodiscard]] FilePublicationDestinationArtifactPreparer sheet_preparer(std::string sheet) {
+    return [sheet = std::move(sheet)](const std::string& prepared_raw_path,
+                                      const core::CancellationToken&)
+               -> core::Result<core::LocalSourceRevision> {
+        {
+            std::ofstream out{prepared_raw_path, std::ios::binary | std::ios::trunc};
+            out.write(sheet.data(), static_cast<std::streamsize>(sheet.size()));
+            out.flush();
+            if (!out) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                                   .message = "the CUE sheet could not be written",
+                                                   .context = {}});
+            }
+        }
+        auto revision = core::observe_local_source_revision(prepared_raw_path);
+        if (!revision) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                               .message = "the CUE sheet written cannot be read",
+                                               .context = {}});
+        }
+        return *revision;
+    };
+}
+
+} // namespace
+
+namespace {
+
 // ADR-0318: the folders an album left, removed where nothing stayed in them --
 // rmdir takes only an empty one. Their own folders only: never one above,
 // which may be a library's.
@@ -399,7 +467,12 @@ apply_file_publications(const OutputPathPreflight& preflight, FilePublicationJou
                                                             source_result.source_raw_path,
                                                             source_result.target_raw_path)
                                               : std::move(refreshed.error()));
-                if (refreshed) {
+                auto sheet = refreshed ? rewritten_cue(preflight, index) : std::nullopt;
+                if (refreshed && sheet) {
+                    committed = commit_destination_artifact_publication(
+                        *refreshed, 0U, synchronized_journal, sheet_preparer(std::move(*sheet)),
+                        dependent_state_committer, cancellation, remember_created_directories);
+                } else if (refreshed) {
                     switch (refreshed->sources.front().publication) {
                     case OutputPathPublicationKind::same_filesystem_rename:
                         committed = commit_same_filesystem_publication(
@@ -697,6 +770,17 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
                 if (committed) {
                     source_result.commit = std::move(*committed);
                     source_result.published_metadata = std::move(published_document);
+                } else {
+                    outcome = std::unexpected(std::move(committed.error()));
+                }
+            } else if (auto sheet = outcome && refreshed ? rewritten_cue(preflight, index)
+                                                         : std::nullopt;
+                       sheet) {
+                auto committed = commit_destination_artifact_publication(
+                    *refreshed, 0U, synchronized_file_journal, sheet_preparer(std::move(*sheet)),
+                    file_dependent_state_committer, cancellation, remember_created_directories);
+                if (committed) {
+                    source_result.commit = std::move(*committed);
                 } else {
                     outcome = std::unexpected(std::move(committed.error()));
                 }

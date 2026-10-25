@@ -7,6 +7,8 @@
 #include "trackknife/operations/output_path_plan.hpp"
 
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -87,11 +89,17 @@ struct OutputPathPreflight {
 preflight_output_paths(const OutputPathPlan& plan,
                        const core::CancellationToken& cancellation = {});
 
+// ADR-0320: a CUE sheet's FILE names, renamed as `renamed` says -- names
+// as written, quoted or not -- every other byte kept, line endings with
+// them. Nothing where it names none of them.
+[[nodiscard]] std::optional<std::string>
+rewrite_cue_file_names(std::string_view sheet, const std::map<std::string, std::string>& renamed);
+
 // ADR-0318: the same, with the companions of the files that move: where
 // every audio file of a folder goes to one other folder, that folder's
 // images, CUE sheets and playlists go with them, planned as further sources
 // (`companion`) and checked as every source is. A CUE sheet naming a file the
-// plan renames is a blocking issue: the sheet would no longer find it.
+// plan renames travels rewritten to name it as renamed (ADR-0320).
 [[nodiscard]] core::Result<OutputPathPreflight>
 preflight_output_paths_with_companions(const OutputPathPlan& plan,
                                        const core::CancellationToken& cancellation = {});

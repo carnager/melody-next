@@ -307,7 +307,7 @@ class MatchBoard final : public QListWidget {
         const auto position = event->position().toPoint();
         if (press_ && press_->on_file && (event->buttons() & Qt::LeftButton) != 0 &&
             (position - press_->at).manhattanLength() >= QApplication::startDragDistance()) {
-            carry(press_->row, position);
+            carry(press_->row);
             return;
         }
         // A hand over a file: it is what is moved.
@@ -514,7 +514,7 @@ class MatchBoard final : public QListWidget {
                    : tr("Carrying %1").arg(file));
     }
 
-    void carry(const std::size_t row, const QPoint& at) {
+    void carry(const std::size_t row) {
         press_.reset();
         if (!hasFile(row)) {
             return;
@@ -522,21 +522,32 @@ class MatchBoard final : public QListWidget {
         held_.reset();
         QDrag drag{this};
         drag.setMimeData(payload(row));
-        if (auto* item_at = itemOfRow(row)) {
-            // The file itself, lifted -- and see-through, so the track it is
-            // carried over shows beneath it.
-            const auto zones = zonesOf(visualItemRect(item_at));
-            const auto tile = viewport()->grab(zones.file);
-            QPixmap carried{tile.size()};
-            carried.setDevicePixelRatio(tile.devicePixelRatio());
+        {
+            // Only the file's name is carried, see-through, so the track it
+            // is carried over shows beneath it.
+            const auto name = session_->rows()[row].file;
+            const auto metrics = fontMetrics();
+            const auto ratio = devicePixelRatioF();
+            const QSize size{metrics.horizontalAdvance(name) + 20, metrics.height() + 10};
+            QPixmap carried{size * ratio};
+            carried.setDevicePixelRatio(ratio);
             carried.fill(Qt::transparent);
             {
                 QPainter painter{&carried};
-                painter.setOpacity(0.65);
-                painter.drawPixmap(0, 0, tile);
+                painter.setRenderHint(QPainter::Antialiasing);
+                painter.setOpacity(0.8);
+                QPainterPath shape;
+                shape.addRoundedRect(QRectF{QPointF{0.5, 0.5}, QSizeF{size}}.adjusted(0, 0, -1, -1),
+                                     4, 4);
+                painter.fillPath(shape, palette().color(QPalette::Base));
+                painter.setPen(QPen{palette().color(QPalette::Highlight), 1.0});
+                painter.drawPath(shape);
+                painter.setFont(font());
+                painter.setPen(palette().color(QPalette::Text));
+                painter.drawText(QRect{QPoint{0, 0}, size}, Qt::AlignCenter, name);
             }
             drag.setPixmap(carried);
-            drag.setHotSpot(at - zones.file.topLeft());
+            drag.setHotSpot(QPoint{-12, size.height() / 2});
         }
         viewport()->setCursor(Qt::ClosedHandCursor);
         drag.exec(Qt::MoveAction);

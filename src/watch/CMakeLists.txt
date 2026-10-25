@@ -17,6 +17,10 @@ target_link_libraries(
 )
 target_compile_features(trackknife_watch PUBLIC cxx_std_23)
 
+if(NOT MELODY_BUILD_WATCH)
+    return()
+endif()
+
 add_executable(melody_watch main.cpp)
 set_target_properties(melody_watch PROPERTIES OUTPUT_NAME melody-watch)
 target_link_libraries(

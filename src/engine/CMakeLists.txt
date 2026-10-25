@@ -19,9 +19,8 @@ target_link_libraries(
 )
 target_compile_features(trackknife_engine PUBLIC cxx_std_23)
 
-# ADR-0322: the library watched where the engine is -- inotify, so where
-# melody-watch builds.
-if(MELODY_BUILD_WATCH)
+# ADR-0322: the library watched where the engine is -- inotify, so Linux.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(trackknife_engine PRIVATE src/library_watch.cpp)
     target_link_libraries(trackknife_engine PUBLIC Trackknife::Watch)
     target_compile_definitions(trackknife_engine PUBLIC MELODY_ENABLE_LIBRARY_WATCH=1)

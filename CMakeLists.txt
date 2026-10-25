@@ -179,7 +179,9 @@ add_subdirectory(src/tools)
 add_subdirectory(src/daemon)
 add_subdirectory(src/agent)
 add_subdirectory(src/cli)
-if(MELODY_BUILD_WATCH)
+# ADR-0322: the watch library is the engine's too, wherever inotify is;
+# MELODY_BUILD_WATCH decides melody-watch itself.
+if(MELODY_BUILD_WATCH OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(src/watch)
 endif()
 

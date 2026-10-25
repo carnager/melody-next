@@ -19,8 +19,10 @@ for once they saw it.
 - **Right: the release's tracks**, headed by disc, one row each: number,
   title, length, a dot, and the file on it -- a tile to pick up -- or an
   empty slot to drop one in.
-- **Left: the files on no track**, gone from there once placed. "Every file
-  is on a track" when it is empty.
+- **Left: the files on no track**, gone from there once placed, under the
+  name of the folder each is in -- "CD 2", as the tracks under their disc;
+  two folders of one name by their parents' too ("Gilded/CD 1"). "Every
+  file is on a track" when it is empty.
 - **The dot is the fit**, as Picard colours it: green when length and title
   agree (lengths within three seconds, titles at least 80 % alike -- the
   clear-match rule -- or one of them sure and the other unknown), red when

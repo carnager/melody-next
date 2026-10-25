@@ -1474,10 +1474,12 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
                               Qt::NoModifier};
         QApplication::sendEvent(loose->viewport(), &drop_loose);
         QVERIFY(drop_loose.isAccepted());
-        QTRY_COMPARE(loose->count(), 1);
-        QCOMPARE(loose->item(0)->text(), QStringLiteral("2.flac"));
+        // Under its folder's name, as the tracks under their disc's.
+        QTRY_COMPARE(loose->count(), 2);
+        QCOMPARE(loose->item(0)->text(), QStringLiteral("music"));
+        QCOMPARE(loose->item(1)->text(), QStringLiteral("2.flac"));
         QVERIFY(matchRow(board, 3)->text().isEmpty());
-        const auto row = loose->item(0)->data(Qt::UserRole + 2).toInt();
+        const auto row = loose->item(1)->data(Qt::UserRole + 2).toInt();
         matchClickOnto(board, row, 3);
         QTRY_COMPARE(matchRow(board, 3)->text(), QStringLiteral("2.flac"));
         QCOMPARE(loose->count(), 0);

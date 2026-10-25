@@ -9,6 +9,7 @@
 #include <QDragLeaveEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <utility>
 
@@ -727,6 +729,27 @@ class LooseDelegate final : public QStyledItemDelegate {
         : QStyledItemDelegate(parent), pairing_(pairing) {}
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
                const QModelIndex& index) const override {
+        // A folder heads its files, as a disc its tracks.
+        if (static_cast<Kind>(index.data(kind_role).toInt()) == Kind::disc) {
+            const auto& palette = option.palette;
+            const auto area = option.rect.adjusted(8, 0, -4, 0);
+            painter->save();
+            auto font = option.font;
+            font.setWeight(QFont::DemiBold);
+            painter->setFont(font);
+            painter->setPen(palette.color(QPalette::PlaceholderText));
+            painter->drawText(QRect{area.left(), option.rect.top() + 6, area.width(),
+                                    option.rect.height() - 8},
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              QFontMetrics{font}.elidedText(index.data().toString(),
+                                                            Qt::ElideMiddle, area.width()));
+            painter->setPen(QPen{
+                blend(palette.color(QPalette::Base), palette.color(QPalette::Text), 18), 1.0});
+            painter->drawLine(area.left(), option.rect.bottom() - 1, area.right(),
+                              option.rect.bottom() - 1);
+            painter->restore();
+            return;
+        }
         const auto row = static_cast<std::size_t>(index.data(row_role).toULongLong());
         const auto& rows = pairing_->session()->rows();
         if (row >= rows.size()) {
@@ -745,8 +768,9 @@ class LooseDelegate final : public QStyledItemDelegate {
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& option,
-                                 const QModelIndex&) const override {
-        return QSize{160, QFontMetrics{option.font}.height() + 16};
+                                 const QModelIndex& index) const override {
+        const auto heading = static_cast<Kind>(index.data(kind_role).toInt()) == Kind::disc;
+        return QSize{160, QFontMetrics{option.font}.height() + (heading ? 18 : 16)};
     }
 
   private:
@@ -768,18 +792,53 @@ class LooseFiles final : public QListWidget {
         setMouseTracking(true);
     }
 
+    [[nodiscard]] int files() const {
+        int counted = 0;
+        for (int index = 0; index < count(); ++index) {
+            counted += rowOf(item(index)) ? 1 : 0;
+        }
+        return counted;
+    }
+
+    // The files on no track, under their folders -- "CD 2" -- in the order
+    // the folders first come.
     void rebuild() {
         clear();
         const auto& rows = pairing_->session()->rows();
+        std::vector<std::pair<QString, std::vector<std::size_t>>> folders;
         for (auto row = pairing_->session()->trackCount(); row < rows.size(); ++row) {
             if (rows[row].gap) {
                 continue;
             }
-            auto* item = new QListWidgetItem(rows[row].file, this);
-            item->setData(kind_role, static_cast<int>(Kind::pair));
-            item->setData(row_role, static_cast<qulonglong>(row));
-            item->setData(track_role, rows[row].track);
-            item->setToolTip(rows[row].file_tool_tip + QLatin1Char('\n') + rows[row].track);
+            const auto folder = QFileInfo{rows[row].file_tool_tip}.path();
+            auto found = std::ranges::find(folders, folder, &decltype(folders)::value_type::first);
+            if (found == folders.end()) {
+                folders.emplace_back(folder, std::vector<std::size_t>{});
+                found = std::prev(folders.end());
+            }
+            found->second.push_back(row);
+        }
+        // A folder by its name; two of one name, by their parents' too.
+        const auto named = [&folders](const QString& folder) {
+            const QFileInfo info{folder};
+            const auto name = info.fileName().isEmpty() ? folder : info.fileName();
+            const auto alike = std::ranges::count_if(folders, [&name](const auto& other) {
+                return QFileInfo{other.first}.fileName() == name;
+            });
+            return alike > 1 ? QFileInfo{info.path()}.fileName() + QLatin1Char('/') + name : name;
+        };
+        for (const auto& [folder, members] : folders) {
+            auto* heading = new QListWidgetItem(named(folder), this);
+            heading->setData(kind_role, static_cast<int>(Kind::disc));
+            heading->setToolTip(folder);
+            heading->setFlags(Qt::ItemIsEnabled);
+            for (const auto row : members) {
+                auto* item = new QListWidgetItem(rows[row].file, this);
+                item->setData(kind_role, static_cast<int>(Kind::pair));
+                item->setData(row_role, static_cast<qulonglong>(row));
+                item->setData(track_role, rows[row].track);
+                item->setToolTip(rows[row].file_tool_tip + QLatin1Char('\n') + rows[row].track);
+            }
         }
     }
 
@@ -1039,11 +1098,10 @@ class TrackMatchWidget final : public QWidget {
         pairing_->renew();
         board_->rebuild(selected);
         loose_->rebuild();
-        loose_title_->setText(loose_->count() == 0
-                                  ? tr("Every file is on a track")
-                                  : loose_->count() == 1
-                                        ? tr("1 unmatched file")
-                                        : tr("%1 unmatched files").arg(loose_->count()));
+        const auto loose = loose_->files();
+        loose_title_->setText(loose == 0   ? tr("Every file is on a track")
+                              : loose == 1 ? tr("1 unmatched file")
+                                           : tr("%1 unmatched files").arg(loose));
         if (heading_ != nullptr) {
             const auto fit = session_->fitSummary();
             heading_->setText(fit.isEmpty() ? session_->heading()

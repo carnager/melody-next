@@ -263,12 +263,12 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
                 .contains(QStringLiteral("1999-09-09")));
     // The version chosen is previewed beneath it: its pairing, to change
     // there; Apply stages it (ADR-0311).
-    QTRY_VERIFY(dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files")) !=
+    QTRY_VERIFY(dialog->findChild<QListWidget*>(QStringLiteral("bench-musicbrainz-match-board")) !=
                 nullptr);
     auto* stage_matches = use;
     if (untagged) {
-        auto* pairs =
-            dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
+        auto* board =
+            dialog->findChild<QListWidget*>(QStringLiteral("bench-musicbrainz-match-board"));
         auto* up = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-up"));
         auto* down =
             dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-down"));
@@ -276,63 +276,59 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
             dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-unmatch"));
         auto* sort =
             dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-sort"));
-        QVERIFY(pairs && up && down && unmatch && sort);
-        auto* tracks =
-            dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
-        QVERIFY(tracks);
-        QTRY_COMPARE(pairs->topLevelItemCount(), 2);
+        QVERIFY(board && up && down && unmatch && sort);
+        QTRY_COMPARE(matchRowCount(board), 2);
         sort->click();
-        QVERIFY(pairs->topLevelItem(0)->text(0).endsWith(QStringLiteral("2-first.flac")));
-        const auto first_album_track = tracks->topLevelItem(0)->text(0);
-        const auto second_album_track = tracks->topLevelItem(1)->text(0);
+        QVERIFY(matchRow(board, 0)->text().endsWith(QStringLiteral("2-first.flac")));
+        const auto first_album_track = matchTrack(matchRow(board, 0));
+        const auto second_album_track = matchTrack(matchRow(board, 1));
         QVERIFY(first_album_track.contains(QStringLiteral("One")));
         QVERIFY(second_album_track.contains(QStringLiteral("Two")));
-        pairs->setCurrentItem(pairs->topLevelItem(0));
+        board->setCurrentItem(matchRow(board, 0));
         QVERIFY(!up->isEnabled());
         QVERIFY(down->isEnabled());
-        QCOMPARE(tracks->currentItem(), tracks->topLevelItem(0));
-        QCOMPARE(pairs->topLevelItem(0)->text(2), QStringLiteral("→ 1.1"));
-        QVERIFY(pairs->topLevelItem(0)->font(2).bold());
-        QCOMPARE(pairs->topLevelItem(0)->background(0), tracks->topLevelItem(0)->background(0));
-        QCOMPARE(pairs->topLevelItem(0)->toolTip(0), QStringLiteral("/music/2-first.flac"));
-        // Exercise the actual drop handler using this view's model-generated payload.
-        std::unique_ptr<QMimeData> mime{pairs->model()->mimeData({pairs->model()->index(0, 0)})};
-        const auto rect = pairs->visualItemRect(pairs->topLevelItem(1));
-        const QPoint position{rect.center().x(), rect.bottom() - 1};
+        QVERIFY(matchRow(board, 0)->toolTip().contains(QStringLiteral("/music/2-first.flac")));
+        // A file carried between files, by the board's own drop handler and
+        // the payload its model makes: dropped below the second file.
+        std::unique_ptr<QMimeData> mime{board->model()->mimeData(
+            {board->indexFromItem(matchRow(board, 0))})};
+        const auto rect = board->visualItemRect(matchRow(board, 1));
+        const QPoint position{rect.left() + 30, rect.bottom() - 1};
         QDragEnterEvent enter{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton,
                               Qt::NoModifier};
-        QApplication::sendEvent(pairs->viewport(), &enter);
+        QApplication::sendEvent(board->viewport(), &enter);
         QVERIFY(enter.isAccepted());
         QDropEvent drop{QPointF{position}, Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
-        QApplication::sendEvent(pairs->viewport(), &drop);
+        QApplication::sendEvent(board->viewport(), &drop);
         QVERIFY(drop.isAccepted());
+        // A payload from before the board changed is not taken.
         QDragEnterEvent stale{dragPosition(position), Qt::MoveAction, mime.get(), Qt::LeftButton,
                               Qt::NoModifier};
-        QApplication::sendEvent(pairs->viewport(), &stale);
+        QApplication::sendEvent(board->viewport(), &stale);
         QVERIFY(!stale.isAccepted());
-        QVERIFY(pairs->topLevelItem(1)->text(0).endsWith(QStringLiteral("2-first.flac")));
-        QCOMPARE(tracks->topLevelItem(0)->text(0), first_album_track);
-        QCOMPARE(tracks->topLevelItem(1)->text(0), second_album_track);
+        QVERIFY(matchRow(board, 1)->text().endsWith(QStringLiteral("2-first.flac")));
+        QCOMPARE(matchTrack(matchRow(board, 0)), first_album_track);
+        QCOMPARE(matchTrack(matchRow(board, 1)), second_album_track);
         QVERIFY(!down->isEnabled());
-        pairs->setFocus();
-        QTest::keyClick(pairs, Qt::Key_Up, Qt::AltModifier);
-        QVERIFY(pairs->topLevelItem(0)->text(0).endsWith(QStringLiteral("2-first.flac")));
+        board->setFocus();
+        QTest::keyClick(board, Qt::Key_Up, Qt::AltModifier);
+        QVERIFY(matchRow(board, 0)->text().endsWith(QStringLiteral("2-first.flac")));
         unmatch->click();
-        QCOMPARE(pairs->topLevelItemCount(), 3);
-        QCOMPARE(pairs->topLevelItem(0)->text(0), QStringLiteral("No local file"));
-        QVERIFY(pairs->topLevelItem(2)->text(2).contains(QStringLiteral("Unmatched")));
+        QCOMPARE(matchRowCount(board), 3);
+        QVERIFY(matchRow(board, 0)->text().isEmpty());
+        QVERIFY(matchTrack(matchRow(board, 2)).contains(QStringLiteral("No tags")));
         QVERIFY(!unmatch->isEnabled());
         up->click();
         up->click();
-        QCOMPARE(pairs->topLevelItemCount(), 3);
+        QCOMPARE(matchRowCount(board), 3);
         // The missing slot can move too, returning the extra file to the album.
-        pairs->setCurrentItem(pairs->topLevelItem(2));
+        board->setCurrentItem(matchRow(board, 2));
         up->click();
-        QCOMPARE(pairs->topLevelItemCount(), 2);
-        QVERIFY(pairs->topLevelItem(0)->text(0).endsWith(QStringLiteral("2-first.flac")));
-        QCOMPARE(tracks->topLevelItem(0)->text(0), first_album_track);
-        QCOMPARE(tracks->topLevelItem(1)->text(0), second_album_track);
+        QCOMPARE(matchRowCount(board), 2);
+        QVERIFY(matchRow(board, 0)->text().endsWith(QStringLiteral("2-first.flac")));
+        QCOMPARE(matchTrack(matchRow(board, 0)), first_album_track);
+        QCOMPARE(matchTrack(matchRow(board, 1)), second_album_track);
     }
     QTRY_VERIFY(stage_matches->isEnabled());
     const auto screenshot_dir = qEnvironmentVariable("MELODY_TEST_SCREENSHOT_DIR");

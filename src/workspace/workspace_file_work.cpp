@@ -1020,6 +1020,7 @@ void Workspace::applyCommittedRelocation(const operations::FilePublicationCommit
 void Workspace::applyCommittedPublicationMetadata(
     const operations::FilePublicationCommitResult& result,
     const metadata::MetadataDocument& document) {
+    bool applied_any = false;
     for (auto& tab : list_tabs_) {
         auto applied = tab->model->applyCommittedMetadata(result.target_raw_path, document,
                                                           result.target_revision);
@@ -1029,9 +1030,12 @@ void Workspace::applyCommittedPublicationMetadata(
                                8'000);
             continue;
         }
-        if (*applied > 0U) {
-            syncArtwork(*tab);
-        }
+        applied_any = applied_any || *applied > 0U;
+    }
+    // Written with its move, a cover may be new: a miss cached before -- the
+    // file had none -- must not outlive it, as with a write in place.
+    if (applied_any) {
+        invalidateArtwork(result.target_raw_path);
     }
 }
 void Workspace::readRowsAgain(std::string raw_path) {
@@ -1073,17 +1077,19 @@ void Workspace::flushRowReads() {
                 if (EngineKey::of(tab->document) != key) {
                     continue;
                 }
-                std::size_t changed = 0U;
                 for (const auto& [path, read] : reads) {
-                    if (auto applied = tab->model->applyCommittedMetadata(path, read.document,
-                                                                          read.source_revision)) {
-                        changed += *applied;
-                    }
-                }
-                if (changed > 0U) {
-                    syncArtwork(*tab);
+                    static_cast<void>(
+                        tab->model->applyCommittedMetadata(path, read.document, read.source_revision));
                 }
             }
+            // Read again because they were written: a cover may be new, and
+            // a miss cached before must not outlive it -- under the album as
+            // the files now name it.
+            std::set<std::string> written;
+            for (const auto& [path, read] : reads) {
+                written.insert(path);
+            }
+            invalidateArtwork(written);
             if (!reads.empty()) {
                 schedulePersist();
             }

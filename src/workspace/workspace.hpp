@@ -1059,6 +1059,8 @@ class Workspace final : public QObject {
     // it, arriving later through the same path as a list's.
     [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine);
     void invalidateArtwork(const std::string& raw_path);
+    // The covers of these files' albums asked again: they were written.
+    void invalidateArtwork(const std::set<std::string>& raw_paths);
 
   private:
     void finishDiscovery();

@@ -1469,6 +1469,98 @@ void BenchMainWindowTest::aMovedAlbumGetsItsFolderCoverWhereItMoved() {
     QVERIFY(window_test::closeTaggerAfterWrite(guard));
 }
 
+// A file shown without a cover -- it had none -- that is given one as it is
+// moved shows it in its tab: the miss cached before does not outlive the
+// write.
+void BenchMainWindowTest::aCoverWrittenWithAMoveShowsInItsTab() {
+    QSettings{}.setValue(QLatin1String(SettingsDialog::artwork_embed_key), true);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::artwork_folder_image_key), false);
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    QVERIFY(QDir{media.path()}.mkpath(QStringLiteral("Old")));
+    QVERIFY(QDir{media.path()}.mkpath(QStringLiteral("Sorted")));
+    const auto staging = media.filePath(QStringLiteral("Old/staging.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), staging));
+    const auto read = metadata::read_local_metadata(QFile::encodeName(staging).toStdString());
+    QVERIFY(read.has_value());
+    const auto title = QString::fromStdString(read->document.effective_values("title").front());
+    const auto source_path = media.filePath(QStringLiteral("Old/") + title + QStringLiteral(".flac"));
+    QVERIFY(QFile::rename(staging, source_path));
+    const auto picked_file = media.filePath(QStringLiteral("picked.png"));
+    QImage picked{40, 40, QImage::Format_RGB32};
+    picked.fill(Qt::yellow);
+    QVERIFY(picked.save(picked_file, "PNG"));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    bool layout_saved = false;
+    window.persistence_->saveOutputLayoutProfile(
+        persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::OutputLayoutProfile{
+                    .schema_version = 1U,
+                    .name = "Moved",
+                    .dialect = {},
+                    .relative_directory_expression = "Album",
+                    .basename_expression = "%title%",
+                    .sanitization_policy = {"linux", 1U},
+                },
+        },
+        [&layout_saved](const QString& error) { layout_saved = error.isEmpty(); });
+    QTRY_VERIFY(layout_saved);
+    window.openLocalPaths({QFile::encodeName(source_path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr && properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    // Looked for, and none: the miss is cached.
+    const auto key = list_model->groupKey(0);
+    QTRY_VERIFY_WITH_TIMEOUT(window.workspace_.artwork_cache_.contains(key), 10'000);
+    QVERIFY(!list_model->hasArtwork(key));
+
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    properties_action->trigger();
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    TaggerSession* session = nullptr;
+    ArtworkSession* artwork = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((session = properties->findChild<TaggerSession*>()) != nullptr &&
+                                 (artwork = properties->findChild<ArtworkSession*>()) != nullptr,
+                             10'000);
+    auto* apply =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
+    QVERIFY(apply && status);
+    QTRY_VERIFY_WITH_TIMEOUT(session->renameAvailable(), 10'000);
+    session->chooseMoveFolder(QFile::encodeName(media.filePath(QStringLiteral("Sorted")))
+                                  .toStdString());
+    QTRY_VERIFY_WITH_TIMEOUT(session->moveAvailable(), 10'000);
+    session->chooseMove(true);
+    artwork->setActive(true);
+    QTRY_VERIFY_WITH_TIMEOUT(artwork->canAdd(), 10'000);
+    artwork->add(picked_file, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(artwork->hasPendingChanges(), 10'000);
+    QTRY_VERIFY(apply->isEnabled());
+    QTest::mouseClick(apply, Qt::LeftButton);
+    const auto moved =
+        media.filePath(QStringLiteral("Sorted/Album/") + title + QStringLiteral(".flac"));
+    QTRY_VERIFY2_WITH_TIMEOUT(QFile::exists(moved), qPrintable(status->text()), 15'000);
+    // The tab shows the cover written with the move.
+    QTRY_VERIFY2_WITH_TIMEOUT(list_model->hasArtwork(list_model->groupKey(0)),
+                              qPrintable(status->text()), 10'000);
+    QPointer guard{properties};
+    QVERIFY(window_test::closeTaggerAfterWrite(guard));
+}
+
 void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     QTemporaryDir media;
     QVERIFY(media.isValid());

@@ -150,6 +150,9 @@ struct CoverArtImage {
     std::string image_url;
     // Smallest useful preview the archive offers (250px, else "small").
     std::string thumbnail_url;
+    // ADR-0326: where it is from when not the Cover Art Archive
+    // ("Bandcamp"); empty for the archive's own.
+    std::string source;
 
     friend bool operator==(const CoverArtImage&, const CoverArtImage&) = default;
 };
@@ -173,5 +176,22 @@ parse_cover_art_listing(std::string_view body, const WebServiceLimits& limits = 
 // Deterministic front-cover choice: the first image flagged front, else the
 // first typed "Front", else the first approved image, else the first image.
 [[nodiscard]] std::optional<std::size_t> select_front_cover(const CoverArtListing& listing);
+
+// ADR-0326: a release's links (its URL relationships) and its album's id,
+// for the album's links too.
+struct ReleaseLinks {
+    std::vector<std::string> urls;
+    std::string release_group_id;
+
+    friend bool operator==(const ReleaseLinks&, const ReleaseLinks&) = default;
+};
+[[nodiscard]] core::Result<std::string> build_release_links_url(std::string_view release_id);
+[[nodiscard]] core::Result<std::string> build_release_group_links_url(std::string_view group_id);
+// A release's or a release group's lookup with its links.
+[[nodiscard]] core::Result<ReleaseLinks> parse_release_links(std::string_view body,
+                                                             const WebServiceLimits& limits = {});
+// The cover a Bandcamp album page names (its og:image), as an image of the
+// listing: front, 1200 pixels, a 350-pixel preview.
+[[nodiscard]] std::optional<CoverArtImage> bandcamp_cover(std::string_view page);
 
 } // namespace trackknife::musicbrainz

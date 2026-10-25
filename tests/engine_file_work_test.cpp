@@ -1946,9 +1946,14 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
         engine::MetadataServices::fetchable("https://musicbrainz.org/ws/2/release/x?fmt=json") &&
             engine::MetadataServices::fetchable("https://coverartarchive.org/release/x"),
         "MusicBrainz and the Cover Art Archive are fetched");
+    require(engine::MetadataServices::fetchable("https://band.bandcamp.com/album/beta") &&
+                engine::MetadataServices::fetchable("https://f4.bcbits.com/img/a42_10.jpg"),
+            "and Bandcamp's album pages and covers (ADR-0326)");
     for (const auto* url : {"http://musicbrainz.org/ws/2/release/x", "https://example.org/",
                             "file:///etc/passwd", "https://musicbrainz.org.evil.example/ws/2/",
-                            "https://coverartarchive.org.evil.example/"}) {
+                            "https://coverartarchive.org.evil.example/",
+                            "https://band.bandcamp.com/merch", "https://bandcamp.com/search?q=x",
+                            "https://band.bandcamp.com.evil.example/album/beta"}) {
         require(!engine::MetadataServices::fetchable(url), url);
         require(!services.fetch(url, {}), "and fetch() refuses it too");
     }

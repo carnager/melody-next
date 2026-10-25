@@ -46,7 +46,7 @@ metadata::ArtworkStoragePolicy SettingsKeys::artworkPolicy() {
                     .toStdString(),
             .fetch_source = settings
                                 .value(QLatin1String(artwork_fetch_source_key),
-                                       QStringLiteral("coverartarchive"))
+                                       QStringLiteral("coverartarchive+bandcamp"))
                                 .toString()
                                 .toStdString(),
             .max_embedded_edge = static_cast<std::uint32_t>(std::max(

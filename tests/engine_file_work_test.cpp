@@ -1942,6 +1942,26 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
         require(decide(503, 120, 0) == Throttle{.kind = Throttle::Kind::give_up, .seconds = 120},
                 "nor after a wait too long to sit through");
     }
+    {
+        // ADR-0329: no answer, or the service failing on its side, is asked
+        // again twice -- after a second, then three -- then given up on;
+        // an answer, even a refusal, is not.
+        using Throttle = engine::MetadataServices::Throttle;
+        const auto again = &engine::MetadataServices::transient;
+        require(again(false, 0, 0) == Throttle{.kind = Throttle::Kind::wait, .seconds = 1},
+                "a request nothing answered is asked again after a second");
+        require(again(false, 0, 1) == Throttle{.kind = Throttle::Kind::wait, .seconds = 3},
+                "and again after three");
+        require(again(false, 0, 2).kind == Throttle::Kind::give_up, "and then given up on");
+        for (const long status : {500L, 502L, 504L}) {
+            require(again(true, status, 0).kind == Throttle::Kind::wait,
+                    "a failure on the service's side is asked again");
+        }
+        for (const long status : {200L, 404L, 400L, 503L}) {
+            require(again(true, status, 0).kind == Throttle::Kind::answer,
+                    "an answer is taken as it is -- 503 is MusicBrainz asking to wait");
+        }
+    }
     require(
         engine::MetadataServices::fetchable("https://musicbrainz.org/ws/2/release/x?fmt=json") &&
             engine::MetadataServices::fetchable("https://coverartarchive.org/release/x"),

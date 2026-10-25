@@ -42,6 +42,7 @@ constexpr auto user_agent = "Melody/0.0.1 ( https://github.com/carnager/melody-n
 // Covers can be large; nothing a lookup needs is larger.
 constexpr std::size_t response_limit = 64U * 1024U * 1024U;
 constexpr long request_timeout_ms = 30'000;
+constexpr long connect_timeout_ms = 10'000;
 constexpr auto fingerprint_timeout = std::chrono::seconds{120};
 
 [[nodiscard]] core::Error service_error(const core::ErrorCode code, std::string message) {
@@ -92,6 +93,9 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
     curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, collect);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &body);
     curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, request_timeout_ms);
+    // A server not taking the connection is asked again soon (ADR-0329),
+    // not after the whole request's time.
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, stop_when_cancelled);
@@ -166,6 +170,20 @@ MetadataServices::Throttle MetadataServices::throttle(const long status,
     return Throttle{.kind = Throttle::Kind::wait, .seconds = wait};
 }
 
+MetadataServices::Throttle MetadataServices::transient(const bool answered, const long status,
+                                                      const int attempt) {
+    constexpr int retries = 2;
+    const bool failed = !answered || status == 500 || status == 502 || status == 504;
+    if (!failed) {
+        return {};
+    }
+    if (attempt >= retries) {
+        return Throttle{.kind = Throttle::Kind::give_up, .seconds = 0};
+    }
+    // 1 s, then 3.
+    return Throttle{.kind = Throttle::Kind::wait, .seconds = attempt == 0 ? 1 : 3};
+}
+
 bool MetadataServices::fetchable(const std::string_view url) {
     // ADR-0326: and Bandcamp's album pages and their images, found through
     // a release's MusicBrainz links.
@@ -214,11 +232,40 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
     // its refusal handed on as if it were an answer.
     long status = 0;
     core::Result<std::string> body = std::unexpected(core::Error{});
+    // Waits, or says it was cancelled meanwhile.
+    const auto wait = [&cancellation](const std::int64_t seconds) {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{seconds};
+        while (std::chrono::steady_clock::now() < until) {
+            if (cancellation.is_cancellation_requested()) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
+        return true;
+    };
+    int failures = 0;
     for (int attempt = 0;; ++attempt) {
         pace(last_musicbrainz_,
              std::chrono::milliseconds{musicbrainz::minimum_request_interval_ms});
         std::int64_t retry_after = 0;
+        status = 0;
         body = perform(url, std::nullopt, cancellation, &status, &retry_after);
+        // ADR-0329: no answer, or a failure on the service's side, is asked
+        // again before it is handed on: a lookup is not lost to one dropped
+        // connection.
+        const bool answered = body.has_value() || status != 0;
+        if ((body || body.error().code == core::ErrorCode::io) &&
+            !(body && status == 503 && answers_json(url))) {
+            const auto again = transient(answered, status, failures);
+            if (again.kind == Throttle::Kind::wait) {
+                ++failures;
+                if (!wait(again.seconds)) {
+                    return std::unexpected(
+                        service_error(core::ErrorCode::cancelled, "the lookup was cancelled"));
+                }
+                continue;
+            }
+        }
         if (!body) {
             return body;
         }
@@ -232,13 +279,9 @@ core::Result<std::string> MetadataServices::fetch(const std::string& url,
                                                      std::to_string(next.seconds) +
                                                      " s; try again later"));
         }
-        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{next.seconds};
-        while (std::chrono::steady_clock::now() < until) {
-            if (cancellation.is_cancellation_requested()) {
-                return std::unexpected(
-                    service_error(core::ErrorCode::cancelled, "the lookup was cancelled"));
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        if (!wait(next.seconds)) {
+            return std::unexpected(
+                service_error(core::ErrorCode::cancelled, "the lookup was cancelled"));
         }
     }
     // The archive says a release has no covers with a 404 page: as a listing,

@@ -499,17 +499,18 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
             continue;
         }
         const auto& target_folder = *leaving.targets.begin();
-        DIR* directory = ::opendir(folder.c_str());
-        if (directory == nullptr) {
+        std::error_code listing;
+        std::filesystem::directory_iterator entries{std::filesystem::path{folder}, listing};
+        if (listing) {
             continue;
         }
         std::vector<std::string> companions;
         bool audio_left = false;
-        while (const auto* entry = ::readdir(directory)) {
-            const std::string name{entry->d_name};
-            if (name == "." || name == "..") {
-                continue;
+        for (; entries != std::filesystem::directory_iterator{}; entries.increment(listing)) {
+            if (listing) {
+                break;
             }
+            const auto name = entries->path().filename().native();
             const auto path = std::filesystem::path{folder} / name;
             struct stat status{};
             if (::lstat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
@@ -524,7 +525,6 @@ preflight_output_paths_with_companions(const OutputPathPlan& plan,
                 companions.push_back(name);
             }
         }
-        ::closedir(directory);
         if (audio_left) {
             continue;
         }

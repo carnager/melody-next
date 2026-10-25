@@ -599,7 +599,9 @@ void PlaylistFolder::load_state() {
     style_ = style_named(state.value("style", std::string{"root"}))
                  .value_or(lists::PlaylistPathStyle::root_relative);
     indexed_folder_ = state.value("indexed_folder", std::string{});
-    for (const auto& [name, known] : state.value("files", Json::object()).items()) {
+    // Named: items() of the temporary value() returns would outlive it.
+    const auto files = state.value("files", Json::object());
+    for (const auto& [name, known] : files.items()) {
         files_[name] = Known{.id = known.value("id", std::string{}),
                              .modified_ns = known.value("modified_ns", std::int64_t{0}),
                              .size = known.value("size", std::uintmax_t{0}),

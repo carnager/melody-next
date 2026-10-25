@@ -1427,11 +1427,11 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
     std::unique_ptr<QMimeData> mime{
         board->model()->mimeData({board->indexFromItem(matchRow(board, 0))})};
     const auto onto = track_side(2);
-    QDragEnterEvent enter{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{dragPosition(onto), Qt::MoveAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(board->viewport(), &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+    QDragMoveEvent move{dragPosition(onto), Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
     QApplication::sendEvent(board->viewport(), &move);
     QVERIFY(move.isAccepted());
@@ -1465,7 +1465,7 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
         std::unique_ptr<QMimeData> back{
             board->model()->mimeData({board->indexFromItem(matchRow(board, 3))})};
         const auto into = loose->viewport()->rect().center();
-        QDragEnterEvent enter_loose{QPointF{into}, Qt::MoveAction, back.get(), Qt::LeftButton,
+        QDragEnterEvent enter_loose{dragPosition(into), Qt::MoveAction, back.get(), Qt::LeftButton,
                                     Qt::NoModifier};
         QApplication::sendEvent(loose->viewport(), &enter_loose);
         QVERIFY(enter_loose.isAccepted());

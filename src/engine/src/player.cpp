@@ -112,7 +112,9 @@ class SilentAudition final : public audio::Audition {
 
 Player::Player(std::unique_ptr<audio::LocalAuditionService> local)
     : local_(std::move(local)), silent_(std::make_unique<SilentAudition>()),
-      audition_(local_ ? static_cast<audio::Audition*>(local_.get()) : silent_.get()) {}
+      audition_(local_ ? static_cast<audio::Audition*>(local_.get()) : silent_.get()) {
+    static_cast<void>(audition_->set_replay_gain_mode(replay_gain_mode_));
+}
 
 std::unique_ptr<Player> Player::create_without_audio() {
     return std::unique_ptr<Player>{new Player{nullptr}};

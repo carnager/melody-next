@@ -26,10 +26,22 @@ a set of speakers, headphones, a renderer -- and how it is listened to.
   give it its volume and mode back. An output never set takes the gain the
   engine plays with and keeps its own volume.
 - Preamps stay one engine setting.
-- Clients change nothing: they show and set the playing output's volume
-  and mode, as before -- Melody, the phone, melody-cli alike.
+- **A client never pushes its own ReplayGain.** It shows the playing
+  output's mode and preamps as the engine reports them, and sends them only
+  when they are changed there -- the menu, Settings, or its "auto" following
+  shuffle -- and only to the engine playing. Connecting, reconnecting or
+  starting sends nothing: Melody's window once gave its own setting to every
+  engine it reached on each connection, and so overwrote what another output
+  -- set from the phone -- was set to.
+- **An engine, and an output it was never told about, plays album gain**:
+  no client has to push a setting for the first track to play as Melody
+  does by default.
 
 ## Verification
+
+- `engine-playback`: a window whose own setting is album, connecting to an
+  engine another client set to no gain, shows no gain and leaves it so.
+- `bench-main-window`: preamps changed in Settings reach the playing engine.
 
 - `output-agent`: two agents set differently are given their own volume
   and mode back as each is chosen again, and the engine keeps them.

@@ -11,8 +11,12 @@ none="$(mktemp -d)"
 trap 'rm -rf "${none}"' EXIT
 exec unshare -rn dbus-run-session -- sh -c '
     ip link set lo up
-    ip link set lo multicast on
-    ip route add 224.0.0.0/4 dev lo 2>/dev/null || true
+    # A network of its own to find engines on: multicast DNS needs an
+    # interface that is not loopback.
+    ip link add sealed0 type dummy
+    ip addr add 10.213.0.1/24 dev sealed0
+    ip link set sealed0 multicast on up
+    ip route add 224.0.0.0/4 dev sealed0
     export PIPEWIRE_RUNTIME_DIR="$1" PULSE_SERVER=unix:/nonexistent
     shift
     exec ctest --test-dir "$@"

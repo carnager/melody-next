@@ -290,7 +290,7 @@ class Player final {
         // a new instance. A client that credits listening needs to tell those
         // apart, and a path cannot.
         std::uint64_t instance{0U};
-        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
+        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::album};
         audio::ReplayGainPreamps replay_gain_preamps;
         // The chosen sink (nullopt: the default), what the default is now, and
         // whether the chosen one exists -- a USB DAC unplugged is chosen but
@@ -332,7 +332,7 @@ class Player final {
         audio::PlaybackModes modes;
         // How loud tracks are meant to be, as last set; each output's own
         // is kept by Outputs and given back when it plays (ADR-0325).
-        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
+        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::album};
         audio::ReplayGainPreamps replay_gain_preamps;
         std::int64_t position_ms{0};
         // What the file looked like when the position was taken. Resuming
@@ -455,7 +455,10 @@ class Player final {
     // Kept here, not left to the output: an output that is replaced, or an
     // agent that starts afresh, knows nothing of it.
     std::string speakers_taken_by_;
-    audio::ReplayGainMode replay_gain_mode_{audio::ReplayGainMode::off};
+    // ADR-0325: album gain until set otherwise -- an engine, or an output,
+    // never told plays as Melody does by default, so no client need push
+    // its own on connecting.
+    audio::ReplayGainMode replay_gain_mode_{audio::ReplayGainMode::album};
     audio::ReplayGainPreamps replay_gain_preamps_;
     audio::PlaybackOrder order_;
     int row_{-1};

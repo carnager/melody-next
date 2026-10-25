@@ -133,7 +133,10 @@ void Workspace::reloadPlaybackPreferences() {
     if (local_rg_preamp_with_ != with_gain || local_rg_preamp_without_ != without_gain) {
         local_rg_preamp_with_ = with_gain;
         local_rg_preamp_without_ = without_gain;
-        applyLocalPlaybackModes();
+        saveLocalPlaybackModes();
+        // Changed in Settings: the playing output takes them.
+        syncReplayGain();
+        view_->refreshLocalPlaybackControls();
     }
 }
 
@@ -215,25 +218,35 @@ void Workspace::cycleConsume() {
 }
 
 void Workspace::setReplayGain(const QString& mode) {
+    // Chosen here: the playing output plays so (ADR-0325).
     local_replaygain_ = mode;
-    applyLocalPlaybackModes();
+    saveLocalPlaybackModes();
+    syncReplayGain();
+    view_->refreshLocalPlaybackControls();
 }
 
 void Workspace::followEngineState(const EnginePlayback::State& state) {
-    // ReplayGain changed on the playing engine from elsewhere: taken, and
-    // given to the others. Only a change counts -- what an engine reports
-    // before it has been given this window's setting is its default, not a
-    // choice -- and a report from before this window's own change, still on
-    // its way, is none.
+    // ADR-0325: the playing output's ReplayGain is what this window shows --
+    // set here, by another client, or kept by the engine for that output.
+    // Taken, never pushed back; nor given to any other engine. A report from
+    // before this window's own change, still on its way, is none.
     const auto reported = state.replay_gain_mode;
-    const bool changed_there = engine_replay_gain_.has_value() && *engine_replay_gain_ != reported;
     engine_replay_gain_ = reported;
-    if (changed_there && !transport_->settling() && reported != resolvedReplayGain()) {
+    if (!transport_->settling() && reported != resolvedReplayGain()) {
         local_replaygain_ = reported == audio::ReplayGainMode::track   ? QStringLiteral("track")
                             : reported == audio::ReplayGainMode::album ? QStringLiteral("album")
                                                                        : QStringLiteral("off");
         saveLocalPlaybackModes();
-        syncReplayGain();
+        view_->refreshLocalPlaybackControls();
+    }
+    // Its preamps likewise: shown, and in Settings, as it plays them.
+    if (const auto& preamps = state.replay_gain_preamps;
+        !transport_->settling() &&
+        (static_cast<double>(preamps.with_gain_db) != local_rg_preamp_with_ ||
+         static_cast<double>(preamps.without_gain_db) != local_rg_preamp_without_)) {
+        local_rg_preamp_with_ = static_cast<double>(preamps.with_gain_db);
+        local_rg_preamp_without_ = static_cast<double>(preamps.without_gain_db);
+        saveLocalPlaybackModes();
         view_->refreshLocalPlaybackControls();
     }
     // Not while a command of this window's is unanswered: a state the engine

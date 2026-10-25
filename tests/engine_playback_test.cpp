@@ -489,6 +489,26 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     QTRY_VERIFY_WITH_TIMEOUT(track_gain->isChecked(), 5'000);
     QCOMPARE(QSettings{}.value(QStringLiteral("playback/local-replaygain")).toString(),
              QStringLiteral("track"));
+
+    // ADR-0325: another window, its own setting album, connects while the
+    // engine plays without gain -- as another client set it, the phone,
+    // say. It shows that; it sends nothing of its own on connecting.
+    QVERIFY((*other)
+                ->call("playback.set_replay_gain", protocol::Json{{"mode", "off"},
+                                                                  {"preamp_with_gain_db", 0.0},
+                                                                  {"preamp_without_gain_db", 0.0}})
+                .has_value());
+    QSettings{}.setValue(QStringLiteral("playback/local-replaygain"), QStringLiteral("album"));
+    {
+        BenchMainWindow second;
+        second.show();
+        auto* shown_off =
+            second.findChild<QAction*>(QStringLiteral("action-local-replaygain-off"));
+        QVERIFY(shown_off != nullptr);
+        QTRY_VERIFY_WITH_TIMEOUT(shown_off->isChecked(), 5'000);
+        QTest::qWait(500);
+        QCOMPARE((*player)->state().replay_gain_mode, audio::ReplayGainMode::off);
+    }
     (*other)->close();
 
     watcher.stop();

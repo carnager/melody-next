@@ -1871,12 +1871,6 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
         QVERIFY(window.findChild<QAction*>(QStringLiteral("action-local-replaygain-preamp")) !=
                 nullptr);
     }
-    // Persisted preamps reach the playback worker on the next start.
-    {
-        QSettings settings;
-        settings.setValue(QStringLiteral("playback/rg-preamp-with"), 4.5);
-        settings.setValue(QStringLiteral("playback/rg-preamp-without"), -3.0);
-    }
     BenchMainWindow restored;
     restored.show();
     auto* repeat = restored.findChild<QAction*>(QStringLiteral("action-local-repeat"));
@@ -1889,6 +1883,14 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
     QCOMPARE(single->iconText(), QStringLiteral("1×"));
     QCOMPARE(consume->iconText(), QStringLiteral("C×"));
     QTRY_COMPARE(restored.property("trackknife-player-replaygain").toInt(), 1);
+    // ADR-0325: preamps changed in Settings reach the playing engine; a
+    // window starting sends none of its own.
+    {
+        QSettings settings;
+        settings.setValue(QStringLiteral("playback/rg-preamp-with"), 4.5);
+        settings.setValue(QStringLiteral("playback/rg-preamp-without"), -3.0);
+    }
+    restored.workspace_.reloadPlaybackPreferences();
     QTRY_COMPARE(restored.property("trackknife-player-rg-preamp-with").toDouble(), 4.5);
     QTRY_COMPARE(restored.property("trackknife-player-rg-preamp-without").toDouble(), -3.0);
 }

@@ -318,8 +318,8 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
         // that rather than its address (an engine too old to say keeps it).
         static_cast<void>(link->catalogue->open());
         adoptEngineIdentity(*link);
-        // Reached: it plays with this window's ReplayGain, as every engine does.
-        syncReplayGain();
+        // Reached, it keeps its own ReplayGain (ADR-0325): shown when it is
+        // the one playing, never set by connecting.
         view_->engineAttached(*link);
         // The remote tabs were restored before there was a remote to ask for
         // their covers and missing tags -- or while it was away: they ask now.

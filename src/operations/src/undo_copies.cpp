@@ -326,6 +326,15 @@ core::Result<std::size_t> keep_undo_copies_in_place(MetadataOperationJournal& me
                  [&](const std::string& path, const core::LocalSourceRevision& revision) {
                      return files.relocate_kept(record.id, path, revision);
                  });
+        // ADR-0318: kept beside where a moved file was, the folder its album
+        // left stayed for it; taken to the undo folder, the folder goes too,
+        // once empty -- that folder only.
+        std::error_code missing;
+        if (current == beside.native() && !std::filesystem::exists(beside, missing) &&
+            beside.parent_path() !=
+                std::filesystem::path{record.target_raw_path}.parent_path()) {
+            static_cast<void>(::rmdir(beside.parent_path().c_str()));
+        }
     }
     if (first_issue) {
         return std::unexpected(std::move(*first_issue));

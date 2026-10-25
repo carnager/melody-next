@@ -536,6 +536,7 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
                             .state = operations::FilePublicationApplySourceState::committed,
                             .commit = std::move(commit),
                             .metadata_commit = std::nullopt,
+                            .folder_image_commit = std::nullopt,
                             .published_metadata = std::nullopt,
                             .issue = std::nullopt,
                         }},

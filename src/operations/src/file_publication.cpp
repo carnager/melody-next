@@ -3228,7 +3228,15 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
             return std::unexpected(std::move(removed.error()));
         }
     }
-    return mark_backup(journal, record.id, BackupState::retained, BackupState::released);
+    auto marked = mark_backup(journal, record.id, BackupState::retained, BackupState::released);
+    // ADR-0318: kept beside where the file was, the folder an album left
+    // stayed for it; let go of, the folder goes too, once empty -- that
+    // folder only.
+    if (marked && retained.parent_path() == std::filesystem::path{record.source_raw_path}.parent_path() &&
+        retained.parent_path() != std::filesystem::path{record.target_raw_path}.parent_path()) {
+        static_cast<void>(::rmdir(retained.parent_path().c_str()));
+    }
+    return marked;
 }
 
 core::Result<std::vector<FilePublicationRecoveryResult>>

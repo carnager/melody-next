@@ -3264,6 +3264,10 @@ void TaggerSession::finishFileApply() {
     {
         // Gathered until read: a retry adds to what the first try wrote.
         std::vector<operations::UndoRequest> written;
+        // ADR-0318: folder covers written in a moved album's folder, undone
+        // first -- the cover that travelled along is then back before it
+        // moves back.
+        std::vector<operations::UndoRequest> covers;
         for (const auto& source : outcome.sources) {
             if (source.state != operations::FilePublicationApplySourceState::committed) {
                 continue;
@@ -3275,6 +3279,10 @@ void TaggerSession::finishFileApply() {
             if (source.commit && !source.commit->journal_id.is_nil()) {
                 written.push_back({.kind = operations::UndoKind::publication,
                                    .journal_id = source.commit->journal_id});
+            }
+            if (source.folder_image_commit && !source.folder_image_commit->journal_id.is_nil()) {
+                covers.push_back({.kind = operations::UndoKind::metadata,
+                                  .journal_id = source.folder_image_commit->journal_id});
             }
             if (grid_model_ != nullptr) {
                 const auto& selection = grid_model_->selection();
@@ -3289,6 +3297,7 @@ void TaggerSession::finishFileApply() {
             }
         }
         std::ranges::reverse(written);
+        written.insert(written.begin(), covers.begin(), covers.end());
         rememberWrite(std::move(written));
     }
     const auto changed_count = outcome.committed_source_count();
@@ -3498,6 +3507,7 @@ void TaggerSession::writeUndone(
                 .state = operations::FilePublicationApplySourceState::committed,
                 .commit = undone.moved_back,
                 .metadata_commit = std::nullopt,
+                .folder_image_commit = std::nullopt,
                 .published_metadata = undone.published_metadata,
                 .issue = std::nullopt});
         }

@@ -7,6 +7,9 @@
 
 #include <QSettings>
 
+#include <set>
+#include <map>
+#include <filesystem>
 #include <algorithm>
 #include <string>
 #include <utility>
@@ -106,6 +109,36 @@ planPreparation(PreparationRequest request, const core::CancellationToken& cance
             // along with the album.
             path_plan = checked->plan;
             path_preflight = std::move(*checked);
+        }
+    }
+    // ADR-0318: the folder cover of files that all move to one other folder
+    // is written there, once they -- and what travels with them -- are.
+    if (metadata_plan && path_preflight) {
+        std::map<std::string, std::set<std::string>> leaving;
+        for (const auto& source : path_preflight->sources) {
+            if (source.planned.companion) {
+                continue;
+            }
+            const std::filesystem::path from{source.planned.source_raw_path};
+            leaving[from.parent_path().native()].insert(
+                source.planned.no_change
+                    ? from.parent_path().native()
+                    : std::filesystem::path{source.planned.target_raw_path}.parent_path().native());
+        }
+        for (auto& source : metadata_plan->sources) {
+            if (!source.artwork || !source.artwork->folder_image) {
+                continue;
+            }
+            const std::filesystem::path image{source.artwork->folder_image->raw_path};
+            const auto found = leaving.find(image.parent_path().native());
+            if (found == leaving.end() || found->second.size() != 1U ||
+                *found->second.begin() == image.parent_path().native()) {
+                continue;
+            }
+            auto artwork = std::make_shared<metadata::ArtworkWritePlanSource>(*source.artwork);
+            artwork->folder_image->raw_path =
+                (std::filesystem::path{*found->second.begin()} / image.filename()).native();
+            source.artwork = std::move(artwork);
         }
     }
     return operations::assemble_preparation_plan(operation_selection, metadata_context_change_count,

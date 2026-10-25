@@ -39,6 +39,9 @@ struct FilePublicationApplySourceResult {
     FilePublicationApplySourceState state{FilePublicationApplySourceState::pending};
     std::optional<FilePublicationCommitResult> commit;
     std::optional<MetadataCommitResult> metadata_commit;
+    // ADR-0318: the folder cover of a file that moved, written in the folder
+    // it moved to once every file is there.
+    std::optional<MetadataCommitResult> folder_image_commit;
     std::optional<metadata::MetadataDocument> published_metadata;
     std::optional<core::Error> issue;
 

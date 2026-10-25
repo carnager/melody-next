@@ -506,6 +506,9 @@ Json encode(const operations::FilePublicationApplyResult& result) {
                 // sent: `published_metadata` is no longer part of a result.
                 {"metadata_commit",
                  source.metadata_commit ? encode_commit(*source.metadata_commit) : Json()},
+                {"folder_image_commit", source.folder_image_commit
+                                            ? encode_commit(*source.folder_image_commit)
+                                            : Json()},
                 {"issue", encode_optional_error(source.issue)}};
         });
     return Json{{"sources", std::move(sources)},
@@ -528,6 +531,9 @@ decode_publication_apply_result(const Json& value) {
                 "commit", read_publication_commit);
             source.metadata_commit = source_in.optional_object<operations::MetadataCommitResult>(
                 "metadata_commit", read_commit);
+            source.folder_image_commit =
+                source_in.optional_object<operations::MetadataCommitResult>(
+                    "folder_image_commit", read_commit);
             if (const auto* published = source_in.find("published_metadata")) {
                 auto decoded = decode_document(*published);
                 if (decoded) {

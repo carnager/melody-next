@@ -11,7 +11,9 @@
 #endif
 #include "trackknife/protocol/dispatch.hpp"
 
+#include <atomic>
 #include <map>
+#include <optional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -29,6 +31,8 @@ class Outputs final {
   public:
     static constexpr auto selection_key = "outputs.selected.v1";
     static constexpr auto local_id = "local";
+    // ADR-0325: each output's volume and ReplayGain mode, as last set.
+    static constexpr auto settings_key = "outputs.settings.v1";
 
     // `own_name` is what the engine's own audio is listed as: the engine's
     // name, so a client shows "gemenon", not "this machine".
@@ -70,6 +74,15 @@ class Outputs final {
     // Called with mutex_ held.
     [[nodiscard]] std::unique_ptr<output::AgentAudition> make_agent(const std::string& name);
     void announce();
+    // ADR-0325: the volume and ReplayGain mode just set, kept for the output
+    // playing; and those kept for `id`, given back to it.
+    void remember();
+    void recall(const std::string& id);
+
+    struct Remembered final {
+        std::optional<int> volume;
+        std::optional<audio::ReplayGainMode> replay_gain;
+    };
 
     Player* player_;
     std::string own_name_;
@@ -80,6 +93,9 @@ class Outputs final {
     // Stable addresses: the player holds a pointer to whichever is playing.
     std::map<std::string, std::unique_ptr<output::AgentAudition>> agents_;
     std::string selected_;
+    std::map<std::string, Remembered> remembered_;
+    // Set while recall() gives settings back: what it sets is not news.
+    std::atomic<bool> recalling_{false};
 #if MELODY_ENABLE_UPNP
     std::shared_ptr<discovery::UpnpControl> upnp_control_;
     output::UpnpAudition::Prepare upnp_prepare_;

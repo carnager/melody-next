@@ -572,7 +572,33 @@ int main(int argc, char** argv) {
                            path.find("format=opus&bitrate=96") != std::string::npos;
                 }),
                 "and the engine streams it Opus at the rate asked");
+        // ADR-0325: each output keeps the volume and ReplayGain it was set
+        // to, given back when it plays again -- and kept by the engine.
+        require(player->set_volume_percent(40).has_value() &&
+                    player->set_replay_gain_mode(audio::ReplayGainMode::off).has_value(),
+                "the porch is set quieter, without gain");
         require(outputs.select("agent:kitchen").has_value(), "the first streaming agent again");
+        require(player->set_volume_percent(100).has_value() &&
+                    player->set_replay_gain_mode(audio::ReplayGainMode::album).has_value(),
+                "the kitchen is set to full, with album gain");
+        require(outputs.select("agent:porch").has_value(), "the porch again");
+        require(eventually([&] {
+                    const auto state = player->state();
+                    return state.volume_percent == 40 &&
+                           state.replay_gain_mode == audio::ReplayGainMode::off;
+                }),
+                "the porch plays as it was set");
+        require(outputs.select("agent:kitchen").has_value(), "and the kitchen");
+        require(eventually([&] {
+                    const auto state = player->state();
+                    return state.volume_percent == 100 &&
+                           state.replay_gain_mode == audio::ReplayGainMode::album;
+                }),
+                "the kitchen plays as it was set");
+        const auto kept = workspace->load_engine_state(engine::Outputs::settings_key);
+        require(kept && *kept && (*kept)->find("\"agent:porch\":{\"replay_gain\":\"off\","
+                                               "\"volume\":40}") != std::string::npos,
+                "the engine keeps what each output was set to");
         porch->stop();
     }
 

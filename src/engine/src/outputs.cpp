@@ -22,6 +22,30 @@ using protocol::Json;
 
 constexpr std::string_view agent_prefix{"agent:"};
 
+[[nodiscard]] std::string_view replay_gain_text(const audio::ReplayGainMode mode) {
+    switch (mode) {
+    case audio::ReplayGainMode::track:
+        return "track";
+    case audio::ReplayGainMode::album:
+        return "album";
+    default:
+        return "off";
+    }
+}
+
+[[nodiscard]] std::optional<audio::ReplayGainMode> replay_gain_of(const std::string& text) {
+    if (text == "track") {
+        return audio::ReplayGainMode::track;
+    }
+    if (text == "album") {
+        return audio::ReplayGainMode::album;
+    }
+    if (text == "off") {
+        return audio::ReplayGainMode::off;
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
@@ -69,9 +93,94 @@ constexpr std::string_view agent_prefix{"agent:"};
 Outputs::Outputs(Player& player, output::AgentPaths paths, Workspace* workspace, EventSink sink,
                  std::string own_name)
     : player_(&player), own_name_(std::move(own_name)), paths_(std::move(paths)),
-      workspace_(workspace), sink_(std::move(sink)) {}
+      workspace_(workspace), sink_(std::move(sink)) {
+    // ADR-0325: what each output was last set to.
+    if (workspace_ != nullptr) {
+        if (auto stored = workspace_->load_engine_state(settings_key); stored && *stored) {
+            const auto parsed = Json::parse(**stored, nullptr, false);
+            if (parsed.is_object()) {
+                for (const auto& [id, kept] : parsed.items()) {
+                    if (!kept.is_object()) {
+                        continue;
+                    }
+                    Remembered remembered;
+                    if (const auto volume = kept.find("volume");
+                        volume != kept.end() && volume->is_number_integer() &&
+                        volume->get<int>() >= 0 && volume->get<int>() <= 100) {
+                        remembered.volume = volume->get<int>();
+                    }
+                    if (const auto gain = kept.find("replay_gain");
+                        gain != kept.end() && gain->is_string()) {
+                        remembered.replay_gain = replay_gain_of(gain->get<std::string>());
+                    }
+                    remembered_[id] = remembered;
+                }
+            }
+        }
+    }
+    player_->on_output_settings([this] { remember(); });
+}
+
+void Outputs::remember() {
+    if (recalling_) {
+        return;
+    }
+    std::string id;
+    {
+        const std::lock_guard guard{mutex_};
+        id = selected_;
+    }
+    if (id.empty()) {
+        return;
+    }
+    const auto state = player_->state();
+    auto stored = Json::object();
+    {
+        const std::lock_guard guard{mutex_};
+        if (id != selected_) {
+            return;
+        }
+        remembered_[id] = Remembered{.volume = state.volume_percent,
+                                     .replay_gain = state.replay_gain_mode};
+        for (const auto& [output, kept] : remembered_) {
+            auto entry = Json::object();
+            if (kept.volume) {
+                entry["volume"] = *kept.volume;
+            }
+            if (kept.replay_gain) {
+                entry["replay_gain"] = replay_gain_text(*kept.replay_gain);
+            }
+            stored[output] = std::move(entry);
+        }
+    }
+    if (workspace_ != nullptr) {
+        static_cast<void>(workspace_->save_engine_state(settings_key, stored.dump(), now_ms()));
+    }
+}
+
+void Outputs::recall(const std::string& id) {
+    Remembered kept;
+    {
+        const std::lock_guard guard{mutex_};
+        const auto found = remembered_.find(id);
+        if (found == remembered_.end()) {
+            return;
+        }
+        kept = found->second;
+    }
+    recalling_ = true;
+    if (kept.replay_gain) {
+        static_cast<void>(player_->set_replay_gain_mode(*kept.replay_gain));
+    }
+    if (kept.volume) {
+        // An agent away takes it when it is back (admit).
+        static_cast<void>(player_->set_volume_percent(*kept.volume));
+    }
+    recalling_ = false;
+}
 
 Outputs::~Outputs() {
+    player_->on_output_settings({});
     // The player must not be left pointing at an agent about to go.
     static_cast<void>(player_->set_output(player_->local_output()));
 }
@@ -116,6 +225,11 @@ void Outputs::admit(const Json& params, const int descriptor) {
     if (adopt_first) {
         static_cast<void>(select(std::string{agent_prefix} + name));
         return;
+    }
+    // ADR-0325: an agent started again starts at its own volume; the one
+    // playing is given back what it was set to.
+    if (selected) {
+        recall(std::string{agent_prefix} + name);
     }
     // ADR-0274: back having played on from its buffer, and still on what the
     // engine plays: taken as it is, not wound back to where it dropped.
@@ -214,6 +328,8 @@ core::Result<void> Outputs::select(const std::string& id) {
         std::cerr << "melodyd: selected output " << id
                   << " but could not move playback yet: " << moved.error().message << '\n';
     }
+    // ADR-0325: as loud, and with the gain, it was last set to.
+    recall(id);
     announce();
     return {};
 }

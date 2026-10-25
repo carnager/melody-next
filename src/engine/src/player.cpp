@@ -153,8 +153,8 @@ core::Result<void> Player::set_output(audio::Audition* output) {
     // One output at a time: the old one falls silent before the new one
     // speaks.
     static_cast<void>(audition_->stop());
-    // How loud a track is meant to be travels with the music; the volume is
-    // the device's own.
+    // The gain carries over until Outputs gives the new output its own
+    // (ADR-0325); the volume is the device's.
     static_cast<void>(next->set_replay_gain_mode(replay_gain_mode_));
     static_cast<void>(next->set_replay_gain_preamps(replay_gain_preamps_));
     audition_ = next;
@@ -707,13 +707,26 @@ core::Result<void> Player::play_entry(const core::StableId& entry_id) {
 }
 
 core::Result<void> Player::set_volume_percent(const int percent) {
-    const std::lock_guard guard{mutex_};
-    auto set = audition_->set_volume_percent(percent);
-    if (set) {
-        asked_volume_ = AskedVolume{
-            .output = audition_, .percent = percent, .at = std::chrono::steady_clock::now()};
+    std::function<void()> observer;
+    core::Result<void> set;
+    {
+        const std::lock_guard guard{mutex_};
+        set = audition_->set_volume_percent(percent);
+        if (set) {
+            asked_volume_ = AskedVolume{
+                .output = audition_, .percent = percent, .at = std::chrono::steady_clock::now()};
+            observer = output_settings_observer_;
+        }
+    }
+    if (observer) {
+        observer();
     }
     return set;
+}
+
+void Player::on_output_settings(std::function<void()> observer) {
+    const std::lock_guard guard{mutex_};
+    output_settings_observer_ = std::move(observer);
 }
 
 void Player::set_speakers_taken_by(std::string engine) {
@@ -722,12 +735,21 @@ void Player::set_speakers_taken_by(std::string engine) {
 }
 
 core::Result<void> Player::set_replay_gain_mode(const audio::ReplayGainMode mode) {
-    const std::lock_guard guard{mutex_};
-    if (mode != replay_gain_mode_) {
-        replay_gain_mode_ = mode;
-        ++revision_;
+    std::function<void()> observer;
+    core::Result<void> set;
+    {
+        const std::lock_guard guard{mutex_};
+        if (mode != replay_gain_mode_) {
+            replay_gain_mode_ = mode;
+            ++revision_;
+        }
+        set = audition_->set_replay_gain_mode(mode);
+        observer = output_settings_observer_;
     }
-    return audition_->set_replay_gain_mode(mode);
+    if (observer) {
+        observer();
+    }
+    return set;
 }
 
 core::Result<void> Player::set_replay_gain_preamps(const audio::ReplayGainPreamps preamps) {

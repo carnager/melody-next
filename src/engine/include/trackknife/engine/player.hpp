@@ -157,6 +157,10 @@ class Player final {
     // the same volume, and a client that exits must not take its setting with
     // it.
     [[nodiscard]] core::Result<void> set_volume_percent(int percent);
+    // ADR-0325: told after the volume or the ReplayGain mode was set, on the
+    // thread that set it and with nothing held: what the output playing is
+    // to remember.
+    void on_output_settings(std::function<void()> observer);
 
     // ADR-0138: how a gain is chosen, and the two preamps that apply while it
     // is active. Engine state for the same reason volume is: it decides how
@@ -326,8 +330,8 @@ class Player final {
         bool playing_request{false};
         std::vector<core::StableId> requests;
         audio::PlaybackModes modes;
-        // How loud tracks are meant to be: the engine's setting, whichever
-        // output plays them, and still the same after a restart.
+        // How loud tracks are meant to be, as last set; each output's own
+        // is kept by Outputs and given back when it plays (ADR-0325).
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         audio::ReplayGainPreamps replay_gain_preamps;
         std::int64_t position_ms{0};
@@ -429,6 +433,7 @@ class Player final {
         std::chrono::steady_clock::time_point at;
     };
     mutable std::optional<AskedVolume> asked_volume_;
+    std::function<void()> output_settings_observer_;
     mutable std::optional<AskedPlace> asked_place_;
     // This machine's audio, if it has any; an output that refuses to play,
     // for when nothing is chosen; and whichever one is playing, which is

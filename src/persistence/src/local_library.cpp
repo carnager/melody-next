@@ -259,6 +259,25 @@ std::optional<std::uint64_t> revision_device(const std::string_view revision) {
     return device;
 }
 
+// The same file as before but perhaps on another device: a share mounted
+// again is often given another device number (ADR-0313), and its files --
+// inode, size and modification time as they were -- are not read again for
+// it.
+bool same_but_device(const std::string_view stored, const std::string_view now) {
+    const auto rest = [](const std::string_view revision) -> std::optional<std::string_view> {
+        if (!revision.starts_with("2:")) {
+            return std::nullopt;
+        }
+        const auto separator = revision.find(':', 2U);
+        if (separator == std::string_view::npos) {
+            return std::nullopt;
+        }
+        return revision.substr(separator);
+    };
+    const auto before = rest(stored);
+    return before && before == rest(now);
+}
+
 // Devices a scan saw files move to, by the device they were stored with: a
 // share mounted again -- after a reboot, an NFS or SMB remount -- is often
 // given another device number, and every file on it is seen on that one.
@@ -2926,8 +2945,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                                    "local_library_tracks WHERE raw_path=?"};
             Statement exists{db,
                              "SELECT 1 FROM local_library_roots WHERE raw_path=? AND scan_token=?"};
-            Statement touch{db, "UPDATE local_library_tracks SET available=1,seen=? WHERE "
-                                "raw_path=? AND revision=?"};
+            Statement touch{db, "UPDATE local_library_tracks SET available=1,seen=?,revision=? "
+                                "WHERE raw_path=? AND revision=?"};
             std::optional<Transaction> seen_batch;
             std::size_t seen_batched = 0;
             auto seen_batch_started = std::chrono::steady_clock::now();
@@ -2998,13 +3017,19 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 }
                 const auto revision = revision_key(*before);
                 bool unchanged = false;
+                std::string stored_revision;
                 {
                     // Rows still missing their migration-35 rating identity
                     // re-prepare even when the file itself is unchanged.
                     previous.reset();
                     previous.blob(1, raw);
                     const bool stored = previous.next();
-                    unchanged = stored && previous.bytes(0) == revision &&
+                    if (stored) {
+                        stored_revision = previous.bytes(0);
+                    }
+                    unchanged = stored &&
+                                (stored_revision == revision ||
+                                 same_but_device(stored_revision, revision)) &&
                                 previous.number(1) == 1 && !previous.bytes(2).empty();
                     // Here still, on another device than stored: what went
                     // from that device may be confirmed on this one.
@@ -3038,8 +3063,9 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     }
                     touch.reset();
                     touch.text(1, generation);
-                    touch.blob(2, raw);
-                    touch.text(3, revision);
+                    touch.text(2, revision);
+                    touch.blob(3, raw);
+                    touch.text(4, stored_revision);
                     touch.next();
                     if (++seen_batched >= 512U ||
                         std::chrono::steady_clock::now() - seen_batch_started >

@@ -146,6 +146,7 @@ class LocalLibraryTest final : public QObject {
     void deletedSubfoldersArePrunedEvenByIncompleteScans();
     void missingFilesOnAnotherDeviceAreRetained();
     void missingFilesOnARemountedShareArePruned();
+    void aRemountedShareIsNotReadAgain();
     void deletionCleanupPagesWithoutChangingWorkingLists();
     void albumIdentityKeepsEditionsSeparate();
     void metadataAndMovesFollowTheListTransaction();
@@ -587,6 +588,51 @@ void LocalLibraryTest::missingFilesOnARemountedShareArePruned() {
     QVERIFY(library->query(tracks("Gone"))->entries.empty());
     QCOMPARE(library->paths(tracks())->size(), 1U);
     QCOMPARE(library->paths(tracks())->front(), kept);
+}
+
+// A share mounted again is often given another device number; its files,
+// otherwise as they were, are not read again for it -- the rows take the new
+// device and the refresh stays as fast as any other.
+void LocalLibraryTest::aRemountedShareIsNotReadAgain() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto first = fixture(root / "album", "01.flac", "First", "Album");
+    const auto second = fixture(root / "album", "02.flac", "Second", "Album");
+    QVERIFY(!first.empty() && !second.empty());
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress initial;
+    QVERIFY(library->scan({}, initial));
+    QCOMPARE(initial.indexed.load(), 2U);
+    sqlite3* db = nullptr;
+    QCOMPARE(sqlite3_open((base / "state.sqlite").c_str(), &db), SQLITE_OK);
+    const auto revisions = [db] {
+        std::vector<std::string> found;
+        sqlite3_stmt* statement = nullptr;
+        sqlite3_prepare_v2(db, "SELECT revision FROM local_library_tracks ORDER BY raw_path", -1,
+                           &statement, nullptr);
+        while (sqlite3_step(statement) == SQLITE_ROW) {
+            found.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0)));
+        }
+        sqlite3_finalize(statement);
+        return found;
+    };
+    const auto before = revisions();
+    QCOMPARE(sqlite3_exec(db,
+                          "UPDATE local_library_tracks SET revision="
+                          "'2:18446744073709551615' || substr(revision,instr(substr(revision,3),"
+                          "':')+2)",
+                          nullptr, nullptr, nullptr),
+             SQLITE_OK);
+    persistence::LibraryScanProgress again;
+    const auto scanned = library->scan({}, again);
+    QVERIFY(scanned && !scanned->incomplete);
+    QCOMPARE(again.indexed.load(), 0U);
+    QCOMPARE(revisions(), before);
+    sqlite3_close(db);
+    QCOMPARE(library->paths(tracks())->size(), 2U);
+    QCOMPARE(library->query(tracks("First"))->entries.size(), 1U);
 }
 
 void LocalLibraryTest::deletionCleanupPagesWithoutChangingWorkingLists() {

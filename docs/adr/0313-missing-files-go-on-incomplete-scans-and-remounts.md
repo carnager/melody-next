@@ -37,6 +37,12 @@ were not there. Two rules kept them:
    folder may be on its recorded device or on one the scan saw that device's
    files move to. Where no file of the old device is seen -- the share is
    not mounted -- nothing is confirmed, as before.
+3. **A remount is not a rescan.** A file is unchanged when its inode, size
+   and modification time are as stored, whatever device number it is on
+   now; the row takes the new device without the file being read. Before,
+   the device was part of the comparison, and every reboot or remount of a
+   share that came back on another device number read the whole library
+   again -- tags, technical data, everything.
 
 Search and playing are unchanged: search already left out unavailable
 tracks; the library shows them greyed, and playing skips them.
@@ -47,4 +53,6 @@ tracks; the library shows them greyed, and playing skips them.
   an unreadable file, while the files there stay available; a cancelled scan
   removes nothing; files stored on another device number, one deleted, the
   rest seen on the new one -- the deleted one removed; files of a device none
-  of which is seen stay, unavailable.
+  of which is seen stay, unavailable; files stored on another device
+  number, otherwise as they were, are not read again and take the new
+  device.

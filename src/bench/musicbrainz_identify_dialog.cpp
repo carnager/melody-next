@@ -195,7 +195,15 @@ class IdentifyAlbumPage final : public QWidget {
             delete panes_.data();
             panes_ = createMusicBrainzTrackMatchPanes(match, match_holder_);
             match_holder_->layout()->addWidget(panes_);
-            match_heading_->setText(match->heading());
+            // ADR-0330: and how its files fit, as they are paired.
+            const auto heading = [this, match] {
+                const auto fit = match->fitSummary();
+                match_heading_->setText(fit.isEmpty() ? match->heading()
+                                                      : match->heading() + QStringLiteral(" — ") +
+                                                            fit);
+            };
+            connect(match, &TrackMatchSession::changed, panes_, heading);
+            heading();
         });
         connect(session_, &IdentifySession::matchClosed, this, [this] {
             delete panes_.data();

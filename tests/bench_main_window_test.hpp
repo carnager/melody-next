@@ -206,22 +206,41 @@ constexpr std::int32_t test_wave_peak = 256;
 // ADR-0324: the MusicBrainz matching board's pair rows, by their row in the
 // session; the file a row holds is its text (empty for a gap), its track is
 // beside it.
+// ADR-0330: the files on no track are in the list beside the board.
+inline QListWidget* matchLoose(const QListWidget* board) {
+    return board->parentWidget()->findChild<QListWidget*>(
+        QStringLiteral("bench-musicbrainz-match-loose"));
+}
 inline QListWidgetItem* matchRow(const QListWidget* board, const int row) {
-    for (int index = 0; index < board->count(); ++index) {
-        auto* item = board->item(index);
-        if (item->data(Qt::UserRole + 1).toInt() == 1 &&
-            item->data(Qt::UserRole + 2).toInt() == row) {
-            return item;
+    for (const auto* list : {board, static_cast<const QListWidget*>(matchLoose(board))}) {
+        for (int index = 0; list != nullptr && index < list->count(); ++index) {
+            auto* item = list->item(index);
+            if (item->data(Qt::UserRole + 1).toInt() == 1 &&
+                item->data(Qt::UserRole + 2).toInt() == row) {
+                return item;
+            }
         }
     }
     return nullptr;
 }
 inline int matchRowCount(const QListWidget* board) {
     int rows = 0;
-    for (int index = 0; index < board->count(); ++index) {
-        rows += board->item(index)->data(Qt::UserRole + 1).toInt() == 1 ? 1 : 0;
+    for (const auto* list : {board, static_cast<const QListWidget*>(matchLoose(board))}) {
+        for (int index = 0; list != nullptr && index < list->count(); ++index) {
+            rows += list->item(index)->data(Qt::UserRole + 1).toInt() == 1 ? 1 : 0;
+        }
     }
     return rows;
+}
+// A click on a file in the unmatched list, then on a track's row.
+inline void matchClickOnto(QListWidget* board, const int file_row, const int track_row) {
+    auto* loose = matchLoose(board);
+    auto* file = matchRow(board, file_row);
+    QTest::mouseClick(loose->viewport(), Qt::LeftButton, {},
+                      loose->visualItemRect(file).center());
+    const auto track = board->visualItemRect(matchRow(board, track_row));
+    QTest::mouseClick(board->viewport(), Qt::LeftButton, {},
+                      QPoint{track.left() + 60, track.center().y()});
 }
 inline QString matchTrack(const QListWidgetItem* item) {
     return item->data(Qt::UserRole + 4).toString();

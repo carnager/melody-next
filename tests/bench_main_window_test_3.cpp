@@ -1337,15 +1337,17 @@ void BenchMainWindowTest::musicBrainzMatchingHandlesUnequalCounts() {
         QVERIFY(matchRow(board, 0)->text().isEmpty());
     } else {
         QVERIFY(matchTrack(matchRow(board, 2)).contains(QStringLiteral("No tags")));
-        board->setCurrentItem(matchRow(board, 2));
-        up->click();
-        QCOMPARE(matchRow(board, 1)->text(), QStringLiteral("file-2.flac"));
+        // ADR-0330: the file on no track, put on the second track; the one
+        // there goes back to the unmatched files.
+        matchClickOnto(board, 2, 1);
+        QTRY_COMPARE(matchRow(board, 1)->text(), QStringLiteral("file-2.flac"));
         QCOMPARE(matchRow(board, 2)->text(), QStringLiteral("file-1.flac"));
+        QCOMPARE(matchRow(board, 2)->listWidget(), matchLoose(board));
     }
     QCOMPARE(matchTrack(matchRow(board, 1)), QStringLiteral("2.1 · Disc 2"));
     if (file_count > 3) {
-        // One list: the files and their tracks cannot scroll apart.
-        QTRY_VERIFY(board->verticalScrollBar()->maximum() > 0);
+        // ADR-0330: the files on no track are listed beside the tracks.
+        QTRY_VERIFY(matchLoose(board)->verticalScrollBar()->maximum() > 0);
     }
     QVERIFY(!accepted);
     stage->click();
@@ -1411,13 +1413,14 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
     QCOMPARE(board->count(), 6);
     QCOMPARE(board->item(0)->text(), QStringLiteral("Disc 1 · CD"));
 
+    // ADR-0330: a row is the track at the left, its file at the right.
     const auto file_side = [board](const int row) {
         const auto rect = board->visualItemRect(matchRow(board, row));
-        return QPoint{rect.left() + 40, rect.center().y()};
+        return QPoint{rect.right() - 60, rect.center().y()};
     };
     const auto track_side = [board](const int row) {
         const auto rect = board->visualItemRect(matchRow(board, row));
-        return QPoint{rect.right() - 60, rect.center().y()};
+        return QPoint{rect.left() + 60, rect.center().y()};
     };
 
     // Dropped on disc 2's first track.
@@ -1438,8 +1441,14 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
     QVERIFY(drop.isAccepted());
     QTRY_COMPARE(matchRow(board, 2)->text(), QStringLiteral("1.flac"));
     QVERIFY(matchRow(board, 0)->text().isEmpty());
-    // Disc 2 is longer than these files: that pairing is worth a look.
+    // Disc 2's track is 20 s longer than this file: likely the wrong one,
+    // and the line above says so (ADR-0330).
     QVERIFY(matchRow(board, 2)->toolTip().contains(QStringLiteral("20 s shorter")));
+    QVERIFY(matchRow(board, 2)->toolTip().contains(QStringLiteral("Likely the wrong track")));
+    const auto labels = widget->findChildren<QLabel*>();
+    QVERIFY(std::ranges::any_of(labels, [](const QLabel* label) {
+        return label->text().contains(QStringLiteral("1 likely wrong"));
+    }));
 
     // Clicked, then its track clicked.
     QTest::mouseClick(board->viewport(), Qt::LeftButton, {}, file_side(1));
@@ -1447,6 +1456,32 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
     QTest::mouseClick(board->viewport(), Qt::LeftButton, {}, track_side(3));
     QTRY_COMPARE(matchRow(board, 3)->text(), QStringLiteral("2.flac"));
     QVERIFY(matchRow(board, 1)->text().isEmpty());
+
+    // ADR-0330: a file dragged from its track to the unmatched files is on
+    // none; put back on its track by a click on it, then on the track.
+    {
+        auto* loose = matchLoose(board);
+        QVERIFY(loose != nullptr && loose->count() == 0);
+        std::unique_ptr<QMimeData> back{
+            board->model()->mimeData({board->indexFromItem(matchRow(board, 3))})};
+        const auto into = loose->viewport()->rect().center();
+        QDragEnterEvent enter_loose{QPointF{into}, Qt::MoveAction, back.get(), Qt::LeftButton,
+                                    Qt::NoModifier};
+        QApplication::sendEvent(loose->viewport(), &enter_loose);
+        QVERIFY(enter_loose.isAccepted());
+        QVERIFY(hint->text().contains(QStringLiteral("unmatched")));
+        QDropEvent drop_loose{QPointF{into}, Qt::MoveAction, back.get(), Qt::LeftButton,
+                              Qt::NoModifier};
+        QApplication::sendEvent(loose->viewport(), &drop_loose);
+        QVERIFY(drop_loose.isAccepted());
+        QTRY_COMPARE(loose->count(), 1);
+        QCOMPARE(loose->item(0)->text(), QStringLiteral("2.flac"));
+        QVERIFY(matchRow(board, 3)->text().isEmpty());
+        const auto row = loose->item(0)->data(Qt::UserRole + 2).toInt();
+        matchClickOnto(board, row, 3);
+        QTRY_COMPARE(matchRow(board, 3)->text(), QStringLiteral("2.flac"));
+        QCOMPARE(loose->count(), 0);
+    }
 
     // Disc 1, empty now, takes disc 2's files back by its heading.
     const auto heading = board->visualItemRect(board->item(0));

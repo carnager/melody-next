@@ -62,6 +62,9 @@ class TrackMatchSession final : public QObject {
         // known; far apart, the pairing is worth a look.
         std::optional<int> delta_seconds;
         bool doubtful{false};
+        // ADR-0330: how well the file fits its track -- green, orange, red,
+        // as Picard colours a pair; none for a gap or a file on no track.
+        std::optional<musicbrainz::PairFit> fit;
     };
     // A release track by its disc and its number on it.
     using TrackKey = std::pair<std::size_t, std::size_t>;
@@ -75,6 +78,9 @@ class TrackMatchSession final : public QObject {
     ~TrackMatchSession() override;
 
     [[nodiscard]] QString heading() const;
+    // ADR-0330: how the pairs fit, in words: "All 11 fit", "9 fit · 1 worth
+    // a look · 1 likely wrong"; empty until the pairing is ready.
+    [[nodiscard]] QString fitSummary() const;
     [[nodiscard]] static QString help();
     [[nodiscard]] QString status() const { return status_; }
     // How the pairing stands: files paired, files, the album's tracks.

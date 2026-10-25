@@ -322,10 +322,9 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         up->click();
         up->click();
         QCOMPARE(matchRowCount(board), 3);
-        // The missing slot can move too, returning the extra file to the album.
-        board->setCurrentItem(matchRow(board, 2));
-        up->click();
-        QCOMPARE(matchRowCount(board), 2);
+        // ADR-0330: the file on no track, put back on the empty track.
+        matchClickOnto(board, 2, 0);
+        QTRY_COMPARE(matchRowCount(board), 2);
         QVERIFY(matchRow(board, 0)->text().endsWith(QStringLiteral("2-first.flac")));
         QCOMPARE(matchTrack(matchRow(board, 0)), first_album_track);
         QCOMPARE(matchTrack(matchRow(board, 1)), second_album_track);

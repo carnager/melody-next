@@ -7,7 +7,22 @@
 
 namespace trackknife::engine {
 
-JobRegistry::JobRegistry(EventSink sink) : sink_(std::move(sink)) {}
+namespace {
+
+thread_local std::uint64_t requester = 0;
+
+} // namespace
+
+std::uint64_t current_requester() noexcept { return requester; }
+
+RequesterScope::RequesterScope(const std::uint64_t connection) noexcept : previous_(requester) {
+    requester = connection;
+}
+
+RequesterScope::~RequesterScope() { requester = previous_; }
+
+JobRegistry::JobRegistry(EventSink sink, AddressedSink addressed)
+    : sink_(std::move(sink)), addressed_(std::move(addressed)) {}
 
 JobRegistry::~JobRegistry() {
     {
@@ -28,6 +43,26 @@ void JobRegistry::publish(const protocol::Event& event) {
     const std::lock_guard guard{sink_mutex_};
     if (sink_) {
         sink_(event);
+    }
+}
+
+void JobRegistry::publish_finished(protocol::Json data, protocol::Json outcome,
+                                   const std::uint64_t owner) {
+    const std::lock_guard guard{sink_mutex_};
+    // ADR-0327: the outcome -- a cover's bytes, megabytes of them -- is the
+    // asker's. Every other client hears that the job finished, not what it
+    // found: broadcast, one cover fetched let every client go past its limit
+    // on unread events, and went over the phone's mobile data besides.
+    if (owner != 0U && addressed_) {
+        auto for_owner = data;
+        for_owner["outcome"] = std::move(outcome);
+        addressed_(protocol::Event{.name = "job.finished", .data = std::move(data)}, owner,
+                   protocol::Event{.name = "job.finished", .data = std::move(for_owner)});
+        return;
+    }
+    data["outcome"] = std::move(outcome);
+    if (sink_) {
+        sink_(protocol::Event{.name = "job.finished", .data = std::move(data)});
     }
 }
 
@@ -69,22 +104,24 @@ core::StableId JobRegistry::submit(std::string name, Work work) {
     // Listed before its thread starts, under the lock the thread's retire()
     // takes: a job that finished at once used to retire before it was
     // listed, and was then listed as running forever.
+    // Whose request this is: its outcome goes to that connection.
+    const auto owner = current_requester();
     const std::lock_guard guard{mutex_};
     auto& running = running_[job_id];
     running.cancellation = cancellation;
     running.worker = std::thread{[this, job_id, identity, name = std::move(name),
-                                  work = std::move(work), token, reporter]() mutable {
+                                  work = std::move(work), token, reporter, owner]() mutable {
         protocol::Json data = protocol::Json::object();
         data["job_id"] = identity;
         data["job"] = name;
-        data["outcome"] = work(token, reporter);
+        auto outcome = work(token, reporter);
         // Whether it stopped early is the job's to report in its outcome;
         // the registry does not second-guess it.
         data["cancelled"] = token.is_cancellation_requested();
         // Retire before the final event so a client acting on job.finished
         // cannot find the job still listed as running.
         retire(job_id);
-        publish(protocol::Event{.name = "job.finished", .data = std::move(data)});
+        publish_finished(std::move(data), std::move(outcome), owner);
     }};
     return job_id;
 }

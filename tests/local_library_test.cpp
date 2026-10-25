@@ -144,7 +144,7 @@ class LocalLibraryTest final : public QObject {
     void hiddenFilesAndFoldersAreNotTheLibrarys();
     void refreshDropsAVanishedFolderAndInventoryPages();
     void deletedSubfoldersArePrunedEvenByIncompleteScans();
-    void missingFilesOnAnotherDeviceAreRetained();
+    void aShareNotMountedKeepsItsFiles();
     void missingFilesOnARemountedShareArePruned();
     void aRemountedShareIsNotReadAgain();
     void deletionCleanupPagesWithoutChangingWorkingLists();
@@ -524,36 +524,74 @@ void LocalLibraryTest::deletedSubfoldersArePrunedEvenByIncompleteScans() {
     QVERIFY(std::filesystem::is_directory(root));
 }
 
-void LocalLibraryTest::missingFilesOnAnotherDeviceAreRetained() {
+// ADR-0321: a mount table for a test -- "/" on a local disk and, unless
+// `share` is empty, the library folder on a share of its own.
+struct MountTable {
+    std::filesystem::path table;
+    explicit MountTable(std::filesystem::path path) : table{std::move(path)} {
+        qputenv("MELODY_MOUNTINFO", QByteArray::fromStdString(table.native()));
+    }
+    ~MountTable() { qunsetenv("MELODY_MOUNTINFO"); }
+    MountTable(const MountTable&) = delete;
+    MountTable& operator=(const MountTable&) = delete;
+    void write(const std::filesystem::path& share) const {
+        std::ofstream out{table};
+        out << "21 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n";
+        if (!share.empty()) {
+            out << "98 21 0:71 / " << share.native()
+                << " rw,relatime shared:50 - cifs //nas/multimedia rw,vers=3.1.1\n";
+        }
+    }
+};
+
+// ADR-0321: a share not mounted leaves its empty mountpoint; its files are
+// kept, unavailable, and come back with it. Mounted again, a file deleted
+// meanwhile goes; and once the folder is no mount at all, but its files are
+// there, a file missing from it goes too.
+void LocalLibraryTest::aShareNotMountedKeepsItsFiles() {
     QTemporaryDir temporary;
     const std::filesystem::path base{temporary.path().toStdString()};
     const auto root = base / "music";
-    const auto source = fixture(root / "album", "01.flac");
+    const auto kept = fixture(root / "album", "01.flac", "Kept", "Album");
+    const auto deleted = fixture(root / "album", "02.flac", "Deleted", "Album");
+    const auto later = fixture(root / "other", "01.flac", "Later", "Other");
+    QVERIFY(!kept.empty() && !deleted.empty() && !later.empty());
+    const MountTable mounts{base / "mountinfo"};
+    mounts.write(std::filesystem::canonical(root));
     auto library = persistence::LocalLibrary::open(base / "state.sqlite");
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress initial;
     QVERIFY(library->scan({}, initial));
-    // Model the device evidence left by an offline mount, without requiring
-    // privileged mount operations. The existing mountpoint stays accessible.
-    sqlite3* db = nullptr;
-    QCOMPARE(sqlite3_open((base / "state.sqlite").c_str(), &db), SQLITE_OK);
-    QCOMPARE(sqlite3_exec(db,
-                          "UPDATE local_library_tracks SET revision="
-                          "'18446744073709551615' || substr(revision,instr(revision,':'))",
-                          nullptr, nullptr, nullptr),
-             SQLITE_OK);
-    sqlite3_close(db);
-    std::filesystem::rename(root / "album", base / "offline-album");
-    persistence::LibraryScanProgress missing;
-    QVERIFY(library->scan({}, missing));
-    QCOMPARE(library->query(tracks())->entries.size(), 1U);
-    QCOMPARE(library->query(tracks())->entries.front().available, 0U);
+    QCOMPARE(library->paths(tracks())->size(), 3U);
+
+    // Not mounted: the mountpoint is there, and empty.
+    mounts.write({});
+    std::filesystem::rename(root / "album", base / "album");
+    std::filesystem::rename(root / "other", base / "other");
+    persistence::LibraryScanProgress unmounted;
+    QVERIFY(library->scan({}, unmounted));
+    QCOMPARE(library->query(tracks())->entries.size(), 3U);
     QVERIFY(library->paths(tracks())->empty());
-    // Returning files are revalidated and restore availability.
-    std::filesystem::rename(base / "offline-album", root / "album");
-    persistence::LibraryScanProgress returned;
-    QVERIFY(library->scan({}, returned));
-    QCOMPARE(library->paths(tracks())->front(), source);
+
+    // Mounted again, one file deleted meanwhile.
+    mounts.write(std::filesystem::canonical(root));
+    std::filesystem::rename(base / "album", root / "album");
+    std::filesystem::rename(base / "other", root / "other");
+    std::filesystem::remove(deleted);
+    persistence::LibraryScanProgress remounted;
+    QVERIFY(library->scan({}, remounted));
+    QCOMPARE(remounted.indexed.load(), 0U);
+    QVERIFY(library->query(tracks("Deleted"))->entries.empty());
+    QCOMPARE(library->paths(tracks())->size(), 2U);
+
+    // No mount any more, its files there: one missing from it goes.
+    mounts.write({});
+    std::filesystem::remove_all(root / "other");
+    persistence::LibraryScanProgress local;
+    QVERIFY(library->scan({}, local));
+    QVERIFY(library->query(tracks("Later"))->entries.empty());
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+    QCOMPARE(library->paths(tracks())->front(), kept);
 }
 
 // ADR-0313: a share mounted again is often given another device number; its
@@ -590,9 +628,10 @@ void LocalLibraryTest::missingFilesOnARemountedShareArePruned() {
     QCOMPARE(library->paths(tracks())->front(), kept);
 }
 
-// A share mounted again is often given another device number; its files,
-// otherwise as they were, are not read again for it -- the rows take the new
-// device and the refresh stays as fast as any other.
+// A share mounted again is often given another device number, and on sshfs,
+// or SMB without server inode numbers, its files new inodes; otherwise as
+// they were, they are not read again for it (ADR-0321) -- the rows take
+// what is observed now and the refresh stays as fast as any other.
 void LocalLibraryTest::aRemountedShareIsNotReadAgain() {
     QTemporaryDir temporary;
     const std::filesystem::path base{temporary.path().toStdString()};
@@ -621,10 +660,13 @@ void LocalLibraryTest::aRemountedShareIsNotReadAgain() {
     const auto before = revisions();
     QCOMPARE(sqlite3_exec(db,
                           "UPDATE local_library_tracks SET revision="
-                          "'2:18446744073709551615' || substr(revision,instr(substr(revision,3),"
-                          "':')+2)",
+                          "'2:18446744073709551615:4242' || substr(substr(revision,3),"
+                          "instr(substr(substr(revision,3),instr(substr(revision,3),':')+1),"
+                          "':')+instr(substr(revision,3),':'))",
                           nullptr, nullptr, nullptr),
              SQLITE_OK);
+    QVERIFY(revisions() != before);
+    QVERIFY(revisions().front().starts_with("2:18446744073709551615:4242:"));
     persistence::LibraryScanProgress again;
     const auto scanned = library->scan({}, again);
     QVERIFY(scanned && !scanned->incomplete);
@@ -834,7 +876,8 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Migrations unwind strictly in reverse order down to the truncation-era
     // schema before the app re-migrates forward.
-    for (const auto* name : {"0056_working_lists_retired.down",
+    for (const auto* name : {"0057_library_mounts.down",
+                             "0056_working_lists_retired.down",
                              "0055_album_year_index.down",
                              "0054_in_place_writes.down",
                              "0052_file_publication_backups.down",
@@ -1109,13 +1152,14 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 56U);
+        QCOMPARE(*repository->schema_version(), 57U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
-    for (const auto* name : {"0056_working_lists_retired.down",
+    for (const auto* name : {"0057_library_mounts.down",
+                             "0056_working_lists_retired.down",
                              "0055_album_year_index.down",
                              "0054_in_place_writes.down",
                              "0052_file_publication_backups.down",
@@ -1185,7 +1229,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 56U);
+    QCOMPARE(*repository->schema_version(), 57U);
     QVERIFY(repository->save_local_resume(std::string(64U, 'a'), 500, 1'000));
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile history_downgrade{
@@ -1257,7 +1301,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
                   "completed_at_unix_seconds, updated_at_unix_seconds) VALUES('j1', 0, 1, 1);"),
              SQLITE_OK);
     for (const auto* name :
-         {"0056_working_lists_retired", "0055_album_year_index", "0054_in_place_writes",
+         {"0057_library_mounts", "0056_working_lists_retired", "0055_album_year_index", "0054_in_place_writes",
           "0052_file_publication_backups", "0051_engine_list_drafts",
           "0050_engine_list_item_details", "0049_operation_journal_backup_identity",
           "0047_list_engine", "0046_engine_lists", "0045_library_revision", "0044_library_added",
@@ -1276,7 +1320,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
     // Schema 38 runs again: the rebuild that emptied the child tables.
     auto repository = persistence::ListRepository::open(database);
     QVERIFY(repository.has_value());
-    QCOMPARE(*repository->schema_version(), 56U);
+    QCOMPARE(*repository->schema_version(), 57U);
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     const auto count = [&db](const char* table) {
         sqlite3_stmt* statement = nullptr;

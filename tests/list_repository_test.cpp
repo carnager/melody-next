@@ -337,7 +337,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 56U, "state repository schema must be explicit");
+        require(repository.schema_version() == 57U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -724,7 +724,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 56U,
+        require(repository.schema_version() == 57U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1460,7 +1460,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 56U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 57U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -2205,6 +2205,7 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3* db = nullptr;
     require(sqlite3_open(path.c_str(), &db) == SQLITE_OK, "the database opens directly");
     require(sqlite3_exec(db,
+                         "DROP TABLE local_library_mounts;"
                          "DROP TABLE retired_engine_list_items;"
                          "DROP TABLE retired_engine_lists;"
                          "DROP INDEX local_library_album_date;"
@@ -2231,7 +2232,7 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3_close(db);
 
     auto reopened = persistence::ListRepository::open(path);
-    require(reopened.has_value() && reopened->schema_version() == 56U, "and is upgraded");
+    require(reopened.has_value() && reopened->schema_version() == 57U, "and is upgraded");
     const auto loaded = reopened->load_all();
     require(loaded.has_value() && loaded->size() == 2U, "with both lists");
     for (const auto& list : *loaded) {
@@ -2483,10 +2484,11 @@ void working_lists_are_retired_and_come_back() {
         return ran;
     };
     // Back to schema 55 with both lists in place, then opened again: 56 runs.
-    require(run("0056_working_lists_retired.down.sql"), "schema 56 goes down");
+    require(run("0057_library_mounts.down.sql") && run("0056_working_lists_retired.down.sql"),
+            "schema 56 goes down");
     {
         auto repository = persistence::ListRepository::open(path);
-        require(repository.has_value() && repository->schema_version() == 56U,
+        require(repository.has_value() && repository->schema_version() == 57U,
                 "and is upgraded again");
         const auto lists = repository->load_engine_lists();
         require(lists && lists->size() == 1U && lists->front().id == saved,
@@ -2501,7 +2503,8 @@ void working_lists_are_retired_and_come_back() {
                 "it is no list of the engine's any more");
     }
     // Down again: it is a list once more.
-    require(run("0056_working_lists_retired.down.sql"), "schema 56 goes down again");
+    require(run("0057_library_mounts.down.sql") && run("0056_working_lists_retired.down.sql"),
+            "schema 56 goes down again");
     {
         sqlite3* raw = nullptr;
         require(sqlite3_open(path.c_str(), &raw) == SQLITE_OK, "the database opens directly");

@@ -32,7 +32,9 @@
 #include <ctime>
 #include <deque>
 #include <functional>
+#include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -238,72 +240,213 @@ std::string revision_key(const core::LocalSourceRevision& revision) {
            std::to_string(revision.modification_time_nanoseconds);
 }
 
-// The device a stored revision was observed on, where it names one.
-std::optional<std::uint64_t> revision_device(const std::string_view revision) {
-    // Rows written since ADR-0150 carry a leading representation-version
-    // component; the device follows it. Pre-migration rows start with the
-    // device directly.
-    std::string_view text{revision};
-    if (text.starts_with("2:")) {
-        text.remove_prefix(2U);
-    }
-    const auto separator = text.find(':');
-    if (separator == std::string_view::npos) {
+// The size and modification time in a stored revision: what says a file is
+// as it was. Device and inode are left out (ADR-0321): a share mounted again
+// is often given another device number, and sshfs -- or SMB without server
+// inode numbers -- gives its files new inodes as well.
+std::optional<std::string_view> revision_data(const std::string_view revision) {
+    if (!revision.starts_with("2:")) {
         return std::nullopt;
     }
-    std::uint64_t device = 0;
-    const auto parsed = std::from_chars(text.data(), text.data() + separator, device);
-    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + separator) {
-        return std::nullopt;
+    auto at = std::string_view::size_type{2U};
+    for (int field = 0; field < 2; ++field) {
+        at = revision.find(':', at);
+        if (at == std::string_view::npos) {
+            return std::nullopt;
+        }
+        ++at;
     }
-    return device;
+    return revision.substr(at);
 }
 
-// The same file as before but perhaps on another device: a share mounted
-// again is often given another device number (ADR-0313), and its files --
-// inode, size and modification time as they were -- are not read again for
-// it.
-bool same_but_device(const std::string_view stored, const std::string_view now) {
-    const auto rest = [](const std::string_view revision) -> std::optional<std::string_view> {
-        if (!revision.starts_with("2:")) {
-            return std::nullopt;
+bool same_file_data(const std::string_view stored, const std::string_view now) {
+    const auto before = revision_data(stored);
+    return before && before == revision_data(now);
+}
+
+// A mount as the kernel lists it: where, what filesystem, and from where --
+// "cifs" from "//nas/music", "ext4" from "/dev/sda2".
+struct Mount {
+    std::string point;
+    std::string filesystem;
+    std::string source;
+};
+
+// Mount table fields escape space, tab, newline and backslash as octal.
+std::string unescape_mount_field(const std::string_view field) {
+    std::string text;
+    text.reserve(field.size());
+    for (std::size_t at = 0; at < field.size(); ++at) {
+        if (field[at] == '\\' && at + 3U < field.size()) {
+            const auto digits = field.substr(at + 1U, 3U);
+            unsigned value = 0;
+            if (digits.size() == 3U &&
+                std::from_chars(digits.data(), digits.data() + 3, value, 8).ptr ==
+                    digits.data() + 3 &&
+                value < 256U) {
+                text.push_back(static_cast<char>(value));
+                at += 3U;
+                continue;
+            }
         }
-        const auto separator = revision.find(':', 2U);
-        if (separator == std::string_view::npos) {
-            return std::nullopt;
+        text.push_back(field[at]);
+    }
+    return text;
+}
+
+// The mounts this process sees, from /proc/self/mountinfo -- or the table
+// MELODY_MOUNTINFO names, for tests.
+std::vector<Mount> read_mounts() {
+    const char* named = std::getenv("MELODY_MOUNTINFO");
+    std::ifstream stream{named != nullptr && *named != '\0' ? named : "/proc/self/mountinfo"};
+    std::vector<Mount> mounts;
+    std::string line;
+    while (std::getline(stream, line)) {
+        std::istringstream fields{line};
+        std::vector<std::string> parts;
+        for (std::string part; fields >> part;) {
+            parts.push_back(std::move(part));
         }
-        return revision.substr(separator);
+        const auto separator = std::ranges::find(parts, "-");
+        if (parts.size() < 5U || separator == parts.end() ||
+            std::distance(separator, parts.end()) < 3) {
+            continue;
+        }
+        mounts.push_back({unescape_mount_field(parts[4]), *(separator + 1),
+                          unescape_mount_field(*(separator + 2))});
+    }
+    return mounts;
+}
+
+bool at_or_below(const std::string& path, const std::string& point) {
+    return point == "/" ? path.starts_with('/')
+                        : path == point || path.starts_with(point + '/');
+}
+
+// The mount a path is on: the deepest mount point at or above it, and of
+// several on one point the one mounted last.
+const Mount* mount_of(const std::vector<Mount>& mounts, const std::string& path) {
+    const Mount* found = nullptr;
+    for (const auto& mount : mounts) {
+        if (at_or_below(path, mount.point) &&
+            (found == nullptr || mount.point.size() >= found->point.size())) {
+            found = &mount;
+        }
+    }
+    return found;
+}
+
+std::optional<std::string> real_path(const std::string& path) {
+    std::unique_ptr<char, decltype(&std::free)> resolved{::realpath(path.c_str(), nullptr),
+                                                         &std::free};
+    if (!resolved) {
+        return std::nullopt;
+    }
+    return std::string{resolved.get()};
+}
+
+std::pair<std::string, std::string> subtree_range(std::string folder);
+
+std::vector<Mount> recorded_mounts(sqlite3* db) {
+    std::vector<Mount> recorded;
+    Statement select{db, "SELECT mount_point,filesystem,source FROM local_library_mounts"};
+    while (select.next()) {
+        recorded.push_back({select.bytes(0), select.bytes(1), select.bytes(2)});
+    }
+    return recorded;
+}
+
+// After a walk of `folder`: the mounts its files were found on -- the one
+// the folder is on and each mounted below it that holds any -- are
+// recorded, and a recorded mount point that is none any more, though files
+// were found there all the same, is forgotten. A mount whose files were not
+// found (a share not mounted, its empty mountpoint left) keeps its record.
+void record_mounts(sqlite3* db, const std::string& folder, const std::string& generation,
+                   const std::vector<Mount>& mounts) {
+    const auto resolved = real_path(folder);
+    if (!resolved) {
+        return;
+    }
+    // A real path at or below the folder, as the library spells it.
+    const auto spelled = [&](const std::string& real) {
+        return folder + real.substr(resolved->size() == 1U ? 0U : resolved->size());
     };
-    const auto before = rest(stored);
-    return before && before == rest(now);
+    Statement found{db, "SELECT 1 FROM local_library_tracks WHERE raw_path>=? AND raw_path<? "
+                        "AND seen=? LIMIT 1"};
+    const auto holds = [&](const std::string& raw) {
+        const auto [from, to] = subtree_range(raw);
+        found.reset();
+        found.blob(1, from);
+        found.blob(2, to);
+        found.text(3, generation);
+        return found.next();
+    };
+    Transaction transaction{db};
+    Statement record{db, "INSERT INTO local_library_mounts(mount_point,filesystem,source) "
+                         "VALUES(?,?,?) ON CONFLICT(mount_point) DO UPDATE SET "
+                         "filesystem=excluded.filesystem,source=excluded.source"};
+    const auto keep = [&](const Mount& mount) {
+        record.reset();
+        record.blob(1, mount.point);
+        record.text(2, mount.filesystem);
+        record.blob(3, mount.source);
+        record.next();
+    };
+    std::set<std::string> points;
+    for (const auto& mount : mounts) {
+        points.insert(mount.point);
+    }
+    if (const auto* containing = mount_of(mounts, *resolved); containing && holds(folder)) {
+        keep(*containing);
+    }
+    for (const auto& point : points) {
+        if (point != *resolved && at_or_below(point, *resolved) && holds(spelled(point))) {
+            keep(*mount_of(mounts, point));
+        }
+    }
+    Statement forget{db, "DELETE FROM local_library_mounts WHERE mount_point=?"};
+    for (const auto& was : recorded_mounts(db)) {
+        if (points.contains(was.point)) {
+            continue;
+        }
+        const bool above = at_or_below(*resolved, was.point);
+        if ((above && holds(folder)) ||
+            (!above && at_or_below(was.point, *resolved) && holds(spelled(was.point)))) {
+            forget.reset();
+            forget.blob(1, was.point);
+            forget.next();
+        }
+    }
+    transaction.commit();
 }
-
-// Devices a scan saw files move to, by the device they were stored with: a
-// share mounted again -- after a reboot, an NFS or SMB remount -- is often
-// given another device number, and every file on it is seen on that one.
-using DeviceMoves = std::map<std::uint64_t, std::set<std::uint64_t>>;
 
 // A successful walk alone is insufficient: an unmounted volume can leave an
-// accessible empty mountpoint. Require an absent path and a surviving directory
-// on the file's previously observed device -- or on one the scan saw the
-// other files of that device move to; uncertainty retains the cache.
-bool confirmed_missing(const std::string& raw_path, const std::string& revision,
-                       const std::string& root, const DeviceMoves& moves = {}) {
-    const auto device = revision_device(revision);
-    if (!device) {
-        return false;
-    }
+// accessible empty mountpoint. Require an absent path and a surviving folder
+// above it on the mount the file was found on -- the same mount point,
+// filesystem and source (ADR-0321), whatever device number it has now. A
+// file of no recorded mount is kept: uncertainty retains the cache.
+bool confirmed_missing(const std::string& raw_path, const std::string& root,
+                       const std::vector<Mount>& mounts, const std::vector<Mount>& recorded) {
     struct stat state{};
     if (::lstat(raw_path.c_str(), &state) == 0 || errno != ENOENT) {
         return false;
     }
-    const auto moved = moves.find(*device);
     auto parent = std::filesystem::path{raw_path}.parent_path();
     while (!parent.empty()) {
         if (::lstat(parent.c_str(), &state) == 0) {
-            const auto now = static_cast<std::uint64_t>(state.st_dev);
-            return S_ISDIR(state.st_mode) &&
-                   (now == *device || (moved != moves.end() && moved->second.contains(now)));
+            if (!S_ISDIR(state.st_mode)) {
+                return false;
+            }
+            const auto resolved = real_path(parent.native());
+            if (!resolved) {
+                return false;
+            }
+            const auto rest = raw_path.substr(parent.native().size());
+            const auto file = *resolved == "/" ? rest : *resolved + rest;
+            const auto* was = mount_of(recorded, file);
+            const auto* now = mount_of(mounts, *resolved);
+            return was != nullptr && now != nullptr && was->point == now->point &&
+                   was->filesystem == now->filesystem && was->source == now->source;
         }
         if (errno != ENOENT || parent == std::filesystem::path{root} ||
             parent == parent.parent_path()) {
@@ -317,8 +460,9 @@ bool confirmed_missing(const std::string& raw_path, const std::string& revision,
 // Below the root, or with `from` and `to` (a subtree_range) only the part of
 // it a scan was asked to walk.
 void prune_missing(sqlite3* db, const std::string& root, const std::string& generation,
-                   const core::CancellationToken& cancellation, const std::string& from = {},
-                   const std::string& to = {}, const DeviceMoves& moves = {}) {
+                   const core::CancellationToken& cancellation, const std::vector<Mount>& mounts,
+                   const std::string& from = {}, const std::string& to = {}) {
+    const auto recorded = recorded_mounts(db);
     std::string after = from;
     while (!cancellation.is_cancellation_requested()) {
         std::vector<std::pair<std::string, std::string>> candidates;
@@ -344,7 +488,7 @@ void prune_missing(sqlite3* db, const std::string& root, const std::string& gene
         // Filesystem checks run outside the write transaction and in bounded pages.
         std::erase_if(candidates, [&](const auto& entry) {
             return cancellation.is_cancellation_requested() ||
-                   !confirmed_missing(entry.first, entry.second, root, moves);
+                   !confirmed_missing(entry.first, root, mounts, recorded);
         });
         if (cancellation.is_cancellation_requested()) {
             return;
@@ -2929,7 +3073,6 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             }
             bool complete = true;
             bool root_lost = false;
-            DeviceMoves moves;
             // Decided before anything is stored: a first scan stores tracks
             // too, and they must not make the rest of it look like a later one.
             const bool first_scan = [&] {
@@ -3029,15 +3172,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     }
                     unchanged = stored &&
                                 (stored_revision == revision ||
-                                 same_but_device(stored_revision, revision)) &&
+                                 same_file_data(stored_revision, revision)) &&
                                 previous.number(1) == 1 && !previous.bytes(2).empty();
-                    // Here still, on another device than stored: what went
-                    // from that device may be confirmed on this one.
-                    if (const auto was = stored ? revision_device(previous.bytes(0))
-                                                : std::nullopt;
-                        was && *was != before->device) {
-                        moves[*was].insert(before->device);
-                    }
                 }
                 if (unchanged) {
                     const auto after = core::observe_local_source_revision(raw);
@@ -3127,7 +3263,9 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             // read: a file that is there keeps its row, whatever the walk
             // missed. Not when cancelled, nor when the root went away.
             if (!root_lost && !cancellation.is_cancellation_requested()) {
-                prune_missing(db, root.raw_path, generation, cancellation, from, to, moves);
+                const auto mounts = read_mounts();
+                record_mounts(db, folder, generation, mounts);
+                prune_missing(db, root.raw_path, generation, cancellation, mounts, from, to);
             }
         }
         result.cancelled = result.cancelled || cancellation.is_cancellation_requested();

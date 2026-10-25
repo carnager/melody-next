@@ -29,7 +29,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 56U;
+constexpr unsigned current_schema_version = 57U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1623,6 +1623,18 @@ CREATE INDEX retired_engine_list_items_list ON retired_engine_list_items(list_id
 DELETE FROM engine_list_items WHERE list_id IN (SELECT id FROM engine_lists WHERE kind = 0);
 DELETE FROM engine_lists WHERE kind = 0;
 UPDATE schema_version SET version = 56;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 56) {
+        // ADR-0321: the mounts a library's files were found on.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE local_library_mounts (mount_point BLOB PRIMARY KEY NOT NULL,
+    filesystem TEXT NOT NULL, source BLOB NOT NULL);
+UPDATE schema_version SET version = 57;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

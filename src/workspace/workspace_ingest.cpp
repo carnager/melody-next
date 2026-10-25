@@ -688,11 +688,18 @@ QImage Workspace::coverFor(const LocalTrackRow& track, const EngineKey& engine_k
 }
 
 void Workspace::invalidateArtwork(const std::string& raw_path) {
+    invalidateArtwork(std::set<std::string>{raw_path});
+}
+
+void Workspace::invalidateArtwork(const std::set<std::string>& raw_paths) {
+    if (raw_paths.empty()) {
+        return;
+    }
     QSet<QString> keys;
     for (const auto& tab : list_tabs_) {
         const auto& rows = tab->model->rows();
         for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
-            if (rows[static_cast<std::size_t>(row)].raw_path == raw_path) {
+            if (raw_paths.contains(rows[static_cast<std::size_t>(row)].raw_path)) {
                 keys.insert(tab->model->groupKey(row));
             }
         }

@@ -371,6 +371,7 @@ class BenchMainWindowTest final : public QObject {
     void aFileAlreadyWhereRenamingPutsItGetsItsCover();
     void aMovedAlbumGetsItsFolderCoverWhereItMoved_data();
     void aMovedAlbumGetsItsFolderCoverWhereItMoved();
+    void aCoverWrittenWithAMoveShowsInItsTab();
     void applyReadsAgainAFileChangedElsewhere();
     void listRowsFollowChangedFiles();
     void fileWorkWithoutAnEngineSaysWhy();

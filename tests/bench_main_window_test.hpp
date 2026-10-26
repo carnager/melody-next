@@ -406,7 +406,7 @@ class BenchMainWindowTest final : public QObject {
     void moveDestinationsArePerEngine();
     void actionChoicesAreRemembered();
     void actionsLinksOpenTheirOwnSettings();
-    void namingLayoutsReachEveryEngine();
+    void namingLayoutsAreMelodys();
     void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
     void metadataSuggestionsStageSelectionConsistency();

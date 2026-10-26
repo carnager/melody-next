@@ -191,12 +191,8 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<BackupLocation> set_backup_location(const std::string& place,
                                                                    const std::string& folder);
 
-    // Naming layouts handed over (layouts.put): each added or updated, and
-    // only `removed` taken away. This engine's own move destinations, and
-    // folders.list for choosing one on its machine.
-    [[nodiscard]] core::Result<void>
-    put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
-                const std::vector<core::StableId>& removed = {});
+    // This engine's own move destinations, and folders.list for choosing one
+    // on its machine.
     [[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>> destinations();
     [[nodiscard]] core::Result<void>
     save_destination(const persistence::SavedDestinationProfile& destination);

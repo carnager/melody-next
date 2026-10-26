@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench_main_window_test.hpp"
+#include "trackknife/core/engine_state.hpp"
 
 namespace trackknife::bench {
 
@@ -363,21 +364,20 @@ void BenchMainWindowTest::actionsLinksOpenTheirOwnSettings() {
     window.findChild<SettingsDialog*>()->reject();
 }
 
-void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
+// ADR-0339: naming layouts are Melody's -- kept in its presets, which
+// melody-cli shares on this computer -- and no engine is handed a copy.
+void BenchMainWindowTest::namingLayoutsAreMelodys() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
-    auto client = protocol::Client::connect(protocol::Endpoint{
-        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
-    QVERIFY(client.has_value());
-    const auto names = [&client] {
+    const auto kept = [] {
         std::vector<std::string> found;
-        auto answer = (*client)->call("layouts.list");
-        for (const auto& layout :
-             answer ? answer->value("layouts", protocol::Json::array()) : protocol::Json::array()) {
-            if (auto decoded = engine::wire::decode_saved_layout(layout)) {
-                found.push_back(decoded->profile.name);
+        auto presets = persistence::ListRepository::open(core::presets_database_path());
+        if (auto layouts = presets ? presets->load_output_layout_profiles()
+                                   : decltype(presets->load_output_layout_profiles()){}) {
+            for (const auto& layout : *layouts) {
+                found.push_back(layout.profile.name);
             }
         }
         return found;
@@ -388,7 +388,7 @@ void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
         persistence::SavedOutputLayoutProfile{
             .id = id,
             .profile = operations::OutputLayoutProfile{.schema_version = 1U,
-                                                       .name = "Everywhere",
+                                                       .name = "Mine",
                                                        .dialect = {},
                                                        .relative_directory_expression = "%artist%",
                                                        .basename_expression = "%title%",
@@ -396,13 +396,18 @@ void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
         },
         [&saved](const QString& error) { saved = error.isEmpty(); });
     QTRY_VERIFY(saved);
-    QTRY_VERIFY_WITH_TIMEOUT(std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(std::ranges::contains(kept(), std::string{"Mine"}), 5'000);
+    // The engine keeps none: there is nothing to ask it for.
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    QVERIFY(!(*client)->call("layouts.list").has_value());
+    (*client)->close();
     bool removed = false;
     window.buildOutputProfileStore().remove_layout(
         id, [&removed](const QString& error) { removed = error.isEmpty(); });
     QTRY_VERIFY(removed);
-    QTRY_VERIFY_WITH_TIMEOUT(!std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
-    (*client)->close();
+    QTRY_VERIFY_WITH_TIMEOUT(!std::ranges::contains(kept(), std::string{"Mine"}), 5'000);
 }
 
 void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply_data() {

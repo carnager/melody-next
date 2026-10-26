@@ -195,8 +195,18 @@ cli convert --to "${work}/converted" --preset flac --since 60d --no-replaygain \
     || fail "converting again succeeds"
 matches "converted before, passed over" "${work}/again.txt" || fail "and passes over what is there"
 if cli convert --to "${work}/converted" --layout "No such layout" --since 60d > /dev/null 2>&1; then
-    fail "a layout the engine does not have is refused"
+    fail "a layout Melody does not have is refused"
 fi
+# ADR-0339: naming layouts are Melody's, on this computer -- none made here
+# yet -- and a request carries the one it names files by.
+if cli convert --layouts > /dev/null 2>&1; then
+    fail "with no presets of Melody's, there are no layouts to list"
+fi
+cli convert --to "${work}/named" --preset flac --no-replaygain \
+    --layout-expression '$if2(%artist%,Nobody)/$if(%album%,%album%,single)' \
+    "${work}/music/first/alpha.wav" > /dev/null \
+    || fail "convert names files by a layout expression"
+[ -s "${work}/named/Nobody/single.flac" ] || fail "named in a folder by the expression"
 if cli convert --since 60d > /dev/null 2>&1; then
     fail "convert wants a destination"
 fi

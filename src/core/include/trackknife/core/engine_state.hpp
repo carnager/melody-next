@@ -18,6 +18,17 @@ namespace trackknife::core {
 // `~/.local/share/melody/engine`.
 [[nodiscard]] std::filesystem::path default_engine_state_directory();
 
+// ADR-0339: Melody's own data -- its presets: naming layouts, destinations,
+// encoder presets, tagging scripts -- which the window and melody-cli share
+// on this computer and no engine keeps. `MELODY_DATA_DIR` when set; else
+// Qt's AppDataLocation for Melody: `$XDG_DATA_HOME/melody/melody`, on macOS
+// `~/Library/Application Support/melody/melody`, else
+// `~/.local/share/melody/melody`.
+[[nodiscard]] std::filesystem::path melody_data_directory();
+
+// The presets' database in it.
+[[nodiscard]] std::filesystem::path presets_database_path();
+
 // Where it was kept before, under Trackknife's name.
 [[nodiscard]] std::filesystem::path legacy_engine_state_directory();
 

@@ -1158,30 +1158,6 @@ RemoteFileWork::release_undo_copies(const std::span<const operations::UndoReques
     return {};
 }
 
-core::Result<void>
-RemoteFileWork::put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
-                            const std::vector<core::StableId>& removed) {
-    auto connection = client();
-    if (!connection) {
-        return std::unexpected(std::move(connection.error()));
-    }
-    auto list = Json::array();
-    for (const auto& layout : layouts) {
-        list.push_back(wire::encode(layout));
-    }
-    auto gone = Json::array();
-    for (const auto& id : removed) {
-        gone.push_back(id.to_string());
-    }
-    auto answer =
-        (*connection)
-            ->call("layouts.put", Json{{"layouts", std::move(list)}, {"removed", std::move(gone)}});
-    if (!answer) {
-        return std::unexpected(std::move(answer.error()));
-    }
-    return {};
-}
-
 namespace {
 
 [[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>>

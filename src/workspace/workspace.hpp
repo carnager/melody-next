@@ -340,7 +340,6 @@ class Workspace final : public QObject {
     // an engine elsewhere through its mount.
     std::vector<persistence::SavedDestinationProfile> local_destinations_;
     // Layout hand-overs to engines, one at a time and in order.
-    QThreadPool layout_pushes_;
     // Ratings read and stored, one at a time.
     QThreadPool catalogue_work_;
     // Paths opened before the asynchronous list restore finishes are queued
@@ -756,7 +755,6 @@ class Workspace final : public QObject {
     // ADR-0302: a friend arriving in, or leaving, the room an engine is in,
     // said.
     void watchTogether(EngineLink& link);
-    void pushLayouts(std::vector<core::StableId> removed = {});
     // ADR-0233: a file moved here, told to every engine's lists; kept in
     // Settings until each has taken it.
     void queueEngineRelocation(const std::string& from, const std::string& to);

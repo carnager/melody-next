@@ -4,6 +4,7 @@
 
 #include "trackknife/core/engine_state.hpp"
 #include "trackknife/core/environment.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/dynamic_playlist_service.hpp"
@@ -27,7 +28,6 @@ constexpr int persist_debounce_ms = 1'000;
 } // namespace
 
 Workspace::Workspace(QObject* parent) : QObject(parent) {
-    layout_pushes_.setMaxThreadCount(1);
     catalogue_work_.setMaxThreadCount(1);
     // ADR-0234: this computer's engine is always the first link, connected
     // or not; remotes follow when configured.
@@ -62,10 +62,18 @@ void Workspace::start() {
                                  << QString::fromStdString(adopted.error().message);
         }
     }
-    const auto state = core::engine_state_directory();
+    // ADR-0339: Melody's presets are its own -- not the engine's database,
+    // which this window no longer opens -- shared with melody-cli; taken
+    // over once from the database they shared with this computer's engine.
+    database_path_ = core::presets_database_path();
     std::error_code ignored;
-    std::filesystem::create_directories(state, ignored);
-    database_path_ = state / "lists.sqlite";
+    std::filesystem::create_directories(database_path_.parent_path(), ignored);
+    if (auto adopted = persistence::adopt_presets(core::engine_state_directory() / "lists.sqlite",
+                                                  database_path_);
+        !adopted) {
+        qWarning().noquote() << "The presets stay with the engine:"
+                             << QString::fromStdString(adopted.error().message);
+    }
     // ADR-0258: one set of dynamic playlists, whichever backend saved them.
     adoptDynamicPlaylists(QStringLiteral("local"));
     rememberContinuationRules();

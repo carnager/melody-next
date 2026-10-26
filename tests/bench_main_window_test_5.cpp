@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench_main_window_test.hpp"
+#include "trackknife/core/engine_state.hpp"
 
 namespace trackknife::bench {
 
@@ -2253,7 +2254,9 @@ void BenchMainWindowTest::searchResultTabLoadsCovers() {
     };
 
     {
-        auto library = persistence::LocalLibrary::open(window.database_path_);
+        // The engine's library, in its own database (ADR-0339: not Melody's).
+        auto library =
+            persistence::LocalLibrary::open(core::engine_state_directory() / "lists.sqlite");
         QVERIFY(library.has_value());
         const auto root = QFile::encodeName(media.path());
         QVERIFY(

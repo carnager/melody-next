@@ -864,37 +864,25 @@ OutputProfileStore Workspace::buildOutputProfileStore(const EngineKey& destinati
                     });
             },
         .save_layout =
-            [this, persistence_service, unavailable](persistence::SavedOutputLayoutProfile profile,
-                                                     OutputProfileStore::Completion completion) {
+            [persistence_service, unavailable](persistence::SavedOutputLayoutProfile profile,
+                                               OutputProfileStore::Completion completion) {
                 if (!persistence_service) {
                     completion(unavailable);
                     return;
                 }
-                const QPointer window{this};
                 persistence_service->saveOutputLayoutProfile(
                     std::move(profile),
-                    [window, completion = std::move(completion)](QString error) {
-                        if (window && error.isEmpty()) {
-                            window->pushLayouts();
-                        }
-                        completion(error);
-                    });
+                    [completion = std::move(completion)](QString error) { completion(error); });
             },
         .remove_layout =
-            [this, persistence_service, unavailable](core::StableId id,
-                                                     OutputProfileStore::Completion completion) {
+            [persistence_service, unavailable](core::StableId id,
+                                               OutputProfileStore::Completion completion) {
                 if (!persistence_service) {
                     completion(unavailable);
                     return;
                 }
-                const QPointer window{this};
                 persistence_service->removeOutputLayoutProfile(
-                    id, [window, id, completion = std::move(completion)](QString error) {
-                        if (window && error.isEmpty()) {
-                            window->pushLayouts({id});
-                        }
-                        completion(error);
-                    });
+                    id, [completion = std::move(completion)](QString error) { completion(error); });
             },
         .save_destination = destinations.save,
         .remove_destination = destinations.remove,

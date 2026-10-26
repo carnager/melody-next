@@ -6545,4 +6545,74 @@ core::Result<std::vector<EngineListSummary>> ListRepository::relocate_engine_lis
     });
 }
 
+core::Result<bool> adopt_presets(const std::filesystem::path& from,
+                                 const std::filesystem::path& to) {
+    std::error_code error;
+    if (std::filesystem::exists(to, error) || !std::filesystem::exists(from, error)) {
+        return false;
+    }
+    auto source = ListRepository::open(from);
+    if (!source) {
+        return std::unexpected(std::move(source.error()));
+    }
+    auto layouts = source->load_output_layout_profiles();
+    auto destinations = source->load_destination_profiles();
+    auto encoders = source->load_encoder_presets();
+    auto scripts = source->load_metadata_transformation_chains();
+    // And the lists an older release kept there for the window, which it
+    // takes up as its tabs once (ADR-0259).
+    auto lists = source->load_all();
+    if (!layouts || !destinations || !encoders || !scripts || !lists) {
+        return std::unexpected(!layouts        ? std::move(layouts.error())
+                               : !destinations ? std::move(destinations.error())
+                               : !encoders     ? std::move(encoders.error())
+                               : !scripts      ? std::move(scripts.error())
+                                               : std::move(lists.error()));
+    }
+    std::filesystem::create_directories(to.parent_path(), error);
+    // Made beside it and renamed into place, so a failure leaves no half
+    // copy that would be taken for the presets next time.
+    auto staging = to;
+    staging += ".adopting";
+    std::filesystem::remove(staging, error);
+    {
+        auto target = ListRepository::open(staging);
+        if (!target) {
+            return std::unexpected(std::move(target.error()));
+        }
+        const auto copy = [&target](const auto& saved, auto upsert) -> core::Result<void> {
+            for (const auto& each : saved) {
+                if (auto done = ((*target).*upsert)(each); !done) {
+                    return done;
+                }
+            }
+            return {};
+        };
+        for (auto copied :
+             {copy(*layouts, &ListRepository::upsert_output_layout_profile),
+              copy(*destinations, &ListRepository::upsert_destination_profile),
+              copy(*encoders, &ListRepository::upsert_encoder_preset),
+              copy(*scripts, &ListRepository::upsert_metadata_transformation_chain)}) {
+            if (!copied) {
+                std::filesystem::remove(staging, error);
+                return std::unexpected(std::move(copied.error()));
+            }
+        }
+        if (!lists->empty()) {
+            if (auto copied = target->replace_all(*lists); !copied) {
+                std::filesystem::remove(staging, error);
+                return std::unexpected(std::move(copied.error()));
+            }
+        }
+    }
+    std::filesystem::rename(staging, to, error);
+    if (error) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = "the presets could not be put in place: " + error.message(),
+                        .context = {}});
+    }
+    return true;
+}
+
 } // namespace trackknife::persistence

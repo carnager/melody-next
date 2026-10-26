@@ -332,7 +332,8 @@ preflight_output_paths(const OutputPathPlan& plan, const core::CancellationToken
             continue;
         }
         source.observed_revision = revision_from_stat(source_status);
-        if (source.observed_revision != planned.source_revision) {
+        if (!core::same_revision(planned.source_revision, source.observed_revision,
+                                 source_descriptor.get())) {
             add_issue(planned, OutputPathPreflightIssueKind::source_changed,
                       "Source revision changed after path planning");
         }

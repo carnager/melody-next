@@ -388,7 +388,7 @@ open_locked_source(const std::string& raw_path, const core::LocalSourceRevision&
             target_raw_path, journal_id));
     }
     const auto revision = revision_from_stat(descriptor_status);
-    if (revision != expected_revision) {
+    if (!core::same_revision(expected_revision, revision, source.get())) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict, "Publication source changed after filesystem preflight",
             raw_path, target_raw_path, journal_id));

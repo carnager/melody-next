@@ -278,7 +278,8 @@ require_direct_single_link_source(const Descriptor& descriptor, const std::strin
             "metadata commit does not yet support symlink or hard-linked source paths",
             source_raw_path));
     }
-    if (revision_from_stat(*descriptor_status) != expected_revision) {
+    if (!core::same_revision(expected_revision, revision_from_stat(*descriptor_status),
+                             descriptor.get())) {
         return std::unexpected(operation_error(
             core::ErrorCode::conflict, "metadata source changed after the write plan was previewed",
             source_raw_path));
@@ -2185,7 +2186,7 @@ verify_direct_single_link(const std::string& raw_path, const Descriptor& descrip
     if (!S_ISREG(path_status.st_mode) || path_status.st_nlink != 1 ||
         path_status.st_dev != descriptor_status.st_dev ||
         path_status.st_ino != descriptor_status.st_ino ||
-        revision_from_stat(descriptor_status) != expected) {
+        !core::same_revision(expected, revision_from_stat(descriptor_status), descriptor.get())) {
         return std::unexpected(operation_error(
             core::ErrorCode::conflict,
             std::string{description} + " no longer has its recorded identity and topology",
@@ -3603,7 +3604,8 @@ recover_metadata_operations(MetadataOperationJournal& journal,
                 continue;
             }
             auto status = locked_status(*locked_source, record.source_raw_path, record.id);
-            if (!status || revision_from_stat(*status) != **source_revision) {
+            if (!status || !core::same_revision(**source_revision, revision_from_stat(*status),
+                                                locked_source->get())) {
                 const auto issue =
                     !status ? status.error()
                             : operation_error(core::ErrorCode::conflict,

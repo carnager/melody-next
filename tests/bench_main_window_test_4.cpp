@@ -526,8 +526,19 @@ void BenchMainWindowTest::musicBrainzIdentifyLooksUpNamedReleases() {
     // Another, by its link where the album is typed.
     album->setText(QStringLiteral(
         " https://musicbrainz.org/release/22222222-2222-3333-4444-555555555555/discids "));
-    QTest::mouseClick(search, Qt::LeftButton);
+    // Enter in the field searches.
+    album->setFocus();
+    QTest::keyClick(album, Qt::Key_Return);
     QTRY_VERIFY(search->isEnabled() && results->topLevelItemCount() == 3);
+    // And is not Apply: the field leaves Enter to the window around it, whose
+    // default button Apply is -- with a lookup that takes its time, still
+    // enabled when it arrives. Delivered as Qt hands it on.
+    QTRY_VERIFY(use->isEnabled());
+    QVERIFY(use->isDefault());
+    QSignalSpy applied{use, &QPushButton::clicked};
+    QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};
+    QApplication::sendEvent(dialog, &enter);
+    QCOMPARE(applied.count(), 0);
     QCOMPARE(rows(), (QStringList{QStringLiteral("Alpha (Deluxe): Release named · 2 tracks"),
                                   QStringLiteral("Alpha: same track count · 2 tracks"),
                                   QStringLiteral("Alpha: 3 tracks")}));

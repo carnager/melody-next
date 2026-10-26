@@ -65,8 +65,7 @@ class RemoteCatalogue final : public Catalogue {
            const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::size_t>
     refresh(const std::vector<std::string>& raw_paths,
-            const core::CancellationToken& cancellation = {},
-            bool changed_only = false) override;
+            const core::CancellationToken& cancellation = {}, bool changed_only = false) override;
     [[nodiscard]] core::Result<persistence::LibraryFolder>
     folder(const std::string& raw_path,
            const core::CancellationToken& cancellation = {}) const override;

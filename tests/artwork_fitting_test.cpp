@@ -5,9 +5,9 @@
 
 #include "bench/artwork_fitting.hpp"
 
+#include <QBuffer>
 #include <QFile>
 #include <QImage>
-#include <QBuffer>
 #include <QImageReader>
 #include <QImageWriter>
 #include <QRandomGenerator>

@@ -9,9 +9,9 @@
 #include <array>
 #include <cstdlib>
 #include <filesystem>
-#include <map>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -270,16 +270,15 @@ void companionsTravelWithTheirAlbum() {
     write_file(album / ".hidden.jpg", "jpeg");
     const auto target = destination / "Artist" / "Album";
     const auto plan_of = [&](const std::vector<std::pair<std::string, std::string>>& moves) {
-        auto plan = ready_plan(album / moves.front().first, target / moves.front().second,
-                               *core::observe_local_source_revision(
-                                   (album / moves.front().first).native()),
-                               true, destination);
+        auto plan =
+            ready_plan(album / moves.front().first, target / moves.front().second,
+                       *core::observe_local_source_revision((album / moves.front().first).native()),
+                       true, destination);
         for (std::size_t index = 1U; index < moves.size(); ++index) {
             auto next = plan.sources.front();
             next.source_raw_path = (album / moves[index].first).native();
             next.target_raw_path = (target / moves[index].second).native();
-            next.source_revision =
-                *core::observe_local_source_revision(next.source_raw_path);
+            next.source_revision = *core::observe_local_source_revision(next.source_raw_path);
             next.item_indexes = {index};
             plan.sources.push_back(next);
         }
@@ -289,9 +288,8 @@ void companionsTravelWithTheirAlbum() {
         std::vector<std::string> names;
         for (const auto& source : preflight.sources) {
             if (source.planned.companion) {
-                names.push_back(std::filesystem::path{source.planned.target_raw_path}
-                                    .filename()
-                                    .string());
+                names.push_back(
+                    std::filesystem::path{source.planned.target_raw_path}.filename().string());
             }
         }
         std::ranges::sort(names);
@@ -303,8 +301,8 @@ void companionsTravelWithTheirAlbum() {
         plan_of({{"01.flac", "01.flac"}, {"02.flac", "02.flac"}}));
     CHECK(whole.has_value());
     CHECK(whole->ready());
-    CHECK((companions_of(*whole) ==
-           std::vector<std::string>{"album.cue", "album.m3u", "cover.jpg"}));
+    CHECK(
+        (companions_of(*whole) == std::vector<std::string>{"album.cue", "album.m3u", "cover.jpg"}));
     CHECK(std::ranges::all_of(whole->sources, [&](const auto& source) {
         return std::filesystem::path{source.planned.target_raw_path}.parent_path() == target;
     }));
@@ -356,8 +354,7 @@ void cueSheetsNameTheFilesAsRenamed() {
     CHECK(*rewritten == "REM GENRE Rock\r\nFILE \"01 - One.flac\" WAVE\r\n  TRACK 01 AUDIO\r\n"
                         "FILE Two.wav WAVE\r\nFILE \"other.flac\" WAVE\r\n");
     // A new name with a space is quoted where the old one was not.
-    const auto spaced =
-        rewrite_cue_file_names("FILE a.flac WAVE\n", {{"a.flac", "A B.flac"}});
+    const auto spaced = rewrite_cue_file_names("FILE a.flac WAVE\n", {{"a.flac", "A B.flac"}});
     CHECK(spaced && *spaced == "FILE \"A B.flac\" WAVE\n");
     // Naming none of them: nothing.
     CHECK(!rewrite_cue_file_names("FILE \"x.flac\" WAVE\n", renamed).has_value());

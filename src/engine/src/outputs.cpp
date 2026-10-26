@@ -140,8 +140,8 @@ void Outputs::remember() {
         if (id != selected_) {
             return;
         }
-        remembered_[id] = Remembered{.volume = state.volume_percent,
-                                     .replay_gain = state.replay_gain_mode};
+        remembered_[id] =
+            Remembered{.volume = state.volume_percent, .replay_gain = state.replay_gain_mode};
         for (const auto& [output, kept] : remembered_) {
             auto entry = Json::object();
             if (kept.volume) {

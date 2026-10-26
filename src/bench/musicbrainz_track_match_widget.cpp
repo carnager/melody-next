@@ -267,8 +267,8 @@ void paintFileTile(QPainter* painter, const QRect& tile, const QString& name, co
     QPainterPath shape;
     shape.addRoundedRect(QRectF{tile}.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
     painter->fillPath(shape, other ? base : blend(base, text, held || hovered ? 10 : 5));
-    painter->setPen(QPen{held ? palette.color(QPalette::Highlight) : blend(base, text, 24),
-                         held ? 2.0 : 1.0});
+    painter->setPen(
+        QPen{held ? palette.color(QPalette::Highlight) : blend(base, text, 24), held ? 2.0 : 1.0});
     painter->drawPath(shape);
     painter->setPen(Qt::NoPen);
     painter->setBrush(blend(base, text, 42));
@@ -303,11 +303,12 @@ struct Zones {
 Zones zonesOf(const QRect& rect) {
     constexpr int dot = 28;
     const auto track = std::max(0, (rect.width() - dot) * 9 / 20);
-    return Zones{.track = QRect{rect.left(), rect.top(), track, rect.height()}.adjusted(4, 3, 0, -3),
-                 .dot = QRect{rect.left() + track, rect.top(), dot, rect.height()},
-                 .file = QRect{rect.left() + track + dot, rect.top(),
-                               rect.width() - track - dot, rect.height()}
-                             .adjusted(0, 3, -4, -3)};
+    return Zones{
+        .track = QRect{rect.left(), rect.top(), track, rect.height()}.adjusted(4, 3, 0, -3),
+        .dot = QRect{rect.left() + track, rect.top(), dot, rect.height()},
+        .file =
+            QRect{rect.left() + track + dot, rect.top(), rect.width() - track - dot, rect.height()}
+                .adjusted(0, 3, -4, -3)};
 }
 
 class TrackBoard;
@@ -420,11 +421,10 @@ class TrackBoard final : public QListWidget {
                 tip << entry.file_tool_tip;
             }
             if (entry.fit) {
-                tip << (*entry.fit == musicbrainz::PairFit::good
-                            ? tr("Fits")
-                            : *entry.fit == musicbrainz::PairFit::doubtful
-                                  ? tr("Worth a look")
-                                  : tr("Likely the wrong track"));
+                tip << (*entry.fit == musicbrainz::PairFit::good ? tr("Fits")
+                        : *entry.fit == musicbrainz::PairFit::doubtful
+                            ? tr("Worth a look")
+                            : tr("Likely the wrong track"));
             }
             if (entry.delta_seconds && std::abs(*entry.delta_seconds) > 3) {
                 tip << tr("The file is %1 s %2 than the track")
@@ -626,9 +626,9 @@ void TrackDelegate::paintHeading(QPainter* painter, const QStyleOptionViewItem& 
     font.setWeight(QFont::DemiBold);
     painter->setFont(font);
     painter->setPen(palette.color(QPalette::PlaceholderText));
-    painter->drawText(QRect{area.left(), option.rect.top() + 6, area.width(),
-                            option.rect.height() - 8},
-                      Qt::AlignLeft | Qt::AlignVCenter, index.data().toString());
+    painter->drawText(
+        QRect{area.left(), option.rect.top() + 6, area.width(), option.rect.height() - 8},
+        Qt::AlignLeft | Qt::AlignVCenter, index.data().toString());
     painter->setPen(
         QPen{blend(palette.color(QPalette::Base), palette.color(QPalette::Text), 18), 1.0});
     painter->drawLine(area.left(), option.rect.bottom() - 1, area.right(),
@@ -738,13 +738,13 @@ class LooseDelegate final : public QStyledItemDelegate {
             font.setWeight(QFont::DemiBold);
             painter->setFont(font);
             painter->setPen(palette.color(QPalette::PlaceholderText));
-            painter->drawText(QRect{area.left(), option.rect.top() + 6, area.width(),
-                                    option.rect.height() - 8},
-                              Qt::AlignLeft | Qt::AlignVCenter,
-                              QFontMetrics{font}.elidedText(index.data().toString(),
-                                                            Qt::ElideMiddle, area.width()));
-            painter->setPen(QPen{
-                blend(palette.color(QPalette::Base), palette.color(QPalette::Text), 18), 1.0});
+            painter->drawText(
+                QRect{area.left(), option.rect.top() + 6, area.width(), option.rect.height() - 8},
+                Qt::AlignLeft | Qt::AlignVCenter,
+                QFontMetrics{font}.elidedText(index.data().toString(), Qt::ElideMiddle,
+                                              area.width()));
+            painter->setPen(
+                QPen{blend(palette.color(QPalette::Base), palette.color(QPalette::Text), 18), 1.0});
             painter->drawLine(area.left(), option.rect.bottom() - 1, area.right(),
                               option.rect.bottom() - 1);
             painter->restore();
@@ -763,8 +763,8 @@ class LooseDelegate final : public QStyledItemDelegate {
                                                  option.palette.color(QPalette::Highlight), 14));
         }
         const bool held = pairing_->held() && *pairing_->held() == row;
-        paintFileTile(painter, option.rect.adjusted(4, 3, -4, -3), entry.file, entry.length,
-                      option, held, false, entry.other);
+        paintFileTile(painter, option.rect.adjusted(4, 3, -4, -3), entry.file, entry.length, option,
+                      held, false, entry.other);
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& option,
@@ -865,9 +865,8 @@ class LooseFiles final : public QListWidget {
         press_.reset();
         const auto position = event->position().toPoint();
         // A file picked up from a track, put down here: on no track.
-        if (const auto held = pairing_->held();
-            held && *held < pairing_->session()->trackCount() &&
-            event->button() == Qt::LeftButton) {
+        if (const auto held = pairing_->held(); held && *held < pairing_->session()->trackCount() &&
+                                                event->button() == Qt::LeftButton) {
             pairing_->place(*held, Target{.kind = Target::Kind::loose, .row = 0});
             return;
         }

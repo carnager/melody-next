@@ -312,9 +312,9 @@ void LastFmSettingsSession::ask(const int row) {
         }
         const auto name = QString::fromStdString(user.get<std::string>());
         return {QStringLiteral("Scrobbling as %1%2 · %3 waiting")
-                    .arg(name,
-                         answer->value("library_only", false) ? QStringLiteral(", library only")
-                                                              : QString{})
+                    .arg(name, answer->value("library_only", false)
+                                   ? QStringLiteral(", library only")
+                                   : QString{})
                     .arg(answer->value("pending", 0)),
                 name};
     }));

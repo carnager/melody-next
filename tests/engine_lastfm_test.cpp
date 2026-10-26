@@ -406,8 +406,8 @@ int main(const int argc, char** argv) {
         require(player->play_entry(kept.entry_id).has_value(), "the library's track plays");
         listen(1'000);
         const auto after = fake.requests();
-        require(after.size() == before + 2U && after[before].at("method") ==
-                                                    "track.updateNowPlaying",
+        require(after.size() == before + 2U &&
+                    after[before].at("method") == "track.updateNowPlaying",
                 "the library's track is said to be playing");
         require(after.back().at("method") == "track.scrobble" &&
                     after.back().at("track") == "Metadata Fixture",

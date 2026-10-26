@@ -7,10 +7,10 @@
 
 #include <QSettings>
 
-#include <set>
-#include <map>
-#include <filesystem>
 #include <algorithm>
+#include <filesystem>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 

@@ -98,8 +98,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* enabled = new QCheckBox(QStringLiteral("Scrobble playback to Last.fm"), page);
     enabled->setObjectName(QStringLiteral("lastfm-enabled"));
     layout->addWidget(enabled);
-    auto* library_only =
-        new QCheckBox(QStringLiteral("Only scrobble tracks in the library"), page);
+    auto* library_only = new QCheckBox(QStringLiteral("Only scrobble tracks in the library"), page);
     library_only->setObjectName(QStringLiteral("lastfm-library-only"));
     library_only->setToolTip(
         QStringLiteral("Files played from elsewhere and streams are not scrobbled. Applies "

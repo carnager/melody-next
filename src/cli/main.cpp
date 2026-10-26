@@ -1404,12 +1404,13 @@ int run(const Options& options) {
             params["paths"] = std::move(paths);
         }
         const bool interactive = !options.json && ::isatty(STDERR_FILENO) == 1;
-        auto outcome = client->run_job("catalogue.scan", params, [interactive](const Json& progress) {
-            if (interactive) {
-                std::cerr << "\r\033[Kupdating: " << progress.value("visited", 0) << " seen, "
-                          << progress.value("indexed", 0) << " read" << std::flush;
-            }
-        });
+        auto outcome =
+            client->run_job("catalogue.scan", params, [interactive](const Json& progress) {
+                if (interactive) {
+                    std::cerr << "\r\033[Kupdating: " << progress.value("visited", 0) << " seen, "
+                              << progress.value("indexed", 0) << " read" << std::flush;
+                }
+            });
         if (interactive) {
             std::cerr << "\r\033[K";
         }
@@ -1750,7 +1751,9 @@ int run(const Options& options) {
                 return;
             }
             const auto role = text_of(room, "role");
-            std::cout << (role.empty() ? "not in a room" : role == "host" ? "hosting" : "listening")
+            std::cout << (role.empty()     ? "not in a room"
+                          : role == "host" ? "hosting"
+                                           : "listening")
                       << "\n";
             if (!text_of(room, "invite").empty() && role == "host") {
                 std::cout << "invite: " << text_of(room, "invite") << "\n";
@@ -1771,8 +1774,8 @@ int run(const Options& options) {
                 std::cout << "a party\n";
                 for (const auto& each : room.value("suggestions", Json::array())) {
                     std::cout << "  " << each.value("id", 0) << ". " << text_of(each, "artist")
-                              << " \u2014 " << text_of(each, "title") << " (" << text_of(each, "name")
-                              << ", " << each.value("votes", 0) << " votes"
+                              << " \u2014 " << text_of(each, "title") << " ("
+                              << text_of(each, "name") << ", " << each.value("votes", 0) << " votes"
                               << (each.value("voted", false) ? ", yours" : "")
                               << (each.value("ready", false) ? "" : ", its copy on its way")
                               << ")\n";
@@ -1789,18 +1792,18 @@ int run(const Options& options) {
             }
             // The server's own password, for a server that asks one.
             std::string password;
-            if (const char* given = trackknife::core::environment_variable("MELODY_TOGETHER_PASSWORD");
+            if (const char* given =
+                    trackknife::core::environment_variable("MELODY_TOGETHER_PASSWORD");
                 given != nullptr) {
                 password = given;
             } else if (const char* home = trackknife::core::environment_variable("HOME");
                        home != nullptr) {
                 const char* config = trackknife::core::environment_variable("XDG_CONFIG_HOME");
-                const std::filesystem::path base =
-                    config != nullptr && *config != '\0'
-                        ? std::filesystem::path{config}
-                        : std::filesystem::path{home} / ".config";
-                if (auto read = trackknife::protocol::read_password_file(
-                        base / "melody" / "together-password")) {
+                const std::filesystem::path base = config != nullptr && *config != '\0'
+                                                       ? std::filesystem::path{config}
+                                                       : std::filesystem::path{home} / ".config";
+                if (auto read = trackknife::protocol::read_password_file(base / "melody" /
+                                                                         "together-password")) {
                     password = *read;
                 }
             }
@@ -1825,7 +1828,8 @@ int run(const Options& options) {
             }
         } else if (what == "join") {
             // An invite, or the server, the room's name and its password.
-            const bool by_invite = words.size() >= 3U && words[2].find("/rooms/") != std::string::npos;
+            const bool by_invite =
+                words.size() >= 3U && words[2].find("/rooms/") != std::string::npos;
             if (by_invite ? (words.size() > 4U) : (words.size() < 5U || words.size() > 6U)) {
                 fail("together join wants the invite a friend sent, or the server, the room's "
                      "name and its password -- and a name to be known by");
@@ -1836,13 +1840,12 @@ int run(const Options& options) {
                 name.empty() && user != nullptr) {
                 name = user;
             }
-            static_cast<void>(call(
-                *client, "together.join",
-                by_invite ? Json{{"invite", words[2]}, {"name", name}}
-                          : Json{{"server", words[2]},
-                                 {"room", words[3]},
-                                 {"password", words[4]},
-                                 {"name", name}}));
+            static_cast<void>(call(*client, "together.join",
+                                   by_invite ? Json{{"invite", words[2]}, {"name", name}}
+                                             : Json{{"server", words[2]},
+                                                    {"room", words[3]},
+                                                    {"password", words[4]},
+                                                    {"name", name}}));
             show_room(call(*client, "together.state"));
         } else if (what == "leave") {
             static_cast<void>(call(*client, "together.leave"));
@@ -1863,8 +1866,9 @@ int run(const Options& options) {
             for (std::size_t index = 2; index < words.size(); ++index) {
                 // As the shell gave it, a path of this machine's.
                 const auto absolute = std::filesystem::absolute(words[index]).string();
-                const auto answer = call(*client, "together.suggest",
-                                         Json{{"path", trackknife::protocol::encode_raw_path(absolute)}});
+                const auto answer =
+                    call(*client, "together.suggest",
+                         Json{{"path", trackknife::protocol::encode_raw_path(absolute)}});
                 if (options.json) {
                     std::cout << answer.dump() << "\n";
                 } else {

@@ -3,7 +3,6 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
-#include "workspace/plugins.hpp"
 #include "bench/desktop_media_session.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/engine_key.hpp"
@@ -26,6 +25,7 @@
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
 #include "workspace/convert_job.hpp"
+#include "workspace/plugins.hpp"
 #include "workspace/tagger_session.hpp"
 
 #include <QElapsedTimer>

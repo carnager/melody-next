@@ -692,8 +692,8 @@ void LocalLibraryTest::aWatchersRefreshReadsOnlyWhatChanged() {
     QVERIFY(library->scan({}, initial));
     QCOMPARE(library->refresh({path}, {}, true), 0U);
     QCOMPARE(library->refresh({path}), 1U);
-    std::filesystem::last_write_time(
-        path, std::filesystem::last_write_time(path) + std::chrono::seconds{5});
+    std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) +
+                                               std::chrono::seconds{5});
     QCOMPARE(library->refresh({path}, {}, true), 1U);
     QCOMPARE(library->refresh({path}, {}, true), 0U);
     std::filesystem::remove(path);
@@ -1325,8 +1325,8 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
                   "completed_at_unix_seconds, updated_at_unix_seconds) VALUES('j1', 0, 1, 1);"),
              SQLITE_OK);
     for (const auto* name :
-         {"0057_library_mounts", "0056_working_lists_retired", "0055_album_year_index", "0054_in_place_writes",
-          "0052_file_publication_backups", "0051_engine_list_drafts",
+         {"0057_library_mounts", "0056_working_lists_retired", "0055_album_year_index",
+          "0054_in_place_writes", "0052_file_publication_backups", "0051_engine_list_drafts",
           "0050_engine_list_item_details", "0049_operation_journal_backup_identity",
           "0047_list_engine", "0046_engine_lists", "0045_library_revision", "0044_library_added",
           "0043_remote_list_documents", "0042_engine_state", "0041_list_entry_identity",

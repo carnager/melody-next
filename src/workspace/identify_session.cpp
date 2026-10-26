@@ -8,9 +8,9 @@
 #include <QCollator>
 #include <QDir>
 #include <QFileInfo>
-#include <QRegularExpression>
 #include <QFutureWatcher>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -352,8 +352,8 @@ void TrackMatchSession::moveDisc(const std::size_t from, const std::size_t to) {
 
 std::vector<std::size_t> TrackMatchSession::discsWithFiles() const {
     std::vector<std::size_t> discs;
-    for (std::size_t index = 0;
-         index < alignment_.release_tracks.size() && index < slots_.size(); ++index) {
+    for (std::size_t index = 0; index < alignment_.release_tracks.size() && index < slots_.size();
+         ++index) {
         const auto disc = alignment_.release_tracks[index].medium_position;
         if (slots_[index] && *slots_[index] < own_count_ &&
             std::ranges::find(discs, disc) == discs.end()) {
@@ -364,15 +364,15 @@ std::vector<std::size_t> TrackMatchSession::discsWithFiles() const {
 }
 
 std::size_t TrackMatchSession::discTrackCount(const std::size_t disc) const {
-    return static_cast<std::size_t>(std::ranges::count_if(
-        alignment_.release_tracks,
-        [disc](const auto& track) { return track.medium_position == disc; }));
+    return static_cast<std::size_t>(
+        std::ranges::count_if(alignment_.release_tracks,
+                              [disc](const auto& track) { return track.medium_position == disc; }));
 }
 
 std::set<TrackMatchSession::TrackKey> TrackMatchSession::pairedTracks() const {
     std::set<TrackKey> paired;
-    for (std::size_t index = 0;
-         index < alignment_.release_tracks.size() && index < slots_.size(); ++index) {
+    for (std::size_t index = 0; index < alignment_.release_tracks.size() && index < slots_.size();
+         ++index) {
         if (slots_[index] && *slots_[index] < own_count_) {
             const auto& track = alignment_.release_tracks[index];
             paired.insert(TrackKey{track.medium_position, track.track.position});
@@ -483,8 +483,8 @@ void TrackMatchSession::refresh(const std::optional<std::size_t> selected) {
                 }
             }
             entry.disc_heading = heading.join(QStringLiteral(" · "));
-            if (const auto local = slots_[row]; local && track.track.length_ms &&
-                                                local_tracks_[*local].duration_ms) {
+            if (const auto local = slots_[row];
+                local && track.track.length_ms && local_tracks_[*local].duration_ms) {
                 const auto delta = *local_tracks_[*local].duration_ms - *track.track.length_ms;
                 entry.delta_seconds = static_cast<int>((delta + (delta < 0 ? -500 : 500)) / 1000);
                 entry.doubtful = delta > 3'000 || delta < -3'000;
@@ -550,8 +550,7 @@ IdentifySession::IdentifySession(MusicBrainzLookupService service,
                                  std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
                                  std::vector<QString> local_paths,
                                  std::vector<std::size_t> item_indexes, QString initial_artist,
-                                 QString initial_release, QString tagged_release,
-                                 QObject* parent)
+                                 QString initial_release, QString tagged_release, QObject* parent)
     : QObject(parent), service_(std::move(service)), local_tracks_(std::move(local_tracks)),
       local_paths_(std::move(local_paths)), item_indexes_(std::move(item_indexes)),
       initial_artist_(std::move(initial_artist)), initial_release_(std::move(initial_release)),
@@ -911,8 +910,8 @@ void IdentifySession::finishGroup(core::Result<QByteArray> body, const Named nam
     auto listed =
         body ? musicbrainz::parse_release_search(
                    std::string_view{body->constData(), static_cast<std::size_t>(body->size())},
-                   musicbrainz::WebServiceLimits{
-                       .releases = musicbrainz::release_group_releases_limit})
+                   musicbrainz::WebServiceLimits{.releases =
+                                                     musicbrainz::release_group_releases_limit})
              : core::Result<musicbrainz::ReleaseSearchResult>{std::unexpected(body.error())};
     const auto first = named == Named::tagged
                            ? QStringLiteral("The release the files are tagged with")
@@ -929,9 +928,8 @@ void IdentifySession::finishGroup(core::Result<QByteArray> body, const Named nam
     // Those with as many tracks as files first, then by date.
     auto& releases = listed->releases;
     std::erase_if(releases, [this](const musicbrainz::Release& release) {
-        return std::ranges::any_of(candidates_, [&release](const auto& candidate) {
-            return candidate.id == release.id;
-        });
+        return std::ranges::any_of(
+            candidates_, [&release](const auto& candidate) { return candidate.id == release.id; });
     });
     std::ranges::stable_sort(releases, [this](const auto& left, const auto& right) {
         const auto left_fits = left.track_count == local_tracks_.size();
@@ -960,28 +958,26 @@ void IdentifySession::finishGroup(core::Result<QByteArray> body, const Named nam
         candidates_.push_back(std::move(release));
     }
     // Where there are more than one page lists.
-    const auto more =
-        listed->total_count > musicbrainz::release_group_releases_limit
-            ? QStringLiteral(" · the first %1 of %2")
-                  .arg(musicbrainz::release_group_releases_limit)
-                  .arg(listed->total_count)
-            : QString{};
+    const auto more = listed->total_count > musicbrainz::release_group_releases_limit
+                          ? QStringLiteral(" · the first %1 of %2")
+                                .arg(musicbrainz::release_group_releases_limit)
+                                .arg(listed->total_count)
+                          : QString{};
     if (named == Named::group) {
         suggested_ = candidates_.empty() ? -1 : 0;
-        status_ = candidates_.empty()
-                      ? QStringLiteral("The album has no versions on MusicBrainz")
-                      : QStringLiteral("%1 %2 of the album%3")
-                            .arg(others)
-                            .arg(others == 1U ? QStringLiteral("version")
-                                              : QStringLiteral("versions"))
-                            .arg(more);
+        status_ = candidates_.empty() ? QStringLiteral("The album has no versions on MusicBrainz")
+                                      : QStringLiteral("%1 %2 of the album%3")
+                                            .arg(others)
+                                            .arg(others == 1U ? QStringLiteral("version")
+                                                              : QStringLiteral("versions"))
+                                            .arg(more);
     } else {
-        status_ = QStringLiteral("%1, and %2 other %3 of its album%4%5")
-                      .arg(first)
-                      .arg(others)
-                      .arg(others == 1U ? QStringLiteral("version") : QStringLiteral("versions"))
-                      .arg(more,
-                           named == Named::tagged ? QStringLiteral(" — search to look for another")
+        status_ =
+            QStringLiteral("%1, and %2 other %3 of its album%4%5")
+                .arg(first)
+                .arg(others)
+                .arg(others == 1U ? QStringLiteral("version") : QStringLiteral("versions"))
+                .arg(more, named == Named::tagged ? QStringLiteral(" — search to look for another")
                                                   : QString{});
     }
     setBusy(false);
@@ -1025,8 +1021,8 @@ void IdentifySession::use(const int row) {
 
 void IdentifySession::finishLookup(core::Result<QByteArray> body) {
     busy_ = false;
-    opened(body ? musicbrainz::parse_release_lookup(std::string_view{
-                      body->constData(), static_cast<std::size_t>(body->size())})
+    opened(body ? musicbrainz::parse_release_lookup(
+                      std::string_view{body->constData(), static_cast<std::size_t>(body->size())})
                 : core::Result<musicbrainz::Release>{std::unexpected(body.error())});
 }
 
@@ -1094,9 +1090,9 @@ MultiIdentifySession::MultiIdentifySession(TaggerSession& tagger, MusicBrainzLoo
     : QObject(parent), tagger_(&tagger) {
     albums_.reserve(albums.size());
     for (auto& files : albums) {
-        auto* session = new IdentifySession(service, files.descriptors, files.local_paths,
-                                            files.items, files.artist, files.release,
-                                            files.release_id, this);
+        auto* session =
+            new IdentifySession(service, files.descriptors, files.local_paths, files.items,
+                                files.artist, files.release, files.release_id, this);
         const auto index = albums_.size();
         connect(session, &IdentifySession::changed, this, [this] {
             emit changed();
@@ -1107,28 +1103,26 @@ MultiIdentifySession::MultiIdentifySession(TaggerSession& tagger, MusicBrainzLoo
                 [this, index](metadata::MetadataProposalSet proposals) {
                     to_stage_.emplace_back(index, std::move(proposals));
                 });
-        connect(session, &IdentifySession::matchOpened, this,
-                [this, index](TrackMatchSession* match) {
-                    // ADR-0324: the same release as another album here --
-                    // a set whose discs repeat each other, split in two
-                    // by their tags -- pairs with the tracks that one left.
-                    std::set<TrackMatchSession::TrackKey> taken;
-                    for (std::size_t other = 0; other < albums_.size(); ++other) {
-                        const auto* elsewhere =
-                            other == index || albums_[other].skipped
-                                ? nullptr
-                                : albums_[other].session->match();
-                        if (elsewhere != nullptr && elsewhere != match &&
-                            elsewhere->releaseId() == match->releaseId()) {
-                            auto paired = elsewhere->pairedTracks();
-                            taken.merge(paired);
-                        }
+        connect(
+            session, &IdentifySession::matchOpened, this, [this, index](TrackMatchSession* match) {
+                // ADR-0324: the same release as another album here --
+                // a set whose discs repeat each other, split in two
+                // by their tags -- pairs with the tracks that one left.
+                std::set<TrackMatchSession::TrackKey> taken;
+                for (std::size_t other = 0; other < albums_.size(); ++other) {
+                    const auto* elsewhere = other == index || albums_[other].skipped
+                                                ? nullptr
+                                                : albums_[other].session->match();
+                    if (elsewhere != nullptr && elsewhere != match &&
+                        elsewhere->releaseId() == match->releaseId()) {
+                        auto paired = elsewhere->pairedTracks();
+                        taken.merge(paired);
                     }
-                    match->avoid(std::move(taken));
-                    // Ready once paired.
-                    connect(match, &TrackMatchSession::changed, this,
-                            &MultiIdentifySession::changed);
-                });
+                }
+                match->avoid(std::move(taken));
+                // Ready once paired.
+                connect(match, &TrackMatchSession::changed, this, &MultiIdentifySession::changed);
+            });
         albums_.push_back(Album{.files = std::move(files),
                                 .session = session,
                                 .started = false,
@@ -1155,9 +1149,8 @@ QString MultiIdentifySession::name(const std::size_t index) const {
     }
     const auto& files = albums_[index].files;
     if (!files.release.isEmpty()) {
-        return files.artist.isEmpty()
-                   ? files.release
-                   : QStringLiteral("%1 — %2").arg(files.artist, files.release);
+        return files.artist.isEmpty() ? files.release
+                                      : QStringLiteral("%1 — %2").arg(files.artist, files.release);
     }
     return files.local_paths.empty() ? QString{}
                                      : QFileInfo{files.local_paths.front()}.dir().dirName();
@@ -1222,9 +1215,8 @@ QString MultiIdentifySession::stateText(const std::size_t index) const {
             return QStringLiteral("✓");
         }
         const auto& chosen = rows[static_cast<std::size_t>(row)];
-        return chosen.media.isEmpty()
-                   ? QStringLiteral("✓ %1").arg(chosen.album)
-                   : QStringLiteral("✓ %1 · %2").arg(chosen.album, chosen.media);
+        return chosen.media.isEmpty() ? QStringLiteral("✓ %1").arg(chosen.album)
+                                      : QStringLiteral("✓ %1 · %2").arg(chosen.album, chosen.media);
     }
     case State::skipped:
         return QStringLiteral("Skipped");

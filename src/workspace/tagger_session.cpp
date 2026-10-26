@@ -9,13 +9,13 @@
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/settings_keys.hpp"
-#include "trackknife/musicbrainz/bandcamp.hpp"
 #include "trackknife/formats/probe.hpp"
 #include "trackknife/loudness/grouping.hpp"
 #include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/musicbrainz/album_groups.hpp"
+#include "trackknife/musicbrainz/bandcamp.hpp"
 #include "uicommon/debug_log.hpp"
 
 #include <QElapsedTimer>
@@ -351,9 +351,8 @@ std::optional<ArtworkCoverArtService> TaggerSession::coverArtService() {
                             body->constData(), static_cast<std::size_t>(body->size())});
                         // ADR-0326: where the archive has no front cover,
                         // Bandcamp's, when Cover settings allow it.
-                        const bool wanted =
-                            SettingsKeys::artworkPolicy().fetch_source ==
-                            metadata::artwork_fetch_source_with_bandcamp;
+                        const bool wanted = SettingsKeys::artworkPolicy().fetch_source ==
+                                            metadata::artwork_fetch_source_with_bandcamp;
                         if (!listing || !wanted || self.isNull() ||
                             std::ranges::any_of(listing->images,
                                                 [](const auto& image) { return image.front; })) {
@@ -418,8 +417,7 @@ void TaggerSession::addBandcampCover(
         return;
     }
     services_.musicbrainz.fetch(
-        QString::fromStdString(*links_url),
-        [self, give, from_page](core::Result<QByteArray> body) {
+        QString::fromStdString(*links_url), [self, give, from_page](core::Result<QByteArray> body) {
             const auto links =
                 body ? musicbrainz::parse_release_links(std::string_view{
                            body->constData(), static_cast<std::size_t>(body->size())})
@@ -736,15 +734,15 @@ void TaggerSession::fetchNextCover() {
         covers_to_fetch_.clear();
         selectAllRows();
         // Said until something else is: the staging said before it is done.
-        sticky_status_ = staged == asked
-                      ? QStringLiteral("Covers fetched for %1 %2")
-                            .arg(asked)
-                            .arg(asked == 1U ? QStringLiteral("album") : QStringLiteral("albums"))
-                      : QStringLiteral("Covers fetched for %1 of %2 albums%3")
-                            .arg(staged)
-                            .arg(asked)
-                            .arg(covers_why_.isEmpty() ? QString{}
-                                                       : QStringLiteral(" · ") + covers_why_);
+        sticky_status_ =
+            staged == asked
+                ? QStringLiteral("Covers fetched for %1 %2")
+                      .arg(asked)
+                      .arg(asked == 1U ? QStringLiteral("album") : QStringLiteral("albums"))
+                : QStringLiteral("Covers fetched for %1 of %2 albums%3")
+                      .arg(staged)
+                      .arg(asked)
+                      .arg(covers_why_.isEmpty() ? QString{} : QStringLiteral(" · ") + covers_why_);
         setStatus(sticky_status_);
         emit changed();
         emit coversFetched(staged, asked);
@@ -1217,10 +1215,9 @@ bool TaggerSession::canEditValues() const {
 }
 
 bool TaggerSession::canTransform() const {
-    return !provisional_ && !transformation_dialog_open_ &&
-           grid_model_ != nullptr && selectionReady() && !exact_values_dialog_open_ &&
-           !field_name_dialog_open_ && !write_plan_running_ && !apply_running_ &&
-           !artwork_operation_running_;
+    return !provisional_ && !transformation_dialog_open_ && grid_model_ != nullptr &&
+           selectionReady() && !exact_values_dialog_open_ && !field_name_dialog_open_ &&
+           !write_plan_running_ && !apply_running_ && !artwork_operation_running_;
 }
 
 bool TaggerSession::canIdentify() const {
@@ -1240,8 +1237,7 @@ bool TaggerSession::canApply() const {
 }
 
 bool TaggerSession::fileListEnabled() const {
-    return !artwork_operation_running_ &&
-           (artwork_ == nullptr || !artwork_->hasPendingChanges());
+    return !artwork_operation_running_ && (artwork_ == nullptr || !artwork_->hasPendingChanges());
 }
 
 void TaggerSession::setFieldSelection(const bool has_selected_fields,
@@ -2839,8 +2835,8 @@ void TaggerSession::finishWritePlan() {
         // moved first. A file renamed or moved to where it already is moves
         // nowhere: its cover, tags and gains are written as without them.
         if (!folders.empty() && plan->path_preflight) {
-            const auto moving = std::ranges::any_of(
-                plan->path_preflight->sources, [&folders](const auto& source) {
+            const auto moving =
+                std::ranges::any_of(plan->path_preflight->sources, [&folders](const auto& source) {
                     return source.publication != operations::OutputPathPublicationKind::no_change &&
                            std::ranges::any_of(folders, [&source](const auto& folder) {
                                return std::filesystem::path{folder.raw_path}.parent_path() ==
@@ -2849,8 +2845,8 @@ void TaggerSession::finishWritePlan() {
                            });
                 });
             if (moving) {
-                setStatus(QStringLiteral(
-                    "Save folder covers before moving these files away from them"));
+                setStatus(
+                    QStringLiteral("Save folder covers before moving these files away from them"));
                 emit changed();
                 return;
             }

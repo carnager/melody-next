@@ -13,16 +13,16 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <functional>
-#include <map>
-#include <set>
-#include <cstdint>
-#include <cstdlib>
 #include <limits>
+#include <map>
 #include <memory>
+#include <set>
 #include <utility>
 
 namespace trackknife::engine {
@@ -90,10 +90,9 @@ struct Answer final {
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "melodyd");
     if (const auto performed = curl_easy_perform(curl.get()); performed != CURLE_OK) {
-        return std::unexpected(
-            together_error(std::string{"the server is not reached: "} +
-                               curl_easy_strerror(performed),
-                           core::ErrorCode::io));
+        return std::unexpected(together_error(std::string{"the server is not reached: "} +
+                                                  curl_easy_strerror(performed),
+                                              core::ErrorCode::io));
     }
     Answer answer;
     curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &answer.status);
@@ -136,7 +135,7 @@ struct Answer final {
 [[nodiscard]] std::string first(const persistence::TkqRowFacts& facts, const char* name) {
     const auto found = facts.fields.find(name);
     return found != facts.fields.end() && !found->second.empty() ? found->second.front().first
-                                                                  : std::string{};
+                                                                 : std::string{};
 }
 
 [[nodiscard]] std::string text(const Json& object, const char* name) {
@@ -229,8 +228,8 @@ void put_cover(const std::string& url, const std::string& key, const std::string
         return;
     }
     static_cast<void>(request(
-        "PUT", url, key,
-        std::string{reinterpret_cast<const char*>(fitted->data()), fitted->size()}, 15'000L));
+        "PUT", url, key, std::string{reinterpret_cast<const char*>(fitted->data()), fitted->size()},
+        15'000L));
 }
 
 std::size_t write_file(char* data, const std::size_t size, const std::size_t count, void* into) {
@@ -255,10 +254,9 @@ std::size_t write_file(char* data, const std::size_t size, const std::size_t cou
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, output.get());
     long_transfer(curl.get(), stop);
     long status = 0;
-    const bool fetched = curl_easy_perform(curl.get()) == CURLE_OK &&
-                         curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status) ==
-                             CURLE_OK &&
-                         status == 200;
+    const bool fetched =
+        curl_easy_perform(curl.get()) == CURLE_OK &&
+        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status) == CURLE_OK && status == 200;
     output.reset();
     std::error_code ignored;
     if (!fetched) {
@@ -320,7 +318,6 @@ class Errands final {
     std::thread worker_;
 };
 
-
 [[nodiscard]] Json status_json(const Together::Status& now) {
     auto suggestions = Json::array();
     for (const auto& each : now.suggestions) {
@@ -332,13 +329,13 @@ class Errands final {
                                    {"voted", each.voted},
                                    {"ready", each.ready}});
     }
-    return Json{{"role", now.role},         {"invite", now.invite},
+    return Json{{"role", now.role},           {"invite", now.invite},
                 {"listeners", now.listeners}, {"track", now.track},
-                {"message", now.message},   {"party", now.party},
+                {"message", now.message},     {"party", now.party},
                 {"suggestions", suggestions}, {"by", now.by},
-                {"next", now.next},         {"history", now.history},
-                {"upcoming", now.upcoming}, {"room", now.room},
-                {"server", now.server},     {"reaction", now.reaction}};
+                {"next", now.next},           {"history", now.history},
+                {"upcoming", now.upcoming},   {"room", now.room},
+                {"server", now.server},       {"reaction", now.reaction}};
 }
 
 [[nodiscard]] core::Result<std::uint64_t> suggestion_id(const Json& params) {
@@ -352,6 +349,8 @@ class Errands final {
 
 } // namespace
 
+// One per room joined: its layout is kept readable, not packed.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct Together::Session final {
     Invite invite;
     bool hosting{false};
@@ -431,8 +430,7 @@ std::optional<Together::Invite> Together::parse_invite(std::string_view text) {
     Invite invite{.server = std::string{text.substr(0, rooms)},
                   .room = std::string{text.substr(rooms + 7U, hash - rooms - 7U)},
                   .key = std::string{text.substr(hash + 1U)}};
-    if (invite.room.empty() || invite.key.empty() ||
-        invite.room.find('/') != std::string::npos) {
+    if (invite.room.empty() || invite.key.empty() || invite.room.find('/') != std::string::npos) {
         return std::nullopt;
     }
     return invite;
@@ -477,7 +475,14 @@ Together::Together(Player& player, Catalogue& catalogue, EventSink sink,
     }
 }
 
-Together::~Together() { suspend(); }
+Together::~Together() {
+    // Leaving the room on the way out must not end the engine: a lock that
+    // cannot be taken now is the process ending anyway.
+    try {
+        suspend();
+    } catch (...) {
+    }
+}
 
 void Together::leave() {
     const std::lock_guard control{control_};
@@ -503,7 +508,8 @@ void Together::remember(const Session& session, const std::string& invite) const
     std::filesystem::create_directories(directory_, ignored);
     const auto file = directory_ / "session.json";
     const auto temporary = file.string() + ".new";
-    const auto descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    const auto descriptor =
+        ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (descriptor < 0) {
         return;
     }
@@ -557,7 +563,16 @@ void Together::resume() {
                           .invite = text(document, "invite"),
                           .listeners = {},
                           .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
+                          .message = {},
+                          .party = false,
+                          .suggestions = {},
+                          .by = {},
+                          .next = {},
+                          .history = {},
+                          .upcoming = {},
+                          .room = {},
+                          .server = {},
+                          .reaction = {}});
 }
 
 void Together::gone(Session& session, std::string message) {
@@ -634,23 +649,35 @@ core::Result<std::string> Together::host(const std::string& server, const std::s
         return std::unexpected(together_error(
             made->status == 403   ? "the server's password is not that"
             : made->status == 409 ? "a room of that name is open on the server already"
-            : made->status == 400 ? "a room's name is 3 to 40 of a-z, 0-9 and -, its password "
-                                    "4 characters at least"
-                                  : "the server made no room (" + std::to_string(made->status) + ")",
+            : made->status == 400
+                ? "a room's name is 3 to 40 of a-z, 0-9 and -, its password "
+                  "4 characters at least"
+                : "the server made no room (" + std::to_string(made->status) + ")",
             made->status == 403 ? core::ErrorCode::unauthorized : core::ErrorCode::backend));
     }
     session->invite.room = text(made->body, "room");
     session->invite.key = text(made->body, "host_key");
-    const Invite shared{.server = base,
-                        .room = session->invite.room,
-                        .key = text(made->body, "invite")};
+    const Invite shared{
+        .server = base, .room = session->invite.room, .key = text(made->body, "invite")};
     if (auto measured = measure_clock(*session); !measured) {
         return std::unexpected(measured.error());
     }
     const auto invite = invite_text(shared);
     remember(*session, invite);
-    begin(session,
-          Status{.role = "host", .invite = invite, .listeners = {}, .track = {}, .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
+    begin(session, Status{.role = "host",
+                          .invite = invite,
+                          .listeners = {},
+                          .track = {},
+                          .message = {},
+                          .party = false,
+                          .suggestions = {},
+                          .by = {},
+                          .next = {},
+                          .history = {},
+                          .upcoming = {},
+                          .room = {},
+                          .server = {},
+                          .reaction = {}});
     return invite;
 }
 
@@ -659,9 +686,9 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     end();
     auto parsed = parse_invite(invite);
     if (!parsed) {
-        return std::unexpected(together_error(
-            "an invite is the server's address, /rooms/ROOM and #KEY",
-            core::ErrorCode::invalid_argument));
+        return std::unexpected(
+            together_error("an invite is the server's address, /rooms/ROOM and #KEY",
+                           core::ErrorCode::invalid_argument));
     }
     auto session = std::make_shared<Session>();
     session->invite = *parsed;
@@ -671,21 +698,33 @@ core::Result<void> Together::join(const std::string& invite, const std::string& 
     std::filesystem::remove_all(session->downloads, unmade);
     std::filesystem::create_directories(session->downloads, unmade);
     // Asked once now, so a wrong invite is said to whoever gave it.
-    auto first_look = request("GET", session->url("/state?after=0&wait=0"), parsed->key, {},
-                              10'000L);
+    auto first_look =
+        request("GET", session->url("/state?after=0&wait=0"), parsed->key, {}, 10'000L);
     if (!first_look) {
         return std::unexpected(first_look.error());
     }
     if (first_look->status != 200) {
-        return std::unexpected(together_error("the invite opens no room",
-                                              core::ErrorCode::unauthorized));
+        return std::unexpected(
+            together_error("the invite opens no room", core::ErrorCode::unauthorized));
     }
     if (auto measured = measure_clock(*session); !measured) {
         return std::unexpected(measured.error());
     }
     remember(*session, invite);
-    begin(session, Status{.role = "listener", .invite = invite, .listeners = {}, .track = {},
-                          .message = {}, .party = false, .suggestions = {}, .by = {}, .next = {}, .history = {}, .upcoming = {}, .room = {}, .server = {}, .reaction = {}});
+    begin(session, Status{.role = "listener",
+                          .invite = invite,
+                          .listeners = {},
+                          .track = {},
+                          .message = {},
+                          .party = false,
+                          .suggestions = {},
+                          .by = {},
+                          .next = {},
+                          .history = {},
+                          .upcoming = {},
+                          .room = {},
+                          .server = {},
+                          .reaction = {}});
     return {};
 }
 
@@ -848,8 +887,10 @@ void Together::host_round(Session& session) {
         upcoming_key += each.entry_id.to_string();
     }
     const auto key = state.entry.to_string() + "/" + std::to_string(state.instance) + "/" +
-                     (playing ? "playing" : paused ? "paused" : "stopped") + "/" +
-                     (following ? following->entry_id.to_string() : std::string{}) + "/" +
+                     (playing  ? "playing"
+                      : paused ? "paused"
+                               : "stopped") +
+                     "/" + (following ? following->entry_id.to_string() : std::string{}) + "/" +
                      upcoming_key;
     const auto now = session.server_now();
     const auto anchor = now - state.position_ms;
@@ -894,8 +935,8 @@ void Together::host_round(Session& session) {
         } else {
             said = Json{{"track", nullptr}};
         }
-        if (auto put = request("PUT", session.url("/state"), session.invite.key, said.dump(),
-                               5'000L);
+        if (auto put =
+                request("PUT", session.url("/state"), session.invite.key, said.dump(), 5'000L);
             put && put->status == 200) {
             session.said_key = key;
             session.said_anchor = anchor;
@@ -909,8 +950,9 @@ void Together::host_round(Session& session) {
                 for (const auto& each : said.value("upcoming", Json::array())) {
                     status_.upcoming.push_back(shown(each));
                 }
-                status_.next = said.contains("next") ? shown(said["next"].value("track", Json::object()))
-                                                     : std::string{};
+                status_.next = said.contains("next")
+                                   ? shown(said["next"].value("track", Json::object()))
+                                   : std::string{};
             }
             changed();
         } else if (put && (put->status == 404 || put->status == 403)) {
@@ -939,8 +981,8 @@ void Together::host_round(Session& session) {
     if (steady_clock::now() - session.presence_asked >
         (session.party ? std::chrono::seconds{2} : presence_every)) {
         session.presence_asked = steady_clock::now();
-        if (auto seen = request("GET", session.url("/state?after=0&wait=0"), session.invite.key,
-                                {}, 5'000L);
+        if (auto seen = request("GET", session.url("/state?after=0&wait=0"), session.invite.key, {},
+                                5'000L);
             seen && seen->status == 200) {
             std::vector<std::string> names;
             for (const auto& name : seen->body.value("listeners", Json::array())) {
@@ -1088,14 +1130,14 @@ void Together::send(Session& session, const QueueEntry& entry) {
     session.errands.post([this, &session, id, source = entry.source] {
         // The engine's Opus copy -- made once, kept -- a hundred and sixty
         // kilobits a second: as the phone hears it away from home.
-        auto file = transcodes_->ensure(
-            TranscodeSource{.raw_path = source.raw_path,
-                            .selection = source.selection,
-                            .segment = source.segment},
-            StreamFormat{.bitrate_kbps = 160, .codec = output::StreamCodec::opus,
-                         .sample_rate_cap = std::nullopt});
-        const bool kept = file && put_file(session.url("/tracks/" + id), session.invite.key,
-                                           *file, session.stopping);
+        auto file = transcodes_->ensure(TranscodeSource{.raw_path = source.raw_path,
+                                                        .selection = source.selection,
+                                                        .segment = source.segment},
+                                        StreamFormat{.bitrate_kbps = 160,
+                                                     .codec = output::StreamCodec::opus,
+                                                     .sample_rate_cap = std::nullopt});
+        const bool kept = file && put_file(session.url("/tracks/" + id), session.invite.key, *file,
+                                           session.stopping);
         if (kept) {
             put_cover(session.url("/covers/" + id), session.invite.key, source.raw_path);
         }
@@ -1116,8 +1158,8 @@ void Together::fetch(Session& session, const std::string& entry) {
     }
     session.errands.post([&session, entry] {
         const auto target = session.downloads / (entry + ".opus");
-        const bool kept = get_file(session.url("/tracks/" + entry), session.invite.key, target,
-                                   session.stopping);
+        const bool kept =
+            get_file(session.url("/tracks/" + entry), session.invite.key, target, session.stopping);
         const std::lock_guard guard{session.copies};
         session.fetching.erase(entry);
         if (kept) {
@@ -1126,8 +1168,7 @@ void Together::fetch(Session& session, const std::string& entry) {
     });
 }
 
-std::string Together::library_copy(Session& session, const std::string& entry,
-                                   const Json& track) {
+std::string Together::library_copy(Session& session, const std::string& entry, const Json& track) {
     if (const auto known = session.library.find(entry); known != session.library.end()) {
         return known->second;
     }
@@ -1225,8 +1266,8 @@ void Together::read_room(Session& session, const Json& answer) {
             .id = each.value("id", std::uint64_t{0}),
             .name = text(each, "name"),
             .title = text(track, "title"),
-            .artist = text(track, "artist").empty() ? text(track, "albumartist")
-                                                     : text(track, "artist"),
+            .artist =
+                text(track, "artist").empty() ? text(track, "albumartist") : text(track, "artist"),
             .votes = votes.size(),
             .voted = !session.name.empty() &&
                      std::ranges::any_of(votes,
@@ -1260,13 +1301,14 @@ void Together::read_room(Session& session, const Json& answer) {
         status_.reaction = std::move(reaction);
         const auto ids = [](const std::vector<Suggestion>& of) {
             std::vector<std::tuple<std::uint64_t, std::size_t, bool, bool>> keys;
+            keys.reserve(of.size());
             for (const auto& each : of) {
                 keys.emplace_back(each.id, each.votes, each.voted, each.ready);
             }
             return keys;
         };
-        different = different || status_.party != session.party ||
-                    ids(status_.suggestions) != ids(listed);
+        different =
+            different || status_.party != session.party || ids(status_.suggestions) != ids(listed);
         status_.party = session.party;
         status_.suggestions = std::move(listed);
     }
@@ -1406,8 +1448,7 @@ core::Result<void> Together::party(const bool on) {
     auto set = request("PUT", session->url("/party"), session->invite.key,
                        Json{{"party", on}}.dump(), 5'000L);
     if (!set || set->status != 200) {
-        return std::unexpected(set ? together_error("the server refused the party")
-                                   : set.error());
+        return std::unexpected(set ? together_error("the server refused the party") : set.error());
     }
     {
         const std::lock_guard guard{mutex_};
@@ -1433,10 +1474,10 @@ core::Result<std::uint64_t> Together::suggest(const std::string& raw_path) {
         return std::unexpected(offered.error());
     }
     if (offered->status != 200) {
-        return std::unexpected(together_error(
-            text(offered->body, "error").empty() ? "the room refused the suggestion"
-                                                 : text(offered->body, "error"),
-            core::ErrorCode::conflict));
+        return std::unexpected(together_error(text(offered->body, "error").empty()
+                                                  ? "the room refused the suggestion"
+                                                  : text(offered->body, "error"),
+                                              core::ErrorCode::conflict));
     }
     const auto file = text(offered->body, "file");
     {
@@ -1447,7 +1488,8 @@ core::Result<std::uint64_t> Together::suggest(const std::string& raw_path) {
     session->errands.post([this, session, file, raw_path] {
         auto made = transcodes_->ensure(
             TranscodeSource{.raw_path = raw_path, .selection = {}, .segment = std::nullopt},
-            StreamFormat{.bitrate_kbps = 160, .codec = output::StreamCodec::opus,
+            StreamFormat{.bitrate_kbps = 160,
+                         .codec = output::StreamCodec::opus,
                          .sample_rate_cap = std::nullopt});
         if (!made || !put_file(session->url("/tracks/" + file), session->invite.key, *made,
                                session->stopping)) {
@@ -1468,9 +1510,9 @@ core::Result<void> Together::vote(const std::uint64_t id) {
     auto voted = request("POST", session->url("/suggestions/" + std::to_string(id) + "/vote"),
                          session->invite.key, Json{{"name", session->name}}.dump(), 5'000L);
     if (!voted || voted->status != 200) {
-        return std::unexpected(voted ? together_error("there is no such suggestion",
-                                                      core::ErrorCode::not_found)
-                                     : voted.error());
+        return std::unexpected(
+            voted ? together_error("there is no such suggestion", core::ErrorCode::not_found)
+                  : voted.error());
     }
     return {};
 }
@@ -1484,9 +1526,9 @@ core::Result<void> Together::remove(const std::uint64_t id) {
     auto removed = request("DELETE", session->url("/suggestions/" + std::to_string(id)),
                            session->invite.key, {}, 5'000L);
     if (!removed || removed->status != 200) {
-        return std::unexpected(removed ? together_error("there is no such suggestion",
-                                                        core::ErrorCode::not_found)
-                                       : removed.error());
+        return std::unexpected(
+            removed ? together_error("there is no such suggestion", core::ErrorCode::not_found)
+                    : removed.error());
     }
     return {};
 }
@@ -1521,7 +1563,6 @@ void Together::keep_in_step(Session& session) {
         session.last_seek = steady_clock::now();
     }
 }
-
 
 void register_together_methods(protocol::Dispatcher& dispatcher, Together& together) {
     dispatcher.on("together.party", [&together](const Json& params) -> core::Result<Json> {
@@ -1562,22 +1603,20 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
         }
         return Json{{"removed", true}};
     });
-    dispatcher.on("together.host",
-                  [&together](const Json& params) -> core::Result<Json> {
-                      const auto server = params.value("server", std::string{});
-                      if (server.empty()) {
-                          return std::unexpected(together_error(
-                              "the server's address is needed", core::ErrorCode::invalid_argument));
-                      }
-                      auto invite = together.host(server, params.value("password", std::string{}),
-                                                  params.value("name", std::string{}),
-                                                  params.value("room", std::string{}),
-                                                  params.value("room_password", std::string{}));
-                      if (!invite) {
-                          return std::unexpected(invite.error());
-                      }
-                      return Json{{"invite", *invite}};
-                  });
+    dispatcher.on("together.host", [&together](const Json& params) -> core::Result<Json> {
+        const auto server = params.value("server", std::string{});
+        if (server.empty()) {
+            return std::unexpected(together_error("the server's address is needed",
+                                                  core::ErrorCode::invalid_argument));
+        }
+        auto invite = together.host(
+            server, params.value("password", std::string{}), params.value("name", std::string{}),
+            params.value("room", std::string{}), params.value("room_password", std::string{}));
+        if (!invite) {
+            return std::unexpected(invite.error());
+        }
+        return Json{{"invite", *invite}};
+    });
     dispatcher.on("together.join", [&together](const Json& params) -> core::Result<Json> {
         auto name = params.value("name", std::string{});
         if (name.empty()) {
@@ -1590,10 +1629,10 @@ void register_together_methods(protocol::Dispatcher& dispatcher, Together& toget
             while (server.ends_with('/')) {
                 server.pop_back();
             }
-            invite = Together::invite_text(Together::Invite{
-                .server = server,
-                .room = params.value("room", std::string{}),
-                .key = params.value("password", std::string{})});
+            invite = Together::invite_text(
+                Together::Invite{.server = server,
+                                 .room = params.value("room", std::string{}),
+                                 .key = params.value("password", std::string{})});
         }
         auto joined = together.join(invite, name);
         if (!joined) {

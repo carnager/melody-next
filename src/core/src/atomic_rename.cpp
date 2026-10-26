@@ -90,7 +90,7 @@ Result<NoReplacePublishMethod> publish_no_replace_at(const int source_dir_fd,
 }
 
 std::filesystem::path temporary_sibling(const std::filesystem::path& target,
-                                       const std::string_view label) {
+                                        const std::string_view label) {
     constexpr std::size_t longest_name = 255U;
     const auto suffix = "." + std::string{label} + "-" + StableId::random().to_string();
     auto name = target.filename().native();

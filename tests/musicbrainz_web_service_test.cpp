@@ -395,8 +395,8 @@ void bandcampPagesAndCoversAreRecognised() {
     CHECK(!is_bandcamp_image("https://f4.bcbits.com/other/a.jpg"));
     CHECK(!is_bandcamp_image("https://f4.bcbits.com.evil.org/img/a.jpg"));
 
-    CHECK(bandcamp_album_page({"https://www.discogs.com/master/1",
-                               "http://band.bandcamp.com/album/beta"}) ==
+    CHECK(bandcamp_album_page(
+              {"https://www.discogs.com/master/1", "http://band.bandcamp.com/album/beta"}) ==
           std::optional<std::string>{"https://band.bandcamp.com/album/beta"});
     CHECK(!bandcamp_album_page({"https://band.bandcamp.com/"}));
 

@@ -502,8 +502,7 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     {
         BenchMainWindow second;
         second.show();
-        auto* shown_off =
-            second.findChild<QAction*>(QStringLiteral("action-local-replaygain-off"));
+        auto* shown_off = second.findChild<QAction*>(QStringLiteral("action-local-replaygain-off"));
         QVERIFY(shown_off != nullptr);
         QTRY_VERIFY_WITH_TIMEOUT(shown_off->isChecked(), 5'000);
         QTest::qWait(500);

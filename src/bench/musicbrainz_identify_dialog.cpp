@@ -75,11 +75,10 @@ class TwoLineDelegate final : public QStyledItemDelegate {
         painter->setFont(quiet_font);
         painter->setPen(
             item.palette.color(selected ? QPalette::HighlightedText : QPalette::PlaceholderText));
-        painter->drawText(
-            QRect{area.left(), top + metrics.height(), area.width(), quiet_height},
-            Qt::AlignLeft | Qt::AlignVCenter,
-            quiet_metrics.elidedText(index.data(second_line_role).toString(), Qt::ElideRight,
-                                     area.width()));
+        painter->drawText(QRect{area.left(), top + metrics.height(), area.width(), quiet_height},
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          quiet_metrics.elidedText(index.data(second_line_role).toString(),
+                                                   Qt::ElideRight, area.width()));
         painter->restore();
     }
 
@@ -198,9 +197,9 @@ class IdentifyAlbumPage final : public QWidget {
             // ADR-0330: and how its files fit, as they are paired.
             const auto heading = [this, match] {
                 const auto fit = match->fitSummary();
-                match_heading_->setText(fit.isEmpty() ? match->heading()
-                                                      : match->heading() + QStringLiteral(" — ") +
-                                                            fit);
+                match_heading_->setText(fit.isEmpty()
+                                            ? match->heading()
+                                            : match->heading() + QStringLiteral(" — ") + fit);
             };
             connect(match, &TrackMatchSession::changed, panes_, heading);
             heading();
@@ -230,9 +229,9 @@ class IdentifyAlbumPage final : public QWidget {
             if (match.startsWith(QStringLiteral("Same album"))) {
                 match = match.section(QStringLiteral(" · "), 1);
             }
-            item->setText(0, candidate.artist.isEmpty()
-                                 ? candidate.album
-                                 : QStringLiteral("%1 — %2").arg(candidate.artist, candidate.album));
+            item->setText(0, candidate.artist.isEmpty() ? candidate.album
+                                                        : QStringLiteral("%1 — %2").arg(
+                                                              candidate.artist, candidate.album));
             QStringList details;
             if (!match.isEmpty()) {
                 details << match;
@@ -431,8 +430,8 @@ class MusicBrainzIdentifyDialog final : public QDialog {
             albums_->setCurrentItem(albums_->topLevelItem(static_cast<int>(index)));
             showing_ = false;
         }
-        if (auto* field = page->findChild<QLineEdit*>(
-                QStringLiteral("bench-musicbrainz-identify-release"))) {
+        if (auto* field =
+                page->findChild<QLineEdit*>(QStringLiteral("bench-musicbrainz-identify-release"))) {
             field->setFocus();
         }
         sync();
@@ -485,7 +484,8 @@ QDialog* createMusicBrainzIdentifyDialog(TaggerSession& tagger, MusicBrainzLooku
                                          QWidget* parent) {
     // The tagger's, not the window's: accepted albums are still staged when
     // the window closes first.
-    auto* session = new MultiIdentifySession(tagger, std::move(service), std::move(albums), &tagger);
+    auto* session =
+        new MultiIdentifySession(tagger, std::move(service), std::move(albums), &tagger);
     return new MusicBrainzIdentifyDialog(session, parent);
 }
 

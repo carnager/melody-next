@@ -5,8 +5,8 @@
 #include "bench/playlist_folder_widget.hpp"
 #include "bench/themed_icon.hpp"
 #include "bench/undo_location_widget.hpp"
-#include "workspace/list_view_definitions.hpp"
 #include "workspace/library_watch_session.hpp"
+#include "workspace/list_view_definitions.hpp"
 #include "workspace/playlist_folder_session.hpp"
 #include "workspace/undo_location_session.hpp"
 
@@ -35,14 +35,13 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFrame>
-#include <QCheckBox>
 #include <QHBoxLayout>
-#include <QSignalBlocker>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
@@ -53,6 +52,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QStyledItemDelegate>
 #include <QToolButton>
 
@@ -719,9 +719,9 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             }
             auto* row = new QWidget(pages);
             row->setProperty("engine-address",
-                              engine->key.isLocal()
-                                  ? QString::fromLatin1(SettingsKeys::library_engine_local)
-                                  : engine->setting.address);
+                             engine->key.isLocal()
+                                 ? QString::fromLatin1(SettingsKeys::library_engine_local)
+                                 : engine->setting.address);
             auto* layout = new QHBoxLayout(row);
             layout->setContentsMargins(0, 0, 0, 0);
             auto* box = new QCheckBox(tr("Watch its library folders for changes"), row);

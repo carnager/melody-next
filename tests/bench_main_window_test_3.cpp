@@ -1427,11 +1427,11 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
     std::unique_ptr<QMimeData> mime{
         board->model()->mimeData({board->indexFromItem(matchRow(board, 0))})};
     const auto onto = track_side(2);
-    QDragEnterEvent enter{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+    QDragEnterEvent enter{dragPosition(onto), Qt::MoveAction, mime.get(), Qt::LeftButton,
                           Qt::NoModifier};
     QApplication::sendEvent(board->viewport(), &enter);
     QVERIFY(enter.isAccepted());
-    QDragMoveEvent move{QPointF{onto}, Qt::MoveAction, mime.get(), Qt::LeftButton,
+    QDragMoveEvent move{dragPosition(onto), Qt::MoveAction, mime.get(), Qt::LeftButton,
                         Qt::NoModifier};
     QApplication::sendEvent(board->viewport(), &move);
     QVERIFY(move.isAccepted());
@@ -1465,7 +1465,7 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
         std::unique_ptr<QMimeData> back{
             board->model()->mimeData({board->indexFromItem(matchRow(board, 3))})};
         const auto into = loose->viewport()->rect().center();
-        QDragEnterEvent enter_loose{QPointF{into}, Qt::MoveAction, back.get(), Qt::LeftButton,
+        QDragEnterEvent enter_loose{dragPosition(into), Qt::MoveAction, back.get(), Qt::LeftButton,
                                     Qt::NoModifier};
         QApplication::sendEvent(loose->viewport(), &enter_loose);
         QVERIFY(enter_loose.isAccepted());
@@ -1498,13 +1498,15 @@ void BenchMainWindowTest::theMatchingBoardPairsByDropClickAndDisc() {
 // repeating each other, the files split by their tags -- the second pairs
 // with the disc the first left.
 void BenchMainWindowTest::aSecondAlbumTakesTheDiscTheFirstLeft() {
-    TrackMatchSession first{repeatingDiscs(), twoFiles(180'000),
+    TrackMatchSession first{repeatingDiscs(),
+                            twoFiles(180'000),
                             {QStringLiteral("/a/1.flac"), QStringLiteral("/a/2.flac")},
                             {0U, 1U}};
     QTRY_VERIFY(first.ready());
     QCOMPARE(first.rows()[0].file, QStringLiteral("1.flac"));
     QCOMPARE(first.rows()[1].file, QStringLiteral("2.flac"));
-    TrackMatchSession second{repeatingDiscs(), twoFiles(200'000),
+    TrackMatchSession second{repeatingDiscs(),
+                             twoFiles(200'000),
                              {QStringLiteral("/b/1.flac"), QStringLiteral("/b/2.flac")},
                              {2U, 3U}};
     second.avoid(first.pairedTracks());

@@ -87,18 +87,20 @@ void Workspace::sampleLastFm(const EnginePlayback::State& state) {
         if (source != nullptr && !raw_path.empty() && !state.entry.isEmpty()) {
             QtConcurrent::run([catalogue = std::shared_ptr{source->openDeferred()}, raw_path] {
                 return catalogue->cached_tracks({raw_path});
-            }).then(this, [this, entry = state.entry](
-                              const core::Result<std::vector<persistence::LibraryTrackSnapshot>>&
-                                  known) {
-                if (entry != lastfm_library_entry_) {
-                    return;
-                }
-                lastfm_in_library_ = known && !known->empty();
-                // Not asked, rather than not in it: asked again.
-                if (!known && known.error().code != core::ErrorCode::conflict) {
-                    lastfm_library_entry_.clear();
-                }
-            });
+            })
+                .then(
+                    this,
+                    [this, entry = state.entry](
+                        const core::Result<std::vector<persistence::LibraryTrackSnapshot>>& known) {
+                        if (entry != lastfm_library_entry_) {
+                            return;
+                        }
+                        lastfm_in_library_ = known && !known->empty();
+                        // Not asked, rather than not in it: asked again.
+                        if (!known && known.error().code != core::ErrorCode::conflict) {
+                            lastfm_library_entry_.clear();
+                        }
+                    });
         }
     }
     // Observable for offscreen tests and diagnostics: "is anything being
@@ -322,8 +324,8 @@ Workspace::lyricsOfPlaying(const EnginePlayback::State& state) {
     });
 }
 
-std::optional<QFuture<PluginPanelLibrary>>
-Workspace::pluginLibraryOf(const std::string& raw_path, const bool artist_albums) {
+std::optional<QFuture<PluginPanelLibrary>> Workspace::pluginLibraryOf(const std::string& raw_path,
+                                                                      const bool artist_albums) {
     const auto* link = linkOf(transport_);
     auto* source = link != nullptr ? catalogueOf(link->key) : nullptr;
     if (!playingOnEngine() || source == nullptr || raw_path.empty()) {

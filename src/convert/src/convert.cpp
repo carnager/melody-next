@@ -364,11 +364,15 @@ fields_to_transfer(const metadata::MetadataDocument& document, const EncoderPres
             continue;
         }
         const auto& name = carried.canonical_name;
-        if (vorbis_comments && name.size() > performer.size() + 1U &&
-            name.starts_with(performer) && name[performer.size()] == ':') {
+        if (vorbis_comments && name.size() > performer.size() + 1U && name.starts_with(performer) &&
+            name[performer.size()] == ':') {
             const auto instrument = name.substr(performer.size() + 1U);
             for (const auto& who : carried.values) {
-                credits.push_back(who + " (" + instrument + ")");
+                auto credit = who;
+                credit += " (";
+                credit += instrument;
+                credit += ')';
+                credits.push_back(std::move(credit));
             }
             continue;
         }
@@ -382,11 +386,12 @@ fields_to_transfer(const metadata::MetadataDocument& document, const EncoderPres
         if (plain != kept.fields.end()) {
             plain->values.insert(plain->values.end(), credits.begin(), credits.end());
         } else {
-            kept.fields.push_back(metadata::MetadataField{.canonical_name = std::string{performer},
-                                                          .native_name = "PERFORMER",
-                                                          .values = std::move(credits),
-                                                          .qualifier = {},
-                                                          .provenance = metadata::FieldProvenance::embedded});
+            kept.fields.push_back(
+                metadata::MetadataField{.canonical_name = std::string{performer},
+                                        .native_name = "PERFORMER",
+                                        .values = std::move(credits),
+                                        .qualifier = {},
+                                        .provenance = metadata::FieldProvenance::embedded});
         }
     }
     kept.unsupported_native_objects = document.unsupported_native_objects;

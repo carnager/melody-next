@@ -5,8 +5,8 @@
 // come and go, and let go of. Nothing here reads the remote files: what they
 // are comes from the engine that has them.
 
-#include "workspace/library_browser.hpp"
 #include "uicommon/debug_log.hpp"
+#include "workspace/library_browser.hpp"
 #include "workspace/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"

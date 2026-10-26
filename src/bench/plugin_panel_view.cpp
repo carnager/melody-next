@@ -194,7 +194,7 @@ class FlowLayout final : public QLayout {
 class Dot final : public QWidget {
   public:
     Dot(const int extent, QColor colour, QString letter, QWidget* parent)
-        : QWidget(parent), colour_(std::move(colour)), letter_(std::move(letter)) {
+        : QWidget(parent), colour_(colour), letter_(std::move(letter)) {
         setFixedSize(extent, extent);
     }
 
@@ -251,8 +251,8 @@ class PersonChip final : public QWidget {
         QPainter painter{this};
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(mixed(palette().color(QPalette::Window),
-                               palette().color(QPalette::WindowText), 8));
+        painter.setBrush(
+            mixed(palette().color(QPalette::Window), palette().color(QPalette::WindowText), 8));
         const QRectF area{rect()};
         painter.drawRoundedRect(area, area.height() / 2, area.height() / 2);
     }
@@ -278,8 +278,8 @@ class PanelSwitch final : public QAbstractButton {
         const auto& colours = palette();
         const QRectF track = QRectF{rect()}.adjusted(0.5, 0.5, -0.5, -0.5);
         const auto radius = track.height() / 2;
-        const auto off = mixed(colours.color(QPalette::Window),
-                               colours.color(QPalette::WindowText), 28);
+        const auto off =
+            mixed(colours.color(QPalette::Window), colours.color(QPalette::WindowText), 28);
         auto fill = isChecked() ? colours.color(QPalette::Highlight) : off;
         if (underMouse()) {
             fill = fill.lighter(108);
@@ -455,11 +455,11 @@ class TrackRow final : public QWidget {
     }
     button->setCheckable(true);
     button->setChecked(each.on);
-    button->setStyleSheet(QStringLiteral(
-        "QToolButton { border: 1px solid palette(mid); border-radius: 11px;"
-        " padding: 2px 10px; font-weight: 600; }"
-        "QToolButton:checked { background: palette(highlight);"
-        " color: palette(highlighted-text); border-color: palette(highlight); }"));
+    button->setStyleSheet(
+        QStringLiteral("QToolButton { border: 1px solid palette(mid); border-radius: 11px;"
+                       " padding: 2px 10px; font-weight: 600; }"
+                       "QToolButton:checked { background: palette(highlight);"
+                       " color: palette(highlighted-text); border-color: palette(highlight); }"));
     return button;
 }
 
@@ -710,10 +710,9 @@ void PluginPanelView::showContent(const PluginPanelContent& content, const bool 
             toggle->setToolTip(part.text);
             toggle->setChecked(part.on);
             label->setBuddy(toggle);
-            connect(toggle, &QAbstractButton::toggled, this,
-                    [this, key = part.key](const bool on) {
-                        emit actionRequested(key, on ? QStringLiteral("on") : QStringLiteral("off"));
-                    });
+            connect(toggle, &QAbstractButton::toggled, this, [this, key = part.key](const bool on) {
+                emit actionRequested(key, on ? QStringLiteral("on") : QStringLiteral("off"));
+            });
             line_layout->addWidget(toggle, 0, Qt::AlignVCenter);
             add(line);
             break;
@@ -725,8 +724,8 @@ void PluginPanelView::showContent(const PluginPanelContent& content, const bool 
             auto* line_layout = new QHBoxLayout(line);
             line_layout->setContentsMargins(0, 2, 0, 2);
             line_layout->setSpacing(7);
-            const auto dot_colour = part.on ? palette().color(QPalette::Highlight)
-                                            : faded(this, 90);
+            const auto dot_colour =
+                part.on ? palette().color(QPalette::Highlight) : faded(this, 90);
             line_layout->addWidget(new Dot(8, dot_colour, {}, line), 0, Qt::AlignVCenter);
             auto* text = plainLabel(part.text, line);
             auto font = text->font();

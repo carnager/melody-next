@@ -79,7 +79,8 @@ struct TopLevelBox {
     }
 };
 
-[[nodiscard]] std::uint64_t read_be32(const std::vector<unsigned char>& bytes, const std::size_t at) {
+[[nodiscard]] std::uint64_t read_be32(const std::vector<unsigned char>& bytes,
+                                      const std::size_t at) {
     return (static_cast<std::uint64_t>(bytes[at]) << 24U) |
            (static_cast<std::uint64_t>(bytes[at + 1U]) << 16U) |
            (static_cast<std::uint64_t>(bytes[at + 2U]) << 8U) |
@@ -140,7 +141,8 @@ children(const std::vector<unsigned char>& bytes, const TopLevelBox& parent,
 
 [[nodiscard]] const TopLevelBox* child(const std::vector<TopLevelBox>& boxes,
                                        const std::string_view name) {
-    const auto found = std::ranges::find_if(boxes, [name](const auto& box) { return box.is(name); });
+    const auto found =
+        std::ranges::find_if(boxes, [name](const auto& box) { return box.is(name); });
     return found == boxes.end() ? nullptr : &*found;
 }
 
@@ -182,14 +184,12 @@ chunk_offsets(const std::vector<unsigned char>& bytes, const TopLevelBox& table)
 // file must be the source's, moved by exactly as much as the box it points
 // into moved; the tables of the samples themselves -- their sizes, timing
 // and grouping -- unchanged.
-[[nodiscard]] core::Result<void>
-verify_mp4_audio_index(const std::vector<unsigned char>& source,
-                       const std::vector<TopLevelBox>& source_boxes,
-                       const std::vector<const TopLevelBox*>& source_fixed,
-                       const std::vector<unsigned char>& prepared,
-                       const std::vector<TopLevelBox>& prepared_boxes,
-                       const std::vector<const TopLevelBox*>& prepared_fixed,
-                       const core::Error& malformed, const core::Error& misplaced) {
+[[nodiscard]] core::Result<void> verify_mp4_audio_index(
+    const std::vector<unsigned char>& source, const std::vector<TopLevelBox>& source_boxes,
+    const std::vector<const TopLevelBox*>& source_fixed, const std::vector<unsigned char>& prepared,
+    const std::vector<TopLevelBox>& prepared_boxes,
+    const std::vector<const TopLevelBox*>& prepared_fixed, const core::Error& malformed,
+    const core::Error& misplaced) {
     const auto* source_moov = child(source_boxes, "moov");
     const auto* prepared_moov = child(prepared_boxes, "moov");
     auto source_tracks = children(source, *source_moov, malformed);
@@ -254,9 +254,8 @@ verify_mp4_audio_index(const std::vector<unsigned char>& source,
         if (before == nullptr) {
             before = child(*source_table, "co64");
         }
-        const auto* after = child(*prepared_table, before != nullptr && before->is("co64")
-                                                       ? "co64"
-                                                       : "stco");
+        const auto* after =
+            child(*prepared_table, before != nullptr && before->is("co64") ? "co64" : "stco");
         if (before == nullptr && after == nullptr) {
             continue;
         }
@@ -363,8 +362,8 @@ preservation_detail::verify_mp4_box_preservation(const std::string& source_raw_p
         *source_bytes, *source_boxes, source_fixed, *prepared_bytes, *prepared_boxes,
         prepared_fixed, malformed,
         writer_error(core::ErrorCode::conflict,
-                     "a prepared MP4's audio index no longer points at its audio",
-                     source_raw_path, prepared_raw_path));
+                     "a prepared MP4's audio index no longer points at its audio", source_raw_path,
+                     prepared_raw_path));
 }
 
 namespace {

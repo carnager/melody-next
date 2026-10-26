@@ -67,8 +67,8 @@ class TemporaryDirectory final {
     std::filesystem::path path_;
 };
 
-void write_sine_wav(const std::filesystem::path& path, const double amplitude,
-                    const double seconds, const int rate = sample_rate) {
+void write_sine_wav(const std::filesystem::path& path, const double amplitude, const double seconds,
+                    const int rate = sample_rate) {
     const auto frames = static_cast<std::uint32_t>(seconds * rate);
     const std::uint32_t data_bytes = frames * 2U * 2U;
     std::ofstream output{path, std::ios::binary};
@@ -360,27 +360,26 @@ void convertsToALongFileName() {
     const auto source = directory.path() / "tone.wav";
     write_sine_wav(source, 0.6, tone_seconds);
     const auto& presets = trackknife::convert::builtin_encoder_presets();
-    const auto flac = std::ranges::find_if(presets, [](const auto& preset) {
-        return preset.file_extension == "flac";
-    });
+    const auto flac = std::ranges::find_if(
+        presets, [](const auto& preset) { return preset.file_extension == "flac"; });
     CHECK(flac != presets.end());
     if (flac == presets.end()) {
         return;
     }
     const auto destination = directory.path() / (std::string(245U, 'n') + ".flac");
-    const auto converted = trackknife::convert::convert_audio_file(
-        {.source_raw_path = source.native(),
-         .source_selection = {},
-         .source_range = {},
-         .destination_raw_path = destination.native(),
-         .preset = *flac,
-         .target_sample_rate = {},
-         .sample_rate_cap = {},
-         .target_bit_depth = {},
-         .keep_source_bit_depth = false,
-         .metadata = {},
-         .artwork = {}},
-        [](std::uint64_t, std::optional<std::uint64_t>) {});
+    const auto converted =
+        trackknife::convert::convert_audio_file({.source_raw_path = source.native(),
+                                                 .source_selection = {},
+                                                 .source_range = {},
+                                                 .destination_raw_path = destination.native(),
+                                                 .preset = *flac,
+                                                 .target_sample_rate = {},
+                                                 .sample_rate_cap = {},
+                                                 .target_bit_depth = {},
+                                                 .keep_source_bit_depth = false,
+                                                 .metadata = {},
+                                                 .artwork = {}},
+                                                [](std::uint64_t, std::optional<std::uint64_t>) {});
     if (!converted) {
         std::cerr << "long name: " << converted.error().message << '\n';
     }
@@ -388,7 +387,8 @@ void convertsToALongFileName() {
     CHECK(std::filesystem::exists(destination));
     // Nothing left beside it.
     std::size_t files = 0U;
-    for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator{directory.path()}) {
+    for ([[maybe_unused]] const auto& entry :
+         std::filesystem::directory_iterator{directory.path()}) {
         ++files;
     }
     CHECK(files == 2U);
@@ -539,8 +539,7 @@ void carriesMetadataIntoEveryPreset() {
               std::optional<std::string>{"custom value"});
         CHECK(reread->document.effective_values("acoustidfingerprint").empty());
         CHECK(reread->document.effective_values("acoustidid").empty());
-        CHECK(reread->document.effective_values("mylistfield") ==
-              std::vector<std::string>{"kept"});
+        CHECK(reread->document.effective_values("mylistfield") == std::vector<std::string>{"kept"});
         CHECK(reread->document.effective_values("~length").empty());
         if (preset.file_extension == "flac" || preset.file_extension == "ogg" ||
             preset.file_extension == "opus") {

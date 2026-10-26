@@ -1078,8 +1078,8 @@ void Workspace::flushRowReads() {
                     continue;
                 }
                 for (const auto& [path, read] : reads) {
-                    static_cast<void>(
-                        tab->model->applyCommittedMetadata(path, read.document, read.source_revision));
+                    static_cast<void>(tab->model->applyCommittedMetadata(path, read.document,
+                                                                         read.source_revision));
                 }
             }
             // Read again because they were written: a cover may be new, and

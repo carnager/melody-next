@@ -231,8 +231,9 @@ class TaggerSession final : public QObject {
     }
     // Covers from the Cover Art Archive: none without MusicBrainz lookups.
     [[nodiscard]] std::optional<ArtworkCoverArtService> coverArtService();
-    void addBandcampCover(const QString& release_id, musicbrainz::CoverArtListing listing,
-                          std::function<void(core::Result<musicbrainz::CoverArtListing>)> completion);
+    void
+    addBandcampCover(const QString& release_id, musicbrainz::CoverArtListing listing,
+                     std::function<void(core::Result<musicbrainz::CoverArtListing>)> completion);
     // The artwork applied through the artwork section's own Apply.
     [[nodiscard]] ArtworkApplyObserver artworkAppliedObserver();
     // An artwork Apply finished: the files' new revisions taken in.

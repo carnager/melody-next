@@ -18,8 +18,7 @@ namespace trackknife::musicbrainz {
 // A Bandcamp image: https://NAME.bcbits.com/img/....
 [[nodiscard]] bool is_bandcamp_image(std::string_view url);
 // The first Bandcamp album page among links, as asked for over HTTPS.
-[[nodiscard]] std::optional<std::string>
-bandcamp_album_page(const std::vector<std::string>& urls);
+[[nodiscard]] std::optional<std::string> bandcamp_album_page(const std::vector<std::string>& urls);
 
 struct BandcampCoverUrls {
     // 1200 pixels, and a 350-pixel preview.

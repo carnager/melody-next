@@ -98,11 +98,9 @@ class Together final {
     // `password`: the server's, if it asks one; `room`: the room's name,
     // else one is made; `room_password`: what friends join with, else a key
     // is made; `name`: the host's, at a party.
-    [[nodiscard]] core::Result<std::string> host(const std::string& server,
-                                                 const std::string& password,
-                                                 const std::string& name = {},
-                                                 const std::string& room = {},
-                                                 const std::string& room_password = {});
+    [[nodiscard]] core::Result<std::string>
+    host(const std::string& server, const std::string& password, const std::string& name = {},
+         const std::string& room = {}, const std::string& room_password = {});
     // Into the room an invite names, as `name`.
     [[nodiscard]] core::Result<void> join(const std::string& invite, const std::string& name);
     // Out of the room -- closing it, as its host.

@@ -747,19 +747,20 @@ void a_large_outcome_reaches_only_its_asker(const std::filesystem::path& path) {
         return protocol::Json{{"state", "stopped"}};
     });
     engine::JobCatalog catalogue;
-    catalogue.on("test.cover", [](const protocol::Json&) -> core::Result<engine::JobRegistry::Work> {
-        return [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
-            return protocol::Json{{"bytes", std::string(6U << 20U, 'c')}};
-        };
-    });
+    catalogue.on(
+        "test.cover", [](const protocol::Json&) -> core::Result<engine::JobRegistry::Work> {
+            return [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
+                return protocol::Json{{"bytes", std::string(6U << 20U, 'c')}};
+            };
+        });
     auto server = engine::Server::listen(path, dispatcher);
     require(server.has_value(), "the engine must bind");
     auto* const serving = server->get();
-    engine::JobRegistry jobs{serving->sink(),
-                             [serving](const auto& everyone, const std::uint64_t recipient,
-                                       const auto& for_recipient) {
-                                 serving->publish_addressed(everyone, recipient, for_recipient);
-                             }};
+    engine::JobRegistry jobs{
+        serving->sink(),
+        [serving](const auto& everyone, const std::uint64_t recipient, const auto& for_recipient) {
+            serving->publish_addressed(everyone, recipient, for_recipient);
+        }};
     engine::register_job_methods(dispatcher, jobs, catalogue);
     serving->start();
 

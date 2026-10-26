@@ -1018,7 +1018,17 @@ void MetadataPropertiesDialog::refreshFileListScope() {
         file_list_dir_->setVisible(!common_dir.isEmpty());
     }
     file_list_->itemDelegate()->setProperty("relative-prefix", common_dir);
-    file_list_->viewport()->update();
+    // ADR-0332: the files under their albums.
+    std::vector<FileScopeView::Album> albums;
+    for (auto& album : session_->fileAlbums()) {
+        FileScopeView::Album shown{.title = std::move(album.title), .rows = {}};
+        for (const auto item : album.items) {
+            shown.rows.push_back(static_cast<int>(
+                std::min(item, static_cast<std::size_t>(std::numeric_limits<int>::max()))));
+        }
+        albums.push_back(std::move(shown));
+    }
+    file_list_->setAlbums(std::move(albums));
 }
 
 // ADR-0186: the Actions popover is the apply-options surface — its choices

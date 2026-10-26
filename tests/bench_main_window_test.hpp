@@ -17,7 +17,6 @@
 #include "bench/lastfm_service.hpp"
 #include "bench/list_view_dialog.hpp"
 #include "bench/lists_panel.hpp"
-#include "bench/plugin_panel_view.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
@@ -28,6 +27,7 @@
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/plugin_panel_view.hpp"
 #include "bench/quick_pick_popup.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/replaygain_dialog.hpp"
@@ -236,8 +236,7 @@ inline int matchRowCount(const QListWidget* board) {
 inline void matchClickOnto(QListWidget* board, const int file_row, const int track_row) {
     auto* loose = matchLoose(board);
     auto* file = matchRow(board, file_row);
-    QTest::mouseClick(loose->viewport(), Qt::LeftButton, {},
-                      loose->visualItemRect(file).center());
+    QTest::mouseClick(loose->viewport(), Qt::LeftButton, {}, loose->visualItemRect(file).center());
     const auto track = board->visualItemRect(matchRow(board, track_row));
     QTest::mouseClick(board->viewport(), Qt::LeftButton, {},
                       QPoint{track.left() + 60, track.center().y()});
@@ -494,6 +493,7 @@ class BenchMainWindowTest final : public QObject {
     void artworkFetchesCoverArtFromArchiveAndAddsFront_data();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
     void identifyFetchesTheCoversOfTheAlbumsApplied();
+    void fileListShowsTheFilesUnderTheirAlbums();
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
     void coverPolicyRoundTrip();

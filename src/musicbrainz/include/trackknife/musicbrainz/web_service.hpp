@@ -167,6 +167,12 @@ struct CoverArtListing {
 // a MusicBrainz UUID.
 [[nodiscard]] core::Result<std::string> build_cover_art_listing_url(std::string_view release_id);
 
+// ADR-0332: the Cover Art Archive's listing for a release group -- the front
+// cover of the release MusicBrainz shows for the album, for a release of it
+// that has none of its own. Parsed by parse_cover_art_listing.
+[[nodiscard]] core::Result<std::string>
+build_release_group_cover_art_listing_url(std::string_view group_id);
+
 // Parses a Cover Art Archive release listing. Image URLs are upgraded to
 // https so the transport never follows a less-safe redirect; entries with
 // no usable image URL are dropped, never invented.

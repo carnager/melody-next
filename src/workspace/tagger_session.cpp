@@ -20,6 +20,7 @@
 
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,6 +42,27 @@
 namespace trackknife::bench {
 
 namespace {
+
+// ADR-0261: what grouping by album needs of a file.
+[[nodiscard]] musicbrainz::AlbumGroupInput
+album_group_input(const std::string& raw_path, const metadata::MetadataDocument& tags) {
+    const auto first = [&tags](std::initializer_list<const char*> names) {
+        for (const auto* name : names) {
+            if (auto value = tags.first_effective_value(name); value && !value->empty()) {
+                return *value;
+            }
+        }
+        return std::string{};
+    };
+    return musicbrainz::AlbumGroupInput{
+        .raw_path = raw_path,
+        .release_id = first({"musicbrainz_albumid", "musicbrainzalbumid"}),
+        .album_artist = first({"albumartist"}),
+        .artist = first({"artist"}),
+        .album = first({"album"}),
+        .date = first({"date", "originaldate"}),
+    };
+}
 
 // ADR-0238: what the Actions popover was last set to.
 constexpr auto remembered_save_tags_key = "properties/actions/save-tags";
@@ -349,17 +371,15 @@ std::optional<ArtworkCoverArtService> TaggerSession::coverArtService() {
                         }
                         auto listing = musicbrainz::parse_cover_art_listing(std::string_view{
                             body->constData(), static_cast<std::size_t>(body->size())});
-                        // ADR-0326: where the archive has no front cover,
-                        // Bandcamp's, when Cover settings allow it.
-                        const bool wanted = SettingsKeys::artworkPolicy().fetch_source ==
-                                            metadata::artwork_fetch_source_with_bandcamp;
-                        if (!listing || !wanted || self.isNull() ||
+                        // ADR-0326, ADR-0332: where the archive has no front
+                        // cover for the release, the album's.
+                        if (!listing || self.isNull() ||
                             std::ranges::any_of(listing->images,
                                                 [](const auto& image) { return image.front; })) {
                             completion(std::move(listing));
                             return;
                         }
-                        self->addBandcampCover(release_id, std::move(*listing), completion);
+                        self->addFallbackCovers(release_id, std::move(*listing), completion);
                     });
             },
         .fetch_bytes =
@@ -383,32 +403,90 @@ std::optional<ArtworkCoverArtService> TaggerSession::coverArtService() {
     };
 }
 
-// ADR-0326: a release's Bandcamp cover -- its album page found among its
-// MusicBrainz links, else its album's -- added to its listing. Whatever goes
-// wrong leaves the listing as the archive gave it.
-void TaggerSession::addBandcampCover(
+// ADR-0326, ADR-0332: a release without a front cover of its own, given its
+// album's, each source asked only while none has been found: the release's
+// Bandcamp page among its MusicBrainz links, the archive's cover for its
+// release group -- another release of the album -- then the release group's
+// Bandcamp page. Bandcamp only when Cover settings allow it. Whatever goes
+// wrong leaves the listing as far as it got.
+void TaggerSession::addFallbackCovers(
     const QString& release_id, musicbrainz::CoverArtListing listing,
     std::function<void(core::Result<musicbrainz::CoverArtListing>)> completion) {
     auto shared = std::make_shared<musicbrainz::CoverArtListing>(std::move(listing));
     auto done = std::make_shared<std::function<void(core::Result<musicbrainz::CoverArtListing>)>>(
         std::move(completion));
     const auto give = [shared, done] { (*done)(*shared); };
+    const auto found = [shared] {
+        return std::ranges::any_of(shared->images, [](const auto& image) { return image.front; });
+    };
+    const bool bandcamp =
+        SettingsKeys::artworkPolicy().fetch_source == metadata::artwork_fetch_source_with_bandcamp;
     const QPointer self{this};
-    // The album page, fetched, its cover added.
-    const auto from_page = [self, shared, give](const std::string& page) {
+    // A body, as text.
+    const auto text = [](const QByteArray& body) {
+        return std::string_view{body.constData(), static_cast<std::size_t>(body.size())};
+    };
+    // An album page, fetched, its cover added; then `next`.
+    const auto from_page = [self, shared, text](const std::string& page,
+                                                std::function<void()> next) {
         if (self.isNull()) {
+            next();
+            return;
+        }
+        self->services_.musicbrainz.fetch(
+            QString::fromStdString(page),
+            [shared, text, next = std::move(next)](core::Result<QByteArray> body) {
+                if (body) {
+                    if (auto cover = musicbrainz::bandcamp_cover(text(*body))) {
+                        shared->images.push_back(std::move(*cover));
+                    }
+                }
+                next();
+            });
+    };
+    // The release group's Bandcamp page.
+    const auto group_bandcamp = [self, give, found, bandcamp, from_page,
+                                 text](const std::string& group_id) {
+        const auto group_url = musicbrainz::build_release_group_links_url(group_id);
+        if (found() || !bandcamp || !group_url || self.isNull()) {
             give();
             return;
         }
         self->services_.musicbrainz.fetch(
-            QString::fromStdString(page), [shared, give](core::Result<QByteArray> body) {
-                if (body) {
-                    if (auto cover = musicbrainz::bandcamp_cover(std::string_view{
-                            body->constData(), static_cast<std::size_t>(body->size())})) {
-                        shared->images.push_back(std::move(*cover));
+            QString::fromStdString(*group_url),
+            [give, from_page, text](core::Result<QByteArray> group) {
+                const auto group_links =
+                    group ? musicbrainz::parse_release_links(text(*group))
+                          : core::Result<musicbrainz::ReleaseLinks>{std::unexpected(group.error())};
+                const auto page = group_links ? musicbrainz::bandcamp_album_page(group_links->urls)
+                                              : std::nullopt;
+                if (page) {
+                    from_page(*page, give);
+                } else {
+                    give();
+                }
+            });
+    };
+    // The archive's cover for the release group, from another release.
+    const auto group_archive = [self, shared, found, group_bandcamp,
+                                text](const std::string& group_id) {
+        const auto listing_url = musicbrainz::build_release_group_cover_art_listing_url(group_id);
+        if (found() || !listing_url || self.isNull()) {
+            group_bandcamp(group_id);
+            return;
+        }
+        self->services_.musicbrainz.fetch(
+            QString::fromStdString(*listing_url),
+            [shared, group_bandcamp, group_id, text](core::Result<QByteArray> body) {
+                if (auto group = body ? musicbrainz::parse_cover_art_listing(text(*body))
+                                      : core::Result<musicbrainz::CoverArtListing>{
+                                            std::unexpected(body.error())}) {
+                    for (auto& image : group->images) {
+                        image.source = "Cover Art Archive · another release";
+                        shared->images.push_back(std::move(image));
                     }
                 }
-                give();
+                group_bandcamp(group_id);
             });
     };
     const auto links_url = musicbrainz::build_release_links_url(release_id.toStdString());
@@ -417,43 +495,23 @@ void TaggerSession::addBandcampCover(
         return;
     }
     services_.musicbrainz.fetch(
-        QString::fromStdString(*links_url), [self, give, from_page](core::Result<QByteArray> body) {
+        QString::fromStdString(*links_url),
+        [self, give, bandcamp, from_page, group_archive, text](core::Result<QByteArray> body) {
             const auto links =
-                body ? musicbrainz::parse_release_links(std::string_view{
-                           body->constData(), static_cast<std::size_t>(body->size())})
+                body ? musicbrainz::parse_release_links(text(*body))
                      : core::Result<musicbrainz::ReleaseLinks>{std::unexpected(body.error())};
             if (!links || self.isNull()) {
                 give();
                 return;
             }
-            if (const auto page = musicbrainz::bandcamp_album_page(links->urls)) {
-                from_page(*page);
-                return;
+            const auto group_id = links->release_group_id;
+            const auto page =
+                bandcamp ? musicbrainz::bandcamp_album_page(links->urls) : std::nullopt;
+            if (page) {
+                from_page(*page, [group_archive, group_id] { group_archive(group_id); });
+            } else {
+                group_archive(group_id);
             }
-            // Not the release's own: the album's, for all its versions.
-            const auto group_url =
-                musicbrainz::build_release_group_links_url(links->release_group_id);
-            if (!group_url) {
-                give();
-                return;
-            }
-            self->services_.musicbrainz.fetch(
-                QString::fromStdString(*group_url),
-                [give, from_page](core::Result<QByteArray> group) {
-                    const auto group_links =
-                        group ? musicbrainz::parse_release_links(std::string_view{
-                                    group->constData(), static_cast<std::size_t>(group->size())})
-                              : core::Result<musicbrainz::ReleaseLinks>{
-                                    std::unexpected(group.error())};
-                    const auto page = group_links
-                                          ? musicbrainz::bandcamp_album_page(group_links->urls)
-                                          : std::nullopt;
-                    if (page) {
-                        from_page(*page);
-                    } else {
-                        give();
-                    }
-                });
         });
 }
 
@@ -1891,15 +1949,6 @@ std::vector<TaggerSession::Identify> TaggerSession::identifyAlbums() const {
         return {};
     }
     const auto& selection = grid_model_->selection();
-    const auto first = [](const metadata::MetadataDocument& tags,
-                          std::initializer_list<const char*> names) {
-        for (const auto* name : names) {
-            if (auto value = tags.first_effective_value(name); value && !value->empty()) {
-                return *value;
-            }
-        }
-        return std::string{};
-    };
     std::vector<musicbrainz::LocalTrackDescriptor> descriptors;
     std::vector<QString> paths;
     std::vector<musicbrainz::AlbumGroupInput> inputs;
@@ -1926,14 +1975,7 @@ std::vector<TaggerSession::Identify> TaggerSession::identifyAlbums() const {
         if (const auto disc = baseline.first_effective_value("discnumber")) {
             descriptor.disc_number = parse_position_number(*disc);
         }
-        inputs.push_back(musicbrainz::AlbumGroupInput{
-            .raw_path = source.raw_path,
-            .release_id = first(baseline, {"musicbrainz_albumid", "musicbrainzalbumid"}),
-            .album_artist = first(baseline, {"albumartist"}),
-            .artist = descriptor.artist,
-            .album = descriptor.album,
-            .date = first(baseline, {"date", "originaldate"}),
-        });
+        inputs.push_back(album_group_input(source.raw_path, baseline));
         descriptors.push_back(std::move(descriptor));
     }
     std::vector<Identify> albums;
@@ -1962,6 +2004,39 @@ std::vector<TaggerSession::Identify> TaggerSession::identifyAlbums() const {
             album.items.push_back(items[at]);
         }
         album.release_id = display_utf8(release_id.value_or(std::string{}));
+        albums.push_back(std::move(album));
+    }
+    return albums;
+}
+
+std::vector<TaggerSession::FileAlbum> TaggerSession::fileAlbums() const {
+    if (grid_model_ == nullptr) {
+        return {};
+    }
+    const auto& selection = grid_model_->selection();
+    const auto count =
+        std::min(selection.item_count(), static_cast<std::size_t>(grid_model_->rowCount()));
+    std::vector<musicbrainz::AlbumGroupInput> inputs;
+    inputs.reserve(count);
+    for (std::size_t item = 0U; item < count; ++item) {
+        const auto& source = selection.source(item);
+        inputs.push_back(album_group_input(source.raw_path, source.baseline));
+    }
+    std::vector<FileAlbum> albums;
+    for (const auto& group : musicbrainz::group_albums(inputs)) {
+        FileAlbum album{.title = {}, .items = group.items};
+        const auto& input = inputs[group.items.front()];
+        if (!input.album.empty()) {
+            const auto& by = !input.album_artist.empty() ? input.album_artist : input.artist;
+            album.title = display_utf8(input.album) +
+                          (by.empty() ? QString{} : QStringLiteral(" · ") + display_utf8(by));
+        } else {
+            // Untagged: its folder.
+            const auto folder = group.folders.empty() ? std::string{} : group.folders.front();
+            album.title = QFileInfo{QFile::decodeName(QByteArray{
+                                        folder.data(), static_cast<qsizetype>(folder.size())})}
+                              .fileName();
+        }
         albums.push_back(std::move(album));
     }
     return albums;

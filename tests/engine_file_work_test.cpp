@@ -2005,11 +2005,18 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
         const std::string listing = "https://coverartarchive.org/release/"
                                     "00000000-0000-0000-0000-000000000000";
         const std::string image = listing + "/1-250.jpg";
+        // ADR-0332: a release group's listing is a listing too.
+        const std::string group = "https://coverartarchive.org/release-group/"
+                                  "00000000-0000-0000-0000-000000000000";
         auto cache = trackknife::persistence::SqliteMusicBrainzResponseCache::open(database);
         require(cache.has_value(), "the cache opens again");
         const auto now = static_cast<std::int64_t>(std::time(nullptr));
         require(cache->store(listing, "<!doctype html><title>404 Not Found</title>", now,
                              14LL * 24 * 60 * 60, 100U)
+                        .has_value() &&
+                    cache
+                        ->store(group, "<!doctype html><title>404 Not Found</title>", now,
+                                14LL * 24 * 60 * 60, 100U)
                         .has_value() &&
                     cache->store(image, "\xff\xd8\xff", now, 14LL * 24 * 60 * 60, 100U).has_value(),
                 "a kept error page and a kept image");
@@ -2017,6 +2024,9 @@ void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
         stop.request_cancellation();
         const auto page = services.fetch(listing, stop.token());
         require(!page || !page->starts_with("<!doctype"), "an error page is not an answer");
+        const auto group_page = services.fetch(group, stop.token());
+        require(!group_page || !group_page->starts_with("<!doctype"),
+                "nor a release group's error page");
         const auto bytes = services.fetch(image, stop.token());
         require(bytes && *bytes == "\xff\xd8\xff", "an image is served as it was kept");
     }

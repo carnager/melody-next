@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "../src/metadata/src/ogg_stream_detail.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/local_reader.hpp"
@@ -14,10 +15,16 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <taglib/flacpicture.h>
+#include <taglib/opusfile.h>
+#include <taglib/vorbisfile.h>
+#include <taglib/xiphcomment.h>
 
 namespace {
 
@@ -207,6 +214,113 @@ void roundTripsCommentEditsPreservingPackets(const std::filesystem::path& fixtur
     CHECK(trackknife::metadata::is_qualified_text_adapter(expected_adapter));
 }
 
+// The cover entries an Ogg file's comment packet holds, as stored.
+[[nodiscard]] std::optional<std::vector<std::string>>
+stored_covers(const std::filesystem::path& path, const bool opus) {
+    std::ifstream input{path, std::ios::binary};
+    const std::vector<unsigned char> bytes{std::istreambuf_iterator<char>{input},
+                                           std::istreambuf_iterator<char>{}};
+    auto stream = trackknife::metadata::ogg_stream_detail::parse_packet_stream(
+        bytes, trackknife::core::Error{});
+    if (!stream || stream->packets.size() < 2U) {
+        return std::nullopt;
+    }
+    auto entries = trackknife::metadata::ogg_stream_detail::comment_entries(
+        stream->packets[1],
+        opus ? std::string_view{"OpusTags"}.size() : std::string_view{"\x03vorbis"}.size());
+    if (!entries) {
+        return std::nullopt;
+    }
+    return trackknife::metadata::ogg_stream_detail::cover_entries(*entries);
+}
+
+// ADR-0334: a tag write keeps every cover the file carries, as it was --
+// a picture TagLib reads, one it cannot read and would not write back, and
+// the older COVERART with its mime type.
+void keepsCoversThroughTagWrites(const std::filesystem::path& fixture_directory,
+                                 const std::string_view fixture, const bool opus) {
+    TemporaryDirectory directory;
+    const auto source = materialize(fixture_directory, fixture, directory.path() / "covered.ogg");
+    {
+        std::unique_ptr<TagLib::File> file;
+        TagLib::Ogg::XiphComment* comment = nullptr;
+        if (opus) {
+            auto opened = std::make_unique<TagLib::Ogg::Opus::File>(source.c_str());
+            comment = opened->tag();
+            file = std::move(opened);
+        } else {
+            auto opened = std::make_unique<TagLib::Vorbis::File>(source.c_str());
+            comment = opened->tag();
+            file = std::move(opened);
+        }
+        CHECK(file->isValid() && comment != nullptr);
+        if (comment == nullptr) {
+            return;
+        }
+        auto* picture = new TagLib::FLAC::Picture;
+        picture->setType(TagLib::FLAC::Picture::FrontCover);
+        picture->setMimeType("image/png");
+        picture->setDescription("front");
+        picture->setData(TagLib::ByteVector{"\x89PNG\r\n\x1a\nnot really a picture", 28U});
+        comment->addPicture(picture);
+        // A picture block cut short: TagLib cannot read it, so writes
+        // nothing of it back.
+        comment->addField("METADATA_BLOCK_PICTURE", "AAAAAwAAAAlpbWFnZS9wbmc=", false);
+        comment->addField("COVERART", "/9j/4AAQSkZJRgABAQ==", false);
+        comment->addField("COVERARTMIME", "image/jpeg", false);
+        CHECK(file->save());
+    }
+    const auto carried = stored_covers(source, opus);
+    CHECK(carried && carried->size() == 4U);
+    if (!carried || carried->size() != 4U) {
+        return;
+    }
+
+    const auto read = trackknife::metadata::read_local_metadata(source.native());
+    CHECK(read.has_value());
+    if (!read) {
+        return;
+    }
+    auto selection = trackknife::metadata::StagedMetadataSelection::create(
+        {trackknife::metadata::StagedMetadataSource{
+            .raw_path = read->raw_path,
+            .source_revision = read->source_revision,
+            .baseline = read->document,
+        }});
+    CHECK(selection.has_value());
+    if (!selection) {
+        return;
+    }
+    // As ReplayGain stages it.
+    const auto gain =
+        selection->ensure_missing_field(opus ? "r128_track_gain" : "replaygain_track_gain",
+                                        opus ? "R128_TRACK_GAIN" : "REPLAYGAIN_TRACK_GAIN");
+    CHECK(gain.has_value());
+    if (!gain) {
+        return;
+    }
+    trackknife::metadata::StagedMetadataPatchSet patches;
+    CHECK(patches.replace_values(*selection, 0U, *gain, {opus ? "-768" : "-3.00 dB"}).has_value());
+    auto plan = trackknife::metadata::revalidate_metadata_write_plan(*selection, patches);
+    CHECK(plan.has_value() && plan->ready());
+    if (!plan || !plan->ready()) {
+        return;
+    }
+    const auto prepared_path = directory.path() / "prepared.ogg";
+    const auto prepared = trackknife::metadata::prepare_ogg_metadata_write_copy(
+        plan->sources.front(), prepared_path.native());
+    if (!prepared) {
+        std::cerr << fixture << ": " << prepared.error().message << '\n';
+    }
+    CHECK(prepared.has_value());
+    const auto kept = stored_covers(prepared_path, opus);
+    CHECK(kept.has_value());
+    if (kept) {
+        CHECK(trackknife::metadata::ogg_stream_detail::same_covers(*carried, *kept));
+    }
+    CHECK(decoded_pcm_matches(source, prepared_path));
+}
+
 } // namespace
 
 int main(const int argc, char** argv) {
@@ -217,6 +331,8 @@ int main(const int argc, char** argv) {
                                                 "taglib-vorbis-v1");
         roundTripsCommentEditsPreservingPackets(fixture_directory, "tagged-tone-opus.b64",
                                                 "taglib-opus-v1");
+        keepsCoversThroughTagWrites(fixture_directory, "tagged-tone-vorbis.b64", false);
+        keepsCoversThroughTagWrites(fixture_directory, "tagged-tone-opus.b64", true);
     }
     return failures == 0 ? 0 : 1;
 }

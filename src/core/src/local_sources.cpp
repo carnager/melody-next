@@ -17,6 +17,9 @@
 #include <random>
 #include <string>
 #include <sys/stat.h>
+#if defined(__linux__)
+#include <sys/vfs.h>
+#endif
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -389,6 +392,40 @@ std::string describe_revision_change(const LocalSourceRevision& before,
             time(after.modification_time_seconds, after.modification_time_nanoseconds));
     }
     return described;
+}
+
+bool inode_numbers_unstable(const int descriptor) noexcept {
+#if defined(__linux__)
+    struct statfs filesystem{};
+    if (::fstatfs(descriptor, &filesystem) != 0) {
+        return false;
+    }
+    constexpr unsigned long cifs = 0xFF534D42UL;
+    constexpr unsigned long smb2 = 0xFE534D42UL;
+    constexpr unsigned long smb = 0x517BUL;
+    constexpr unsigned long fuse = 0x65735546UL;
+    const auto kind = static_cast<unsigned long>(filesystem.f_type) & 0xFFFFFFFFUL;
+    return kind == cifs || kind == smb2 || kind == smb || kind == fuse;
+#else
+    static_cast<void>(descriptor);
+    return false;
+#endif
+}
+
+bool same_revision(const LocalSourceRevision& expected, const LocalSourceRevision& observed,
+                   const bool unstable) noexcept {
+    if (expected == observed) {
+        return true;
+    }
+    auto renumbered = observed;
+    renumbered.inode = expected.inode;
+    return unstable && renumbered == expected;
+}
+
+bool same_revision(const LocalSourceRevision& expected, const LocalSourceRevision& observed,
+                   const int descriptor) noexcept {
+    return expected == observed ||
+           same_revision(expected, observed, inode_numbers_unstable(descriptor));
 }
 
 Result<LocalSourceRevision> observe_local_source_revision(const std::string& raw_path) {

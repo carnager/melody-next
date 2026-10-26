@@ -12,6 +12,7 @@
 #include "trackknife/core/unicode.hpp"
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <array>
 #include <cmath>
@@ -467,7 +468,44 @@ void modesTheFilesystemRefusesAreKept() {
     CHECK(!trackknife::core::mode_refused_by_filesystem(EIO));
 }
 
+// ADR-0331: a file is still the one a plan saw when its revision is the same
+// -- or, where the client numbers the files (SMB noserverino, sshfs), the
+// same but for the inode. Elsewhere a new inode is another file.
+void aRenumberedFileIsTheSameWhereInodesAreUnstable() {
+    const trackknife::core::LocalSourceRevision seen{.device = 71,
+                                                     .inode = 4788,
+                                                     .size = 30'069'042,
+                                                     .modification_time_seconds = 1'652'365'540,
+                                                     .modification_time_nanoseconds = 120};
+    auto renumbered = seen;
+    renumbered.inode = 11'354;
+    auto rewritten = renumbered;
+    rewritten.modification_time_nanoseconds = 121;
+    CHECK(trackknife::core::same_revision(seen, seen, false));
+    CHECK(!trackknife::core::same_revision(seen, renumbered, false));
+    CHECK(trackknife::core::same_revision(seen, renumbered, true));
+    CHECK(!trackknife::core::same_revision(seen, rewritten, true));
+    auto moved = renumbered;
+    moved.device = 72;
+    CHECK(!trackknife::core::same_revision(seen, moved, true));
+
+    // A file here, on a filesystem that keeps its inode numbers.
+    const auto path = std::filesystem::temp_directory_path() / "melody-renumbered-probe";
+    {
+        std::ofstream{path} << "x";
+    }
+    const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    CHECK(descriptor >= 0);
+    if (descriptor >= 0) {
+        const auto unstable = trackknife::core::inode_numbers_unstable(descriptor);
+        CHECK(trackknife::core::same_revision(seen, renumbered, descriptor) == unstable);
+        ::close(descriptor);
+    }
+    std::filesystem::remove(path);
+}
+
 int main() {
+    aRenumberedFileIsTheSameWhereInodesAreUnstable();
     modesTheFilesystemRefusesAreKept();
     stableIdsRoundTrip();
     rightToLeftLettersAreFound();

@@ -15,6 +15,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
@@ -404,6 +405,18 @@ class MusicBrainzIdentifyDialog final : public QDialog {
 
     MusicBrainzIdentifyDialog(const MusicBrainzIdentifyDialog&) = delete;
     MusicBrainzIdentifyDialog& operator=(const MusicBrainzIdentifyDialog&) = delete;
+
+  protected:
+    // Enter in a search field searches -- the field says so itself -- and
+    // is not also the dialog's: that would be Apply.
+    void keyPressEvent(QKeyEvent* event) override {
+        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) &&
+            qobject_cast<QLineEdit*>(focusWidget()) != nullptr) {
+            event->accept();
+            return;
+        }
+        QDialog::keyPressEvent(event);
+    }
 
   private:
     void step(const int direction) {

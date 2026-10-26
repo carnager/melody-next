@@ -73,6 +73,24 @@ struct LocalSourceRevision {
     friend bool operator==(const LocalSourceRevision&, const LocalSourceRevision&) = default;
 };
 
+// ADR-0331: whether the filesystem an open file is on numbers its files
+// itself, on this side -- SMB/CIFS (mounted noserverino, or a server that
+// gives no inode numbers) and FUSE (sshfs) -- so that a file's inode number
+// can change while the file does not: forgotten by the kernel and looked up
+// again, it is given another.
+[[nodiscard]] bool inode_numbers_unstable(int descriptor) noexcept;
+
+// The open file `descriptor` as `observed` is still the one `expected`
+// describes: the same revision -- or, where inode numbers are unstable,
+// the same but for the inode, its device, size and modification time to the
+// nanosecond as they were.
+[[nodiscard]] bool same_revision(const LocalSourceRevision& expected,
+                                 const LocalSourceRevision& observed, int descriptor) noexcept;
+// The rule itself, told whether inode numbers are unstable.
+[[nodiscard]] bool same_revision(const LocalSourceRevision& expected,
+                                 const LocalSourceRevision& observed,
+                                 bool inode_numbers_unstable) noexcept;
+
 // A file Trackknife has just written given a modification time of its own:
 // now, rounded down to an even second, which FAT's two-second steps and SMB's
 // 100 ns units both store exactly. On a network mount the client caches a

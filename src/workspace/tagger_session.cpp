@@ -112,6 +112,8 @@ TaggerSession::TaggerSession(const std::size_t requested_item_count,
                    .arg(requested_item_count_)
                    .arg(pluralized(requested_item_count_, QStringLiteral("track"),
                                    QStringLiteral("tracks")));
+    // A close that had to wait goes ahead once the work it waited for is done.
+    connect(this, &TaggerSession::changed, this, &TaggerSession::closeWhenIdle);
     status_ = QStringLiteral("Read-only metadata preview · preparing selection");
     loading_text_ = QStringLiteral("Preparing metadata grid…");
     output_profile_status_ = QStringLiteral("Loading output profiles…");
@@ -333,9 +335,29 @@ void TaggerSession::artworkApplied(const operations::ArtworkApplyResult& result)
     }
 }
 
-void TaggerSession::setArtworkOperationRunning(const bool running) {
-    artwork_operation_running_ = running;
+void TaggerSession::setArtworkOperationRunning(const bool /*running*/) {
+    // Asked, not taken from the signal: one operation's end may come while
+    // another of the artwork's runs.
+    artwork_operation_running_ = artwork_ != nullptr && artwork_->isBusy();
     emit changed();
+}
+
+void TaggerSession::closeWhenIdle() {
+    if (!close_waiting_ || close_check_queued_) {
+        return;
+    }
+    // Looked at once the change is done: an Apply's next step starts within
+    // the call that ended the last.
+    close_check_queued_ = true;
+    QTimer::singleShot(0, this, [this] {
+        close_check_queued_ = false;
+        const bool busy =
+            (artwork_ != nullptr && artwork_->isWritingFiles()) || apply_running_ || undoing_write_;
+        if (close_waiting_ && !busy) {
+            close_waiting_ = false;
+            emit closeRequested();
+        }
+    });
 }
 
 void TaggerSession::artworkStateChanged() {
@@ -3535,25 +3557,28 @@ TaggerSession::CloseAnswer TaggerSession::requestClose() {
     if (artwork_ != nullptr && artwork_->hasPendingChanges() && !artwork_->isBusy()) {
         return CloseAnswer::confirm_artwork;
     }
-    if (artwork_operation_running_) {
-        if (artwork_ != nullptr) {
-            artwork_->requestOperationCancellation();
-        }
-        setStatus(QStringLiteral("Cancelling artwork work after in-flight files become safe…"));
+    // Waiting, the window closes itself once the work is done (closeWhenIdle).
+    if (artwork_ != nullptr && artwork_->isWritingFiles()) {
+        artwork_->requestOperationCancellation();
+        close_waiting_ = true;
+        setStatus(QStringLiteral("Stopping the artwork work · closing once files are safe…"));
         emit changed();
         return CloseAnswer::wait;
     }
     if (apply_running_) {
         apply_cancellation_.request_cancellation();
-        setStatus(QStringLiteral("Cancelling Apply after in-flight sources become safe…"));
+        close_waiting_ = true;
+        setStatus(QStringLiteral("Stopping Apply · closing once files are safe…"));
         emit changed();
         return CloseAnswer::wait;
     }
     if (undoing_write_) {
+        close_waiting_ = true;
         setStatus(QStringLiteral("Undoing the write · closing when it is done…"));
         emit changed();
         return CloseAnswer::wait;
     }
+    close_waiting_ = false;
     if (draft_count_ == 0 || grid_model_ == nullptr) {
         return CloseAnswer::close;
     }

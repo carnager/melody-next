@@ -7,9 +7,7 @@ MusicBrainz finds the album playing and who made it -- the artist by name
 where the album is not found -- and their Wikidata entries name the
 Wikipedia articles, whose summaries the panel shows: the artist's with its
 photo, the album's with its date, kind and label. Links go to both, and to
-where else the album is: Discogs, Bandcamp, AllMusic. Not Rate Your Music:
-it refuses any visit that does not come from a link on another web page --
-opened from here, pasted, or bookmarked, its pages answer 503.
+where else the album is: Discogs, Bandcamp, Rate Your Music, AllMusic.
 Nothing is asked of anyone's own server but a dropwatch set in the
 settings, and no account is needed. What is found is kept a week in the
 cache folder, so the same artist or album is not looked up every track;
@@ -89,6 +87,9 @@ SITES = (
      + urllib.parse.quote_plus("%s %s" % (artist, album))),
     ("Bandcamp", "bandcamp.com",
      lambda artist, album: "https://bandcamp.com/search?item_type=a&q="
+     + urllib.parse.quote_plus("%s %s" % (artist, album))),
+    ("Rate Your Music", "rateyourmusic.com",
+     lambda artist, album: "https://rateyourmusic.com/search?searchtype=l&searchterm="
      + urllib.parse.quote_plus("%s %s" % (artist, album))),
     ("AllMusic", "allmusic.com",
      lambda artist, album: "https://www.allmusic.com/search/albums/"

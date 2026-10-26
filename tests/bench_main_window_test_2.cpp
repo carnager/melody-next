@@ -3508,14 +3508,25 @@ void BenchMainWindowTest::aTogetherLinkAsksTheEngineToJoin() {
     QVERIFY(!window.openLink(QStringLiteral("https://example.org/rooms/r#k")));
     QVERIFY(window.openLink(QStringLiteral("melody://together/join")));
     QTRY_VERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("no invite")));
+    // Every message the window shows from here: the status bar is shared,
+    // and the refusal may be followed at once by another, from a window
+    // still starting -- shown is what counts, not still showing.
+    QStringList said;
+    connect(window.statusBar(), &QStatusBar::messageChanged, &window, [&said](const QString& text) {
+        if (!text.isEmpty()) {
+            said << text;
+        }
+    });
     // Port 9 on this machine: nothing answers.
     QVERIFY(window.openLink(QStringLiteral("melody://together/join?invite=") +
                             QString::fromLatin1(QUrl::toPercentEncoding(
                                 QStringLiteral("http://127.0.0.1:9/rooms/r#k")))));
-    // What it said instead, where it did not say this.
-    QTRY_VERIFY2_WITH_TIMEOUT(window.statusBar()->currentMessage().startsWith(
-                                  QStringLiteral("Could not join the listening room")),
-                              qPrintable(window.statusBar()->currentMessage()), 15'000);
+    QTRY_VERIFY2_WITH_TIMEOUT(std::ranges::any_of(said,
+                                                  [](const QString& text) {
+                                                      return text.startsWith(QStringLiteral(
+                                                          "Could not join the listening room"));
+                                                  }),
+                              qPrintable(said.join(QStringLiteral(" | "))), 15'000);
 }
 
 // ADR-0301: a panel is told every tag the library has of what plays, and,

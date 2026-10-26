@@ -7,6 +7,15 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 25 (2026-10-26)
+
+ADR-0335: the covers of lossy conversions fitted.
+
+- The `convert.apply` job takes `artwork_edge` (default 1000): the cover a
+  lossy output carries is at most that on its longer side, a JPEG where it
+  was made smaller; 0 carries it as it is, as lossless output always does.
+  An older engine ignores it and carries the cover as it is.
+
 ### Level 24 (2026-10-24)
 
 A rescan of only some of the library.
@@ -109,7 +118,7 @@ Conversion where the files are, as `melody-cli convert` asks it.
 - `convert.presets {}` -> `{presets: [{id, name, extension, available,
   detail}]}`: what the engine's FFmpeg can make.
 - The `convert.apply` job `{paths: [file or folder], to, layout?, preset?,
-  gain?, artwork?, dry_run?}`: the files and the audio files in the folders
+  gain?, artwork?, dry_run?}` (`artwork_edge?` from level 25): the files and the audio files in the folders
   converted beneath `to` with the window's converter -- named by the
   engine's naming layout of that name, else kept below their music folder --
   tags and cover carried and verified, one there already passed over;

@@ -47,7 +47,7 @@ void usage() {
     std::cerr
         << "usage: melody-cli convert --to FOLDER [--layout NAME] [--preset ID]\n"
            "                          [--gain none|track|album] [--no-replaygain] [--no-artwork]\n"
-           "                          [--dry-run]\n"
+           "                          [--cover-size PIXELS] [--dry-run]\n"
            "                          (--since WHEN | PATH...)\n"
            "       melody-cli convert --presets | --layouts\n"
            "  The engine converts, on its machine, with Melody's converter: tags and\n"
@@ -130,6 +130,8 @@ int convert_command(protocol::Client& client, const bool json,
     std::string gain{"none"};
     std::optional<std::int64_t> since;
     bool artwork = true;
+    // ADR-0335: a lossy copy's cover at most this on its longer side; 0 as it is.
+    std::uint32_t cover_size = 1000U;
     bool replaygain = true;
     bool dry_run = false;
     std::vector<std::string> named;
@@ -186,6 +188,15 @@ int convert_command(protocol::Client& client, const bool json,
             }
         } else if (word == "--no-artwork") {
             artwork = false;
+        } else if (word == "--cover-size") {
+            const auto& text = value();
+            std::uint32_t parsed = 0U;
+            const auto [end, error] =
+                std::from_chars(text.data(), text.data() + text.size(), parsed);
+            if (error != std::errc{} || end != text.data() + text.size()) {
+                fail("--cover-size wants pixels, 0 for covers as they are, not " + text);
+            }
+            cover_size = parsed;
         } else if (word == "--no-replaygain") {
             replaygain = false;
         } else if (word == "--dry-run") {
@@ -242,7 +253,8 @@ int convert_command(protocol::Client& client, const bool json,
     }
     Json params{{"paths", std::move(paths)}, {"to", protocol::encode_raw_path(absolute(to))},
                 {"preset", preset},          {"gain", gain},
-                {"artwork", artwork},        {"dry_run", dry_run}};
+                {"artwork", artwork},        {"artwork_edge", cover_size},
+                {"dry_run", dry_run}};
     if (!layout.empty()) {
         params["layout"] = layout;
     }

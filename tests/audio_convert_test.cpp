@@ -208,6 +208,9 @@ struct ReadPicture {
     std::vector<unsigned char> bytes;
     unsigned type{0U};
     std::string mime;
+    // As the picture block records it; 0 where the format keeps none.
+    unsigned width{0U};
+    unsigned height{0U};
 };
 
 [[nodiscard]] std::optional<ReadPicture> from_flac_picture(const TagLib::FLAC::Picture* picture) {
@@ -220,6 +223,8 @@ struct ReadPicture {
                   reinterpret_cast<const unsigned char*>(data.data()) + data.size()},
         .type = static_cast<unsigned>(picture->type()),
         .mime = picture->mimeType().to8Bit(true),
+        .width = static_cast<unsigned>(picture->width()),
+        .height = static_cast<unsigned>(picture->height()),
     };
 }
 
@@ -941,6 +946,56 @@ void carriesArtworkIntoEveryPreset(const std::filesystem::path& fixture_director
 // A source without embedded pictures falls back to the exact-basename
 // sibling cover, carried as a front cover; the parallel scan resolves it
 // through its carry_artwork option.
+// ADR-0335: lossy output carries its cover no larger than the limit -- a
+// JPEG where it was made smaller; lossless output and no limit carry it as
+// it was.
+void fitsCoversIntoLossyOutput(const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto source =
+        materialize(fixture_directory, "art-tone-flac.b64", directory.path() / "covered.flac");
+    const auto donor = trackknife::convert::resolve_conversion_artwork(source.native());
+    CHECK(donor.has_value() && std::max(donor->width, donor->height) > 16U);
+    if (!donor) {
+        return;
+    }
+    const auto convert = [&](const std::string_view preset_id, const std::uint32_t edge,
+                             const std::string& name) {
+        const auto preset = trackknife::convert::find_encoder_preset(preset_id);
+        CHECK(preset.has_value());
+        const auto destination = directory.path() / (name + "." + preset->file_extension);
+        const std::vector<trackknife::convert::ConversionScanItem> items{
+            {.item_index = 0U,
+             .source_raw_path = source.native(),
+             .selection = {},
+             .range = {},
+             .destination_raw_path = destination.native(),
+             .metadata = {}}};
+        const auto result =
+            trackknife::convert::scan_conversion(items, {.preset = *preset,
+                                                         .maximum_parallelism = 1U,
+                                                         .target_sample_rate = {},
+                                                         .sample_rate_cap = {},
+                                                         .target_bit_depth = {},
+                                                         .keep_source_bit_depth = false,
+                                                         .carry_artwork = true,
+                                                         .lossy_artwork_edge = edge});
+        CHECK(result.has_value() && result->converted_count() == 1U);
+        return read_output_picture(destination, preset->file_extension);
+    };
+    const auto small = convert("opus-192", 16U, "small");
+    CHECK(small.has_value());
+    if (small) {
+        CHECK(small->mime == "image/jpeg");
+        CHECK(small->bytes != donor->bytes);
+        CHECK(small->width > 0U && small->width <= 16U && small->height <= 16U);
+        CHECK(small->type == donor->picture_type);
+    }
+    const auto unlimited = convert("opus-192", 0U, "unlimited");
+    CHECK(unlimited && unlimited->bytes == donor->bytes);
+    const auto lossless = convert("flac", 16U, "lossless");
+    CHECK(lossless && lossless->bytes == donor->bytes);
+}
+
 void carriesExternalCoverThroughTheScan(const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
     const auto source = directory.path() / "tone.wav";
@@ -1209,6 +1264,7 @@ int main(const int argc, char** argv) {
     carriesMetadataIntoEveryPreset();
     carriesArtworkIntoEveryPreset(fixture_directory);
     carriesExternalCoverThroughTheScan(fixture_directory);
+    fitsCoversIntoLossyOutput(fixture_directory);
     resamplesOnRequestWithinEncoderConstraints();
     quantizesHiResToSixteenFortyFourWithDither();
     capsRateDownOnlyAndKeepsSourceDepth();

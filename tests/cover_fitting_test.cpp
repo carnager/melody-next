@@ -3,7 +3,7 @@
 // Covers scaled by the engine for a client that shows them small: a phone
 // scrolling a grid pays for every byte of every original.
 
-#include "trackknife/engine/cover_fitting.hpp"
+#include "trackknife/formats/cover_fitting.hpp"
 #include "trackknife/protocol/message.hpp"
 
 extern "C" {
@@ -25,7 +25,7 @@ extern "C" {
 
 namespace {
 
-namespace engine = trackknife::engine;
+namespace formats = trackknife::formats;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
@@ -136,16 +136,16 @@ int main(int argc, char** argv) {
 
     // Within the size and lean: the original, byte for byte -- re-encoding
     // would only lose quality and gain nothing.
-    auto unchanged = engine::fit_cover(png, 64);
+    auto unchanged = formats::fit_cover(png, 64);
     require(unchanged.has_value() && *unchanged == png, "a cover within the size is sent as it is");
-    unchanged = engine::fit_cover(small_jpeg, 1024);
+    unchanged = formats::fit_cover(small_jpeg, 1024);
     require(unchanged.has_value() && *unchanged == small_jpeg, "a lean JPEG is sent as it is");
     // Within the size and heavy -- a cover embedded at half a megabyte --
     // re-encoded: as large to look at, and light.
     const auto heavy = padded(small_jpeg, 8U);
     require(heavy.size() > 500'000U && longest_edge(heavy) == longest_edge(small_jpeg),
             "the padded fixture is heavy and the same size");
-    const auto lightened = engine::fit_cover(heavy, 1024);
+    const auto lightened = formats::fit_cover(heavy, 1024);
     require(lightened.has_value() && jpeg(*lightened), "a heavy cover comes back as JPEG");
     require(lightened->size() < 4'096U, "and light");
     require(longest_edge(*lightened) == longest_edge(small_jpeg), "and never made larger");
@@ -154,19 +154,19 @@ int main(int argc, char** argv) {
     // megabyte.
     const auto grain = grainy(1000);
     require(grain.size() > 1'000'000U, "the grain is heavy");
-    const auto fitted_grain = engine::fit_cover(grain, 1024);
+    const auto fitted_grain = formats::fit_cover(grain, 1024);
     require(fitted_grain.has_value() && jpeg(*fitted_grain), "grain comes back as JPEG");
     require(longest_edge(*fitted_grain) == 1000, "as large as it was");
     require(fitted_grain->size() < grain.size() / 2U, "and less than half the weight");
     // Scaled down, the same budget: a 1000-pixel cover asked for at 512.
-    const auto smaller_grain = engine::fit_cover(grain, 512);
+    const auto smaller_grain = formats::fit_cover(grain, 512);
     require(smaller_grain.has_value() && longest_edge(*smaller_grain) == 512, "scaled to 512");
     require(smaller_grain->size() < fitted_grain->size(), "and lighter still");
-    unchanged = engine::fit_cover(png, 0);
+    unchanged = formats::fit_cover(png, 0);
     require(unchanged.has_value() && *unchanged == png, "no size asked is no scaling");
 
     // Over it: a JPEG exactly that size on its longest edge.
-    const auto fitted = engine::fit_cover(png, 16);
+    const auto fitted = formats::fit_cover(png, 16);
     require(fitted.has_value(), "a 64-pixel PNG fits into 16");
     require(jpeg(*fitted), "and comes back as JPEG");
     require(fitted->size() < 4'096U, "small");
@@ -174,14 +174,14 @@ int main(int argc, char** argv) {
     require(!fits(*fitted, 15), "and not smaller than asked");
 
     // Aspect kept: an 8x6 JPEG into 4 is 4 wide, and still a JPEG.
-    const auto narrow = engine::fit_cover(small_jpeg, 4);
+    const auto narrow = formats::fit_cover(small_jpeg, 4);
     require(narrow.has_value() && jpeg(*narrow), "a JPEG is scaled too");
     require(fits(*narrow, 4) && !fits(*narrow, 3), "to the size asked on its longer side");
 
     // Not an image: said, not sent on as though it were one.
     const std::vector<std::uint8_t> nonsense{'n', 'o', 't', ' ', 'a', 'n',
                                              ' ', 'i', 'm', 'a', 'g', 'e'};
-    require(!engine::fit_cover(nonsense, 16).has_value(), "bytes that are no image are refused");
+    require(!formats::fit_cover(nonsense, 16).has_value(), "bytes that are no image are refused");
 
     std::cout << "cover fitting: ok\n";
     return EXIT_SUCCESS;

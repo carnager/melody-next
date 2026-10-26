@@ -3,11 +3,13 @@
 #include "trackknife/convert/scan.hpp"
 
 #include "trackknife/convert/artwork.hpp"
+#include "trackknife/formats/cover_fitting.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -30,6 +32,29 @@ struct ItemOutcome {
     std::optional<core::LocalSourceRevision> revision;
     std::optional<core::Error> issue;
 };
+
+// ADR-0131, ADR-0335: the cover an item's output carries -- for lossy
+// output, made no larger than the limit; where it cannot be, as it is.
+[[nodiscard]] std::optional<ConversionArtwork>
+conversion_cover(const ConversionScanItem& item, const ConversionScanOptions& options,
+                 const core::CancellationToken& cancellation) {
+    if (!options.carry_artwork) {
+        return std::nullopt;
+    }
+    auto cover = resolve_conversion_artwork(item.source_raw_path, cancellation);
+    if (!cover || options.preset.lossless || options.lossy_artwork_edge == 0U) {
+        return cover;
+    }
+    auto fitted = formats::fit_cover_for_writing(cover->bytes, options.lossy_artwork_edge);
+    if (!fitted || !*fitted) {
+        return cover;
+    }
+    cover->bytes.assign((*fitted)->bytes.begin(), (*fitted)->bytes.end());
+    cover->mime_type = "image/jpeg";
+    cover->width = static_cast<std::uint32_t>((*fitted)->width);
+    cover->height = static_cast<std::uint32_t>((*fitted)->height);
+    return cover;
+}
 
 [[nodiscard]] ItemOutcome convert_item(const ConversionScanItem& item,
                                        const ConversionScanOptions& options,
@@ -56,9 +81,7 @@ struct ItemOutcome {
             .gain_mode = options.gain_mode,
             .gain_preamp_db = options.gain_preamp_db,
             .metadata = item.metadata,
-            .artwork = options.carry_artwork
-                           ? resolve_conversion_artwork(item.source_raw_path, cancellation)
-                           : std::nullopt,
+            .artwork = conversion_cover(item, options, cancellation),
         },
         item_progress, cancellation);
     if (!converted) {

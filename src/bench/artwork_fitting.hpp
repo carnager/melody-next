@@ -18,14 +18,12 @@
 
 namespace trackknife::bench {
 
-// ADR-0317: a cover as Melody writes it -- decoded from whatever it is that
-// Qt's image plugins read (JPEG, PNG, WebP, BMP, GIF, TIFF, …), at most
-// `max_edge` on its longer side (0: as large as it is), flattened onto white,
-// and encoded as JPEG at quality 90. A JPEG is shrunk as it is read.
+// ADR-0317: a cover as Melody writes it -- formats::fit_cover_for_writing,
+// the one fitting there is: a JPEG at most `max_edge` on its longer side (0:
+// as large as it is), transparency over white; a JPEG that fits as it is.
 [[nodiscard]] core::Result<QByteArray> coverJpeg(const QByteArray& encoded, std::uint32_t max_edge);
 
-// The resize at writing: a cover that is no JPEG, or larger than max_edge,
-// made one by coverJpeg. Nothing when it is a JPEG that fits.
+// The same at writing, nothing when it is a JPEG that fits.
 struct FittedArtwork {
     QByteArray bytes;
     bool png{false};

@@ -27,7 +27,8 @@ class ConvertDialog final : public QDialog {
   public:
     explicit ConvertDialog(std::vector<ConvertDialogItem> items,
                            ConvertProfilesLoader profiles = {},
-                           ConvertPresetStore preset_store = {}, QWidget* parent = nullptr);
+                           ConvertPresetStore preset_store = {}, ConversionRunner runner = {},
+                           QWidget* parent = nullptr);
 
   signals:
     void filesConverted();

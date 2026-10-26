@@ -14,11 +14,13 @@
 #include "trackknife/persistence/list_repository.hpp"
 
 #include <QFutureWatcher>
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
 #include <QVariant>
+#include <span>
 
 #include <atomic>
 #include <cstddef>
@@ -44,6 +46,12 @@ struct ConvertDialogItem {
     std::function<core::Result<void>(const std::filesystem::path&, const core::CancellationToken&)>
         fetch;
 };
+
+// ADR-0336: the engine on this computer converting -- the one path a
+// conversion takes. Empty: there is no engine here to convert with.
+using ConversionRunner = std::function<core::Result<convert::ConversionScanResult>(
+    std::span<const convert::ConversionScanItem>, const convert::ConversionScanOptions&,
+    const convert::ConversionScanProgressCallback&, const core::CancellationToken&)>;
 
 // Loads the saved naming layouts and destination roots the rest of the app
 // already manages so the converter offers them as one-click choices.
@@ -98,7 +106,8 @@ class ConvertJob final : public QObject {
     };
 
     ConvertJob(std::vector<ConvertDialogItem> items, ConvertProfilesLoader profiles = {},
-               ConvertPresetStore preset_store = {}, QObject* parent = nullptr);
+               ConvertPresetStore preset_store = {}, ConversionRunner runner = {},
+               QObject* parent = nullptr);
     ~ConvertJob() override;
 
     [[nodiscard]] QString title() const;
@@ -187,6 +196,7 @@ class ConvertJob final : public QObject {
 
     std::vector<ConvertDialogItem> items_;
     ConvertPresetStore preset_store_;
+    ConversionRunner runner_;
     std::vector<persistence::SavedOutputLayoutProfile> layout_catalog_;
     std::vector<persistence::SavedDestinationProfile> destination_catalog_;
     std::vector<persistence::SavedEncoderPreset> saved_presets_;

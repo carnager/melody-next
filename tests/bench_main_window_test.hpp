@@ -603,6 +603,18 @@ inline void releaseHeldModifiers(QWidget* on) {
 namespace window_test {
 
 // Fetch cover opens a picker; choose the row from this place with this type.
+// ADR-0336: conversions by the test's engine, as by this computer's.
+[[nodiscard]] inline ConversionRunner engineConversionRunner(const QString& socket) {
+    auto work = std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+        .socket = QFile::encodeName(socket).toStdString(), .host = {}, .port = 0, .token = {}});
+    return [work](std::span<const convert::ConversionScanItem> items,
+                  const convert::ConversionScanOptions& options,
+                  const convert::ConversionScanProgressCallback& progress,
+                  const core::CancellationToken& cancellation) {
+        return work->convert(items, options, progress, cancellation);
+    };
+}
+
 [[nodiscard]] inline bool chooseInCoverPicker(QWidget* owner, const QString& from,
                                               const QString& type) {
     QTreeWidget* list = nullptr;

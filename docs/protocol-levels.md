@@ -7,6 +7,22 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 26 (2026-10-26)
+
+ADR-0336: conversions by the engine on the asker's computer.
+
+- The `convert.files` job `{items: [{item_index, source, selection, range?,
+  destination, metadata}], options: {preset: {id, version, display_name,
+  codec, container, extension, lossless, bit_rate?, vbr_quality?,
+  sample_format, carries_artwork}, maximum_parallelism, target_sample_rate?,
+  sample_rate_cap?, target_bit_depth?, keep_source_bit_depth, channels:
+  keep|mono|stereo, gain: none|track|album, gain_preamp_db, artwork,
+  artwork_edge}}`: each item converted to its destination with its tags --
+  the folders made -- reporting `{item_index, completed_items, total_items}`,
+  finishing with `{result: {items: [{item_index, source, destination, state,
+  source_revision, issue}], cancellation_requested}}`, every item answered
+  in order. Paths are encoded raw paths.
+
 ### Level 25 (2026-10-26)
 
 ADR-0335: the covers of lossy conversions fitted.

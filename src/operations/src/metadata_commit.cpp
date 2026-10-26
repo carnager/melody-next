@@ -412,20 +412,23 @@ apply_filesystem_metadata(const Descriptor& source, const struct stat& source_st
     // Filesystems with server-side identity mapping refuse ownership
     // changes; source and prepared copy share the filesystem, so the
     // published file keeps the identity the filesystem enforces anyway.
-    bool ownership_preserved = true;
     if (prepared_status.st_uid != source_status.st_uid ||
         prepared_status.st_gid != source_status.st_gid) {
-        if (::fchown(prepared.get(), source_status.st_uid, source_status.st_gid) != 0) {
-            if (errno == EPERM || errno == ENOTSUP || errno == EOPNOTSUPP) {
-                ownership_preserved = false;
-            } else {
-                return std::unexpected(system_error("preserving prepared ownership failed", errno,
-                                                    source_raw_path, journal_id));
-            }
+        if (::fchown(prepared.get(), source_status.st_uid, source_status.st_gid) != 0 &&
+            errno != EPERM && errno != ENOTSUP && errno != EOPNOTSUPP) {
+            return std::unexpected(system_error("preserving prepared ownership failed", errno,
+                                                source_raw_path, journal_id));
         }
     }
     if (core::keep_mode(prepared.get(), source_status.st_mode & 07777) != 0) {
         return std::unexpected(system_error("preserving prepared permissions failed", errno,
+                                            source_raw_path, journal_id));
+    }
+    // ADR-0333: what the copy holds now is what the share keeps; the rest
+    // is checked not to change from it.
+    struct stat settled{};
+    if (::fstat(prepared.get(), &settled) != 0) {
+        return std::unexpected(system_error("observing prepared permissions failed", errno,
                                             source_raw_path, journal_id));
     }
     if (prepared_attributes->supported) {
@@ -453,11 +456,9 @@ apply_filesystem_metadata(const Descriptor& source, const struct stat& source_st
                                                source_raw_path, journal_id));
     }
     if (::fstat(prepared.get(), &prepared_status) != 0 ||
-        (ownership_preserved && (prepared_status.st_uid != source_status.st_uid ||
-                                 prepared_status.st_gid != source_status.st_gid)) ||
-        (prepared_status.st_mode & 07777) != (source_status.st_mode & 07777)) {
+        !core::same_identity(settled, prepared_status)) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
-                                               "prepared ownership or permissions differ",
+                                               "prepared ownership or permissions changed",
                                                source_raw_path, journal_id));
     }
     return {};

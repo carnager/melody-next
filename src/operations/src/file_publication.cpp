@@ -733,15 +733,29 @@ apply_copy_filesystem_metadata(const LockedSource& source, const struct stat& so
         }
     }
     if (core::keep_mode(prepared.get(), source_status.st_mode & 07777) != 0) {
-        if (errno == ENOTSUP || errno == EOPNOTSUPP) {
-            applied.mode_preserved = false;
-            applied.notes.push_back("File permissions were not preserved: the destination "
-                                    "filesystem does not support them");
-        } else {
-            return std::unexpected(system_error("Preserving prepared-copy permissions failed",
-                                                errno, record.source_raw_path,
-                                                record.target_raw_path, record.id));
-        }
+        return std::unexpected(system_error("Preserving prepared-copy permissions failed", errno,
+                                            record.source_raw_path, record.target_raw_path,
+                                            record.id));
+    }
+    // ADR-0333: what the copy holds now is what the destination keeps -- a
+    // share deciding owners or modes itself may have refused the change or
+    // taken it without keeping it.
+    struct stat settled{};
+    if (::fstat(prepared.get(), &settled) != 0) {
+        return std::unexpected(system_error("Observing prepared-copy permissions failed", errno,
+                                            record.source_raw_path, record.target_raw_path,
+                                            record.id));
+    }
+    const auto kept = core::kept_identity(source_status, settled);
+    if (!kept.owner && applied.ownership_preserved) {
+        applied.ownership_preserved = false;
+        applied.notes.push_back("File ownership was not preserved: the destination "
+                                "filesystem decides it");
+    }
+    if (!kept.mode) {
+        applied.mode_preserved = false;
+        applied.notes.push_back("File permissions were not preserved: the destination "
+                                "filesystem decides them");
     }
     if (prepared_attributes->supported) {
         for (const auto& attribute : source_attributes.attributes) {
@@ -770,13 +784,10 @@ apply_copy_filesystem_metadata(const LockedSource& source, const struct stat& so
                               record.source_raw_path, record.target_raw_path, record.id));
     }
     if (::fstat(prepared.get(), &prepared_status) != 0 ||
-        (applied.ownership_preserved && (prepared_status.st_uid != source_status.st_uid ||
-                                         prepared_status.st_gid != source_status.st_gid)) ||
-        (applied.mode_preserved &&
-         (prepared_status.st_mode & 07777) != (source_status.st_mode & 07777))) {
+        !core::same_identity(settled, prepared_status)) {
         return std::unexpected(
             publication_error(core::ErrorCode::conflict,
-                              "Prepared-copy ownership or permissions differ from the source",
+                              "Prepared-copy ownership or permissions changed during preparation",
                               record.source_raw_path, record.target_raw_path, record.id));
     }
     return applied;

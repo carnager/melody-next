@@ -137,11 +137,18 @@ int stop_when_cancelled(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off
 
 namespace {
 
-// What answers in JSON: MusicBrainz's web service and the archive's listings.
-// The archive's images are bytes.
+// What answers in JSON: MusicBrainz's web service and the archive's listings,
+// of a release and (ADR-0332) of a release group. The archive's images are
+// bytes.
 [[nodiscard]] bool is_cover_listing(const std::string_view url) {
-    constexpr std::string_view release = "https://coverartarchive.org/release/";
-    return url.starts_with(release) && url.substr(release.size()).find('/') == std::string::npos;
+    for (const std::string_view kind :
+         {std::string_view{"https://coverartarchive.org/release/"},
+          std::string_view{"https://coverartarchive.org/release-group/"}}) {
+        if (url.starts_with(kind)) {
+            return url.substr(kind.size()).find('/') == std::string::npos;
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool answers_json(const std::string_view url) {

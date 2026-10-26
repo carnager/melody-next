@@ -284,6 +284,12 @@ void coverArtUrlRequiresAReleaseId() {
     const auto url = build_cover_art_listing_url("2f2ac1b7-1111-4f4f-8f8f-123456789abc");
     CHECK(url.has_value());
     CHECK(*url == "https://coverartarchive.org/release/2f2ac1b7-1111-4f4f-8f8f-123456789abc");
+    // ADR-0332: and a release group's, for another release's cover.
+    const auto group_url =
+        build_release_group_cover_art_listing_url("2f2ac1b7-1111-4f4f-8f8f-123456789abc");
+    CHECK(group_url && *group_url == "https://coverartarchive.org/release-group/"
+                                     "2f2ac1b7-1111-4f4f-8f8f-123456789abc");
+    CHECK(!build_release_group_cover_art_listing_url("not-a-uuid").has_value());
     CHECK(!build_cover_art_listing_url("").has_value());
     CHECK(!build_cover_art_listing_url("not-a-uuid").has_value());
 }

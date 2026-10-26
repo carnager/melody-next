@@ -46,6 +46,7 @@ namespace trackknife::bench {
 [[nodiscard]] SettingsDialog::Page settingsPage(TaggerSession::SettingsPage page);
 
 class ApplyActionsPopover;
+class FileScopeView;
 
 class MetadataFieldReviewBar;
 
@@ -174,7 +175,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QPushButton* undo_write_button_{nullptr};
     QTableView* fields_{nullptr};
     MetadataFieldReviewBar* field_review_bar_{nullptr};
-    QPointer<QTableView> file_list_;
+    QPointer<FileScopeView> file_list_;
     QLabel* technical_status_{nullptr};
     QTabWidget* metadata_sections_{nullptr};
     MetadataArtworkSection* artwork_section_{nullptr};

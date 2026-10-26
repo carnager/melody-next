@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/file_scope_view.hpp"
 #include "bench_main_window_test.hpp"
 #include "workspace/artwork_session.hpp"
 
@@ -1454,18 +1455,15 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
             .toUtf8();
     };
     // ADR-0326: Beta has nothing in the archive; its links name a Bandcamp
-    // album page, whose cover is fetched instead.
-    const auto listing = [&beta_id](const QString& id) {
-        if (id == beta_id) {
-            return QByteArray{R"json({"images": []})json"};
-        }
-        return QStringLiteral(R"json({"images": [{"id": 7, "front": true, "approved": true,
-            "types": ["Front"], "image": "https://coverartarchive.org/release/%1/7.png"}]})json")
-            .arg(id)
-            .toUtf8();
-    };
+    // album page, whose cover is fetched instead. ADR-0332: Alpha's release
+    // has nothing either, and no Bandcamp page; another release of its album
+    // has a cover, which the archive gives for the release group.
+    const auto listing = [] { return QByteArray{R"json({"images": []})json"}; };
+    const auto alpha_group = QStringLiteral("99999999-8888-7777-6666-555555555555");
+    const auto other_release = QStringLiteral("77777777-2222-3333-4444-555555555555");
     QStringList covers_asked;
     QStringList bandcamp_asked;
+    QStringList groups_asked;
     const MusicBrainzLookupService service{
         .fetch =
             [&](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
@@ -1493,6 +1491,29 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
                         "release-group": {"id": "88888888-8888-7777-6666-555555555555"}})json"});
                     return;
                 }
+                if (plain.contains(alpha_id + QStringLiteral("?inc=url-rels"))) {
+                    completion(QStringLiteral(R"json({"id": "%1", "relations": [],
+                        "release-group": {"id": "%2"}})json")
+                                   .arg(alpha_id, alpha_group)
+                                   .toUtf8());
+                    return;
+                }
+                if (plain.startsWith(
+                        QStringLiteral("https://coverartarchive.org/release-group/"))) {
+                    groups_asked << plain.section(QLatin1Char('/'), -1);
+                    completion(QStringLiteral(R"json({"images": [{"id": 9, "front": true,
+                        "approved": true, "types": ["Front"],
+                        "image": "http://coverartarchive.org/release/%1/9.png"}],
+                        "release": "https://musicbrainz.org/release/%1"})json")
+                                   .arg(other_release)
+                                   .toUtf8());
+                    return;
+                }
+                if (plain == QStringLiteral("https://coverartarchive.org/release/") +
+                                 other_release + QStringLiteral("/9.png")) {
+                    completion(png);
+                    return;
+                }
                 if (plain == QStringLiteral("https://band.bandcamp.com/album/beta")) {
                     bandcamp_asked << plain;
                     completion(
@@ -1515,11 +1536,7 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
                     }
                     if (plain == QStringLiteral("https://coverartarchive.org/release/") + id) {
                         covers_asked << title;
-                        completion(listing(id));
-                        return;
-                    }
-                    if (plain.endsWith(id + QStringLiteral("/7.png"))) {
-                        completion(png);
+                        completion(listing());
                         return;
                     }
                 }
@@ -1598,6 +1615,9 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
         status->text().contains(QStringLiteral("Covers fetched for 2 albums")),
         qPrintable(status->text()), 20'000);
     QCOMPARE(covers_asked.size(), 2);
+    // Alpha's from another release of its album -- asked only for Alpha:
+    // Beta's own Bandcamp page came first.
+    QCOMPARE(groups_asked, QStringList{alpha_group});
     // Beta's from Bandcamp, at 1200 pixels.
     QCOMPARE(bandcamp_asked,
              (QStringList{QStringLiteral("https://band.bandcamp.com/album/beta"),
@@ -1614,6 +1634,74 @@ void BenchMainWindowTest::identifyFetchesTheCoversOfTheAlbumsApplied() {
     QCOMPARE(covered.size(), std::size_t{2U});
     QVERIFY(covered.contains(sources[0].source.raw_path));
     QVERIFY(covered.contains(sources[1].source.raw_path));
+    delete properties;
+}
+
+// ADR-0332: files of several albums are listed under their albums' titles;
+// a title selects its album's files, with Ctrl adds them.
+void BenchMainWindowTest::fileListShowsTheFilesUnderTheirAlbums() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    std::vector<MetadataPropertiesSource> sources;
+    for (const auto& [album, file] : {std::pair{std::string{"Alpha"}, std::string{"01.flac"}},
+                                      std::pair{std::string{"Alpha"}, std::string{"02.flac"}},
+                                      std::pair{std::string{"Beta"}, std::string{"01.flac"}}}) {
+        QVERIFY(QDir{media.path()}.mkpath(QString::fromStdString(album)));
+        const auto name =
+            QString::fromStdString(album) + QLatin1Char('/') + QString::fromStdString(file);
+        const auto path = media.filePath(name);
+        QVERIFY(materialize_audio_fixture(album == "Alpha"
+                                              ? QStringLiteral("art-tone-flac.b64")
+                                              : QStringLiteral("rich-metadata-flac.b64"),
+                                          path));
+        const auto encoded = QFile::encodeName(path);
+        const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+        auto read = metadata::read_local_metadata(raw_path);
+        QVERIFY(read.has_value());
+        auto document = read->document;
+        sources.push_back(MetadataPropertiesSource{
+            .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                     .source_revision = read->source_revision,
+                                                     .baseline = std::move(document)},
+            .track_label = name,
+        });
+    }
+    auto* properties = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        {}, {}, {});
+    properties->show();
+    FileScopeView* files = nullptr;
+    QTRY_VERIFY((files = dynamic_cast<FileScopeView*>(properties->fileListView())) != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(files->model()->rowCount(), 3, 10'000);
+    QTRY_COMPARE_WITH_TIMEOUT(files->albumHeaders().size(), std::size_t{2U}, 10'000);
+    // Each album by its title and artist.
+    QCOMPARE(files->albumHeaders().at(0),
+             QStringLiteral("Trackbench Fixtures · Trackknife Project"));
+    QVERIFY(files->albumHeaders().at(2).startsWith(QStringLiteral("Rich Metadata · ")));
+    const auto selected = [files] {
+        std::set<int> rows;
+        for (const auto& index : files->selectionModel()->selectedRows()) {
+            rows.insert(index.row());
+        }
+        return rows;
+    };
+    const auto title_of = [files](const int row) {
+        return files->visualRect(files->model()->index(row, 0)).topLeft() + QPoint{20, 4};
+    };
+    QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::NoModifier, title_of(2));
+    QCOMPARE(selected(), (std::set<int>{2}));
+    QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::ControlModifier, title_of(0));
+    QCOMPARE(selected(), (std::set<int>{0, 1, 2}));
+    QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::NoModifier, title_of(0));
+    QCOMPARE(selected(), (std::set<int>{0, 1}));
+    // A file, below its album's title, is still itself.
+    const auto second = files->visualRect(files->model()->index(1, 0));
+    QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      QPoint{second.center().x(), second.center().y()});
+    QCOMPARE(selected(), (std::set<int>{1}));
     delete properties;
 }
 

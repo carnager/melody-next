@@ -487,6 +487,16 @@ core::Result<std::string> build_cover_art_listing_url(const std::string_view rel
     return "https://coverartarchive.org/release/" + std::string{release_id};
 }
 
+core::Result<std::string>
+build_release_group_cover_art_listing_url(const std::string_view group_id) {
+    if (!is_musicbrainz_id(group_id)) {
+        return std::unexpected(
+            service_error(core::ErrorCode::invalid_argument,
+                          "a Cover Art Archive release group listing needs a release group id"));
+    }
+    return "https://coverartarchive.org/release-group/" + std::string{group_id};
+}
+
 core::Result<CoverArtListing> parse_cover_art_listing(const std::string_view body,
                                                       const WebServiceLimits& limits) {
     auto root = parse_body(body, limits);

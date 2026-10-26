@@ -231,9 +231,11 @@ class TaggerSession final : public QObject {
     }
     // Covers from the Cover Art Archive: none without MusicBrainz lookups.
     [[nodiscard]] std::optional<ArtworkCoverArtService> coverArtService();
+    // A release without a front cover of its own: its album's, from another
+    // release of it or Bandcamp, added to its listing.
     void
-    addBandcampCover(const QString& release_id, musicbrainz::CoverArtListing listing,
-                     std::function<void(core::Result<musicbrainz::CoverArtListing>)> completion);
+    addFallbackCovers(const QString& release_id, musicbrainz::CoverArtListing listing,
+                      std::function<void(core::Result<musicbrainz::CoverArtListing>)> completion);
     // The artwork applied through the artwork section's own Apply.
     [[nodiscard]] ArtworkApplyObserver artworkAppliedObserver();
     // An artwork Apply finished: the files' new revisions taken in.
@@ -398,6 +400,14 @@ class TaggerSession final : public QObject {
     // time (ADR-0311): grouped by release id, tags or folder (ADR-0261).
     // None while Identify cannot run.
     [[nodiscard]] std::vector<Identify> identifyAlbums() const;
+    // ADR-0332: the albums all the files hold, as Identify groups them, for
+    // the file list to show its files under; one entry when there is one.
+    struct FileAlbum {
+        QString title;
+        // Rows of the grid, in order.
+        std::vector<std::size_t> items;
+    };
+    [[nodiscard]] std::vector<FileAlbum> fileAlbums() const;
     void applyMusicBrainzProposals(metadata::MetadataProposalSet proposals);
     // ADR-0316: each album's front cover from the Cover Art Archive, in
     // turn -- its files selected, the front of the release they now carry

@@ -54,6 +54,11 @@ struct ConversionScanOptions {
     // Resolves each item's cover image (ADR-0131) and embeds it into the
     // output; a source without usable artwork converts without one.
     bool carry_artwork{false};
+    // ADR-0335: a cover carried into lossy output is no larger than this
+    // on its longer side -- the embedded-cover limit of Cover settings --
+    // and a JPEG where it had to be made smaller; 0 carries it as it is.
+    // Lossless output carries it as it is, always.
+    std::uint32_t lossy_artwork_edge{1000U};
 };
 
 enum class ConversionScanState : std::uint8_t { pending, running, converted, failed, cancelled };

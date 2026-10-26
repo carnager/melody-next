@@ -2,15 +2,11 @@
 
 #include "bench/artwork_fitting.hpp"
 
-#include "uicommon/local_artwork.hpp"
+#include "trackknife/formats/cover_fitting.hpp"
 
-#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
-#include <QImage>
-#include <QImageReader>
-#include <QPainter>
 #include <QSaveFile>
 #include <QStandardPaths>
 
@@ -27,62 +23,35 @@ namespace {
 } // namespace
 
 core::Result<QByteArray> coverJpeg(const QByteArray& encoded, const std::uint32_t max_edge) {
-    QByteArray source = encoded;
-    QBuffer buffer(&source);
-    buffer.open(QIODevice::ReadOnly);
-    QImageReader reader(&buffer);
-    reader.setAutoTransform(true);
-    const auto size = reader.size();
-    if (!size.isValid())
-        return std::unexpected(
-            fitting_error(core::ErrorCode::unsupported,
-                          "The image cannot be read: " + reader.errorString().toStdString()));
-    if (static_cast<std::int64_t>(size.width()) * size.height() > ui::maximum_artwork_pixels)
-        return std::unexpected(
-            fitting_error(core::ErrorCode::unsupported, "The image is too large to read"));
-    const auto edge = static_cast<int>(max_edge);
-    if (max_edge > 0U && std::max(size.width(), size.height()) > edge)
-        reader.setScaledSize(size.scaled(edge, edge, Qt::KeepAspectRatio));
-    const auto decoded = reader.read();
-    if (decoded.isNull())
-        return std::unexpected(
-            fitting_error(core::ErrorCode::unsupported,
-                          "The image cannot be read: " + reader.errorString().toStdString()));
-    // Transparency, where there is any, over white: a cover is a JPEG.
-    QImage flat(decoded.size(), QImage::Format_RGB32);
-    flat.fill(Qt::white);
-    {
-        QPainter painter(&flat);
-        painter.drawImage(0, 0, decoded);
+    const std::span bytes{reinterpret_cast<const std::uint8_t*>(encoded.constData()),
+                          static_cast<std::size_t>(encoded.size())};
+    auto fitted = formats::fit_cover_for_writing(bytes, max_edge);
+    if (!fitted) {
+        return std::unexpected(fitting_error(
+            core::ErrorCode::unsupported, "The image cannot be read: " + fitted.error().message));
     }
-    QByteArray bytes;
-    QBuffer output(&bytes);
-    if (!output.open(QIODevice::WriteOnly) || !flat.save(&output, "JPEG", 90))
-        return std::unexpected(fitting_error(core::ErrorCode::io, "Could not convert the cover"));
-    return bytes;
+    if (!*fitted) {
+        return encoded;
+    }
+    return QByteArray(reinterpret_cast<const char*>((*fitted)->bytes.data()),
+                      static_cast<qsizetype>((*fitted)->bytes.size()));
 }
 
 core::Result<std::optional<FittedArtwork>>
 fitArtworkBytes(const std::vector<unsigned char>& encoded, const std::uint32_t max_edge,
                 const core::CancellationToken& cancellation) {
-    QByteArray source(reinterpret_cast<const char*>(encoded.data()),
-                      static_cast<qsizetype>(encoded.size()));
-    QBuffer buffer(&source);
-    buffer.open(QIODevice::ReadOnly);
-    QImageReader reader(&buffer);
-    const auto size = reader.size();
-    const auto jpeg = source.size() > 3 && static_cast<unsigned char>(source.at(0)) == 0xFFU &&
-                      static_cast<unsigned char>(source.at(1)) == 0xD8U;
-    // A JPEG that fits stays as it is.
-    if (jpeg && size.isValid() &&
-        (max_edge == 0U || std::max(size.width(), size.height()) <= static_cast<int>(max_edge)))
-        return std::optional<FittedArtwork>{};
     if (cancellation.is_cancellation_requested())
         return std::unexpected(fitting_error(core::ErrorCode::cancelled, "Cover review cancelled"));
-    auto converted = coverJpeg(source, max_edge);
-    if (!converted)
-        return std::unexpected(converted.error());
-    return std::optional{FittedArtwork{.bytes = std::move(*converted), .png = false}};
+    auto fitted = formats::fit_cover_for_writing(encoded, max_edge);
+    if (!fitted)
+        return std::unexpected(fitting_error(
+            core::ErrorCode::unsupported, "The image cannot be read: " + fitted.error().message));
+    if (!*fitted)
+        return std::optional<FittedArtwork>{};
+    return std::optional{
+        FittedArtwork{.bytes = QByteArray(reinterpret_cast<const char*>((*fitted)->bytes.data()),
+                                          static_cast<qsizetype>((*fitted)->bytes.size())),
+                      .png = false}};
 }
 
 core::Result<metadata::ArtworkImageFile>

@@ -14,6 +14,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <array>
+#include <utility>
+
 namespace trackknife::bench {
 
 class ArtworkFittingTest final : public QObject {
@@ -26,6 +29,7 @@ class ArtworkFittingTest final : public QObject {
     void anOpaquePngBecomesJpeg();
     void aCoverOverTheInputLimitCanStillBeShrunk();
     void anyImageBecomesTheJpegMelodyWrites();
+    void aPhotoIsTurnedUpright();
 };
 
 namespace {
@@ -138,6 +142,8 @@ void ArtworkFittingTest::anyImageBecomesTheJpegMelodyWrites() {
     if (QImageWriter::supportedImageFormats().contains("webp") &&
         QImageReader::supportedImageFormats().contains("webp"))
         formats << "WEBP";
+    if (QImageWriter::supportedImageFormats().contains("tiff"))
+        formats << "TIFF";
     for (const auto& format : formats) {
         QByteArray encoded;
         QBuffer buffer{&encoded};
@@ -154,6 +160,57 @@ void ArtworkFittingTest::anyImageBecomesTheJpegMelodyWrites() {
         QCOMPARE(QImage::fromData(*whole, "JPEG").size(), QSize(1600, 1200));
     }
     QVERIFY(!coverJpeg(QByteArray{"not an image"}, 500U).has_value());
+}
+
+// A photo's EXIF orientation -- each of the eight -- is undone as the cover
+// is made: it comes out as a viewer shows the photo, here as Qt does.
+void ArtworkFittingTest::aPhotoIsTurnedUpright() {
+    // Four quadrants of their own colour: where each lands says the turn.
+    QImage photo{80, 40, QImage::Format_RGB32};
+    const std::array colours{QColor{Qt::red}, QColor{Qt::green}, QColor{Qt::blue},
+                             QColor{Qt::yellow}};
+    for (int y = 0; y < photo.height(); ++y)
+        for (int x = 0; x < photo.width(); ++x)
+            photo.setPixelColor(x, y,
+                                colours[static_cast<std::size_t>((y < photo.height() / 2 ? 0 : 2) +
+                                                                 (x < photo.width() / 2 ? 0 : 1))]);
+    for (const auto transform :
+         {QImageIOHandler::TransformationNone, QImageIOHandler::TransformationMirror,
+          QImageIOHandler::TransformationFlip, QImageIOHandler::TransformationRotate180,
+          QImageIOHandler::TransformationFlipAndRotate90, QImageIOHandler::TransformationRotate90,
+          QImageIOHandler::TransformationMirrorAndRotate90,
+          QImageIOHandler::TransformationRotate270}) {
+        QByteArray encoded;
+        QBuffer buffer{&encoded};
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QImageWriter writer{&buffer, "JPEG"};
+        writer.setQuality(100);
+        writer.setTransformation(transform);
+        QVERIFY(writer.write(photo));
+        buffer.close();
+        QBuffer reading{&encoded};
+        QVERIFY(reading.open(QIODevice::ReadOnly));
+        QImageReader reader{&reading};
+        reader.setAutoTransform(true);
+        const auto expected = reader.read();
+        QVERIFY(!expected.isNull());
+        // Smaller than it is, so it is made anew rather than kept.
+        const auto cover = coverJpeg(encoded, 60U);
+        QVERIFY(cover.has_value());
+        const auto shown = QImage::fromData(*cover, "JPEG");
+        QCOMPARE(shown.size(), expected.size().scaled(60, 60, Qt::KeepAspectRatio));
+        for (const auto& [fx, fy] : {std::pair{0.25, 0.25}, std::pair{0.75, 0.25},
+                                     std::pair{0.25, 0.75}, std::pair{0.75, 0.75}}) {
+            const auto want = expected.pixelColor(static_cast<int>(fx * expected.width()),
+                                                  static_cast<int>(fy * expected.height()));
+            const auto got = shown.pixelColor(static_cast<int>(fx * shown.width()),
+                                              static_cast<int>(fy * shown.height()));
+            QVERIFY2(std::abs(want.red() - got.red()) < 60 &&
+                         std::abs(want.green() - got.green()) < 60 &&
+                         std::abs(want.blue() - got.blue()) < 60,
+                     qPrintable(QStringLiteral("transform %1").arg(static_cast<int>(transform))));
+        }
+    }
 }
 
 } // namespace trackknife::bench

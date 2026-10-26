@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "workspace/convert_job.hpp"
+
+#include "bench/settings_keys.hpp"
 #include "workspace/keep_awake.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -784,87 +786,90 @@ void ConvertJob::run() {
                            : gain_ == 2 ? convert::ConversionGainMode::album
                                         : convert::ConversionGainMode::none;
     const auto carry_artwork = embed_artwork_;
-    watcher_.setFuture(QtConcurrent::run(
-        [scan_items = std::move(scan_items), fetches = std::move(fetches), preset = *preset,
-         parallelism, target_sample_rate, sample_rate_cap, target_bit_depth, keep_source_depth,
-         channel_policy, gain_mode, carry_artwork, completed = completed_, cancellation]() mutable {
-            // ADR-0237 stage 6: files of an engine elsewhere, fetched first
-            // into a folder of their own and converted from there.
-            std::vector<convert::ConvertedItemScan> fetch_failures;
-            std::optional<std::filesystem::path> fetched_folder;
-            if (!fetches.empty()) {
-                // On disk, not in /tmp: a batch of originals can be large.
-                fetched_folder =
-                    std::filesystem::path{QFile::encodeName(QStandardPaths::writableLocation(
-                                                                QStandardPaths::CacheLocation))
-                                              .toStdString()} /
-                    ("convert-" + core::StableId::random().to_string());
-                std::vector<convert::ConversionScanItem> reachable;
-                for (auto& item : scan_items) {
-                    const auto fetch = fetches.find(item.item_index);
-                    if (fetch == fetches.end()) {
-                        reachable.push_back(std::move(item));
-                        continue;
-                    }
-                    const auto folder = *fetched_folder / std::to_string(item.item_index);
-                    std::error_code made;
-                    std::filesystem::create_directories(folder, made);
-                    const auto copy =
-                        folder / std::filesystem::path{item.source_raw_path}.filename();
-                    auto fetched = made ? core::Result<void>{std::unexpected(
-                                              core::Error{.code = core::ErrorCode::io,
-                                                          .message = made.message(),
-                                                          .context = {}})}
-                                        : fetch->second(copy, cancellation);
-                    if (!fetched) {
-                        fetch_failures.push_back(convert::ConvertedItemScan{
-                            .item_index = item.item_index,
-                            .source_raw_path = item.source_raw_path,
-                            .destination_raw_path = item.destination_raw_path,
-                            .state = convert::ConversionScanState::failed,
-                            .converted = std::nullopt,
-                            .source_revision = std::nullopt,
-                            .issue = std::move(fetched.error())});
-                        continue;
-                    }
-                    item.source_raw_path = copy.native();
+    // ADR-0335: lossy output's cover within the embedded-cover limit.
+    const auto lossy_artwork_edge = SettingsKeys::artworkPolicy().max_embedded_edge;
+    watcher_.setFuture(QtConcurrent::run([scan_items = std::move(scan_items),
+                                          fetches = std::move(fetches), preset = *preset,
+                                          parallelism, target_sample_rate, sample_rate_cap,
+                                          target_bit_depth, keep_source_depth, channel_policy,
+                                          gain_mode, carry_artwork, lossy_artwork_edge,
+                                          completed = completed_, cancellation]() mutable {
+        // ADR-0237 stage 6: files of an engine elsewhere, fetched first
+        // into a folder of their own and converted from there.
+        std::vector<convert::ConvertedItemScan> fetch_failures;
+        std::optional<std::filesystem::path> fetched_folder;
+        if (!fetches.empty()) {
+            // On disk, not in /tmp: a batch of originals can be large.
+            fetched_folder =
+                std::filesystem::path{QFile::encodeName(QStandardPaths::writableLocation(
+                                                            QStandardPaths::CacheLocation))
+                                          .toStdString()} /
+                ("convert-" + core::StableId::random().to_string());
+            std::vector<convert::ConversionScanItem> reachable;
+            for (auto& item : scan_items) {
+                const auto fetch = fetches.find(item.item_index);
+                if (fetch == fetches.end()) {
                     reachable.push_back(std::move(item));
+                    continue;
                 }
-                scan_items = std::move(reachable);
+                const auto folder = *fetched_folder / std::to_string(item.item_index);
+                std::error_code made;
+                std::filesystem::create_directories(folder, made);
+                const auto copy = folder / std::filesystem::path{item.source_raw_path}.filename();
+                auto fetched = made ? core::Result<void>{std::unexpected(
+                                          core::Error{.code = core::ErrorCode::io,
+                                                      .message = made.message(),
+                                                      .context = {}})}
+                                    : fetch->second(copy, cancellation);
+                if (!fetched) {
+                    fetch_failures.push_back(convert::ConvertedItemScan{
+                        .item_index = item.item_index,
+                        .source_raw_path = item.source_raw_path,
+                        .destination_raw_path = item.destination_raw_path,
+                        .state = convert::ConversionScanState::failed,
+                        .converted = std::nullopt,
+                        .source_revision = std::nullopt,
+                        .issue = std::move(fetched.error())});
+                    continue;
+                }
+                item.source_raw_path = copy.native();
+                reachable.push_back(std::move(item));
             }
-            // The conversion core requires existing target directories; create
-            // them up front so parallel workers never race directory creation.
-            for (const auto& item : scan_items) {
-                std::error_code create_error;
-                std::filesystem::create_directories(
-                    std::filesystem::path{item.destination_raw_path}.parent_path(), create_error);
-            }
-            auto scan = convert::scan_conversion(
-                scan_items,
-                {.preset = preset,
-                 .maximum_parallelism = parallelism,
-                 .target_sample_rate = target_sample_rate,
-                 .sample_rate_cap = sample_rate_cap,
-                 .target_bit_depth = target_bit_depth,
-                 .keep_source_bit_depth = keep_source_depth,
-                 .channel_policy = channel_policy,
-                 .gain_mode = gain_mode,
-                 .carry_artwork = carry_artwork},
-                [completed](const convert::ConversionScanProgress& update) {
-                    completed->store(update.completed_items);
-                },
-                cancellation);
-            if (fetched_folder) {
-                std::error_code removed;
-                std::filesystem::remove_all(*fetched_folder, removed);
-            }
-            if (scan) {
-                scan->items.insert(scan->items.end(),
-                                   std::make_move_iterator(fetch_failures.begin()),
-                                   std::make_move_iterator(fetch_failures.end()));
-            }
-            return std::make_shared<core::Result<convert::ConversionScanResult>>(std::move(scan));
-        }));
+            scan_items = std::move(reachable);
+        }
+        // The conversion core requires existing target directories; create
+        // them up front so parallel workers never race directory creation.
+        for (const auto& item : scan_items) {
+            std::error_code create_error;
+            std::filesystem::create_directories(
+                std::filesystem::path{item.destination_raw_path}.parent_path(), create_error);
+        }
+        auto scan = convert::scan_conversion(
+            scan_items,
+            {.preset = preset,
+             .maximum_parallelism = parallelism,
+             .target_sample_rate = target_sample_rate,
+             .sample_rate_cap = sample_rate_cap,
+             .target_bit_depth = target_bit_depth,
+             .keep_source_bit_depth = keep_source_depth,
+             .channel_policy = channel_policy,
+             .gain_mode = gain_mode,
+             .carry_artwork = carry_artwork,
+             .lossy_artwork_edge = lossy_artwork_edge},
+            [completed](const convert::ConversionScanProgress& update) {
+                completed->store(update.completed_items);
+            },
+            cancellation);
+        if (fetched_folder) {
+            std::error_code removed;
+            std::filesystem::remove_all(*fetched_folder, removed);
+        }
+        if (scan) {
+            scan->items.insert(scan->items.end(), std::make_move_iterator(fetch_failures.begin()),
+                               std::make_move_iterator(fetch_failures.end()));
+        }
+        return std::make_shared<core::Result<convert::ConversionScanResult>>(std::move(scan));
+    }));
 }
 
 void ConvertJob::stop() { cancellation_.request_cancellation(); }

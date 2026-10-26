@@ -45,6 +45,7 @@ struct ConvertRequest {
     convert::EncoderPreset preset;
     convert::ConversionGainMode gain{convert::ConversionGainMode::none};
     bool artwork{true};
+    std::uint32_t artwork_edge{1000U};
     bool dry_run{false};
 };
 
@@ -93,6 +94,9 @@ struct ConvertRequest {
         return std::unexpected(bad_params("gain is none, track or album", "gain"));
     }
     request.artwork = params.value("artwork", true);
+    // ADR-0335: the embedded-cover limit of the asker's Cover settings; 0
+    // carries covers as they are.
+    request.artwork_edge = params.value("artwork_edge", std::uint32_t{1000U});
     request.dry_run = params.value("dry_run", false);
     return request;
 }
@@ -287,7 +291,8 @@ void register_convert_jobs(JobCatalog& jobs, Workspace& workspace, LocalCatalogu
                      .channel_policy = convert::ConversionChannelPolicy::keep,
                      .gain_mode = request.gain,
                      .gain_preamp_db = 0.0F,
-                     .carry_artwork = request.artwork},
+                     .carry_artwork = request.artwork,
+                     .lossy_artwork_edge = request.artwork_edge},
                     [&report](const convert::ConversionScanProgress& progress) {
                         report(Json{{"completed", progress.completed_items},
                                     {"total", progress.total_items}});

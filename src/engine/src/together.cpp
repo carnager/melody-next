@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "trackknife/engine/together.hpp"
-#include "trackknife/engine/cover_fitting.hpp"
 #include "trackknife/formats/artwork.hpp"
+#include "trackknife/formats/cover_fitting.hpp"
 
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -223,7 +223,7 @@ void put_cover(const std::string& url, const std::string& key, const std::string
     if (image.empty()) {
         return;
     }
-    const auto fitted = fit_cover(image, 600);
+    const auto fitted = formats::fit_cover(image, 600);
     if (!fitted || fitted->empty()) {
         return;
     }

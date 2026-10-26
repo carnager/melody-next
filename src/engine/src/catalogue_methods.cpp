@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/engine/catalogue_methods.hpp"
-#include "trackknife/engine/cover_fitting.hpp"
 #include "trackknife/formats/artwork.hpp"
+#include "trackknife/formats/cover_fitting.hpp"
 
 #include "track_format.hpp"
 
@@ -800,7 +800,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             // covers is otherwise megabytes over mobile data. Scaled here, where
             // the original is, so only the thumbnail travels.
             if (const auto size = params.value("size", 0); size > 0 && !image->empty()) {
-                auto fitted = fit_cover(*image, size);
+                auto fitted = formats::fit_cover(*image, size);
                 if (!fitted) {
                     return std::unexpected(std::move(fitted.error()));
                 }

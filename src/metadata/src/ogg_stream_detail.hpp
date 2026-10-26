@@ -5,9 +5,11 @@
 #include "trackknife/core/result.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <optional>
 #include <span>
 #include <string>
@@ -200,6 +202,79 @@ cover_entries(const std::vector<std::string>& entries) {
         return pairs;
     };
     return normal(source) == normal(prepared);
+}
+
+// The first `count` packets of an Ogg file, read page by page from its start
+// -- the identification and comment headers without the audio after them.
+// None where the file is no single well-formed Ogg stream that far.
+[[nodiscard]] inline std::optional<std::vector<std::vector<unsigned char>>>
+read_leading_packets(const std::string& raw_path, const std::size_t count) {
+    std::ifstream input{raw_path, std::ios::binary};
+    if (!input) {
+        return std::nullopt;
+    }
+    const auto read = [&input](unsigned char* into, const std::size_t size) {
+        return size == 0U || static_cast<bool>(input.read(reinterpret_cast<char*>(into),
+                                                          static_cast<std::streamsize>(size)));
+    };
+    std::vector<std::vector<unsigned char>> packets;
+    std::vector<unsigned char> current;
+    bool open = false;
+    std::optional<std::uint32_t> serial;
+    std::array<unsigned char, 27> header{};
+    std::array<unsigned char, 255> lacing{};
+    while (packets.size() < count) {
+        if (!read(header.data(), header.size()) || header[0] != 'O' || header[1] != 'g' ||
+            header[2] != 'g' || header[3] != 'S' || header[4] != 0U) {
+            return std::nullopt;
+        }
+        const auto page_serial = static_cast<std::uint32_t>(header[14]) |
+                                 (static_cast<std::uint32_t>(header[15]) << 8U) |
+                                 (static_cast<std::uint32_t>(header[16]) << 16U) |
+                                 (static_cast<std::uint32_t>(header[17]) << 24U);
+        const bool continued = (header[5] & 0x01U) != 0U;
+        if ((serial && *serial != page_serial) || continued != open) {
+            return std::nullopt;
+        }
+        serial = page_serial;
+        const std::size_t segments = header[26];
+        if (!read(lacing.data(), segments)) {
+            return std::nullopt;
+        }
+        for (std::size_t segment = 0U; segment < segments && packets.size() < count; ++segment) {
+            const auto length = lacing[segment];
+            const auto at = current.size();
+            current.resize(at + length);
+            if (!read(current.data() + at, length)) {
+                return std::nullopt;
+            }
+            open = true;
+            if (length < 255U) {
+                packets.push_back(std::move(current));
+                current.clear();
+                open = false;
+            }
+        }
+    }
+    return packets;
+}
+
+// ADR-0337: which Ogg codec a file's first packet opens -- Opus or Vorbis;
+// none for anything else (Ogg FLAC, Speex, Theora, …).
+enum class OggCodec : std::uint8_t { opus, vorbis };
+[[nodiscard]] inline std::optional<OggCodec>
+ogg_codec(const std::vector<unsigned char>& identification) {
+    const auto starts = [&identification](const std::string_view magic) {
+        return identification.size() >= magic.size() &&
+               std::equal(magic.begin(), magic.end(), identification.begin());
+    };
+    if (starts("OpusHead")) {
+        return OggCodec::opus;
+    }
+    if (starts(std::string_view{"\x01vorbis", 7U})) {
+        return OggCodec::vorbis;
+    }
+    return std::nullopt;
 }
 
 } // namespace trackknife::metadata::ogg_stream_detail

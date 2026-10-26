@@ -25,8 +25,8 @@ proved the audio untouched but not the comment's covers.
   stored, every one of them, and compared again; a copy whose covers still
   differ is refused -- "the file's cover would be lost by this tag write"
   -- rather than published.
-- Writing covers into Ogg files on purpose is not part of this: their
-  covers stay read-only (ADR-0137) until a decision of its own.
+- Writing covers into Ogg files on purpose is not part of this; ADR-0337
+  decides it.
 
 ## Consequences
 

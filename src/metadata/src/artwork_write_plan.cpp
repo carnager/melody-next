@@ -3,6 +3,7 @@
 #include "trackknife/metadata/artwork_write_plan.hpp"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <ranges>
 #include <string>
@@ -345,7 +346,8 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
             !is_qualified_artwork_adapter(inventory->embedded_adapter_name)) {
             add_issue(source, ArtworkWritePlanIssueKind::writer_unavailable,
                       plan_error(core::ErrorCode::unsupported,
-                                 "artwork changes require a qualified FLAC, MP3, or MP4 file",
+                                 "artwork changes require a FLAC, MP3, MP4, Opus or Vorbis file "
+                                 "whose covers can be written",
                                  source.raw_media_path));
             continue;
         }
@@ -588,8 +590,24 @@ revalidate_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents
 }
 
 bool is_qualified_artwork_adapter(const std::string_view adapter_name) {
-    return adapter_name == "taglib-flac-picture-v1" || adapter_name == "taglib-id3v2-apic-v1" ||
-           adapter_name == "taglib-mp4-covr-v1";
+    // ADR-0337: and Opus and Vorbis comments whose covers TagLib all reads.
+    return !text_adapter_for_artwork(adapter_name).empty();
+}
+
+std::string_view text_adapter_for_artwork(const std::string_view artwork_adapter) {
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 5> pairs{{
+        {"taglib-flac-picture-v1", "taglib-flac-v1"},
+        {"taglib-id3v2-apic-v1", "taglib-mpeg-v1"},
+        {"taglib-mp4-covr-v1", "taglib-mp4-v1"},
+        {"taglib-opus-picture-v1", "taglib-opus-v1"},
+        {"taglib-vorbis-picture-v1", "taglib-vorbis-v1"},
+    }};
+    for (const auto& [artwork, text] : pairs) {
+        if (artwork == artwork_adapter) {
+            return text;
+        }
+    }
+    return {};
 }
 
 } // namespace trackknife::metadata

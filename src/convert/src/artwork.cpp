@@ -101,8 +101,8 @@ resolve_conversion_artwork(const std::string& source_raw_path,
     std::ranges::sort(embedded_items, front_first);
     std::ranges::sort(external_items, front_first);
 
-    // Qualified native-FLAC pictures first, with their role-level type and
-    // description intact.
+    // Pictures the inventory reads first -- FLAC, and Opus and Vorbis
+    // (ADR-0337) -- with their role-level type and description intact.
     for (const auto& item : embedded_items) {
         if (auto resolved = artwork_from_inventory_item(item, cancellation)) {
             return resolved;

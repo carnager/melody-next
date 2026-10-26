@@ -2,6 +2,8 @@
 
 #include "trackknife/metadata/artwork.hpp"
 
+#include "ogg_stream_detail.hpp"
+
 extern "C" {
 #include <libavutil/mem.h>
 #include <libavutil/sha.h>
@@ -17,7 +19,10 @@ extern "C" {
 #include <mp4item.h>
 #include <mp4tag.h>
 #include <mpegfile.h>
+#include <opusfile.h>
 #include <tfilestream.h>
+#include <vorbisfile.h>
+#include <xiphcomment.h>
 
 #include <algorithm>
 #include <array>
@@ -85,6 +90,61 @@ struct InspectedImage {
     const auto first = static_cast<unsigned char>(marker[0]);
     const auto second = static_cast<unsigned char>(marker[1]);
     return first == 0xFFU && (second & 0xE0U) == 0xE0U;
+}
+
+// ADR-0337: an Opus or Vorbis file -- told by its first packet, so Ogg FLAC
+// and other Ogg streams stay out.
+[[nodiscard]] std::optional<ogg_stream_detail::OggCodec> native_ogg(const std::string& raw_path) {
+    auto first = ogg_stream_detail::read_leading_packets(raw_path, 1U);
+    return first && !first->empty() ? ogg_stream_detail::ogg_codec(first->front()) : std::nullopt;
+}
+
+// An Opus or Vorbis file opened read-only for its comment's pictures.
+struct OggComment {
+    std::unique_ptr<TagLib::FileStream> stream;
+    std::unique_ptr<TagLib::File> file;
+    TagLib::Ogg::XiphComment* comment{nullptr};
+};
+
+[[nodiscard]] OggComment open_ogg_comment(const std::string& raw_path,
+                                          const ogg_stream_detail::OggCodec codec) {
+    OggComment opened;
+    // Read-only: opened for writing, closing it reads as a change to
+    // anything watching the folder (ADR-0232).
+    opened.stream = std::make_unique<TagLib::FileStream>(raw_path.c_str(), true);
+    if (codec == ogg_stream_detail::OggCodec::opus) {
+        auto file = std::make_unique<TagLib::Ogg::Opus::File>(opened.stream.get(), false);
+        opened.comment = file->isValid() ? file->tag() : nullptr;
+        opened.file = std::move(file);
+    } else {
+        auto file = std::make_unique<TagLib::Vorbis::File>(opened.stream.get(), false);
+        opened.comment = file->isValid() ? file->tag() : nullptr;
+        opened.file = std::move(file);
+    }
+    return opened;
+}
+
+// ADR-0337: whether every cover the comment stores is a picture TagLib
+// reads -- no older COVERART, no block it cannot parse -- so a write through
+// it keeps the others as they are. Where not, the covers are read and left
+// alone.
+[[nodiscard]] bool ogg_covers_clean(const std::string& raw_path,
+                                    const ogg_stream_detail::OggCodec codec,
+                                    const std::size_t pictures_read) {
+    const auto packets = ogg_stream_detail::read_leading_packets(raw_path, 2U);
+    if (!packets || packets->size() < 2U) {
+        return false;
+    }
+    const auto magic_size = codec == ogg_stream_detail::OggCodec::opus ? 8U : 7U;
+    const auto entries = ogg_stream_detail::comment_entries((*packets)[1], magic_size);
+    if (!entries) {
+        return false;
+    }
+    const auto covers = ogg_stream_detail::cover_entries(*entries);
+    return covers.size() == pictures_read &&
+           std::ranges::all_of(covers, [](const std::string& cover) {
+               return cover.starts_with("METADATA_BLOCK_PICTURE=");
+           });
 }
 
 [[nodiscard]] core::Result<core::ContentFingerprint>
@@ -536,19 +596,10 @@ read_artwork_image_bytes(const ArtworkImageFile& image, const std::uint64_t maxi
         const auto missing_ordinal =
             error(core::ErrorCode::conflict, "embedded artwork donor ordinal no longer exists",
                   image.raw_path);
-        // Every embedded adapter rereads through the same derivation the
-        // inventory used, so the equality contract below stays exact.
-        if (is_native_flac(image.raw_path)) {
-            // Read-only: opened for writing, closing it reads as a change to
-            // anything watching the folder (ADR-0232).
-            TagLib::FileStream stream{image.raw_path.c_str(), true};
-            TagLib::FLAC::File file{&stream, false};
-            if (!file.isValid()) {
-                return std::unexpected(error(core::ErrorCode::backend,
-                                             "TagLib rejected the embedded artwork donor",
-                                             image.raw_path));
-            }
-            const auto pictures = file.pictureList();
+        // A FLAC picture block -- of a FLAC file, or an Opus or Vorbis
+        // comment -- as the inventory derived it.
+        const auto take_picture =
+            [&](const TagLib::List<TagLib::FLAC::Picture*>& pictures) -> core::Result<void> {
             if (ordinal >= pictures.size() ||
                 pictures[static_cast<unsigned int>(ordinal)] == nullptr) {
                 return std::unexpected(missing_ordinal);
@@ -570,6 +621,33 @@ read_artwork_image_bytes(const ArtworkImageFile& image, const std::uint64_t maxi
                 picture->height() > 0
                     ? std::optional{static_cast<std::uint32_t>(picture->height())}
                     : inspected.and_then([](const auto& value) { return value.height; });
+            return {};
+        };
+        // Every embedded adapter rereads through the same derivation the
+        // inventory used, so the equality contract below stays exact.
+        if (is_native_flac(image.raw_path)) {
+            // Read-only: opened for writing, closing it reads as a change to
+            // anything watching the folder (ADR-0232).
+            TagLib::FileStream stream{image.raw_path.c_str(), true};
+            TagLib::FLAC::File file{&stream, false};
+            if (!file.isValid()) {
+                return std::unexpected(error(core::ErrorCode::backend,
+                                             "TagLib rejected the embedded artwork donor",
+                                             image.raw_path));
+            }
+            if (auto taken = take_picture(file.pictureList()); !taken) {
+                return std::unexpected(std::move(taken.error()));
+            }
+        } else if (const auto codec = native_ogg(image.raw_path)) {
+            const auto opened = open_ogg_comment(image.raw_path, *codec);
+            if (opened.comment == nullptr) {
+                return std::unexpected(error(core::ErrorCode::backend,
+                                             "TagLib rejected the embedded artwork donor",
+                                             image.raw_path));
+            }
+            if (auto taken = take_picture(opened.comment->pictureList()); !taken) {
+                return std::unexpected(std::move(taken.error()));
+            }
         } else if (is_native_mp4(image.raw_path)) {
             TagLib::FileStream stream{image.raw_path.c_str(), true};
             TagLib::MP4::File file{&stream, false};
@@ -690,19 +768,9 @@ read_local_artwork_inventory(const std::string& raw_media_path,
     };
     std::uint64_t total_bytes = 0U;
 
-    bool embedded_read = false;
-    if (is_native_flac(raw_media_path)) {
-        TagLib::FileStream stream{raw_media_path.c_str(), true};
-        TagLib::FLAC::File file{&stream, false};
-        if (!file.isValid()) {
-            return std::unexpected(error(core::ErrorCode::backend,
-                                         "TagLib rejected the FLAC artwork source",
-                                         raw_media_path));
-        }
-        result.capabilities.embedded_readable = true;
-        result.embedded_adapter_name = "taglib-flac-picture-v1";
-        embedded_read = true;
-        const auto pictures = file.pictureList();
+    // FLAC picture blocks, in FLAC files and Opus and Vorbis comments alike.
+    const auto append_pictures =
+        [&](const TagLib::List<TagLib::FLAC::Picture*>& pictures) -> core::Result<void> {
         for (std::size_t ordinal = 0U; ordinal < pictures.size(); ++ordinal) {
             if (cancellation.is_cancellation_requested()) {
                 return std::unexpected(cancelled(raw_media_path));
@@ -710,7 +778,7 @@ read_local_artwork_inventory(const std::string& raw_media_path,
             const auto* picture = pictures[static_cast<unsigned int>(ordinal)];
             if (picture == nullptr) {
                 return std::unexpected(error(core::ErrorCode::backend,
-                                             "FLAC artwork inventory contains a null picture",
+                                             "the artwork inventory contains a null picture",
                                              raw_media_path));
             }
             const auto data = picture->data();
@@ -734,6 +802,42 @@ read_local_artwork_inventory(const std::string& raw_media_path,
                 !appended) {
                 return std::unexpected(std::move(appended.error()));
             }
+        }
+        return {};
+    };
+    bool embedded_read = false;
+    if (is_native_flac(raw_media_path)) {
+        TagLib::FileStream stream{raw_media_path.c_str(), true};
+        TagLib::FLAC::File file{&stream, false};
+        if (!file.isValid()) {
+            return std::unexpected(error(core::ErrorCode::backend,
+                                         "TagLib rejected the FLAC artwork source",
+                                         raw_media_path));
+        }
+        result.capabilities.embedded_readable = true;
+        result.embedded_adapter_name = "taglib-flac-picture-v1";
+        embedded_read = true;
+        if (auto appended = append_pictures(file.pictureList()); !appended) {
+            return std::unexpected(std::move(appended.error()));
+        }
+    } else if (const auto codec = native_ogg(raw_media_path)) {
+        const auto opened = open_ogg_comment(raw_media_path, *codec);
+        if (opened.comment == nullptr) {
+            return std::unexpected(error(core::ErrorCode::backend,
+                                         "TagLib rejected the Ogg artwork source", raw_media_path));
+        }
+        const auto opus = *codec == ogg_stream_detail::OggCodec::opus;
+        const auto pictures = opened.comment->pictureList();
+        result.capabilities.embedded_readable = true;
+        // Covers TagLib cannot all read are shown, not written: a write
+        // through it would lose them (ADR-0337).
+        result.embedded_adapter_name =
+            ogg_covers_clean(raw_media_path, *codec, pictures.size())
+                ? (opus ? "taglib-opus-picture-v1" : "taglib-vorbis-picture-v1")
+                : (opus ? "taglib-opus-picture-readonly-v1" : "taglib-vorbis-picture-readonly-v1");
+        embedded_read = true;
+        if (auto appended = append_pictures(pictures); !appended) {
+            return std::unexpected(std::move(appended.error()));
         }
     } else if (is_native_mp4(raw_media_path)) {
         TagLib::FileStream stream{raw_media_path.c_str(), true};

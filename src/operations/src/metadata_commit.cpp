@@ -3061,10 +3061,7 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
     }
     // Each artwork adapter pairs with exactly one text adapter of the same
     // container (ADR-0137).
-    const std::string_view expected_text_adapter =
-        source_plan.adapter_name == "taglib-id3v2-apic-v1" ? "taglib-mpeg-v1"
-        : source_plan.adapter_name == "taglib-mp4-covr-v1" ? "taglib-mp4-v1"
-                                                           : "taglib-flac-v1";
+    const auto expected_text_adapter = metadata::text_adapter_for_artwork(source_plan.adapter_name);
     if (fresh_document->source_revision != *source_plan.observed_media_revision ||
         fresh_document->adapter_name != expected_text_adapter ||
         fresh_inventory->media_revision != *source_plan.observed_media_revision ||

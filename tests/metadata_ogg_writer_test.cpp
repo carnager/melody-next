@@ -3,6 +3,9 @@
 #include "../src/metadata/src/ogg_stream_detail.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/formats/decoder.hpp"
+#include "trackknife/metadata/artwork.hpp"
+#include "trackknife/metadata/artwork_write_plan.hpp"
+#include "trackknife/metadata/artwork_writers.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/ogg_writer.hpp"
@@ -149,7 +152,7 @@ void roundTripsCommentEditsPreservingPackets(const std::filesystem::path& fixtur
     CHECK(read->adapter_name == expected_adapter);
     CHECK(read->capabilities.fields_writable);
     CHECK(read->capabilities.unknown_data_preserved_on_write);
-    CHECK(!read->capabilities.pictures_writable);
+    CHECK(read->capabilities.pictures_writable);
     CHECK(read->document.first_effective_value("title") ==
           std::optional<std::string>{"Fixture Tone"});
 
@@ -321,6 +324,188 @@ void keepsCoversThroughTagWrites(const std::filesystem::path& fixture_directory,
     CHECK(decoded_pcm_matches(source, prepared_path));
 }
 
+// ADR-0337: covers in Opus and Vorbis comments are read, replaced, removed
+// and added like FLAC's -- each change in its place, the others as they
+// were, the audio packets byte-identical; a comment holding covers TagLib
+// cannot all read is shown, not written.
+void roundTripsOggArtworkEdits(const std::filesystem::path& fixture_directory,
+                               const std::string_view fixture, const bool opus) {
+    using trackknife::metadata::ArtworkRole;
+    using trackknife::metadata::ArtworkWritePlanIntent;
+    using trackknife::metadata::ArtworkWritePlanIntentKind;
+    const std::string qualified = opus ? "taglib-opus-picture-v1" : "taglib-vorbis-picture-v1";
+
+    TemporaryDirectory directory;
+    const auto media = materialize(fixture_directory, fixture, directory.path() / "covered.ogg");
+    const auto plain = materialize(fixture_directory, fixture, directory.path() / "plain.ogg");
+    const auto replacement = materialize(fixture_directory, "external-blue-jpeg.b64",
+                                         directory.path() / "replacement.jpg");
+    const auto with_comment = [opus](const std::filesystem::path& path, const auto& edit) {
+        std::unique_ptr<TagLib::File> file;
+        TagLib::Ogg::XiphComment* comment = nullptr;
+        if (opus) {
+            auto opened = std::make_unique<TagLib::Ogg::Opus::File>(path.c_str());
+            comment = opened->tag();
+            file = std::move(opened);
+        } else {
+            auto opened = std::make_unique<TagLib::Vorbis::File>(path.c_str());
+            comment = opened->tag();
+            file = std::move(opened);
+        }
+        CHECK(file->isValid() && comment != nullptr);
+        if (comment != nullptr) {
+            edit(*comment);
+            CHECK(file->save());
+        }
+    };
+    const auto picture = [](const TagLib::FLAC::Picture::Type type, const char* description,
+                            const std::vector<unsigned char>& bytes) {
+        auto* made = new TagLib::FLAC::Picture;
+        made->setType(type);
+        made->setMimeType("image/jpeg");
+        made->setDescription(description);
+        made->setData(TagLib::ByteVector{reinterpret_cast<const char*>(bytes.data()),
+                                         static_cast<unsigned int>(bytes.size())});
+        return made;
+    };
+    const std::vector<unsigned char> front{0xFFU, 0xD8U, 0xFFU, 0xDBU, 0x00U,
+                                           0x04U, 0x01U, 0x02U, 0xFFU, 0xD9U};
+    const std::vector<unsigned char> back{0xFFU, 0xD8U, 0xFFU, 0xDBU, 0x00U,
+                                          0x04U, 0x03U, 0x04U, 0xFFU, 0xD9U};
+    with_comment(media, [&](TagLib::Ogg::XiphComment& comment) {
+        comment.addPicture(picture(TagLib::FLAC::Picture::FrontCover, "the front", front));
+        comment.addPicture(picture(TagLib::FLAC::Picture::BackCover, "the back", back));
+    });
+
+    auto policy = trackknife::metadata::default_artwork_inventory_policy();
+    policy.external_patterns.clear();
+    const auto inventory =
+        trackknife::metadata::read_local_artwork_inventory(media.native(), policy);
+    CHECK(inventory.has_value());
+    if (!inventory) {
+        return;
+    }
+    CHECK(inventory->embedded_adapter_name == qualified);
+    CHECK(trackknife::metadata::is_qualified_artwork_adapter(inventory->embedded_adapter_name));
+    CHECK(inventory->items.size() == 2U);
+    if (inventory->items.size() != 2U) {
+        return;
+    }
+    CHECK(inventory->items[0].role == ArtworkRole::front);
+    CHECK(inventory->items[0].description == "the front");
+    CHECK(inventory->items[1].role == ArtworkRole::back);
+
+    const ArtworkWritePlanIntent replace_intent{
+        .occurrence_index = 0U,
+        .raw_media_path = media.native(),
+        .expected_media_revision = inventory->media_revision,
+        .target_ordinal = 0U,
+        .expected_target_fingerprint = inventory->items[0].content_fingerprint,
+        .kind = ArtworkWritePlanIntentKind::replace,
+        .replacement_raw_path = replacement.native(),
+        .added_role = ArtworkRole::front,
+        .added_description = {},
+        .replacement_embedded_source = std::nullopt,
+    };
+    const auto write =
+        [&](const std::vector<ArtworkWritePlanIntent>& intents,
+            const std::string& name) -> std::optional<trackknife::metadata::LocalArtworkInventory> {
+        const auto plan = trackknife::metadata::revalidate_artwork_write_plan(intents);
+        CHECK(plan.has_value() && plan->ready());
+        if (!plan || !plan->ready()) {
+            return std::nullopt;
+        }
+        CHECK(plan->sources.front().adapter_name == qualified);
+        const auto prepared_path = directory.path() / name;
+        const auto prepared = trackknife::metadata::prepare_qualified_artwork_write_copy(
+            plan->sources.front(), prepared_path.native());
+        if (!prepared) {
+            std::cerr << fixture << " " << name << ": " << prepared.error().message << '\n';
+            CHECK(false);
+            return std::nullopt;
+        }
+        CHECK(decoded_pcm_matches(std::filesystem::path{intents.front().raw_media_path},
+                                  prepared_path));
+        auto reread =
+            trackknife::metadata::read_local_artwork_inventory(prepared_path.native(), policy);
+        CHECK(reread.has_value());
+        return reread ? std::optional{std::move(*reread)} : std::nullopt;
+    };
+
+    // Replaced in its place: the new picture, the old type and description.
+    if (const auto replaced = write({replace_intent}, "replaced.ogg")) {
+        CHECK(replaced->items.size() == 2U);
+        if (replaced->items.size() == 2U) {
+            CHECK(replaced->items[0].content_fingerprint !=
+                  inventory->items[0].content_fingerprint);
+            CHECK(replaced->items[0].role == ArtworkRole::front);
+            CHECK(replaced->items[0].description == "the front");
+            CHECK(replaced->items[1].content_fingerprint ==
+                  inventory->items[1].content_fingerprint);
+            CHECK(replaced->items[1].description == "the back");
+        }
+    }
+    // Removed: the other stays, first now.
+    auto remove_intent = replace_intent;
+    remove_intent.kind = ArtworkWritePlanIntentKind::remove;
+    remove_intent.replacement_raw_path.reset();
+    if (const auto removed = write({remove_intent}, "removed.ogg")) {
+        CHECK(removed->items.size() == 1U);
+        if (removed->items.size() == 1U) {
+            CHECK(removed->items[0].content_fingerprint == inventory->items[1].content_fingerprint);
+            CHECK(removed->items[0].source_ordinal == 0U);
+        }
+    }
+    // Added to a file without covers: its role's type, the description given.
+    auto add_intent = replace_intent;
+    add_intent.raw_media_path = plain.native();
+    add_intent.expected_media_revision =
+        *trackknife::core::observe_local_source_revision(plain.native());
+    add_intent.kind = ArtworkWritePlanIntentKind::add;
+    add_intent.expected_target_fingerprint = {};
+    add_intent.added_role = ArtworkRole::back;
+    add_intent.added_description = "added";
+    if (const auto added = write({add_intent}, "added.ogg")) {
+        CHECK(added->items.size() == 1U);
+        if (added->items.size() == 1U) {
+            CHECK(added->items[0].role == ArtworkRole::back);
+            CHECK(added->items[0].description == "added");
+            CHECK(added->items[0].mime_type == "image/jpeg");
+        }
+    }
+    // Two changes to one file at once: replaced, and one more added.
+    const auto other =
+        materialize(fixture_directory, "cover-64-png.b64", directory.path() / "other.png");
+    auto second_add = add_intent;
+    second_add.replacement_raw_path = other.native();
+    second_add.raw_media_path = media.native();
+    second_add.expected_media_revision = inventory->media_revision;
+    second_add.target_ordinal = 2U;
+    if (const auto both = write({replace_intent, second_add}, "both.ogg")) {
+        CHECK(both->items.size() == 3U);
+        if (both->items.size() == 3U) {
+            CHECK(both->items[1].content_fingerprint == inventory->items[1].content_fingerprint);
+            CHECK(both->items[2].description == "added");
+        }
+    }
+
+    // An older COVERART beside the pictures: read, but not to be written.
+    const auto legacy = materialize(fixture_directory, fixture, directory.path() / "legacy.ogg");
+    with_comment(legacy, [&](TagLib::Ogg::XiphComment& comment) {
+        comment.addPicture(picture(TagLib::FLAC::Picture::FrontCover, "", front));
+        comment.addField("COVERART", "/9j/4AAQSkZJRgABAQ==", false);
+        comment.addField("COVERARTMIME", "image/jpeg", false);
+    });
+    const auto legacy_inventory =
+        trackknife::metadata::read_local_artwork_inventory(legacy.native(), policy);
+    CHECK(legacy_inventory.has_value());
+    if (legacy_inventory) {
+        CHECK(legacy_inventory->capabilities.embedded_readable);
+        CHECK(!trackknife::metadata::is_qualified_artwork_adapter(
+            legacy_inventory->embedded_adapter_name));
+    }
+}
+
 } // namespace
 
 int main(const int argc, char** argv) {
@@ -333,6 +518,8 @@ int main(const int argc, char** argv) {
                                                 "taglib-opus-v1");
         keepsCoversThroughTagWrites(fixture_directory, "tagged-tone-vorbis.b64", false);
         keepsCoversThroughTagWrites(fixture_directory, "tagged-tone-opus.b64", true);
+        roundTripsOggArtworkEdits(fixture_directory, "tagged-tone-vorbis.b64", false);
+        roundTripsOggArtworkEdits(fixture_directory, "tagged-tone-opus.b64", true);
     }
     return failures == 0 ? 0 : 1;
 }

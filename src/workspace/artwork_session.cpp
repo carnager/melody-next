@@ -839,8 +839,8 @@ void ArtworkSession::present(const BatchResult& result) {
             QString reason;
             if (!inventory.capabilities.embedded_readable ||
                 !metadata::is_qualified_artwork_adapter(inventory.embedded_adapter_name)) {
-                reason = QStringLiteral(
-                    "Artwork changes need a FLAC, MP3, or MP4 file; this file is view-only");
+                reason = QStringLiteral("Artwork changes need a FLAC, MP3, MP4, Opus or Vorbis "
+                                        "file whose covers can be written; this file is view-only");
             } else if (!source.scope.captured_revision_consistent ||
                        !source.scope.captured_revision ||
                        *source.scope.captured_revision != inventory.media_revision) {
@@ -1407,9 +1407,10 @@ void ArtworkSession::startReview(const metadata::ArtworkWritePlanIntentKind kind
         }
     }
     if (intents.empty()) {
-        setStatus(kind == metadata::ArtworkWritePlanIntentKind::add
-                      ? QStringLiteral("Select at least one writable FLAC, MP3, or MP4 file")
-                      : QStringLiteral("Select at least one writable embedded cover"));
+        setStatus(
+            kind == metadata::ArtworkWritePlanIntentKind::add
+                ? QStringLiteral("Select at least one writable FLAC, MP3, MP4, Opus or Vorbis file")
+                : QStringLiteral("Select at least one writable embedded cover"));
         emit changed();
         return;
     }
@@ -1492,7 +1493,8 @@ bool ArtworkSession::reviewFetchedCover(const std::string& replacement_raw_path)
         }
     }
     if (intents.empty()) {
-        setStatus(QStringLiteral("Select at least one writable FLAC, MP3, or MP4 file"));
+        setStatus(
+            QStringLiteral("Select at least one writable FLAC, MP3, MP4, Opus or Vorbis file"));
         emit changed();
         return false;
     }

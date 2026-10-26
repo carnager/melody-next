@@ -3,6 +3,7 @@
 #include "trackknife/metadata/ogg_writer.hpp"
 #include "trackknife/core/posix.hpp"
 
+#include "container_preservation_detail.hpp"
 #include "ogg_stream_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
@@ -69,13 +70,17 @@ read_file_bytes(const std::string& raw_path, const std::string& source_raw_path,
     return packet.size() >= magic.size() && std::equal(magic.begin(), magic.end(), packet.begin());
 }
 
+} // namespace
+
+namespace preservation_detail {
+
 // The qualification proof: every logical packet except the comment packet
 // (index 1 in both Vorbis and Opus streams) is byte-identical, the comment
 // packet keeps its codec magic on both sides, and the packet counts match.
-[[nodiscard]] core::Result<void>
-verify_ogg_packet_preservation(const std::string& source_raw_path,
-                               const std::string& prepared_raw_path, const bool opus,
-                               const core::CancellationToken& cancellation) {
+core::Result<void> verify_ogg_packet_preservation(const std::string& source_raw_path,
+                                                  const std::string& prepared_raw_path,
+                                                  const bool opus,
+                                                  const core::CancellationToken& cancellation) {
     auto source_bytes = read_file_bytes(source_raw_path, source_raw_path, prepared_raw_path);
     if (!source_bytes) {
         return std::unexpected(std::move(source_bytes.error()));
@@ -125,6 +130,12 @@ verify_ogg_packet_preservation(const std::string& source_raw_path,
     }
     return {};
 }
+
+} // namespace preservation_detail
+
+namespace {
+
+using preservation_detail::verify_ogg_packet_preservation;
 
 // The cover entries of an Ogg file's comment packet.
 [[nodiscard]] core::Result<std::vector<std::string>>

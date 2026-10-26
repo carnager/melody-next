@@ -16,10 +16,14 @@
 #include <mp4item.h>
 #include <mp4tag.h>
 #include <mpegfile.h>
+#include <opusfile.h>
+#include <vorbisfile.h>
+#include <xiphcomment.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,6 +56,12 @@ struct ContainerArtworkFormat {
     std::function<core::Result<void>(const std::string&, const std::string&,
                                      const core::CancellationToken&)>
         verify_preservation;
+    // Text changes written into the prepared copy, with or without
+    // Picard's paired totals spellings (Vorbis comments carry them).
+    std::function<core::Result<void>(const MetadataWritePlanSource&, const std::string&,
+                                     const core::CancellationToken&)>
+        apply_text;
+    bool paired_totals{false};
 };
 
 [[nodiscard]] core::Error writer_error(const core::ErrorCode code, std::string message,
@@ -210,6 +220,100 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
     return {};
 }
 
+// ADR-0337: one picture change in an Opus or Vorbis comment -- its pictures
+// rebuilt in order, the changed one in its place: a comment has no way to
+// change a picture where it stands. A replacement keeps the original's type
+// and description; an added picture takes its role's.
+[[nodiscard]] core::Result<void>
+apply_xiph_picture_change(const bool opus, const ArtworkWritePlanSource& source_plan,
+                          const std::string& prepared_raw_path,
+                          const std::vector<unsigned char>& replacement) {
+    std::unique_ptr<TagLib::File> file;
+    TagLib::Ogg::XiphComment* comment = nullptr;
+    if (opus) {
+        auto opened = std::make_unique<TagLib::Ogg::Opus::File>(prepared_raw_path.c_str(), false);
+        comment = opened->isValid() ? opened->tag() : nullptr;
+        file = std::move(opened);
+    } else {
+        auto opened = std::make_unique<TagLib::Vorbis::File>(prepared_raw_path.c_str(), false);
+        comment = opened->isValid() ? opened->tag() : nullptr;
+        file = std::move(opened);
+    }
+    if (comment == nullptr) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib rejected the prepared Ogg copy",
+                                            source_plan.raw_media_path, prepared_raw_path));
+    }
+    const auto& change = source_plan.change;
+    const auto pictures = comment->pictureList();
+    // Copies first: taking a picture out of the comment deletes it.
+    std::vector<std::unique_ptr<TagLib::FLAC::Picture>> current;
+    for (const auto* picture : pictures) {
+        auto copy = std::make_unique<TagLib::FLAC::Picture>();
+        if (picture == nullptr || !copy->parse(picture->render())) {
+            return std::unexpected(writer_error(core::ErrorCode::backend,
+                                                "an Ogg picture could not be copied",
+                                                source_plan.raw_media_path, prepared_raw_path));
+        }
+        current.push_back(std::move(copy));
+    }
+    const auto ordinal = change.target_ordinal;
+    const auto add = change.kind == ArtworkWritePlanIntentKind::add;
+    if (change.kind == ArtworkWritePlanIntentKind::batch ||
+        (add ? ordinal != current.size() : ordinal >= current.size())) {
+        return std::unexpected(writer_error(core::ErrorCode::conflict,
+                                            add ? "the Ogg picture count differs from the plan"
+                                                : "the targeted Ogg picture no longer exists",
+                                            source_plan.raw_media_path, prepared_raw_path));
+    }
+    std::unique_ptr<TagLib::FLAC::Picture> made;
+    if (change.kind != ArtworkWritePlanIntentKind::remove) {
+        const auto& image = *change.replacement;
+        made = std::make_unique<TagLib::FLAC::Picture>();
+        made->setType(add ? artwork_detail::canonical_picture_type(change.added_role)
+                          : current[ordinal]->type());
+        made->setMimeType(TagLib::String{image.mime_type, TagLib::String::UTF8});
+        made->setDescription(add ? TagLib::String{change.added_description, TagLib::String::UTF8}
+                                 : current[ordinal]->description());
+        made->setWidth(static_cast<int>(image.width.value_or(0U)));
+        made->setHeight(static_cast<int>(image.height.value_or(0U)));
+        made->setColorDepth(0);
+        made->setNumColors(0);
+        made->setData(to_byte_vector(replacement));
+    }
+    if (add) {
+        current.push_back(std::move(made));
+    } else if (made) {
+        current[ordinal] = std::move(made);
+    } else {
+        current.erase(current.begin() + static_cast<std::ptrdiff_t>(ordinal));
+    }
+    comment->removeAllPictures();
+    for (auto& picture : current) {
+        comment->addPicture(picture.release());
+    }
+    if (!file->save()) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib could not save the prepared Ogg copy",
+                                            source_plan.raw_media_path, prepared_raw_path));
+    }
+    return {};
+}
+
+// Text changes through TagLib's properties, for a container whose file
+// type opens the prepared copy.
+template <typename File, typename... Arguments>
+[[nodiscard]] auto text_writer(const std::string_view label, const bool paired_totals,
+                               Arguments... arguments) {
+    return [label, paired_totals, arguments...](const MetadataWritePlanSource& plan,
+                                                const std::string& prepared,
+                                                const core::CancellationToken& cancellation) {
+        File file{prepared.c_str(), false, arguments...};
+        return text_writer_detail::apply_text_changes_to_properties(label, plan, file, prepared,
+                                                                    cancellation, paired_totals);
+    };
+}
+
 [[nodiscard]] const ContainerArtworkFormat& mp3_format() {
     static const ContainerArtworkFormat format{
         .label = "MP3",
@@ -219,6 +323,8 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
         .supports_descriptions = true,
         .apply = apply_apic_change,
         .verify_preservation = preservation_detail::verify_mp3_binary_preservation,
+        .apply_text = text_writer<TagLib::MPEG::File>("MP3", false),
+        .paired_totals = false,
     };
     return format;
 }
@@ -232,8 +338,58 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
         .supports_descriptions = false,
         .apply = apply_covr_change,
         .verify_preservation = preservation_detail::verify_mp4_box_preservation,
+        .apply_text = text_writer<TagLib::MP4::File>("MP4", false, TagLib::AudioProperties::Average,
+                                                     mp4_detail::FreeFormFactory::instance()),
+        .paired_totals = false,
     };
     return format;
+}
+
+// ADR-0337: covers in Opus and Vorbis comments.
+[[nodiscard]] const ContainerArtworkFormat& ogg_format(const bool opus) {
+    const auto make = [](const bool is_opus) {
+        return ContainerArtworkFormat{
+            .label = is_opus ? "Opus" : "Vorbis",
+            .artwork_adapter = is_opus ? "taglib-opus-picture-v1" : "taglib-vorbis-picture-v1",
+            .text_adapter = is_opus ? "taglib-opus-v1" : "taglib-vorbis-v1",
+            // Pictures are no text field of the comment; nothing to set aside.
+            .artwork_object_prefix = "METADATA_BLOCK_PICTURE",
+            .supports_descriptions = true,
+            .apply =
+                [is_opus](const ArtworkWritePlanSource& source_plan, const std::string& prepared,
+                          const std::vector<unsigned char>& replacement) {
+                    return apply_xiph_picture_change(is_opus, source_plan, prepared, replacement);
+                },
+            .verify_preservation =
+                [is_opus](const std::string& source, const std::string& prepared,
+                          const core::CancellationToken& cancellation) {
+                    return preservation_detail::verify_ogg_packet_preservation(
+                        source, prepared, is_opus, cancellation);
+                },
+            .apply_text =
+                is_opus ? std::function<core::Result<void>(
+                              const MetadataWritePlanSource&, const std::string&,
+                              const core::CancellationToken&)>{text_writer<TagLib::Ogg::Opus::
+                                                                               File>("Ogg", true)}
+                        : text_writer<TagLib::Vorbis::File>("Ogg", true),
+            .paired_totals = true,
+        };
+    };
+    static const ContainerArtworkFormat opus_format = make(true);
+    static const ContainerArtworkFormat vorbis_format = make(false);
+    return opus ? opus_format : vorbis_format;
+}
+
+// The container whose artwork or text adapter this is; none for FLAC, which
+// is written by its own rewriter.
+[[nodiscard]] const ContainerArtworkFormat* container_format(const std::string_view adapter) {
+    for (const auto* format :
+         {&mp3_format(), &mp4_format(), &ogg_format(true), &ogg_format(false)}) {
+        if (format->artwork_adapter == adapter || format->text_adapter == adapter) {
+            return format;
+        }
+    }
+    return nullptr;
 }
 
 // Predicts one resulting item's identity attributes so the reread
@@ -562,6 +718,7 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
     }
     text_writer_detail::PreparedPathGuard guard{prepared};
     const auto flac = plan.adapter_name == "taglib-flac-v1";
+    const auto* format = flac ? nullptr : container_format(plan.adapter_name);
     if (flac) {
         const text_writer_detail::Descriptor descriptor{
             ::open(prepared.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600)};
@@ -579,6 +736,9 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
             return fail("could not preserve file permissions");
         }
     } else {
+        if (format == nullptr) {
+            return fail("no artwork writer for this container");
+        }
         auto copied = text_writer_detail::copy_source_exclusively(
             "metadata", plan.raw_path, *plan.observed_revision, prepared, cancellation, guard);
         if (!copied) {
@@ -602,29 +762,13 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
                 }
                 bytes = std::move(*loaded);
             }
-            auto applied = plan.adapter_name == "taglib-mpeg-v1"
-                               ? apply_apic_change(single, prepared, bytes)
-                               : apply_covr_change(single, prepared, bytes);
-            if (!applied) {
+            if (auto applied = format->apply(single, prepared, bytes); !applied) {
                 return std::unexpected(applied.error());
             }
         }
         if (!plan.changes.empty()) {
-            if (plan.adapter_name == "taglib-mpeg-v1") {
-                TagLib::MPEG::File file{prepared.c_str(), false};
-                auto applied = text_writer_detail::apply_text_changes_to_properties(
-                    "MP3", plan, file, prepared, cancellation, false);
-                if (!applied) {
-                    return std::unexpected(applied.error());
-                }
-            } else {
-                TagLib::MP4::File file{prepared.c_str(), false, TagLib::AudioProperties::Average,
-                                       mp4_detail::FreeFormFactory::instance()};
-                auto applied = text_writer_detail::apply_text_changes_to_properties(
-                    "MP4", plan, file, prepared, cancellation, false);
-                if (!applied) {
-                    return std::unexpected(applied.error());
-                }
+            if (auto applied = format->apply_text(plan, prepared, cancellation); !applied) {
+                return std::unexpected(applied.error());
             }
         }
         if (core::keep_mode(prepared.c_str(), *copied) != 0) {
@@ -649,8 +793,9 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
     };
     remove_picture_identities(original_document);
     remove_picture_identities(resulting_document);
-    auto text = text_writer_detail::verify_text_result("metadata", original_document,
-                                                       resulting_document, plan, prepared, flac);
+    auto text =
+        text_writer_detail::verify_text_result("metadata", original_document, resulting_document,
+                                               plan, prepared, flac || format->paired_totals);
     if (!text) {
         return std::unexpected(text.error());
     }
@@ -660,14 +805,9 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
         resulting->media_revision != after->source_revision) {
         return fail("prepared covers differ from review");
     }
-    auto preservation =
-        flac ? preservation_detail::verify_flac_composed(plan.raw_path, prepared,
-                                                         !plan.changes.empty(), cancellation)
-        : plan.adapter_name == "taglib-mpeg-v1"
-            ? preservation_detail::verify_mp3_binary_preservation(plan.raw_path, prepared,
-                                                                  cancellation)
-            : preservation_detail::verify_mp4_box_preservation(plan.raw_path, prepared,
-                                                               cancellation);
+    auto preservation = flac ? preservation_detail::verify_flac_composed(
+                                   plan.raw_path, prepared, !plan.changes.empty(), cancellation)
+                             : format->verify_preservation(plan.raw_path, prepared, cancellation);
     if (!preservation) {
         return std::unexpected(preservation.error());
     }
@@ -742,11 +882,9 @@ prepare_qualified_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
                                     .kind = source_plan.change.kind,
                                     .target_ordinal = source_plan.change.target_ordinal};
     }
-    if (source_plan.adapter_name == "taglib-id3v2-apic-v1") {
-        return prepare_mp3_artwork_write_copy(source_plan, prepared_raw_path, cancellation);
-    }
-    if (source_plan.adapter_name == "taglib-mp4-covr-v1") {
-        return prepare_mp4_artwork_write_copy(source_plan, prepared_raw_path, cancellation);
+    if (const auto* format = container_format(source_plan.adapter_name)) {
+        return prepare_container_artwork_write_copy(*format, source_plan, prepared_raw_path,
+                                                    cancellation);
     }
     return prepare_flac_artwork_write_copy(source_plan, prepared_raw_path, cancellation);
 }

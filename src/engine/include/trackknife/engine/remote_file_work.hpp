@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/convert/scan.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/engine/metadata_services.hpp"
@@ -73,6 +74,14 @@ class RemoteFileWork final {
          const loudness::LoudnessScanOptions& options,
          const loudness::LoudnessScanProgressCallback& progress,
          const core::CancellationToken& cancellation);
+
+    // ADR-0336: convert.files -- the engine converting, as the window asks:
+    // in jobs under its line limit, answering for every item in order.
+    [[nodiscard]] core::Result<convert::ConversionScanResult>
+    convert(std::span<const convert::ConversionScanItem> items,
+            const convert::ConversionScanOptions& options,
+            const convert::ConversionScanProgressCallback& progress,
+            const core::CancellationToken& cancellation);
 
     // media.probe: the file's technicals as the engine's decoder sees them.
     [[nodiscard]] core::Result<FileTechnicals> probe(const std::string& raw_path,

@@ -130,10 +130,12 @@ class EncoderPresetEditor final : public QDialog {
 };
 
 ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfilesLoader profiles,
-                             ConvertPresetStore preset_store, QWidget* parent)
+                             ConvertPresetStore preset_store, ConversionRunner runner,
+                             QWidget* parent)
     : QDialog(parent) {
     const auto preset_store_available = static_cast<bool>(preset_store.load);
-    job_ = new ConvertJob(std::move(items), std::move(profiles), std::move(preset_store), this);
+    job_ = new ConvertJob(std::move(items), std::move(profiles), std::move(preset_store),
+                          std::move(runner), this);
     setWindowTitle(job_->title());
     setObjectName(QStringLiteral("bench-convert-dialog"));
     setAttribute(Qt::WA_DeleteOnClose);

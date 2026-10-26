@@ -109,6 +109,19 @@ ConvertProfilesLoader Workspace::convertProfiles() {
     };
 }
 
+ConversionRunner Workspace::localConversionRunner() const {
+    auto work = localEngine().file_work;
+    if (!work) {
+        return {};
+    }
+    return [work = std::move(work)](std::span<const convert::ConversionScanItem> items,
+                                    const convert::ConversionScanOptions& options,
+                                    const convert::ConversionScanProgressCallback& progress,
+                                    const core::CancellationToken& cancellation) {
+        return work->convert(items, options, progress, cancellation);
+    };
+}
+
 ConvertPresetStore Workspace::convertPresets() {
     auto* const persistence_service = persistence_;
     const auto unavailable = QStringLiteral("Melody persistence is unavailable");

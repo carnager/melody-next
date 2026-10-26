@@ -463,6 +463,9 @@ class Workspace final : public QObject {
                                               std::vector<int> rows);
     [[nodiscard]] ConvertProfilesLoader convertProfiles();
     [[nodiscard]] ConvertPresetStore convertPresets();
+    // ADR-0336: conversions by the engine on this computer; none while it
+    // is not connected.
+    [[nodiscard]] ConversionRunner localConversionRunner() const;
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
 

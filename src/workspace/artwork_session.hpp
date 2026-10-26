@@ -61,6 +61,9 @@ class ArtworkSession final : public QObject, public TaggerArtwork {
     [[nodiscard]] bool isBusy() const override {
         return plan_running_ || apply_running_ || export_running_ || cover_fetch_running_;
     }
+    [[nodiscard]] bool isWritingFiles() const override {
+        return plan_running_ || apply_running_ || export_running_;
+    }
     void setWorking(bool working) override;
     void discardPendingChanges() override;
     void requestOperationCancellation() override;

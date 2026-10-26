@@ -494,6 +494,7 @@ class BenchMainWindowTest final : public QObject {
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
     void identifyFetchesTheCoversOfTheAlbumsApplied();
     void fileListShowsTheFilesUnderTheirAlbums();
+    void closingWaitsForACoverThenCloses();
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
     void coverPolicyRoundTrip();

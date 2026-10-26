@@ -1705,6 +1705,132 @@ void BenchMainWindowTest::fileListShowsTheFilesUnderTheirAlbums() {
     delete properties;
 }
 
+// Closed while covers are being saved, the editor waits for the files to be
+// safe -- and then closes by itself, not left open saying it is closing.
+// A cover still being fetched is not waited for.
+void BenchMainWindowTest::closingWaitsForACoverThenCloses() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("01.flac"));
+    // Tagged with release 33333333-…
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    const auto encoded = QFile::encodeName(path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    auto read = metadata::read_local_metadata(raw_path);
+    QVERIFY(read.has_value());
+    const MetadataPropertiesSource source{
+        .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                 .source_revision = read->source_revision,
+                                                 .baseline = read->document},
+        .track_label = QStringLiteral("01"),
+    };
+    QImage cover{16, 16, QImage::Format_ARGB32};
+    cover.fill(Qt::darkCyan);
+    QByteArray png;
+    QBuffer buffer{&png};
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(cover.save(&buffer, "PNG"));
+    buffer.close();
+    // The image is held until the test lets it go.
+    std::function<void(core::Result<QByteArray>)> held;
+    const MusicBrainzLookupService service{
+        .fetch =
+            [&held](const QString& url, std::function<void(core::Result<QByteArray>)> completion) {
+                if (url.startsWith(QStringLiteral("https://coverartarchive.org/release/")) &&
+                    url.endsWith(QStringLiteral("/7.png"))) {
+                    held = std::move(completion);
+                    return;
+                }
+                if (url.startsWith(QStringLiteral("https://coverartarchive.org/release/"))) {
+                    completion(QByteArray{R"json({"images": [{"id": 7, "front": true,
+                        "approved": true, "types": ["Front"], "image":
+                        "https://coverartarchive.org/release/33333333-3333-3333-3333-333333333333/7.png"}]})json"});
+                    return;
+                }
+                completion(std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                                       .message = "unexpected url",
+                                                       .context = {}}));
+            },
+        .fingerprint = {},
+        .acoustid_lookup = {},
+    };
+    // The save is held until the test lets it go.
+    auto released = std::make_shared<std::atomic_bool>(false);
+    auto saving = std::make_shared<std::atomic_bool>(false);
+    const auto open = [&] {
+        QPointer properties = new MetadataPropertiesDialog(
+            1U,
+            [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+                return index == 0U ? std::optional{source} : std::nullopt;
+            },
+            {}, {}, {}, {}, {}, {}, {}, nullptr, {}, service);
+        properties->setAttribute(Qt::WA_DeleteOnClose);
+        properties->setArtworkMutationServices(
+            ArtworkWritePlanApplierFactory{[released, saving] {
+                return ArtworkWritePlanApplier{
+                    [released, saving](const metadata::ArtworkWritePlan&,
+                                       const operations::ArtworkApplyProgressCallback&,
+                                       const core::CancellationToken&)
+                        -> core::Result<operations::ArtworkApplyResult> {
+                        *saving = true;
+                        while (!*released) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+                        }
+                        return operations::ArtworkApplyResult{};
+                    }};
+            }},
+            {});
+        properties->show();
+        return properties;
+    };
+    const auto choose = [](QWidget* properties) {
+        QPushButton* fetch = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((fetch = properties->findChild<QPushButton*>(
+                                      QStringLiteral("bench-metadata-cover-fetch"))) != nullptr &&
+                                     fetch->isEnabled(),
+                                 10'000);
+        QTest::mouseClick(fetch, Qt::LeftButton);
+        QVERIFY(chooseInCoverPicker(properties, QStringLiteral("Cover Art Archive"),
+                                    QStringLiteral("Front")));
+    };
+
+    // Fetching: closed at once.
+    auto fetching = open();
+    choose(fetching);
+    if (QTest::currentTestFailed()) {
+        return;
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(static_cast<bool>(held), 10'000);
+    QVERIFY(fetching->close());
+    QTRY_VERIFY(fetching.isNull());
+    std::exchange(held, {})(std::unexpected(
+        core::Error{.code = core::ErrorCode::cancelled, .message = "closed", .context = {}}));
+
+    // Saving: waited for, saying so, then closed by itself.
+    auto properties = open();
+    choose(properties);
+    if (QTest::currentTestFailed()) {
+        return;
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(static_cast<bool>(held), 10'000);
+    std::exchange(held, {})(png);
+    QPushButton* save = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((save = properties->findChild<QPushButton*>(
+                                  QStringLiteral("bench-metadata-artwork-save"))) != nullptr &&
+                                 save->isEnabled(),
+                             10'000);
+    QTest::mouseClick(save, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(saving->load(), 10'000);
+    QVERIFY(!properties->close());
+    QVERIFY(properties->isVisible());
+    auto* status = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-read-only"));
+    QVERIFY(status != nullptr);
+    QTRY_VERIFY2(status->text().contains(QStringLiteral("closing once")),
+                 qPrintable(status->text()));
+    *released = true;
+    QTRY_VERIFY_WITH_TIMEOUT(properties.isNull(), 10'000);
+}
+
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront_data() {
     // ADR-0237: a downloaded cover is handed to the engine and written by it,
     // or written by this process -- the same section, the same result.

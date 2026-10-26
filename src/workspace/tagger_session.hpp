@@ -151,6 +151,9 @@ class TaggerArtwork {
     [[nodiscard]] virtual bool hasPendingChanges() const = 0;
     [[nodiscard]] virtual std::vector<metadata::ArtworkWritePlanIntent> pendingIntents() const = 0;
     [[nodiscard]] virtual bool isBusy() const = 0;
+    // Checking, writing or exporting files -- what closing waits for; a
+    // cover still being fetched is let go.
+    [[nodiscard]] virtual bool isWritingFiles() const = 0;
     virtual void setWorking(bool working) = 0;
     virtual void discardPendingChanges() = 0;
     virtual void requestOperationCancellation() = 0;
@@ -243,6 +246,8 @@ class TaggerSession final : public QObject {
     // The artwork's pending covers changed; its own work started or ended.
     void artworkStateChanged();
     void setArtworkOperationRunning(bool running);
+    // Whether a close that had to wait can go ahead now.
+    void closeWhenIdle();
     [[nodiscard]] const TaggerServices& services() const { return services_; }
 
     // What is shown.
@@ -751,6 +756,10 @@ class TaggerSession final : public QObject {
     bool automatic_stage_running_{false};
     bool replaygain_running_{false};
     bool artwork_operation_running_{false};
+    // Close was asked for while work had to finish first: the window closes
+    // itself once nothing is running (closeWhenIdle).
+    bool close_waiting_{false};
+    bool close_check_queued_{false};
     bool layout_state_saved_{false};
 };
 

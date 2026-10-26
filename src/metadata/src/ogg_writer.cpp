@@ -126,6 +126,98 @@ verify_ogg_packet_preservation(const std::string& source_raw_path,
     return {};
 }
 
+// The cover entries of an Ogg file's comment packet.
+[[nodiscard]] core::Result<std::vector<std::string>>
+file_cover_entries(const std::string& raw_path, const bool opus, const std::string& source_raw_path,
+                   const std::string& prepared_raw_path) {
+    auto bytes = read_file_bytes(raw_path, source_raw_path, prepared_raw_path);
+    if (!bytes) {
+        return std::unexpected(std::move(bytes.error()));
+    }
+    const auto malformed = writer_error(core::ErrorCode::backend,
+                                        "the Ogg stream is not a single well-formed bitstream",
+                                        source_raw_path, prepared_raw_path);
+    auto stream = ogg_stream_detail::parse_packet_stream(*bytes, malformed);
+    if (!stream) {
+        return std::unexpected(std::move(stream.error()));
+    }
+    const auto magic = opus ? opus_comment_magic : vorbis_comment_magic;
+    if (stream->packets.size() < 2U || !packet_starts_with(stream->packets[1], magic)) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "the Ogg comment packet is not where expected",
+                                            source_raw_path, prepared_raw_path));
+    }
+    auto entries = ogg_stream_detail::comment_entries(stream->packets[1], magic.size());
+    if (!entries) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "the Ogg comment packet is malformed", source_raw_path,
+                                            prepared_raw_path));
+    }
+    return ogg_stream_detail::cover_entries(*entries);
+}
+
+// ADR-0334: a tag write keeps the file's covers as they were. Where the
+// library writing the comment dropped or changed one -- a picture it could
+// not read is not written back -- the source's cover entries are put back
+// as they were stored, and a copy that still differs is refused: a cover is
+// never lost to a tag write.
+[[nodiscard]] core::Result<void> keep_covers(const std::string& source_raw_path,
+                                             const std::string& prepared_raw_path,
+                                             const bool opus) {
+    auto source = file_cover_entries(source_raw_path, opus, source_raw_path, prepared_raw_path);
+    if (!source) {
+        return std::unexpected(std::move(source.error()));
+    }
+    auto prepared = file_cover_entries(prepared_raw_path, opus, source_raw_path, prepared_raw_path);
+    if (!prepared) {
+        return std::unexpected(std::move(prepared.error()));
+    }
+    if (ogg_stream_detail::same_covers(*source, *prepared)) {
+        return {};
+    }
+    std::unique_ptr<TagLib::File> file;
+    TagLib::Ogg::XiphComment* comment = nullptr;
+    if (opus) {
+        auto opened = std::make_unique<TagLib::Ogg::Opus::File>(prepared_raw_path.c_str(), false);
+        comment = opened->tag();
+        file = std::move(opened);
+    } else {
+        auto opened = std::make_unique<TagLib::Vorbis::File>(prepared_raw_path.c_str(), false);
+        comment = opened->tag();
+        file = std::move(opened);
+    }
+    if (!file->isValid() || comment == nullptr) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib rejected the prepared Ogg copy",
+                                            source_raw_path, prepared_raw_path));
+    }
+    comment->removeAllPictures();
+    for (const auto* key : {"METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"}) {
+        comment->removeFields(key);
+    }
+    for (const auto& entry : *source) {
+        const auto equals = entry.find('=');
+        comment->addField(TagLib::String{entry.substr(0U, equals), TagLib::String::UTF8},
+                          TagLib::String{entry.substr(equals + 1U), TagLib::String::UTF8}, false);
+    }
+    if (!file->save()) {
+        return std::unexpected(writer_error(core::ErrorCode::io,
+                                            "putting the covers back into the Ogg copy failed",
+                                            source_raw_path, prepared_raw_path));
+    }
+    file.reset();
+    prepared = file_cover_entries(prepared_raw_path, opus, source_raw_path, prepared_raw_path);
+    if (!prepared) {
+        return std::unexpected(std::move(prepared.error()));
+    }
+    if (!ogg_stream_detail::same_covers(*source, *prepared)) {
+        return std::unexpected(writer_error(core::ErrorCode::conflict,
+                                            "the file's cover would be lost by this tag write",
+                                            source_raw_path, prepared_raw_path));
+    }
+    return {};
+}
+
 [[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,
                                                     const std::string& prepared_raw_path,
                                                     const bool opus,
@@ -238,6 +330,9 @@ prepare_ogg_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     auto applied = apply_text_changes(source_plan, prepared_raw_path, opus, cancellation);
     if (!applied) {
         return std::unexpected(std::move(applied.error()));
+    }
+    if (auto covers = keep_covers(source_plan.raw_path, prepared_raw_path, opus); !covers) {
+        return std::unexpected(std::move(covers.error()));
     }
     if (core::keep_mode(prepared_raw_path.c_str(), *source_mode) != 0) {
         return std::unexpected(system_error("restoring prepared Ogg permissions failed", errno,

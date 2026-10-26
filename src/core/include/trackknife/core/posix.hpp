@@ -45,6 +45,25 @@ inline bool mode_refused_by_filesystem(const int error) {
 #endif
         ;
 }
+// ADR-0333: whether a prepared copy holds the original's owner and mode once
+// they were set. A share may refuse the change or take it without keeping
+// it; either way the copy has the owner and mode the share gives its files.
+struct KeptIdentity {
+    bool owner{true};
+    bool mode{true};
+};
+[[nodiscard]] inline KeptIdentity kept_identity(const struct stat& source,
+                                                const struct stat& prepared) {
+    return KeptIdentity{
+        .owner = prepared.st_uid == source.st_uid && prepared.st_gid == source.st_gid,
+        .mode = (prepared.st_mode & 07777) == (source.st_mode & 07777),
+    };
+}
+// Whether the copy's owner and mode are still those it settled with.
+[[nodiscard]] inline bool same_identity(const struct stat& settled, const struct stat& now) {
+    return now.st_uid == settled.st_uid && now.st_gid == settled.st_gid &&
+           (now.st_mode & 07777) == (settled.st_mode & 07777);
+}
 inline int keep_mode(const char* path, const mode_t mode) {
     if (::chmod(path, mode) == 0) {
         return 0;

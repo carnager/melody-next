@@ -466,6 +466,29 @@ void modesTheFilesystemRefusesAreKept() {
     CHECK(trackknife::core::mode_refused_by_filesystem(ENOTSUP));
     CHECK(!trackknife::core::mode_refused_by_filesystem(ENOENT));
     CHECK(!trackknife::core::mode_refused_by_filesystem(EIO));
+
+    // ADR-0333: a copy left with the share's owner or mode -- refused, or
+    // taken and not kept -- is said not to hold the original's, rather than
+    // being refused; and checked only not to change from what it settled as.
+    struct stat source{};
+    source.st_uid = 1000U;
+    source.st_gid = 1000U;
+    source.st_mode = S_IFREG | 0644;
+    auto copy = source;
+    CHECK(trackknife::core::kept_identity(source, copy).owner &&
+          trackknife::core::kept_identity(source, copy).mode);
+    copy.st_mode = S_IFREG | 0664;
+    CHECK(trackknife::core::kept_identity(source, copy).owner &&
+          !trackknife::core::kept_identity(source, copy).mode);
+    copy.st_gid = 100U;
+    CHECK(!trackknife::core::kept_identity(source, copy).owner);
+    auto later = copy;
+    CHECK(trackknife::core::same_identity(copy, later));
+    later.st_mode = S_IFREG | 0666;
+    CHECK(!trackknife::core::same_identity(copy, later));
+    later = copy;
+    later.st_uid = 0U;
+    CHECK(!trackknife::core::same_identity(copy, later));
 }
 
 // ADR-0331: a file is still the one a plan saw when its revision is the same

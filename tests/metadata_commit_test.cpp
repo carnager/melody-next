@@ -1501,6 +1501,63 @@ void commits_and_undoes_mp4_covr_artwork(const std::filesystem::path& fixture_di
     CHECK(undone.has_value() && read_bytes(source) == original_bytes);
 }
 
+// ADR-0337: a cover added to an Opus or Vorbis file is committed through
+// the journal like FLAC's, and undone byte for byte.
+void commits_and_undoes_ogg_artwork(const std::filesystem::path& fixture_directory,
+                                    const std::string_view fixture, const std::string& adapter) {
+    TemporaryDirectory directory;
+    auto policy = metadata::default_artwork_inventory_policy();
+    policy.external_patterns.clear();
+    const auto source =
+        materialize(fixture_directory, fixture, directory.path() / "artwork-comment.ogg");
+    const auto replacement = materialize(fixture_directory, "external-blue-jpeg.b64",
+                                         directory.path() / "comment-replacement.jpg");
+    const auto original_bytes = read_bytes(source);
+    const auto inventory = metadata::read_local_artwork_inventory(source.native(), policy);
+    CHECK(inventory && inventory->items.empty() && inventory->embedded_adapter_name == adapter);
+    if (!inventory) {
+        return;
+    }
+    auto journal = open_journal(directory, "comment.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    const auto plan = metadata::revalidate_artwork_write_plan({metadata::ArtworkWritePlanIntent{
+        .occurrence_index = 0U,
+        .raw_media_path = source.native(),
+        .expected_media_revision = inventory->media_revision,
+        .target_ordinal = 0U,
+        .expected_target_fingerprint = {},
+        .kind = metadata::ArtworkWritePlanIntentKind::add,
+        .replacement_raw_path = replacement.native(),
+        .added_role = metadata::ArtworkRole::front,
+        .added_description = {},
+        .replacement_embedded_source = std::nullopt,
+    }});
+    CHECK(plan && plan->ready() && plan->sources.size() == 1U);
+    if (!plan || !plan->ready() || plan->sources.size() != 1U) {
+        return;
+    }
+    const auto added = operations::commit_artwork_source(
+        plan->sources.front(), *journal,
+        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+    if (!added) {
+        std::cerr << adapter << " commit: " << added.error().message << '\n';
+    }
+    CHECK(added.has_value());
+    if (!added) {
+        return;
+    }
+    const auto committed = metadata::read_local_artwork_inventory(source.native(), policy);
+    CHECK(committed && committed->items.size() == 1U &&
+          committed->items.front().role == metadata::ArtworkRole::front);
+    const auto undone = operations::undo_metadata_operation(
+        added->journal_id, *journal,
+        [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+    CHECK(undone.has_value() && read_bytes(source) == original_bytes);
+}
+
 void commits_and_recovers_artwork_at_unchanged_paths(
     const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
@@ -4193,6 +4250,10 @@ int main(const int argc, char** argv) {
         renamed_files_keep_their_identity_where_renames_renumber(fixture_directory);
         script_written_rating_verifies_over_an_existing_one(fixture_directory);
         commits_and_recovers_artwork_at_unchanged_paths(fixture_directory);
+        commits_and_undoes_ogg_artwork(fixture_directory, "tagged-tone-opus.b64",
+                                       "taglib-opus-picture-v1");
+        commits_and_undoes_ogg_artwork(fixture_directory, "tagged-tone-vorbis.b64",
+                                       "taglib-vorbis-picture-v1");
         commits_and_undoes_mp4_covr_artwork(fixture_directory);
         recovers_safe_prepublication_debris_but_retains_ambiguous_paths(fixture_directory);
         undoes_completed_metadata_and_recovers_interrupted_undo(fixture_directory);

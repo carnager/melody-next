@@ -120,9 +120,7 @@ core::Result<MetadataWritePlan> merge_artwork_write_plan(MetadataWritePlan metad
                 .occurrence_indexes = source.occurrence_indexes,
                 .expected_revision = source.expected_media_revision,
                 .observed_revision = source.observed_media_revision,
-                .adapter_name = source.adapter_name == "taglib-flac-picture-v1" ? "taglib-flac-v1"
-                                : source.adapter_name == "taglib-id3v2-apic-v1" ? "taglib-mpeg-v1"
-                                                                                : "taglib-mp4-v1",
+                .adapter_name = std::string{text_adapter_for_artwork(source.adapter_name)},
                 .changes = {},
                 .issues = {}});
             found = std::prev(metadata.sources.end());

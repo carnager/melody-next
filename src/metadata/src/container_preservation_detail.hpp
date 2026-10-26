@@ -36,6 +36,13 @@ verify_mp4_box_preservation(const std::string& source_raw_path,
                             const std::string& prepared_raw_path,
                             const core::CancellationToken& cancellation);
 
+// ADR-0114: every Ogg packet but the comment byte-identical, the comment
+// packet's codec magic kept, the packet count unchanged.
+[[nodiscard]] core::Result<void>
+verify_ogg_packet_preservation(const std::string& source_raw_path,
+                               const std::string& prepared_raw_path, bool opus,
+                               const core::CancellationToken& cancellation);
+
 } // namespace trackknife::metadata::preservation_detail
 
 namespace trackknife::metadata::artwork_detail {

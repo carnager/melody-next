@@ -180,5 +180,8 @@ project_artwork_inventory(const LocalArtworkInventory& inventory,
 // The embedded adapters with a qualified prepared-copy artwork writer
 // (ADR-0137): native FLAC pictures, ID3v2 APIC frames, and MP4 covr entries.
 [[nodiscard]] bool is_qualified_artwork_adapter(std::string_view adapter_name);
+// The text adapter of the same container as an artwork adapter -- each pairs
+// with exactly one (ADR-0137); empty for none.
+[[nodiscard]] std::string_view text_adapter_for_artwork(std::string_view artwork_adapter);
 
 } // namespace trackknife::metadata

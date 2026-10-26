@@ -932,14 +932,14 @@ void carriesArtworkIntoEveryPreset(const std::filesystem::path& fixture_director
         }
     }
 
-    // A converted Opus is itself a valid source: its embedded cover resolves
-    // through the container-agnostic reader, normalized to a front cover.
+    // A converted Opus is itself a valid source: its embedded cover is read
+    // as its pictures are (ADR-0337), its picture type carried on.
     const auto opus_output = directory.path() / "covered-opus-192.opus";
     const auto from_opus = trackknife::convert::resolve_conversion_artwork(opus_output.native());
     CHECK(from_opus.has_value());
     if (from_opus) {
         CHECK(from_opus->bytes == artwork->bytes);
-        CHECK(from_opus->picture_type == 3U);
+        CHECK(from_opus->picture_type == artwork->picture_type);
     }
 }
 

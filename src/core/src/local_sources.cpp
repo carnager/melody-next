@@ -292,6 +292,7 @@ namespace {
 std::atomic<bool> renumbering_simulated{false};
 std::atomic<bool> unstable_simulated{false};
 
+#if defined(__linux__)
 [[nodiscard]] bool numbers_its_own_files(const unsigned long kind) noexcept {
     constexpr unsigned long cifs = 0xFF534D42UL;
     constexpr unsigned long smb2 = 0xFE534D42UL;
@@ -299,6 +300,7 @@ std::atomic<bool> unstable_simulated{false};
     constexpr unsigned long fuse = 0x65735546UL;
     return kind == cifs || kind == smb2 || kind == smb || kind == fuse;
 }
+#endif
 
 // inode_numbers_unstable for the file at `raw_path`, or -- gone, or not yet
 // there -- for the folder it is in.

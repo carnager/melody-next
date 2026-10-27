@@ -363,7 +363,8 @@ prepare_mp3_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!before) {
         return std::unexpected(std::move(before.error()));
     }
-    if (before->source_revision != *source_plan.observed_revision ||
+    if (!core::same_file(source_plan.raw_path, *source_plan.observed_revision,
+                         before->source_revision) ||
         before->adapter_name != mp3_adapter) {
         return std::unexpected(
             writer_error(core::ErrorCode::conflict,

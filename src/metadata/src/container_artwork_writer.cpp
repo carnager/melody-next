@@ -501,7 +501,8 @@ struct ExpectedItem {
          (!source_plan.change.original ||
           source_plan.change.original->provenance != ArtworkProvenance::embedded ||
           source_plan.change.original->raw_source_path != source_plan.raw_media_path ||
-          source_plan.change.original->source_revision != *source_plan.observed_media_revision ||
+          !core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                           source_plan.change.original->source_revision) ||
           source_plan.change.original->source_ordinal != source_plan.change.target_ordinal ||
           source_plan.change.original->content_fingerprint !=
               source_plan.change.expected_target_fingerprint))) {
@@ -529,7 +530,8 @@ struct ExpectedItem {
     if (!before_inventory) {
         return std::unexpected(std::move(before_inventory.error()));
     }
-    if (before_inventory->media_revision != *source_plan.observed_media_revision ||
+    if (!core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                         before_inventory->media_revision) ||
         before_inventory->embedded_adapter_name != format.artwork_adapter) {
         return std::unexpected(
             writer_error(core::ErrorCode::conflict,
@@ -582,7 +584,8 @@ struct ExpectedItem {
     if (!before_document) {
         return std::unexpected(std::move(before_document.error()));
     }
-    if (before_document->source_revision != *source_plan.observed_media_revision ||
+    if (!core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                         before_document->source_revision) ||
         before_document->adapter_name != format.text_adapter) {
         return std::unexpected(writer_error(
             core::ErrorCode::conflict, "the metadata changed after the artwork plan was previewed",
@@ -701,8 +704,8 @@ prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
     if (!before || !inventory) {
         return std::unexpected(!before ? before.error() : inventory.error());
     }
-    if (before->source_revision != *plan.observed_revision ||
-        inventory->media_revision != *plan.observed_revision ||
+    if (!core::same_file(plan.raw_path, *plan.observed_revision, before->source_revision) ||
+        !core::same_file(plan.raw_path, *plan.observed_revision, inventory->media_revision) ||
         before->adapter_name != plan.adapter_name ||
         inventory->embedded_adapter_name != plan.artwork->adapter_name) {
         return fail("source changed after review");

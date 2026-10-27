@@ -560,8 +560,10 @@ core::Result<FilePublicationApplyResult> apply_preparation_publications(
                                              });
         if (found == preflight.sources.end() || !metadata_source.expected_revision ||
             !metadata_source.observed_revision ||
-            *metadata_source.expected_revision != *metadata_source.observed_revision ||
-            found->observed_revision != *metadata_source.observed_revision) {
+            !core::same_file(metadata_source.raw_path, *metadata_source.expected_revision,
+                             *metadata_source.observed_revision) ||
+            !core::same_file(metadata_source.raw_path, *metadata_source.observed_revision,
+                             found->observed_revision)) {
             return std::unexpected(apply_error(
                 core::ErrorCode::invalid_argument,
                 "Preparation Apply metadata does not match its reviewed filesystem source",

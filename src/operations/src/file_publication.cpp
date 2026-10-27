@@ -444,8 +444,10 @@ observe_direct_revision(const std::string& raw_path, const std::string& source_r
                                                        const FilePublicationJournalRecord& record) {
     struct stat status{};
     if (::fstatat(target_parent.get(), target_name.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0) {
-        const auto same_source = S_ISREG(status.st_mode) &&
-                                 revision_from_stat(status) == record.expected_source_revision;
+        const auto same_source =
+            S_ISREG(status.st_mode) &&
+            core::same_file(record.target_raw_path, record.expected_source_revision,
+                            revision_from_stat(status));
         return std::unexpected(publication_error(
             same_source ? core::ErrorCode::unsupported : core::ErrorCode::conflict,
             same_source ? "Case-only aliases are not yet safe for crash-recoverable atomic rename"
@@ -1172,7 +1174,8 @@ verify_published_topology(const FilePublicationJournalRecord& record,
     if (!source || !target) {
         return std::unexpected(!source ? std::move(source.error()) : std::move(target.error()));
     }
-    if (*source || !*target || **target != target_revision) {
+    if (*source || !*target ||
+        !core::same_file(record.target_raw_path, target_revision, **target)) {
         return std::unexpected(
             publication_error(core::ErrorCode::conflict,
                               "Published rename no longer has the recorded source/target identity",
@@ -1249,7 +1252,8 @@ terminal_transition(FilePublicationJournal& journal, const FilePublicationJourna
     if (!source || !target) {
         return std::unexpected(!source ? std::move(source.error()) : std::move(target.error()));
     }
-    if (*source || !*target || **target != target_revision) {
+    if (*source || !*target ||
+        !core::same_file(record.target_raw_path, target_revision, **target)) {
         return std::unexpected(
             publication_error(core::ErrorCode::conflict,
                               "Published rename cannot be rolled back from the recorded identities",
@@ -1287,7 +1291,9 @@ terminal_transition(FilePublicationJournal& journal, const FilePublicationJourna
         return std::unexpected(!restored ? std::move(restored.error())
                                          : std::move(removed.error()));
     }
-    if (!*restored || **restored != record.expected_source_revision || *removed) {
+    if (!*restored ||
+        !core::same_file(record.source_raw_path, record.expected_source_revision, **restored) ||
+        *removed) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict, "Rename rollback could not verify the original path",
             record.source_raw_path, record.target_raw_path, record.id));
@@ -1310,8 +1316,11 @@ verify_cross_published_topology(const FilePublicationJournalRecord& record,
                                : !prepared ? std::move(prepared.error())
                                            : std::move(target.error()));
     }
-    if (!*source || **source != record.expected_source_revision || *prepared || !*target ||
-        **target != target_revision || target_revision != prepared_revision) {
+    if (!*source ||
+        !core::same_file(record.source_raw_path, record.expected_source_revision, **source) ||
+        *prepared || !*target ||
+        !core::same_file(record.target_raw_path, target_revision, **target) ||
+        !core::same_file(record.target_raw_path, prepared_revision, target_revision)) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict,
             "Cross-filesystem publication no longer has its recorded path identities",
@@ -1340,8 +1349,12 @@ verify_cross_source_removed_topology(const FilePublicationJournalRecord& record,
     }
     // The source kept beside it as it was -- or, from before sources were
     // kept, gone.
-    if (*source || *prepared || !*target || **target != target_revision ||
-        (*retained && **retained != record.expected_source_revision)) {
+    if (*source || *prepared || !*target ||
+        !core::same_file(record.target_raw_path, target_revision, **target) ||
+        (*retained &&
+         !core::same_file(
+             file_publication_retained_path(record.source_raw_path, record.id).native(),
+             record.expected_source_revision, **retained))) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict,
             "Completed cross-filesystem move no longer has its recorded target identity",
@@ -1360,7 +1373,9 @@ verify_cross_source_removed_topology(const FilePublicationJournalRecord& record,
     if (!source || !prepared) {
         return std::unexpected(!source ? std::move(source.error()) : std::move(prepared.error()));
     }
-    if (!*source || **source != record.expected_source_revision || *prepared) {
+    if (!*source ||
+        !core::same_file(record.source_raw_path, record.expected_source_revision, **source) ||
+        *prepared) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict,
             "Cross-filesystem target cannot be rolled back from recorded identities",
@@ -1378,7 +1393,9 @@ verify_cross_source_removed_topology(const FilePublicationJournalRecord& record,
     auto removed_target = observe_direct_revision(record.target_raw_path, record.source_raw_path,
                                                   record.target_raw_path, record.id);
     if (!restored_source || !removed_target || !*restored_source ||
-        **restored_source != record.expected_source_revision || *removed_target) {
+        !core::same_file(record.source_raw_path, record.expected_source_revision,
+                         **restored_source) ||
+        *removed_target) {
         return std::unexpected(publication_error(
             core::ErrorCode::conflict, "Cross-filesystem target rollback could not be verified",
             record.source_raw_path, record.target_raw_path, record.id));
@@ -1667,7 +1684,9 @@ core::Result<FilePublicationCommitResult> commit_same_filesystem_publication(
     }
     const auto& checked = preflight.sources[source_index];
     if (checked.publication != OutputPathPublicationKind::same_filesystem_rename ||
-        checked.planned.no_change || checked.observed_revision != checked.planned.source_revision ||
+        checked.planned.no_change ||
+        !core::same_file(checked.planned.source_raw_path, checked.planned.source_revision,
+                         checked.observed_revision) ||
         checked.target_filesystem_device != checked.observed_revision.device) {
         return std::unexpected(
             publication_error(core::ErrorCode::invalid_argument,
@@ -1716,7 +1735,7 @@ core::Result<FilePublicationCommitResult> commit_same_filesystem_publication(
             .source_raw_path = checked.planned.source_raw_path,
             .target_raw_path = checked.planned.target_raw_path,
             .prepared_raw_path = {},
-            .expected_source_revision = checked.observed_revision,
+            .expected_source_revision = source->revision,
             .prepared_revision = std::nullopt,
             .target_revision = std::nullopt,
             .occurrence_indexes = checked.planned.item_indexes,
@@ -1909,7 +1928,9 @@ core::Result<FilePublicationCommitResult> commit_cross_filesystem_publication(
     }
     const auto& checked = preflight.sources[source_index];
     if (checked.publication != OutputPathPublicationKind::cross_filesystem_copy ||
-        checked.planned.no_change || checked.observed_revision != checked.planned.source_revision ||
+        checked.planned.no_change ||
+        !core::same_file(checked.planned.source_raw_path, checked.planned.source_revision,
+                         checked.observed_revision) ||
         checked.target_filesystem_device == checked.observed_revision.device) {
         return std::unexpected(
             publication_error(core::ErrorCode::invalid_argument,
@@ -1957,7 +1978,7 @@ core::Result<FilePublicationCommitResult> commit_cross_filesystem_publication(
             .prepared_raw_path =
                 file_publication_prepared_path(checked.planned.target_raw_path, provisional_id)
                     .native(),
-            .expected_source_revision = checked.observed_revision,
+            .expected_source_revision = source->revision,
             .prepared_revision = std::nullopt,
             .target_revision = std::nullopt,
             .occurrence_indexes = checked.planned.item_indexes,
@@ -1988,9 +2009,11 @@ core::Result<FilePublicationCommitResult> commit_cross_filesystem_publication(
                                                 record->target_raw_path, record->id);
         auto target = observe_direct_revision(record->target_raw_path, record->source_raw_path,
                                               record->target_raw_path, record->id);
-        const bool rolled_back = persisted_source && prepared && target && *persisted_source &&
-                                 **persisted_source == record->expected_source_revision &&
-                                 !*prepared && !*target;
+        const bool rolled_back =
+            persisted_source && prepared && target && *persisted_source &&
+            core::same_file(record->source_raw_path, record->expected_source_revision,
+                            **persisted_source) &&
+            !*prepared && !*target;
         auto terminal = cross_terminal_transition(journal, *record, State::planned, std::nullopt,
                                                   std::nullopt, failure, rolled_back);
         if (!terminal) {
@@ -2076,7 +2099,9 @@ core::Result<FilePublicationCommitResult> commit_destination_artifact_publicatio
         (checked.publication == OutputPathPublicationKind::cross_filesystem_copy &&
          checked.target_filesystem_device != checked.observed_revision.device);
     if (checked.publication == OutputPathPublicationKind::no_change || checked.planned.no_change ||
-        checked.observed_revision != checked.planned.source_revision || !valid_topology) {
+        !core::same_file(checked.planned.source_raw_path, checked.planned.source_revision,
+                         checked.observed_revision) ||
+        !valid_topology) {
         return std::unexpected(publication_error(
             core::ErrorCode::invalid_argument,
             "Destination-artifact executor requires one ready changed output path",
@@ -2145,9 +2170,11 @@ core::Result<FilePublicationCommitResult> commit_destination_artifact_publicatio
                                                 record->target_raw_path, record->id);
         auto target = observe_direct_revision(record->target_raw_path, record->source_raw_path,
                                               record->target_raw_path, record->id);
-        const bool rolled_back = persisted_source && prepared && target && *persisted_source &&
-                                 **persisted_source == record->expected_source_revision &&
-                                 !*prepared && !*target;
+        const bool rolled_back =
+            persisted_source && prepared && target && *persisted_source &&
+            core::same_file(record->source_raw_path, record->expected_source_revision,
+                            **persisted_source) &&
+            !*prepared && !*target;
         auto terminal = cross_terminal_transition(journal, *record, State::planned, std::nullopt,
                                                   std::nullopt, failure, rolled_back);
         if (!terminal) {
@@ -2250,8 +2277,12 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_same_filesystem
                                .issue = issue});
             continue;
         }
-        const bool source_matches = *source && **source == record.expected_source_revision;
-        const bool target_matches = *target && **target == record.expected_source_revision;
+        const bool source_matches =
+            *source &&
+            core::same_file(record.source_raw_path, record.expected_source_revision, **source);
+        const bool target_matches =
+            *target &&
+            core::same_file(record.target_raw_path, record.expected_source_revision, **target);
         if (source_matches == target_matches) {
             auto issue =
                 publication_error(core::ErrorCode::conflict,
@@ -2288,8 +2319,10 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_same_filesystem
         target = observe_direct_revision(record.target_raw_path, record.source_raw_path,
                                          record.target_raw_path, record.id);
         if (!source || !target || static_cast<bool>(*source) == static_cast<bool>(*target) ||
-            (*source && **source != record.expected_source_revision) ||
-            (*target && **target != record.expected_source_revision)) {
+            (*source &&
+             !core::same_file(record.source_raw_path, record.expected_source_revision, **source)) ||
+            (*target &&
+             !core::same_file(record.target_raw_path, record.expected_source_revision, **target))) {
             auto issue =
                 publication_error(core::ErrorCode::conflict,
                                   "Rename topology changed while startup recovery locked the file",
@@ -2327,7 +2360,8 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_same_filesystem
             record.state = State::target_published;
             record.target_revision = record.expected_source_revision;
         }
-        if (!*target || !record.target_revision || **target != *record.target_revision) {
+        if (!*target || !record.target_revision ||
+            !core::same_file(record.target_raw_path, *record.target_revision, **target)) {
             auto issue =
                 publication_error(core::ErrorCode::conflict,
                                   "Interrupted rename target differs from its journal identity",
@@ -2469,7 +2503,10 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
         }
 
         if (record.state == State::planned) {
-            if (*source && **source == record.expected_source_revision && !*prepared && !*target) {
+            if (*source &&
+                core::same_file(record.source_raw_path, record.expected_source_revision,
+                                **source) &&
+                !*prepared && !*target) {
                 const auto issue = publication_error(
                     core::ErrorCode::cancelled,
                     "Recovered a journaled copy before a prepared target became durable",
@@ -2484,7 +2521,10 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
                                    .issue = std::nullopt});
                 continue;
             }
-            if (!*source || **source != record.expected_source_revision || !*prepared || *target) {
+            if (!*source ||
+                !core::same_file(record.source_raw_path, record.expected_source_revision,
+                                 **source) ||
+                !*prepared || *target) {
                 auto issue = publication_error(
                     core::ErrorCode::conflict,
                     "Interrupted copy has ambiguous source, prepared, and target identities",
@@ -2557,7 +2597,8 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
 
         if (record.state == State::target_prepared) {
             if (!record.prepared_revision || !*source ||
-                **source != record.expected_source_revision) {
+                !core::same_file(record.source_raw_path, record.expected_source_revision,
+                                 **source)) {
                 auto issue = publication_error(
                     core::ErrorCode::conflict,
                     "Prepared-copy recovery no longer has the original source identity",
@@ -2583,7 +2624,9 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
                                    .issue = std::nullopt});
                 continue;
             }
-            if (*prepared && **prepared == *record.prepared_revision && !*target) {
+            if (*prepared &&
+                core::same_file(record.prepared_raw_path, *record.prepared_revision, **prepared) &&
+                !*target) {
                 auto locked_source =
                     open_locked_source(record.source_raw_path, record.expected_source_revision,
                                        cancellation, record.target_raw_path, record.id);
@@ -2641,7 +2684,9 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
                 }
                 prepared = std::optional<core::LocalSourceRevision>{};
                 target = record.prepared_revision;
-            } else if (*prepared || !*target || **target != *record.prepared_revision) {
+            } else if (*prepared || !*target ||
+                       !core::same_file(record.target_raw_path, *record.prepared_revision,
+                                        **target)) {
                 auto issue =
                     publication_error(core::ErrorCode::conflict,
                                       "Prepared-copy publication has ambiguous recovery identities",
@@ -2780,8 +2825,9 @@ core::Result<std::vector<FilePublicationRecoveryResult>> recover_cross_filesyste
                 continue;
             }
             if (!record.prepared_revision || !record.target_revision || *prepared || !*target ||
-                **target != *record.target_revision ||
-                (*source && **source != record.expected_source_revision)) {
+                !core::same_file(record.target_raw_path, *record.target_revision, **target) ||
+                (*source && !core::same_file(record.source_raw_path,
+                                             record.expected_source_revision, **source))) {
                 auto issue =
                     publication_error(core::ErrorCode::conflict,
                                       "Committed copy has ambiguous source-removal identities",
@@ -2998,7 +3044,7 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
     // the kept one stays until the undo is done.
     bool copied_back = false;
     if (!*source) {
-        if (!*kept || !core::same_file_after_rename(retained.native(), kept_identity, **kept)) {
+        if (!*kept || !core::same_file(retained.native(), kept_identity, **kept)) {
             return reconcile(publication_error(
                 core::ErrorCode::conflict, "The retained source is gone or changed",
                 record.source_raw_path, record.target_raw_path, record.id));
@@ -3062,7 +3108,9 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
     } else if (*kept && same_bytes(record.source_raw_path, retained.native())) {
         // Copied back before a crash; the kept one goes once the undo is done.
         copied_back = true;
-    } else if (**source != record.expected_source_revision || *kept) {
+    } else if (!core::same_file(record.source_raw_path, record.expected_source_revision,
+                                **source) ||
+               *kept) {
         return reconcile(publication_error(
             core::ErrorCode::conflict, "The source path holds another file than the original",
             record.source_raw_path, record.target_raw_path, record.id));
@@ -3074,7 +3122,7 @@ finish_publication_undo(const FilePublicationBackupRecord& backup, FilePublicati
         return std::unexpected(std::move(target.error()));
     }
     if (*target) {
-        if (**target != *record.target_revision) {
+        if (!core::same_file(record.target_raw_path, *record.target_revision, **target)) {
             return reconcile(publication_error(
                 core::ErrorCode::conflict, "The published file changed after it was written",
                 record.source_raw_path, record.target_raw_path, record.id));
@@ -3165,9 +3213,8 @@ undo_retained_publication(const core::StableId& journal_id, FilePublicationJourn
                                        : std::move(target.error()));
     }
     if (*source || !*kept ||
-        !core::same_file_after_rename(kept_path_of(backup).native(), kept_identity_of(backup),
-                                      **kept) ||
-        !*target || **target != *record.target_revision) {
+        !core::same_file(kept_path_of(backup).native(), kept_identity_of(backup), **kept) ||
+        !*target || !core::same_file(record.target_raw_path, *record.target_revision, **target)) {
         auto issue = publication_error(
             core::ErrorCode::conflict,
             "The files changed after the publication, so it cannot be undone safely",
@@ -3224,7 +3271,7 @@ core::Result<void> release_publication_backup(const core::StableId& journal_id,
     if (!kept) {
         return std::unexpected(std::move(kept.error()));
     }
-    if (*kept && !core::same_file_after_rename(retained.native(), kept_identity, **kept)) {
+    if (*kept && !core::same_file(retained.native(), kept_identity, **kept)) {
         auto issue = publication_error(core::ErrorCode::conflict,
                                        "The retained source has an unexpected identity",
                                        record.source_raw_path, record.target_raw_path, record.id);

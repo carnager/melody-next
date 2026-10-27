@@ -834,6 +834,12 @@ build_metadata_write_plan(const StagedMetadataSelection& selection,
         }
         source.observed_revision = read->source_revision;
         source.adapter_name = read->adapter_name;
+        // ADR-0343: renumbered by the client, it is the file the draft saw,
+        // expected from here on as it is now.
+        if (source.expected_revision &&
+            core::same_file(source.raw_path, *source.expected_revision, read->source_revision)) {
+            source.expected_revision = read->source_revision;
+        }
         if (source.expected_revision && *source.expected_revision != read->source_revision) {
             add_issue(source, MetadataWritePlanIssueKind::source_changed,
                       planner_error(core::ErrorCode::conflict,

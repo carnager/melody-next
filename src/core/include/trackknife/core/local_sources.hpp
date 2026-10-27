@@ -107,19 +107,23 @@ void settle_written_file_time(const std::string& raw_path) noexcept;
 void settle_rewritten_file_time(const std::string& raw_path,
                                 const LocalSourceRevision& before) noexcept;
 
-// ADR-0249: whether `after` is `before` after this process renamed the file
-// to `raw_path`. Equal, or -- on a filesystem whose renames give a file a new
-// inode number, as the macOS SMB client does -- equal in all but the inode.
-// Whether renames keep inode numbers is asked of the filesystem itself, once
-// per device and only when an inode did change: a temporary file beside
-// `raw_path` is renamed and observed. Where that cannot be done, an inode
-// change counts, as it always did.
-[[nodiscard]] bool same_file_after_rename(const std::string& raw_path,
-                                          const LocalSourceRevision& before,
-                                          const LocalSourceRevision& after);
+// ADR-0249, ADR-0343: whether `observed`, the file at `raw_path` now, is the
+// one `expected` describes -- the rule every check of a file seen earlier
+// keeps to. Equal; or equal in all but the inode where the file's number may
+// have changed under it: on a filesystem that numbers its files on this
+// side (inode_numbers_unstable: SMB/CIFS, FUSE such as sshfs), where a file
+// the kernel forgets is numbered afresh, or on one whose renames give a file
+// a new number, as the macOS SMB client does. Whether renames keep numbers
+// is asked of the filesystem itself, once per device and only when an inode
+// did change: a temporary file beside `raw_path` is renamed and observed.
+// Where neither can be told, an inode change counts.
+[[nodiscard]] bool same_file(const std::string& raw_path, const LocalSourceRevision& expected,
+                             const LocalSourceRevision& observed);
 
 // Tests only: every filesystem answers that renames renumber files.
 void simulate_renumbering_renames_for_testing(bool enabled) noexcept;
+// Tests only: every filesystem answers that it numbers its files itself.
+void simulate_unstable_inode_numbers_for_testing(bool enabled) noexcept;
 
 // What differs between two observations of one file, for the message that
 // refuses it: "modification time 1790815120.409922300 -> 1790815121.0", each

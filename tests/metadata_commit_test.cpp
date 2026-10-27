@@ -1239,13 +1239,13 @@ void renamed_files_keep_their_identity_where_renames_renumber(
     ++renumbered.inode;
     auto resized = renumbered;
     ++resized.size;
-    CHECK(core::same_file_after_rename(file.native(), *observed, *observed));
+    CHECK(core::same_file(file.native(), *observed, *observed));
     // This filesystem keeps inode numbers across a rename: a new one is a
     // different file, as it always was.
-    CHECK(!core::same_file_after_rename(file.native(), *observed, renumbered));
+    CHECK(!core::same_file(file.native(), *observed, renumbered));
     core::simulate_renumbering_renames_for_testing(true);
-    CHECK(core::same_file_after_rename(file.native(), *observed, renumbered));
-    CHECK(!core::same_file_after_rename(file.native(), *observed, resized));
+    CHECK(core::same_file(file.native(), *observed, renumbered));
+    CHECK(!core::same_file(file.native(), *observed, resized));
     core::simulate_renumbering_renames_for_testing(false);
     // The question asked of the filesystem leaves nothing behind.
     CHECK(std::ranges::none_of(

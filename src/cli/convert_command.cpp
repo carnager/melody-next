@@ -2,6 +2,8 @@
 
 #include "convert_command.hpp"
 
+#include "trackknife/core/engine_state.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <unistd.h>
@@ -15,8 +17,11 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace trackknife::cli {
 namespace {
@@ -45,19 +50,67 @@ using Json = nlohmann::json;
 
 void usage() {
     std::cerr
-        << "usage: melody-cli convert --to FOLDER [--layout NAME] [--preset ID]\n"
+        << "usage: melody-cli convert --to FOLDER [--layout NAME | --layout-expression EXPR]\n"
+           "                          [--preset ID]\n"
            "                          [--gain none|track|album] [--no-replaygain] [--no-artwork]\n"
            "                          [--cover-size PIXELS] [--dry-run]\n"
            "                          (--since WHEN | PATH...)\n"
            "       melody-cli convert --presets | --layouts\n"
            "  The engine converts, on its machine, with Melody's converter: tags and\n"
            "  cover carried and checked, nothing left half-written. FOLDER and PATHs\n"
-           "  are the engine's. Files are named by its naming layout NAME (melody-cli\n"
-           "  convert --layouts), else keep their place below the music folder; then\n"
+           "  are the engine's. Files are named by Melody's naming layout NAME (melody-cli\n"
+           "  convert --layouts) or the path expression EXPR (folders/name), else keep\n"
+           "  their place below the music folder; then\n"
            "  ReplayGain is measured afresh on what was made (--no-replaygain not to).\n"
            "  One already converted is passed over, so the same\n"
            "  command can run again, from cron, say:\n"
            "    melody-cli convert --to ~/Opus --since 1d\n";
+}
+
+// ADR-0339: Melody's naming layouts, as the window keeps them on this
+// computer -- the one place they are.
+[[nodiscard]] std::vector<persistence::SavedOutputLayoutProfile> melody_layouts() {
+    const auto path = core::presets_database_path();
+    std::error_code missing;
+    if (!std::filesystem::exists(path, missing)) {
+        fail("Melody keeps no naming layouts on this computer yet (" + path.string() +
+             "); make one in Melody, or give --layout-expression");
+    }
+    auto presets = persistence::ListRepository::open(path);
+    if (!presets) {
+        fail("Melody's presets could not be read: " + presets.error().message);
+    }
+    auto layouts = presets->load_output_layout_profiles();
+    if (!layouts) {
+        fail("Melody's naming layouts could not be read: " + layouts.error().message);
+    }
+    return std::move(*layouts);
+}
+
+// A whole path expression -- `%albumartist%/%album%/%tracknumber% %title%` --
+// as a layout: its folders, and the name after the last slash outside any
+// function's brackets.
+[[nodiscard]] Json layout_of_expression(const std::string& expression) {
+    std::size_t depth = 0U;
+    std::optional<std::size_t> last;
+    for (std::size_t at = 0U; at < expression.size(); ++at) {
+        const auto character = expression[at];
+        if (character == '\\') {
+            ++at;
+        } else if (character == '(') {
+            ++depth;
+        } else if (character == ')' && depth > 0U) {
+            --depth;
+        } else if (character == '/' && depth == 0U) {
+            last = at;
+        }
+    }
+    if (!last) {
+        return Json{{"name", "expression"}, {"directory", ""}, {"basename", expression}};
+    }
+    return Json{{"name", "expression"},
+                {"directory", expression.substr(0U, *last)},
+                {"basename", expression.substr(*last + 1U)}};
 }
 
 } // namespace
@@ -126,6 +179,7 @@ int convert_command(protocol::Client& client, const bool json,
                     const std::vector<std::string>& words) {
     std::string to;
     std::string layout;
+    std::string layout_expression;
     std::string preset{"opus-192"};
     std::string gain{"none"};
     std::optional<std::int64_t> since;
@@ -161,13 +215,8 @@ int convert_command(protocol::Client& client, const bool json,
             return EXIT_SUCCESS;
         }
         if (word == "--layouts") {
-            for (const auto& listed :
-                 call(client, "layouts.list").value("layouts", Json::array())) {
-                const auto profile = listed.value("profile", Json::object());
-                if (const auto name = profile.find("name");
-                    name != profile.end() && name->is_string()) {
-                    std::cout << name->get<std::string>() << "\n";
-                }
+            for (const auto& saved : melody_layouts()) {
+                std::cout << saved.profile.name << "\n";
             }
             return EXIT_SUCCESS;
         }
@@ -175,6 +224,8 @@ int convert_command(protocol::Client& client, const bool json,
             to = value();
         } else if (word == "--layout") {
             layout = value();
+        } else if (word == "--layout-expression") {
+            layout_expression = value();
         } else if (word == "--preset") {
             preset = value();
         } else if (word == "--gain") {
@@ -255,8 +306,21 @@ int convert_command(protocol::Client& client, const bool json,
                 {"preset", preset},          {"gain", gain},
                 {"artwork", artwork},        {"artwork_edge", cover_size},
                 {"dry_run", dry_run}};
-    if (!layout.empty()) {
-        params["layout"] = layout;
+    if (!layout.empty() && !layout_expression.empty()) {
+        fail("--layout or --layout-expression, not both");
+    }
+    if (!layout_expression.empty()) {
+        params["layout"] = layout_of_expression(layout_expression);
+    } else if (!layout.empty()) {
+        const auto layouts = melody_layouts();
+        const auto found = std::ranges::find_if(
+            layouts, [&layout](const auto& saved) { return saved.profile.name == layout; });
+        if (found == layouts.end()) {
+            fail("Melody has no naming layout " + layout + " (melody-cli convert --layouts)");
+        }
+        params["layout"] = Json{{"name", found->profile.name},
+                                {"directory", found->profile.relative_directory_expression},
+                                {"basename", found->profile.basename_expression}};
     }
     const bool interactive = !json && ::isatty(STDERR_FILENO) == 1;
     auto outcome = client.run_job("convert.apply", params, [interactive](const Json& progress) {

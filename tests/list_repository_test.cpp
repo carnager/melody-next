@@ -679,6 +679,73 @@ void metadata_transformation_chains_round_trip_transactionally() {
     cleanup();
 }
 
+// ADR-0339: Melody's presets taken once from the database they shared with
+// this computer's engine into Melody's own -- never twice, never over what
+// Melody already keeps, and the engine's database left as it was.
+void presets_are_adopted_once() {
+    namespace core = trackknife::core;
+    namespace operations = trackknife::operations;
+    namespace persistence = trackknife::persistence;
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("trackknife-adopt-presets-" + core::StableId::random().to_string());
+    std::filesystem::create_directories(directory);
+    const auto engine_database = directory / "lists.sqlite";
+    const auto presets = directory / "melody" / "presets.sqlite";
+    const persistence::SavedOutputLayoutProfile layout{
+        .id = core::StableId::random(),
+        .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                   .name = "Default",
+                                                   .dialect = {},
+                                                   .relative_directory_expression = "%artist%",
+                                                   .basename_expression = "%title%",
+                                                   .sanitization_policy = {"linux", 1U}},
+    };
+    require(!persistence::adopt_presets(engine_database, presets).value_or(true),
+            "nothing to take where the engine has no database");
+    require(!std::filesystem::exists(presets), "and nothing made");
+    {
+        auto engine = persistence::ListRepository::open(engine_database);
+        require(engine && engine->upsert_output_layout_profile(layout).has_value(),
+                "the engine's database holds a layout");
+        const std::vector lists{persistence::ListDocument{.id = core::StableId::random(),
+                                                          .kind = persistence::ListKind::scratch,
+                                                          .name = "Left by an older release",
+                                                          .pinned = false,
+                                                          .dirty = false,
+                                                          .items = {}}};
+        require(engine->replace_all(lists).has_value(), "and a list kept for the window");
+    }
+    const auto taken = persistence::adopt_presets(engine_database, presets);
+    require(taken && *taken, "the presets are taken over");
+    {
+        auto melody = persistence::ListRepository::open(presets);
+        require(melody && melody->load_output_layout_profiles() == std::vector{layout},
+                "Melody keeps the layout exactly");
+        const auto lists = melody->load_all();
+        require(lists && lists->size() == 1U && lists->front().name == "Left by an older release",
+                "and the window's old list, to take up as a tab");
+        auto engine = persistence::ListRepository::open(engine_database);
+        require(engine && engine->load_output_layout_profiles() == std::vector{layout},
+                "the engine's database is left as it was");
+    }
+    {
+        auto engine = persistence::ListRepository::open(engine_database);
+        auto changed = layout;
+        changed.profile.basename_expression = "%tracknumber%";
+        require(engine && engine->upsert_output_layout_profile(changed).has_value(),
+                "the engine's copy changes after");
+    }
+    const auto again = persistence::adopt_presets(engine_database, presets);
+    require(again && !*again, "taken once only");
+    {
+        auto melody = persistence::ListRepository::open(presets);
+        require(melody && melody->load_output_layout_profiles() == std::vector{layout},
+                "and never over what Melody keeps");
+    }
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
 void output_layout_and_destination_profiles_round_trip_transactionally() {
     namespace core = trackknife::core;
     namespace operations = trackknife::operations;
@@ -2539,6 +2606,7 @@ int main() {
     lists_of_an_older_release_name_their_engine();
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();
+    presets_are_adopted_once();
     encoder_presets_round_trip_transactionally();
     committed_metadata_refreshes_every_occurrence_idempotently();
     committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot();

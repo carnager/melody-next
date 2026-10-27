@@ -177,7 +177,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     std::vector<EngineInterruption>& engine_interruptions_{workspace_.engine_interruptions_};
     std::vector<persistence::SavedDestinationProfile>& local_destinations_{
         workspace_.local_destinations_};
-    QThreadPool& layout_pushes_{workspace_.layout_pushes_};
     std::vector<std::string>& pending_open_paths_{workspace_.pending_open_paths_};
     bool& lists_restored_{workspace_.lists_restored_};
     QString& local_replaygain_{workspace_.local_replaygain_};
@@ -552,9 +551,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // work holds a copy, handed over after each change and when it connects.
     // Only `removed` is taken away there: nothing an engine holds is lost to
     // a set it was sent.
-    void pushLayouts(std::vector<core::StableId> removed = {}) {
-        workspace_.pushLayouts(std::move(removed));
-    }
     void presentInterruptedOperations();
     void applyCommittedMetadata(const operations::MetadataCommitResult& result) {
         workspace_.applyCommittedMetadata(result);

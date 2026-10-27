@@ -71,6 +71,16 @@ std::filesystem::path default_engine_state_directory() {
     return data_home() / "melody" / "engine";
 }
 
+std::filesystem::path melody_data_directory() {
+    if (const auto* chosen = environment_variable("MELODY_DATA_DIR");
+        chosen != nullptr && *chosen) {
+        return chosen;
+    }
+    return data_home() / "melody" / "melody";
+}
+
+std::filesystem::path presets_database_path() { return melody_data_directory() / "presets.sqlite"; }
+
 std::filesystem::path legacy_engine_state_directory() {
 #ifdef __APPLE__
     return data_home() / "trackknife";

@@ -2,7 +2,6 @@
 
 #include "trackknife/engine/job_methods.hpp"
 
-#include "trackknife/convert/scan.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/loudness/replaygain.hpp"
@@ -284,57 +283,6 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                 return Json{{"error", wire::encode(scanned.error())}};
             }
             return Json{{"result", wire::encode(*scanned)}};
-        };
-    });
-
-    // ADR-0336: a conversion the asker hands its engine -- the one path a
-    // conversion takes: each item's source, destination and tags, and the
-    // window's options; folders made, items converted on a bounded pool.
-    jobs.on("convert.files", [](const Json& params) -> core::Result<JobRegistry::Work> {
-        const auto listed = params.find("items");
-        if (listed == params.end() || !listed->is_array()) {
-            return std::unexpected(bad_params("items to convert are required", "items"));
-        }
-        std::vector<convert::ConversionScanItem> items;
-        items.reserve(listed->size());
-        for (const auto& value : *listed) {
-            auto item = wire::decode_conversion_item(value);
-            if (!item) {
-                return std::unexpected(std::move(item.error()));
-            }
-            items.push_back(std::move(*item));
-        }
-        const auto given = params.find("options");
-        if (given == params.end()) {
-            return std::unexpected(bad_params("conversion options are required", "options"));
-        }
-        auto options = wire::decode_conversion_options(*given);
-        if (!options) {
-            return std::unexpected(std::move(options.error()));
-        }
-        // As many at once as asked, and as this machine has cores for.
-        const auto hardware = std::max<std::size_t>(1U, std::thread::hardware_concurrency());
-        options->maximum_parallelism =
-            std::clamp<std::size_t>(options->maximum_parallelism, 1U, hardware);
-        return [items = std::move(items), options = std::move(*options)](
-                   const core::CancellationToken& token, const JobRegistry::Reporter& report) {
-            for (const auto& item : items) {
-                std::error_code made;
-                std::filesystem::create_directories(
-                    std::filesystem::path{item.destination_raw_path}.parent_path(), made);
-            }
-            auto converted = convert::scan_conversion(
-                items, options,
-                [&report](const convert::ConversionScanProgress& progress) {
-                    report(Json{{"item_index", progress.item_index},
-                                {"completed_items", progress.completed_items},
-                                {"total_items", progress.total_items}});
-                },
-                token);
-            if (!converted) {
-                return Json{{"error", wire::encode(converted.error())}};
-            }
-            return Json{{"result", wire::encode(*converted)}};
         };
     });
 

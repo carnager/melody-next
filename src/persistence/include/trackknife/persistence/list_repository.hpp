@@ -462,4 +462,12 @@ class ListRepository final {
     std::unique_ptr<Impl> implementation_;
 };
 
+// ADR-0339: Melody's presets -- naming layouts, destinations, encoder
+// presets, tagging scripts -- and the lists an older release kept there for
+// the window, moved once from the database they shared with this computer's
+// engine (`from`) into Melody's own (`to`): only when `to` does not exist
+// yet and `from` does. True when they were copied; `from` is left as it was.
+[[nodiscard]] core::Result<bool> adopt_presets(const std::filesystem::path& from,
+                                               const std::filesystem::path& to);
+
 } // namespace trackknife::persistence

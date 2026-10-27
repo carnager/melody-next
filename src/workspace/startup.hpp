@@ -16,6 +16,7 @@ void adoptTrackknifeNames();
 // engine's state in its own test folder when none is named: the engine's
 // folder is found from the environment, not from Qt, and a test that forgot
 // to name one once moved a user's library out from under their engine.
+// Melody's presets (ADR-0339) are kept there too.
 void isolateTestEngineState();
 // A restore chosen last time (File › Restore workspace database…) is applied
 // now, the database it replaces kept beside it. What happened, to tell the

@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include "trackknife/convert/preset.hpp"
-#include "trackknife/convert/scan.hpp"
 #include "trackknife/core/error.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
@@ -64,19 +62,6 @@ using protocol::Json;
 
 // Tag text is valid UTF-8 almost always, and travels as a JSON string then;
 // anything else travels as {"bytes": encoded}, so a value is never altered.
-// ADR-0336: a conversion the asker's engine carries out.
-[[nodiscard]] Json encode(const convert::EncoderPreset& preset);
-[[nodiscard]] core::Result<convert::EncoderPreset> decode_preset(const Json& value);
-[[nodiscard]] Json encode(const convert::ConversionScanItem& item);
-[[nodiscard]] core::Result<convert::ConversionScanItem> decode_conversion_item(const Json& value);
-[[nodiscard]] Json encode(const convert::ConversionScanOptions& options);
-[[nodiscard]] core::Result<convert::ConversionScanOptions>
-decode_conversion_options(const Json& value);
-// Each item's state and what went wrong; what was made is on disk.
-[[nodiscard]] Json encode(const convert::ConversionScanResult& result);
-[[nodiscard]] core::Result<convert::ConversionScanResult>
-decode_conversion_result(const Json& value);
-
 [[nodiscard]] Json encode_text(std::string_view text);
 [[nodiscard]] core::Result<std::string> decode_text(const Json& value);
 

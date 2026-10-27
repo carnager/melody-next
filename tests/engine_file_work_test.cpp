@@ -1403,37 +1403,10 @@ void naming_and_destinations_are_the_engines(const std::filesystem::path& direct
         return dispatcher.dispatch(
             protocol::Request{.id = 1, .method = method, .params = over_the_wire(params)});
     };
-    const auto layout = [](std::string name, std::string basename) {
-        return trackknife::persistence::SavedOutputLayoutProfile{
-            .id = core::StableId::random(),
-            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
-                                                       .name = std::move(name),
-                                                       .dialect = {},
-                                                       .relative_directory_expression = "%artist%",
-                                                       .basename_expression = std::move(basename),
-                                                       .sanitization_policy = {"linux", 1U}}};
-    };
-    auto first = layout("By title", "%title%");
-    auto second = layout("Numbered", "$num(%tracknumber%,2) %title%");
-    auto put = call("layouts.put", {{"layouts", {wire::encode(first), wire::encode(second)}}});
-    require(put.result && put.result->at("layouts").size() == 2U, "the layouts are copied in");
-    // A smaller set -- another client's, or one sent late -- takes nothing away.
-    put = call("layouts.put", {{"layouts", {wire::encode(first)}}});
-    require(put.result && put.result->at("layouts").size() == 2U, "a smaller set removes nothing");
-    put = call("layouts.put", {{"layouts", protocol::Json::array()}});
-    require(put.result && put.result->at("layouts").size() == 2U, "nor does an empty one");
-    // A layout renamed to another's name is that layout now: the other gives way.
-    second.profile.name = "By title";
-    put = call("layouts.put", {{"layouts", {wire::encode(second)}}});
-    require(put.result && put.result->at("layouts").size() == 1U, "a name is one layout's");
-    const auto held = wire::decode_saved_layout(put.result->at("layouts").front());
-    require(held && *held == second, "the renamed one, exactly");
-    // Only what it is told to remove goes.
-    put = call("layouts.put",
-               {{"layouts", protocol::Json::array()}, {"removed", {second.id.to_string()}}});
-    require(put.result && put.result->at("layouts").empty(), "a removed layout goes");
-    require(call("layouts.set", {{"layouts", protocol::Json::array()}}).error.has_value(),
-            "and the old replace-everything call is no more");
+    // ADR-0339: an engine keeps no naming layouts; Melody does.
+    require(call("layouts.list", protocol::Json::object()).error.has_value() &&
+                call("layouts.put", {{"layouts", protocol::Json::array()}}).error.has_value(),
+            "an engine has no layouts to list or to be handed");
 
     const trackknife::persistence::SavedDestinationProfile destination{
         .id = core::StableId::random(),

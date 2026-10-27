@@ -82,9 +82,18 @@ void adoptTrackknifeNames() {
 }
 
 void isolateTestEngineState() {
-    if (QStandardPaths::isTestModeEnabled() && qEnvironmentVariableIsEmpty("MELODY_STATE_DIR")) {
-        qputenv("MELODY_STATE_DIR", QFile::encodeName(QStandardPaths::writableLocation(
-                                        QStandardPaths::AppDataLocation)));
+    if (!QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
+    const auto folder =
+        QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    if (qEnvironmentVariableIsEmpty("MELODY_STATE_DIR")) {
+        qputenv("MELODY_STATE_DIR", folder);
+    }
+    // ADR-0339: and Melody's presets with the test's own data, not shared
+    // by every test that runs in the same home.
+    if (qEnvironmentVariableIsEmpty("MELODY_DATA_DIR")) {
+        qputenv("MELODY_DATA_DIR", folder);
     }
 }
 

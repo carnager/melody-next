@@ -733,10 +733,6 @@ void Workspace::watchFileWork(EngineLink& link) {
                                  }
                              }
                          }
-                         if (does) {
-                             // ADR-0237: it names files with this window's layouts.
-                             workspace->pushLayouts();
-                         }
                      });
         }));
     };
@@ -744,33 +740,6 @@ void Workspace::watchFileWork(EngineLink& link) {
     if (link.playback->active()) {
         probe();
     }
-}
-
-void Workspace::pushLayouts(std::vector<core::StableId> removed) {
-    if (persistence_ == nullptr) {
-        return;
-    }
-    const QPointer workspace{this};
-    persistence_->loadOutputProfiles(
-        [workspace, removed = std::move(removed)](
-            std::vector<persistence::SavedOutputLayoutProfile> layouts, auto, QString error) {
-            if (!workspace || !error.isEmpty()) {
-                return;
-            }
-            for (const auto& engine : workspace->engines_) {
-                // This computer's engine keeps its layouts in this workspace:
-                // they are these, and a copy sent to it could only be older.
-                if (engine->key.isLocal() || !engine->does_file_work || !engine->file_work) {
-                    continue;
-                }
-                // In the order they were made: one thread, so an older set
-                // never lands after a newer one.
-                static_cast<void>(QtConcurrent::run(
-                    &workspace->layout_pushes_, [work = engine->file_work, layouts, removed] {
-                        static_cast<void>(work->put_layouts(layouts, removed));
-                    }));
-            }
-        });
 }
 
 namespace {

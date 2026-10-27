@@ -15,13 +15,8 @@ class Workspace;
 
 // ADR-0237: how files the engine moves are named and where they go.
 //
-// Naming layouts are global presets, made in Trackknife and handed to every
-// engine; the engine keeps its copy so any client that moves files through
-// it can name them.
-//   layouts.list                    -> {layouts: [{id, profile}]}
-//   layouts.put {layouts, removed?} -> {layouts}: each layout added or
-//       updated, and only the ids in `removed` taken away -- never one it
-//       was not told of, whatever set a client holds
+// Naming layouts are Melody's (ADR-0339): an engine keeps none, and a
+// request that names files carries its layout.
 //
 // Move destinations are this engine's -- folders on its machine.
 //   destinations.list               -> {destinations: [{id, profile}]}

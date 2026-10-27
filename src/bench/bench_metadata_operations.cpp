@@ -87,9 +87,8 @@ void BenchMainWindow::showConvertForView(QTableView* view) {
 }
 
 void BenchMainWindow::openConvertItems(std::vector<ConvertDialogItem> items) {
-    auto* dialog =
-        new ConvertDialog(std::move(items), workspace_.convertProfiles(),
-                          workspace_.convertPresets(), workspace_.localConversionRunner(), this);
+    auto* dialog = new ConvertDialog(std::move(items), workspace_.convertProfiles(),
+                                     workspace_.convertPresets(), this);
     connect(dialog, &ConvertDialog::filesConverted, this,
             [this] { workspace_.refreshLocalLibrary(); });
     dialog->show();

@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted, 2026-10-26. Superseded on the branch `mpd-client` by ADR-0340:
-Melody converts itself, and there is no local engine.
+Accepted, 2026-10-26. Superseded by ADR-0340 (2026-10-27): Melody converts
+in its own process.
 
 ## Context
 

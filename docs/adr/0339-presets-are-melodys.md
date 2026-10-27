@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted on the branch `mpd-client`, 2026-10-26 -- the first slice of
-"MPD and a powerful client": a server that keeps the library, lists and
-playback, and Melody, which keeps the user's presets and does the file work.
-Not on main.
+Accepted, 2026-10-26; merged from the branch `mpd-client` on 2026-10-27
+(protocol level 27) -- the first slice of "MPD and a powerful client": a
+server that keeps the library, lists and playback, and Melody, which keeps
+the user's presets and does the file work.
 
 ## Context
 

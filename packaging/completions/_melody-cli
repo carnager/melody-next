@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # zsh completion for melody-cli (ADR-0342): its commands, their words and
-# options. The speakers, lists, layouts and presets are asked of the engine
-# the line names -- melody-cli __complete -- and the engines of the network.
+# options. The speakers, lists and presets are asked of the engine
+# the line names -- melody-cli __complete --, the engines of the network, and
+# Melody's naming layouts on this computer (ADR-0339).
 
 # What melody-cli __complete says of $2, as name:what lines, to the engine
 # the line names; into the array named $1.
@@ -67,6 +68,7 @@ _melody-cli() {
         --size|--cover-size) _message 'pixels'; return ;;
         --since) _message 'Unix seconds, 2026-10-17, or 90m, 12h, 3d, 2w'; return ;;
         --run) _message 'command'; return ;;
+        --layout-expression) _message 'tkfmt-1 path expression, folders/name'; return ;;
         --key) _message 'key, from albums --keys or tracks --keys'; return ;;
     esac
 
@@ -135,7 +137,7 @@ _melody-cli() {
             fi ;;
         convert)
             if [[ "$cur" == -* ]]; then
-                compadd -- --to --layout --preset --gain --since --no-replaygain --no-artwork \
+                compadd -- --to --layout --layout-expression --preset --gain --since --no-replaygain --no-artwork \
                     --cover-size --dry-run --presets --layouts --help
             else
                 _files

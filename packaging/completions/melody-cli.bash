@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # bash completion for melody-cli (ADR-0342): its commands, their words and
-# options. The speakers, lists, layouts and presets are asked of the engine
-# the line names -- melody-cli __complete -- and the engines of the network.
+# options. The speakers, lists and presets are asked of the engine
+# the line names -- melody-cli __complete --, the engines of the network, and
+# Melody's naming layouts on this computer (ADR-0339).
 
 # What melody-cli __complete says of $1, names only, to the engine the line
 # names.
@@ -104,7 +105,7 @@ _melody_cli() {
             _melody_cli_words root playlist absolute
             return
             ;;
-        --server | --password | --format | --fields | --size | --cover-size | --since | --run | --key)
+        --server | --password | --format | --fields | --size | --cover-size | --since | --run | --key | --layout-expression)
             return
             ;;
     esac
@@ -166,7 +167,7 @@ _melody_cli() {
             ;;
         convert)
             if [[ "${cur}" == -* ]]; then
-                _melody_cli_words --to --layout --preset --gain --since --no-replaygain \
+                _melody_cli_words --to --layout --layout-expression --preset --gain --since --no-replaygain \
                     --no-artwork --cover-size --dry-run --presets --layouts --help
             else
                 _melody_cli_files

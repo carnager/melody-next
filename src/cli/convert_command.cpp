@@ -175,6 +175,12 @@ std::vector<std::string> album_track_paths(protocol::Client& client, const std::
     return paths;
 }
 
+void print_layout_names(std::ostream& out) {
+    for (const auto& saved : melody_layouts()) {
+        out << saved.profile.name << "\n";
+    }
+}
+
 int convert_command(protocol::Client& client, const bool json,
                     const std::vector<std::string>& words) {
     std::string to;
@@ -215,9 +221,7 @@ int convert_command(protocol::Client& client, const bool json,
             return EXIT_SUCCESS;
         }
         if (word == "--layouts") {
-            for (const auto& saved : melody_layouts()) {
-                std::cout << saved.profile.name << "\n";
-            }
+            print_layout_names(std::cout);
             return EXIT_SUCCESS;
         }
         if (word == "--to") {

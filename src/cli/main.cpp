@@ -856,7 +856,12 @@ int complete(const Options& options) {
         }
         return EXIT_SUCCESS;
     }
-    if (what != "outputs" && what != "lists" && what != "presets" && what != "layouts") {
+    // ADR-0339: Melody's own, on this computer; no engine is asked.
+    if (what == "layouts") {
+        trackknife::cli::print_layout_names(std::cout);
+        return EXIT_SUCCESS;
+    }
+    if (what != "outputs" && what != "lists" && what != "presets") {
         return EXIT_FAILURE;
     }
     auto client = connect(options);
@@ -871,12 +876,8 @@ int complete(const Options& options) {
         names(call(*client, "outputs.list").value("outputs", Json::array()), "name");
     } else if (what == "lists") {
         names(call(*client, "list.all").value("lists", Json::array()), "name");
-    } else if (what == "presets") {
-        names(call(*client, "convert.presets").value("presets", Json::array()), "id");
     } else {
-        for (const auto& listed : call(*client, "layouts.list").value("layouts", Json::array())) {
-            names(Json::array({listed.value("profile", Json::object())}), "name");
-        }
+        names(call(*client, "convert.presets").value("presets", Json::array()), "id");
     }
     return EXIT_SUCCESS;
 }

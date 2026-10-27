@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -26,5 +27,9 @@ namespace trackknife::cli {
 // "convert". Returns the exit status.
 [[nodiscard]] int convert_command(protocol::Client& client, bool json,
                                   const std::vector<std::string>& words);
+
+// The names of Melody's naming layouts on this computer, one a line --
+// convert --layouts, and the shell's completion of --layout.
+void print_layout_names(std::ostream& out);
 
 } // namespace trackknife::cli

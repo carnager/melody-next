@@ -6,6 +6,7 @@
 
 #include "config_command.hpp"
 #include "convert_command.hpp"
+#include "help.hpp"
 #include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/stable_id.hpp"
@@ -53,6 +54,8 @@ struct Options final {
     // parsed, and only if no --password came after it.
     std::string password_file;
     std::string engine;
+    // --local: this computer's engine, whatever $MELODY_SERVER says.
+    bool local{false};
     bool json{false};
     // --fields: what albums and tracks list, besides the key; empty, all.
     std::vector<std::string> fields;
@@ -63,142 +66,6 @@ struct Options final {
     std::string format{"$if(%artist%,%artist% - )%title%"};
     std::vector<std::string> words;
 };
-
-void usage(std::ostream& out) {
-    out << "usage: melody-cli [--server HOST:PORT] [--password PASS | --password-file FILE]\n"
-           "                  [--engine NAME] [--json]\n"
-           "                  [--fields artist,album,title,date] [--keys] [--format EXPR]\n"
-           "                  COMMAND [ARGUMENTS]\n"
-           "\n"
-           "  status                      what plays, where and how far in\n"
-           "  current [--format EXPR]     the playing track on one line; nothing when\n"
-           "                              nothing plays. EXPR is tkfmt-1, as in\n"
-           "                              Melody (default \"$if(%artist%,%artist% - "
-           ")%title%\"):\n"
-           "                              every tag as %name% (%replaygain_track_gain%...),\n"
-           "                              $info(samplerate) $info(bitspersample)\n"
-           "                              $info(codec) $info(channels), %rating%\n"
-           "                              %albumrating% (1-10)\n"
-           "                              %length% %path% %playback_state% %playback_time%\n"
-           "                              %playback_remaining%; a field not known is\n"
-           "                              empty. Literal ( ) , $ % are escaped with a\n"
-           "                              backslash.\n"
-           "  play | pause | toggle | stop | next | prev\n"
-           "  seek [+|-]SECONDS           to a place, or forward and back\n"
-           "  volume [[+|-]PERCENT]       say or set how loud\n"
-           "\n"
-           "  play  album|track WORDS...  replace the queue with it and play it\n"
-           "  add   album|track WORDS...  append it to the queue\n"
-           "  next  album|track WORDS...  play it next (Up Next, first)\n"
-           "  queue album|track WORDS...  add it to Up Next, last\n"
-           "      Every word must appear in its artist, title, album or year:\n"
-           "      melody-cli play album doors 1967\n"
-           "      Or name one exactly by the key albums or tracks --json gives it:\n"
-           "      melody-cli add album --key KEY\n"
-           "      Or let the engine choose: random album (an album of a random album\n"
-           "      artist), random tracks [COUNT] (default 25):\n"
-           "      melody-cli play random tracks 50\n"
-           "\n"
-           "  play list NAME...           play one of the engine's lists: by its name,\n"
-           "                              or every word found in one name\n"
-           "\n"
-           "  lists                       the engine's saved playlists\n"
-           "  playlists                   where they are: the engine's playlist folder,\n"
-           "                              each file there a playlist (ADR-0296)\n"
-           "  playlists folder DIR|default [--style root|playlist|absolute]\n"
-           "                              keep them in DIR -- MPD's playlist_directory,\n"
-           "                              say -- or Playlists in the music folder; the\n"
-           "                              style is how new files name their tracks\n"
-           "  albums [WORDS...]           list albums: every one, or those the words find\n"
-           "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
-           "  find QUERY [--format EXPR]  tracks a query finds, one line each, formatted\n"
-           "                              by the engine from its whole library row, with\n"
-           "                              the fields current has, bar playback_*.\n"
-           "                              QUERY is a Melody query:\n"
-           "                              melody-cli find 'genre IS jazz SORT BY %date%' \\\n"
-           "                                --format '%date% %artist% - %title%'\n"
-           "  latest [COUNT]              the albums added most recently (default 20)\n"
-           "  latest --since WHEN         every album added after WHEN: Unix seconds,\n"
-           "                              2026-10-17, 2026-10-17T18:30, or ago -- 90m,\n"
-           "                              12h, 3d, 2w. Nothing new is no error. For a\n"
-           "                              cron job: keep when it ran, and pass that\n"
-           "         --folders            each album's folder, one a line, instead of\n"
-           "                              its name; with --json, a \"folder\" each\n"
-           "  convert --to FOLDER [--layout NAME] [--preset ID] (--since WHEN | PATH...)\n"
-           "                              the engine converts, where the files are: tags\n"
-           "                              and cover kept, named by its naming layout or\n"
-           "                              kept below the music folder, ReplayGain measured\n"
-           "                              afresh; what is there is passed over (--help)\n"
-           "  update [PATH...]            the engine rescans its library folders, or\n"
-           "                              only these folders and files -- its own paths,\n"
-           "                              relative ones taken from here: new files read,\n"
-           "                              changed ones re-read, gone ones dropped\n"
-           "  revision                    changes when the library does, for caches\n"
-           "  outputs                     the speakers this engine can play on\n"
-           "  output NAME                 play on those instead\n"
-           "  engines                     the engines announcing themselves nearby\n"
-           "\n"
-           "  config [KEY [VALUE...]]     this machine's melodyd.conf: all of it, one\n"
-           "                              setting, or that setting changed -- checked as\n"
-           "                              melodyd reads it, comments kept. --engine NAME\n"
-           "                              for an [engine NAME] section, --unset KEY,\n"
-           "                              --config FILE (default $MELODYD_CONFIG, else\n"
-           "                              ~/.config/melody/melodyd.conf). A new file\n"
-           "                              starts from the commented skeleton\n"
-           "  config --edit               open it in $EDITOR, and take it only when\n"
-           "                              melodyd would\n"
-           "\n"
-           "  watch albums [--folders | --run CMD]\n"
-           "                              each album new to the library, once it is\n"
-           "                              whole: a line, its folder, or CMD run for it --\n"
-           "                              {} its folder, quoted; MELODY_ALBUM_FOLDER,\n"
-           "                              _ARTIST, _TITLE and _DATE set. Runs until the\n"
-           "                              engine goes, then fails\n"
-           "  watch [--all]               print the state each time it changes; with\n"
-           "                              --all, of whichever engine here or nearby plays\n"
-           "                              (only those named, with --server given for each)\n"
-           "  rating [0-10]               say or set the playing track's rating, 1-10\n"
-           "                              as Melody keeps it; 0 clears it, and is\n"
-           "                              what an unrated track says (also: rate)\n"
-           "  albumrating [0-10]          the same, for the playing track's album\n"
-           "  cover FILE [SIZE]           write the playing track's cover to FILE,\n"
-           "                              SIZE pixels across at most if given\n"
-           "  together host SERVER [ROOM [PASSWORD [NAME]]]\n"
-           "                              a room on a melody-together server, named ROOM\n"
-           "                              and joined with PASSWORD (- or none: made), this\n"
-           "                              engine its host (ADR-0302); prints the invite\n"
-           "                              to send to friends. A server that asks a\n"
-           "                              password of its own is given\n"
-           "                              $MELODY_TOGETHER_PASSWORD, else the first line\n"
-           "                              of ~/.config/melody/together-password\n"
-           "  together join INVITE [NAME] listen along, as NAME (default: $USER)\n"
-           "  together join SERVER ROOM PASSWORD [NAME]\n"
-           "                              the same, by the room's name and password\n"
-           "  together leave              out of the room; as its host, closing it\n"
-           "  together status             the room: who listens, what plays, and at a\n"
-           "                              party what is suggested\n"
-           "  together party on|off       as host: friends may suggest tracks and vote\n"
-           "  together suggest FILE...    at a party: tracks of your library, suggested\n"
-           "  together vote N             for suggestion N, or the vote taken back\n"
-           "  together remove N           as host: suggestion N, gone\n"
-           "  love | unlove               the playing track, on Last.fm\n"
-           "  fav | unfav                 the playing track into the Favorites playlist,\n"
-           "                              or out of it (ADR-0297)\n"
-           "\n"
-           "  replaygain album|track WORDS... [--track-gain] [--true-peak] [--sidecar]\n"
-           "                              measure its loudness and write ReplayGain, as\n"
-           "                              Melody does: an album gets track and album\n"
-           "                              gain, a track or --track-gain only track gain.\n"
-           "                              Found as play finds it (also --key KEY). The\n"
-           "                              engine holding the files measures and writes;\n"
-           "                              --sidecar keeps the values out of the files\n"
-           "\n"
-           "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
-           "one found on the network -- by name with --engine when there are several.\n"
-           "--password (or $MELODY_PASSWORD) for an engine on the network, or\n"
-           "--password-file (or $MELODY_PASSWORD_FILE) to read it from the first line\n"
-           "of a file. --json prints the engine's own answers, for scripts.\n";
-}
 
 // A string field of an answer: empty when absent, null or not a string, so
 // an engine that leaves one out is shown as nothing rather than a crash.
@@ -271,6 +138,13 @@ look_around(const std::string& wanted = {}) {
         }
         return std::move(*client);
     };
+    if (options.local) {
+        const auto socket = local_socket();
+        if (!std::filesystem::exists(socket)) {
+            fail("this computer's engine is not running (no " + socket.string() + ")");
+        }
+        return open(Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}});
+    }
     if (!options.server.empty()) {
         const auto endpoint = Endpoint::parse(options.server, options.password);
         if (!endpoint) {
@@ -731,10 +605,15 @@ void print_state(const Json& state, Client& client) {
               << clock(state.value("duration_ms", std::int64_t{-1})) << " · volume "
               << state.value("volume_percent", 0) << "% · queue " << state.value("queue_size", 0)
               << " · up next " << state.value("requests", 0);
+    // Which engine answered, and where it plays: not the same thing when the
+    // engine is a server playing on this computer's speakers.
+    if (const auto engine = text_of(call(client, "engine.info"), "name"); !engine.empty()) {
+        std::cout << " · engine " << engine;
+    }
     const auto outputs = call(client, "outputs.list").value("outputs", std::vector<Json>{});
     for (const auto& output : outputs) {
         if (output.value("selected", false)) {
-            std::cout << " · on " << text_of(output, "name");
+            std::cout << " · speakers " << text_of(output, "name");
         }
     }
     if (const auto taken = text_of(state.value("output", Json::object()), "taken_by");
@@ -960,20 +839,64 @@ int watch_all(const Options& options) {
 int run(const Options& options) {
     const auto& words = options.words;
     const auto command = words.front();
+    if (command == "help") {
+        if (words.size() < 2U) {
+            trackknife::cli::print_overview(std::cout);
+            return EXIT_SUCCESS;
+        }
+        if (!trackknife::cli::print_command_help(std::cout, words[1])) {
+            std::cerr << "melody-cli: there is no command \"" << words[1]
+                      << "\"; melody-cli help lists them\n";
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+    // COMMAND --help: what it does. convert says its own, every option.
+    if (command != "convert" && std::ranges::any_of(words, [](const std::string& word) {
+            return word == "--help" || word == "-h";
+        })) {
+        if (!trackknife::cli::print_command_help(std::cout, command)) {
+            trackknife::cli::print_overview(std::cout);
+        }
+        return EXIT_SUCCESS;
+    }
     // ADR-0286: this machine's file; no engine is asked.
     if (command == "config") {
         return trackknife::cli::config_command({words.begin() + 1, words.end()});
     }
     if (command == "engines") {
         const auto found = look_around();
+        // The one melody-cli would talk to, when it can be told without
+        // asking the network: --local, --server or this computer's engine.
+        std::string in_use;
+        {
+            std::optional<Endpoint> endpoint;
+            if (!options.server.empty() && !options.local) {
+                if (auto parsed = Endpoint::parse(options.server, options.password)) {
+                    endpoint = std::move(*parsed);
+                }
+            } else if (options.engine.empty() && std::filesystem::exists(local_socket())) {
+                endpoint = Endpoint{.socket = local_socket(), .host = {}, .port = 0, .token = {}};
+            }
+            if (endpoint) {
+                if (auto client = Client::connect(*endpoint)) {
+                    if (auto info = (*client)->call("engine.info")) {
+                        in_use = text_of(*info, "name");
+                    }
+                }
+            } else if (!options.engine.empty()) {
+                in_use = options.engine;
+            }
+        }
         if (options.json) {
             auto listed = Json::array();
             for (const auto& engine : found) {
-                listed.push_back(Json{
-                    {"name", engine.instance},
-                    {"address", engine.address},
-                    {"port", engine.port},
-                    {"password", engine.txt.contains("auth") && engine.txt.at("auth") == "1"}});
+                listed.push_back(
+                    Json{{"name", engine.instance},
+                         {"address", engine.address},
+                         {"port", engine.port},
+                         {"password", engine.txt.contains("auth") && engine.txt.at("auth") == "1"},
+                         {"in_use", engine.instance == in_use}});
             }
             std::cout << listed.dump() << "\n";
             return EXIT_SUCCESS;
@@ -982,7 +905,7 @@ int run(const Options& options) {
             std::cout << engine.instance << "\t" << engine.address << ":" << engine.port
                       << (engine.txt.contains("auth") && engine.txt.at("auth") == "1" ? "\tpassword"
                                                                                       : "")
-                      << "\n";
+                      << (engine.instance == in_use ? "\tin use" : "") << "\n";
         }
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
     }
@@ -1922,7 +1845,8 @@ int run(const Options& options) {
                       << describe_track(track) << "\n";
         }
     } else {
-        usage(std::cerr);
+        std::cerr << "melody-cli: there is no command \"" << command
+                  << "\"; melody-cli help lists them\n";
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
@@ -1973,6 +1897,8 @@ int run(int argc, char** argv) {
             options.password_file = value();
         } else if (argument == "--engine") {
             options.engine = value();
+        } else if (argument == "--local") {
+            options.local = true;
         } else if (argument == "--fields") {
             std::stringstream list{value()};
             for (std::string field; std::getline(list, field, ',');) {
@@ -1981,7 +1907,7 @@ int run(int argc, char** argv) {
                 }
             }
         } else if (argument == "--help" || argument == "-h") {
-            usage(std::cout);
+            trackknife::cli::print_overview(std::cout);
             return EXIT_SUCCESS;
         } else if (argument.starts_with("--")) {
             fail("unrecognised option " + std::string{argument});
@@ -1990,8 +1916,13 @@ int run(int argc, char** argv) {
         }
     }
     if (options.words.empty()) {
-        usage(std::cerr);
+        trackknife::cli::print_overview(std::cerr);
         return EXIT_FAILURE;
+    }
+    // $MELODY_SERVER is the default --local sets aside; --server or --engine
+    // given as well is asking for two engines.
+    if (options.local && (!options.servers.empty() || !options.engine.empty())) {
+        fail("--local, --server or --engine: one of them");
     }
     if (!options.password_file.empty()) {
         auto read = trackknife::protocol::read_password_file(options.password_file);

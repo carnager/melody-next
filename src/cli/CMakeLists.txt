@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # melody-cli: an engine from the shell.
-add_executable(melody_cli main.cpp config_command.cpp convert_command.cpp)
+add_executable(melody_cli main.cpp config_command.cpp convert_command.cpp help.cpp)
 set_target_properties(melody_cli PROPERTIES OUTPUT_NAME melody-cli)
 target_link_libraries(
     melody_cli

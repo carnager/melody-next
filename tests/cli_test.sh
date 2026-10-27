@@ -102,7 +102,27 @@ engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.fi
 
 cli() { "${cli}" --server "${socket}" "$@"; }
 
-cli --help | matches "play  album|track WORDS" || fail "--help says how to play an album"
+cli --help | matches "queue  album|track WORDS" || fail "--help says how to play an album"
+cli --help | matches "^Which engine" || fail "--help says how the engine is chosen"
+cli help queue | matches "melody-cli play random tracks 50" \
+    || fail "help COMMAND tells one command in full, with examples"
+cli play --help | matches "melody-cli play list" || fail "COMMAND --help is help COMMAND"
+if cli nosuch 2> "${work}/nosuch.txt"; then
+    fail "an unknown command fails"
+fi
+matches "melody-cli help lists them" "${work}/nosuch.txt" || fail "and says where the commands are"
+# Which engine answered, beside where it plays.
+cli status | matches " · engine " || fail "status names the engine that answered"
+# --local: this computer's engine, whatever $MELODY_SERVER says.
+XDG_RUNTIME_DIR="${work}" MELODY_SERVER=192.0.2.1:9 "${cli}" --local status | matches " · engine " \
+    || fail "--local reaches this computer's engine, past \$MELODY_SERVER"
+if XDG_RUNTIME_DIR="${work}/nowhere" "${cli}" --local status 2> "${work}/local.txt"; then
+    fail "--local with no engine here fails"
+fi
+matches "not running" "${work}/local.txt" || fail "and says so"
+if "${cli}" --local --server "${socket}" status > /dev/null 2>&1; then
+    fail "--local and --server together are two engines"
+fi
 
 # The library's revision: the same after a scan that finds nothing new,
 # another once a track comes.

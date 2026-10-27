@@ -164,6 +164,9 @@ others do: `--server`, `$MELODY_SERVER`, the one on this machine, or one on
 the network (`--engine NAME` if there are several). An engine on the network
 wants its password: `--password`, `$MELODY_PASSWORD`, or kept in a file with
 `--password-file FILE` or `$MELODY_PASSWORD_FILE`, as melodyd reads its own.
+`melody-cli help` lists every command, `melody-cli help COMMAND` says one in
+full; bash and zsh complete commands, their words, and the speakers, lists,
+layouts and engines the engine names (ADR-0342).
 
 ```sh
 melody-cli status
@@ -171,14 +174,14 @@ melody-cli current                    # "Artist - Title", or nothing when stoppe
 melody-cli current --format '%artist% — %title% \(%playback_time%/%length%\)'
 melody-cli find 'genre IS jazz SORT BY %date%' --format '%date% %artist% - %title%'
 melody-cli play album doors 1967      # every word must match
-melody-cli next track riders storm    # plays after the current track
+melody-cli insert track riders storm  # plays after the current track
 melody-cli lists                      # the engine's lists, saved and working
 melody-cli play list road trip        # one of them, by name or its words
 melody-cli output "Pixel 10 Pro"
 melody-cli rating 8                   # what plays, 1-10; 0 clears
 melody-cli albumrating 9              # its album
-melody-cli cover /tmp/cover.jpg 512   # its cover, 512 pixels across at most
-melody-cli love                       # on Last.fm, with the engine's account
+melody-cli cover --size 512 /tmp/cover.jpg  # its cover, 512 pixels across at most
+melody-cli lastfm love                # on Last.fm, with the engine's account
 melody-cli replaygain album doors 1967  # measured and written by the engine
 melody-cli --json watch               # a line each time something changes
 melody-cli watch --all                # the same, for whichever engine plays

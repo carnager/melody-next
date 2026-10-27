@@ -82,10 +82,10 @@ PluginComponent {
             return;
         if (hearted) {
             rate(0);
-            run(["unlove"]);
+            run(["lastfm", "unlove"]);
         } else {
             rate(10);
-            run(["love"]);
+            run(["lastfm", "love"]);
         }
     }
 
@@ -95,7 +95,7 @@ PluginComponent {
             return;
         ratingShownFor = track.path;
         ratingShown = value;
-        run(["rate", String(value)]);
+        run(["rating", String(value)]);
     }
 
     // The cover, as a file the popout shows: fetched when the track changes,
@@ -118,7 +118,7 @@ PluginComponent {
         const file = coverDirectory + "/cover-" + coverCount;
         coverFetch.target = file;
         coverFetch.command = ["sh", "-c", "mkdir -p \"$1\" && rm -f \"$1\"/cover-* && shift && exec \"$@\"", "sh", coverDirectory]
-            .concat([cli], engineArguments(), ["cover", file, "512"]);
+            .concat([cli], engineArguments(), ["cover", "--size", "512", file]);
         coverFetch.running = true;
     }
 

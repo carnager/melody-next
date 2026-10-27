@@ -17,4 +17,8 @@ void print_overview(std::ostream& out);
 // resumes, plays an album, plays a list. False when no command is called so.
 [[nodiscard]] bool print_command_help(std::ostream& out, std::string_view command);
 
+// Every command, a tab and what it does in a few words, one a line: what
+// the shell's completion offers.
+void print_commands(std::ostream& out);
+
 } // namespace trackknife::cli

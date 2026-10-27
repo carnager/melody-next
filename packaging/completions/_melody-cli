@@ -1,0 +1,194 @@
+#compdef melody-cli
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# zsh completion for melody-cli (ADR-0342): its commands, their words and
+# options. The speakers, lists, layouts and presets are asked of the engine
+# the line names -- melody-cli __complete -- and the engines of the network.
+
+# What melody-cli __complete says of $2, as name:what lines, to the engine
+# the line names; into the array named $1.
+_melody_cli_ask() {
+    local -a said
+    said=("${(@f)$(command melody-cli "${engine[@]}" __complete "$2" 2>/dev/null)}")
+    said=("${(@)said:#}")
+    # zsh's _describe splits at the first colon: one in a name is escaped.
+    set -A "$1" "${(@)${(@)said//:/\\:}/$'\t'/:}"
+}
+
+# The names melody-cli __complete says of $1, each one word on the line.
+_melody_cli_names() {
+    local -a found
+    found=("${(@f)$(command melody-cli "${engine[@]}" __complete "$1" 2>/dev/null)}")
+    found=("${(@)${(@)found%%$'\t'*}:#}")
+    (( ${#found} )) && compadd -a found
+}
+
+_melody-cli() {
+    local -a engine arguments
+    local command="" word
+    local -i at=2
+    # The engine options before the command go along to __complete; what
+    # follows the command is its own.
+    while (( at < CURRENT )); do
+        word="${words[at]}"
+        case "$word" in
+            --json|--keys) ;;
+            --format|--fields) (( at++ )) ;;
+            *)
+                if [[ -n "$command" ]]; then
+                    arguments+=("$word")
+                else
+                    case "$word" in
+                        --server|--engine|--password|--password-file)
+                            engine+=("$word" "${(Q)words[at+1]}")
+                            (( at++ )) ;;
+                        --local) engine+=(--local) ;;
+                        -*) ;;
+                        *) command="$word" ;;
+                    esac
+                fi ;;
+        esac
+        (( at++ ))
+    done
+
+    local cur="${words[CURRENT]}" prev="${words[CURRENT-1]}"
+    case "$prev" in
+        --engine) _melody_cli_names engines; return ;;
+        --password-file|--config) _files; return ;;
+        --to) _files -/; return ;;
+        --layout) _melody_cli_names layouts; return ;;
+        --preset) _melody_cli_names presets; return ;;
+        --gain) compadd none track album; return ;;
+        --style) compadd root playlist absolute; return ;;
+        --server) _message 'HOST:PORT or a socket'; return ;;
+        --password) _message 'password'; return ;;
+        --format) _message 'tkfmt-1 expression'; return ;;
+        --fields) _message 'artist,album,title,date'; return ;;
+        --size|--cover-size) _message 'pixels'; return ;;
+        --since) _message 'Unix seconds, 2026-10-17, or 90m, 12h, 3d, 2w'; return ;;
+        --run) _message 'command'; return ;;
+        --key) _message 'key, from albums --keys or tracks --keys'; return ;;
+    esac
+
+    if [[ -z "$command" ]]; then
+        if [[ "$cur" == -* ]]; then
+            local -a options=(
+                '--local:this computer'"'"'s engine'
+                '--server:an engine by address'
+                '--engine:an engine found nearby'
+                '--password:the engine'"'"'s password'
+                '--password-file:its password, from a file'
+                '--json:the engine'"'"'s own answers'
+                '--keys:each line ends in its key'
+                '--format:how a track is printed'
+                '--fields:what albums and tracks show'
+                '--help:every command')
+            _describe -t options option options
+        else
+            local -a commands
+            _melody_cli_ask commands commands
+            _describe -t commands command commands
+        fi
+        return
+    fi
+
+    local -i count=${#arguments}
+    local first="${arguments[1]}"
+    case "$command" in
+        play|add|insert|upnext)
+            if (( count == 0 )); then
+                local -a kinds=('album:an album, by words or --key' 'track:a track, by words or --key'
+                    'random:an album or tracks the engine chooses')
+                [[ "$command" == play ]] && kinds+=('list:one of the engine'"'"'s playlists')
+                _describe -t kinds kind kinds
+            elif [[ "$first" == list && "$command" == play ]]; then
+                _melody_cli_names lists
+            elif [[ "$first" == random ]]; then
+                (( count == 1 )) && compadd album tracks
+            elif [[ "$cur" == -* ]]; then
+                compadd -- --key
+            else
+                _message 'words in its artist, title, album or year'
+            fi ;;
+        output)
+            (( count == 0 )) && _melody_cli_names outputs ;;
+        lists)
+            if (( count == 0 )); then
+                compadd folder
+            elif [[ "$first" == folder ]]; then
+                if (( count == 1 )); then
+                    compadd default
+                    _files -/
+                else
+                    compadd -- --style
+                fi
+            fi ;;
+        lastfm)
+            (( count == 0 )) && compadd love unlove ;;
+        rating|albumrating)
+            (( count == 0 )) && compadd -V ratings {0..10} ;;
+        replaygain)
+            if (( count == 0 )); then
+                compadd album track
+            elif [[ "$cur" == -* ]]; then
+                compadd -- --key --track-gain --true-peak --sidecar
+            fi ;;
+        convert)
+            if [[ "$cur" == -* ]]; then
+                compadd -- --to --layout --preset --gain --since --no-replaygain --no-artwork \
+                    --cover-size --dry-run --presets --layouts --help
+            else
+                _files
+            fi ;;
+        cover)
+            if [[ "$cur" == -* ]]; then
+                compadd -- --size
+            else
+                _files
+            fi ;;
+        together)
+            if (( count == 0 )); then
+                compadd host join leave status party suggest vote remove
+            elif [[ "$first" == party ]]; then
+                (( count == 1 )) && compadd on off
+            elif [[ "$first" == suggest ]]; then
+                _files
+            fi ;;
+        watch)
+            if (( count == 0 )); then
+                compadd -- --all albums
+            elif [[ "$first" == albums ]]; then
+                compadd -- --folders --run
+            fi ;;
+        latest) compadd -- --since --folders ;;
+        albums|tracks) compadd -- --fields --keys ;;
+        find|current) compadd -- --format ;;
+        update) _files ;;
+        help)
+            if (( count == 0 )); then
+                local -a commands
+                _melody_cli_ask commands commands
+                _describe -t commands command commands
+            fi ;;
+        config)
+            # The key, once: what follows it is its value.
+            local -i named=0 index=1
+            while (( index <= count )); do
+                case "${arguments[index]}" in
+                    --engine|--config) (( index++ )) ;;
+                    -*) ;;
+                    *) (( named++ )) ;;
+                esac
+                (( index++ ))
+            done
+            if [[ "$cur" == -* ]]; then
+                compadd -- --edit --unset --engine --config
+            elif (( named == 0 )); then
+                local -a keys
+                _melody_cli_ask keys config-keys
+                _describe -t keys key keys
+            fi ;;
+    esac
+}
+
+_melody-cli "$@"

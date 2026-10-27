@@ -13,3 +13,9 @@ install(TARGETS melody_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT
 # The album page, built on melody-cli.
 install(PROGRAMS ${PROJECT_SOURCE_DIR}/scripts/melody-musiclist
         DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT cli)
+# ADR-0342: completion for bash and zsh, where each looks for it.
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/completions/melody-cli.bash
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions RENAME melody-cli
+        COMPONENT cli)
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/completions/_melody-cli
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions COMPONENT cli)

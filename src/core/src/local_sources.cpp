@@ -290,6 +290,36 @@ void settle_rewritten_file_time(const std::string& raw_path,
 namespace {
 
 std::atomic<bool> renumbering_simulated{false};
+std::atomic<bool> unstable_simulated{false};
+
+[[nodiscard]] bool numbers_its_own_files(const unsigned long kind) noexcept {
+    constexpr unsigned long cifs = 0xFF534D42UL;
+    constexpr unsigned long smb2 = 0xFE534D42UL;
+    constexpr unsigned long smb = 0x517BUL;
+    constexpr unsigned long fuse = 0x65735546UL;
+    return kind == cifs || kind == smb2 || kind == smb || kind == fuse;
+}
+
+// inode_numbers_unstable for the file at `raw_path`, or -- gone, or not yet
+// there -- for the folder it is in.
+[[nodiscard]] bool inode_numbers_unstable_at(const std::string& raw_path) noexcept {
+    if (unstable_simulated.load(std::memory_order_relaxed)) {
+        return true;
+    }
+#if defined(__linux__)
+    struct statfs filesystem{};
+    if (::statfs(raw_path.c_str(), &filesystem) != 0) {
+        auto parent = std::filesystem::path{raw_path}.parent_path();
+        if (parent.empty() || ::statfs(parent.c_str(), &filesystem) != 0) {
+            return false;
+        }
+    }
+    return numbers_its_own_files(static_cast<unsigned long>(filesystem.f_type) & 0xFFFFFFFFUL);
+#else
+    static_cast<void>(raw_path);
+    return false;
+#endif
+}
 
 // Renames a fresh temporary file in `directory` and says whether it kept its
 // inode number; empty when that could not be found out.
@@ -347,18 +377,23 @@ bool renames_keep_inodes(const std::string& raw_path, const std::uint64_t device
 
 } // namespace
 
-bool same_file_after_rename(const std::string& raw_path, const LocalSourceRevision& before,
-                            const LocalSourceRevision& after) {
-    if (before == after) {
+bool same_file(const std::string& raw_path, const LocalSourceRevision& expected,
+               const LocalSourceRevision& observed) {
+    if (expected == observed) {
         return true;
     }
-    auto renumbered = before;
-    renumbered.inode = after.inode;
-    return renumbered == after && !renames_keep_inodes(raw_path, after.device);
+    auto renumbered = expected;
+    renumbered.inode = observed.inode;
+    return renumbered == observed &&
+           (inode_numbers_unstable_at(raw_path) || !renames_keep_inodes(raw_path, observed.device));
 }
 
 void simulate_renumbering_renames_for_testing(const bool enabled) noexcept {
     renumbering_simulated.store(enabled, std::memory_order_relaxed);
+}
+
+void simulate_unstable_inode_numbers_for_testing(const bool enabled) noexcept {
+    unstable_simulated.store(enabled, std::memory_order_relaxed);
 }
 
 std::string describe_revision_change(const LocalSourceRevision& before,
@@ -395,17 +430,15 @@ std::string describe_revision_change(const LocalSourceRevision& before,
 }
 
 bool inode_numbers_unstable(const int descriptor) noexcept {
+    if (unstable_simulated.load(std::memory_order_relaxed)) {
+        return true;
+    }
 #if defined(__linux__)
     struct statfs filesystem{};
     if (::fstatfs(descriptor, &filesystem) != 0) {
         return false;
     }
-    constexpr unsigned long cifs = 0xFF534D42UL;
-    constexpr unsigned long smb2 = 0xFE534D42UL;
-    constexpr unsigned long smb = 0x517BUL;
-    constexpr unsigned long fuse = 0x65735546UL;
-    const auto kind = static_cast<unsigned long>(filesystem.f_type) & 0xFFFFFFFFUL;
-    return kind == cifs || kind == smb2 || kind == smb || kind == fuse;
+    return numbers_its_own_files(static_cast<unsigned long>(filesystem.f_type) & 0xFFFFFFFFUL);
 #else
     static_cast<void>(descriptor);
     return false;

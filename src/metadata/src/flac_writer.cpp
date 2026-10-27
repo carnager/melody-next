@@ -705,7 +705,8 @@ prepare_flac_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!before) {
         return std::unexpected(std::move(before.error()));
     }
-    if (before->source_revision != *source_plan.observed_revision ||
+    if (!core::same_file(source_plan.raw_path, *source_plan.observed_revision,
+                         before->source_revision) ||
         before->adapter_name != "taglib-flac-v1") {
         return std::unexpected(
             writer_error(core::ErrorCode::conflict,
@@ -810,7 +811,8 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
          (!source_plan.change.original ||
           source_plan.change.original->provenance != ArtworkProvenance::embedded ||
           source_plan.change.original->raw_source_path != source_plan.raw_media_path ||
-          source_plan.change.original->source_revision != *source_plan.observed_media_revision ||
+          !core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                           source_plan.change.original->source_revision) ||
           source_plan.change.original->source_ordinal != source_plan.change.target_ordinal ||
           source_plan.change.original->content_fingerprint !=
               source_plan.change.expected_target_fingerprint))) {
@@ -833,7 +835,8 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
     if (!before_inventory) {
         return std::unexpected(std::move(before_inventory.error()));
     }
-    if (before_inventory->media_revision != *source_plan.observed_media_revision ||
+    if (!core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                         before_inventory->media_revision) ||
         before_inventory->embedded_adapter_name != "taglib-flac-picture-v1") {
         return std::unexpected(
             writer_error(core::ErrorCode::conflict,
@@ -881,7 +884,8 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
     if (!before_document) {
         return std::unexpected(std::move(before_document.error()));
     }
-    if (before_document->source_revision != *source_plan.observed_media_revision ||
+    if (!core::same_file(source_plan.raw_media_path, *source_plan.observed_media_revision,
+                         before_document->source_revision) ||
         before_document->adapter_name != "taglib-flac-v1") {
         return std::unexpected(writer_error(
             core::ErrorCode::conflict, "FLAC metadata changed after the artwork plan was previewed",

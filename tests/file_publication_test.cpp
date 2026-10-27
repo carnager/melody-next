@@ -1244,6 +1244,59 @@ void destinationArtifactPublishesChangedContentAndRecoversItsJournalBoundary() {
             "recovery must not infer ownership or intent for an unrecorded changed artifact");
 }
 
+// ADR-0343: on a filesystem that numbers its files itself -- SMB, sshfs and
+// other FUSE mounts -- a file the kernel forgot between planning and Apply
+// comes back under another inode number. It is still the file planned: a
+// rename, and tags written into a renamed copy, go ahead. Elsewhere another
+// number is another file, refused before any journal.
+void renumberedSourcesPublishWhereTheClientNumbersFiles() {
+    for (const bool unstable : {false, true}) {
+        TemporaryDirectory directory;
+        const auto name = std::string{unstable ? "unstable" : "stable"};
+        const auto source = directory.path() / (name + ".flac");
+        const auto renamed = directory.path() / "Artist" / (name + "-renamed.flac");
+        const auto rewritten_source = directory.path() / (name + "-tagged.flac");
+        const auto rewritten = directory.path() / "Tagged" / (name + "-tagged-renamed.flac");
+        write_file(source, "audio bytes");
+        write_file(rewritten_source, "audio bytes to tag");
+        auto checked = preflight(source, renamed);
+        auto tagged = preflight(rewritten_source, rewritten);
+        // Planned under the number the file had then.
+        ++checked.sources.front().planned.source_revision.inode;
+        ++tagged.sources.front().planned.source_revision.inode;
+        auto journal = open_journal(directory, name + ".sqlite3");
+        core::simulate_unstable_inode_numbers_for_testing(unstable);
+        const auto moved = operations::commit_same_filesystem_publication(
+            checked, 0U, journal, successful_dependent_commit);
+        const auto preparer =
+            [](const std::string& prepared_raw_path,
+               const core::CancellationToken&) -> core::Result<core::LocalSourceRevision> {
+            write_file(prepared_raw_path, "tagged audio bytes");
+            return core::observe_local_source_revision(prepared_raw_path);
+        };
+        const auto written = operations::commit_destination_artifact_publication(
+            tagged, 0U, journal, preparer, successful_dependent_commit);
+        core::simulate_unstable_inode_numbers_for_testing(false);
+        if (unstable) {
+            if (!moved) {
+                std::cerr << moved.error().message << '\n';
+            }
+            if (!written) {
+                std::cerr << written.error().message << '\n';
+            }
+            require(moved.has_value() && read_file(renamed) == "audio bytes",
+                    "a renumbered source is renamed where the client numbers files");
+            require(written.has_value() && read_file(rewritten) == "tagged audio bytes",
+                    "and its tags are written into the renamed copy");
+        } else {
+            require(!moved && !written && journal.load_incomplete()->empty() &&
+                        read_file(source) == "audio bytes" &&
+                        read_file(rewritten_source) == "audio bytes to tag",
+                    "elsewhere another inode number is another file, refused before a journal");
+        }
+    }
+}
+
 void cancellationBeforeCommitCreatesNoJournal() {
     TemporaryDirectory directory;
     const auto source = directory.path() / "source.flac";
@@ -1289,6 +1342,7 @@ int main() {
     publicationsKeepTheirSourceForUndo();
     keptSourcesMoveWhereUndoCopiesAreKept();
     cancellationBeforeCommitCreatesNoJournal();
+    renumberedSourcesPublishWhereTheClientNumbersFiles();
     std::cout << "file publication executor tests passed\n";
     return 0;
 }

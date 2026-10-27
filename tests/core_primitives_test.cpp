@@ -524,6 +524,23 @@ void aRenumberedFileIsTheSameWhereInodesAreUnstable() {
         CHECK(trackknife::core::same_revision(seen, renumbered, descriptor) == unstable);
         ::close(descriptor);
     }
+
+    // ADR-0343: the rule by path, for a file seen earlier and not held open.
+    const auto here = trackknife::core::observe_local_source_revision(path.native());
+    CHECK(here.has_value());
+    if (here) {
+        auto other = *here;
+        ++other.inode;
+        auto changed = other;
+        ++changed.size;
+        CHECK(trackknife::core::same_file(path.native(), *here, *here));
+        trackknife::core::simulate_unstable_inode_numbers_for_testing(true);
+        CHECK(trackknife::core::same_file(path.native(), *here, other));
+        CHECK(!trackknife::core::same_file(path.native(), *here, changed));
+        // Not there any more: the folder it was in is asked.
+        CHECK(trackknife::core::same_file((path.parent_path() / "gone").native(), *here, other));
+        trackknife::core::simulate_unstable_inode_numbers_for_testing(false);
+    }
     std::filesystem::remove(path);
 }
 

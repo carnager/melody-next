@@ -774,7 +774,8 @@ verify_published_content(const MetadataOperationJournalRecord& record,
     if (record.content_kind == MetadataOperationContentKind::folder_image) {
         auto image = metadata::read_artwork_image_file(record.source_raw_path, 16U * 1024U * 1024U,
                                                        cancellation);
-        if (!image || image->source_revision != revision || record.changes.size() != 1 ||
+        if (!image || !core::same_file(record.source_raw_path, revision, image->source_revision) ||
+            record.changes.size() != 1 ||
             record.changes.front().planned_values !=
                 std::vector<std::string>{
                     metadata::artwork_fingerprint_hex(image->content_fingerprint)})
@@ -783,7 +784,7 @@ verify_published_content(const MetadataOperationJournalRecord& record,
         return metadata::MetadataDocument{};
     }
     auto reread = metadata::read_local_metadata(record.source_raw_path, cancellation);
-    if (!reread || reread->source_revision != revision) {
+    if (!reread || !core::same_file(record.source_raw_path, revision, reread->source_revision)) {
         return std::unexpected(
             !reread ? std::move(reread.error())
                     : operation_error(core::ErrorCode::conflict,
@@ -818,7 +819,7 @@ verify_published_content(const MetadataOperationJournalRecord& record,
     if (!fingerprint) {
         return std::unexpected(std::move(fingerprint.error()));
     }
-    if (inventory->media_revision != revision ||
+    if (!core::same_file(record.source_raw_path, revision, inventory->media_revision) ||
         inventory->items.size() != record.artwork->planned_item_count ||
         *fingerprint != record.artwork->planned_inventory_fingerprint) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
@@ -867,7 +868,8 @@ unlink_if_matches(const std::string& raw_path,
     if (!*observed) {
         return {};
     }
-    if ((!expected_revision || **observed != *expected_revision) && !permit_unobserved_owned_path) {
+    if ((!expected_revision || !core::same_file(raw_path, *expected_revision, **observed)) &&
+        !permit_unobserved_owned_path) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
                                                "recovery path has an unexpected identity",
                                                source_raw_path, journal_id));
@@ -1039,7 +1041,7 @@ unlink_if_renamed_from(const std::string& raw_path, const core::LocalSourceRevis
     if (!*observed) {
         return {};
     }
-    if (!core::same_file_after_rename(raw_path, expected, **observed)) {
+    if (!core::same_file(raw_path, expected, **observed)) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
                                                "set-aside file has an unexpected identity",
                                                record.source_raw_path, record.id));
@@ -1207,7 +1209,7 @@ rollback_published(const MetadataOperationJournalRecord& record,
     // The source was renamed into place, so it may carry a new inode number
     // (ADR-0249); the backup was not.
     if (!*source || !*backup ||
-        !core::same_file_after_rename(record.source_raw_path, published_revision, **source) ||
+        !core::same_file(record.source_raw_path, published_revision, **source) ||
         **backup != backup_identity(record)) {
         // Which one, and how: the message is all a remote user can send back.
         const auto differs = [&record](const char* what,
@@ -1216,9 +1218,8 @@ rollback_published(const MetadataOperationJournalRecord& record,
             if (!found) {
                 return std::string{what} + " missing";
             }
-            return *found == expected ||
-                           (std::string_view{what} == "source" &&
-                            core::same_file_after_rename(record.source_raw_path, expected, *found))
+            return *found == expected || (std::string_view{what} == "source" &&
+                                          core::same_file(record.source_raw_path, expected, *found))
                        ? std::string{}
                        : std::string{what} + " " + core::describe_revision_change(expected, *found);
         };
@@ -1459,7 +1460,7 @@ core::Result<void> verify_cue_carrier(const MetadataOperationJournalRecord& reco
                                       const core::LocalSourceRevision& revision,
                                       const CarrierEvidenceSide side) {
     auto observed = core::observe_local_source_revision(record.source_raw_path);
-    if (!observed || *observed != revision) {
+    if (!observed || !core::same_file(record.source_raw_path, revision, *observed)) {
         return std::unexpected(!observed
                                    ? std::move(observed.error())
                                    : operation_error(core::ErrorCode::conflict,
@@ -1521,7 +1522,7 @@ core::Result<void> verify_sidecar_carrier(const MetadataOperationJournalRecord& 
                                           const core::LocalSourceRevision& revision,
                                           const CarrierEvidenceSide side) {
     auto observed = core::observe_local_source_revision(record.source_raw_path);
-    if (!observed || *observed != revision) {
+    if (!observed || !core::same_file(record.source_raw_path, revision, *observed)) {
         return std::unexpected(
             !observed ? std::move(observed.error())
                       : operation_error(core::ErrorCode::conflict,
@@ -2248,15 +2249,14 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         return reconcile(std::move(aside_revision.error()));
     }
     const auto set_aside = [&](const std::optional<core::LocalSourceRevision>& found) {
-        return found && core::same_file_after_rename(aside_sibling(record), published, *found);
+        return found && core::same_file(aside_sibling(record), published, *found);
     };
     // ADR-0266, by what stands at the names: not begun (the written file in
     // place, the kept original intact), half done (the written file set
     // aside, the original beside it), or put back (the written file aside).
     const bool staged = ::access(restore_sibling(record).c_str(), F_OK) == 0;
     const bool not_begun =
-        *source_revision &&
-        core::same_file_after_rename(record.source_raw_path, published, **source_revision) &&
+        *source_revision && core::same_file(record.source_raw_path, published, **source_revision) &&
         ((*backup_revision && **backup_revision == backup_identity(record)) || staged) &&
         !*aside_revision;
     const bool half_done = !*source_revision && set_aside(*aside_revision) && staged;
@@ -2293,9 +2293,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         if (!restored) {
             // Nothing set aside: the written file is where it was.
             auto current = optional_revision(record.source_raw_path);
-            const bool unchanged =
-                current && *current &&
-                core::same_file_after_rename(record.source_raw_path, published, **current);
+            const bool unchanged = current && *current &&
+                                   core::same_file(record.source_raw_path, published, **current);
             static_cast<void>(::unlink(restore_sibling(record).c_str()));
             if (unchanged) {
                 auto settled = transition_backup(journal, record.id, BackupState::undoing,
@@ -2348,7 +2347,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         return restore_publication(dependent.error());
     }
     auto final_revision = core::observe_local_source_revision(record.source_raw_path);
-    if (!final_revision || *final_revision != *restored_revision) {
+    if (!final_revision ||
+        !core::same_file(record.source_raw_path, *restored_revision, *final_revision)) {
         return reconcile(!final_revision
                              ? final_revision.error()
                              : operation_error(core::ErrorCode::conflict,
@@ -2478,7 +2478,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     };
     if (!current_source) {
         backup_failure = std::move(current_source.error());
-    } else if (*current_source != record.expected_revision) {
+    } else if (!core::same_file(record.source_raw_path, record.expected_revision,
+                                *current_source)) {
         backup_failure = operation_error(
             core::ErrorCode::conflict,
             "metadata source changed before publication (" +
@@ -2500,8 +2501,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
             !copied_backups_for_testing.load(std::memory_order_relaxed) &&
             ::rename(record.source_raw_path.c_str(), record.backup_raw_path.c_str()) == 0) {
             auto observed = core::observe_local_source_revision(record.backup_raw_path);
-            if (observed && core::same_file_after_rename(record.backup_raw_path,
-                                                         record.expected_revision, *observed)) {
+            if (observed &&
+                core::same_file(record.backup_raw_path, record.expected_revision, *observed)) {
                 moved = *observed;
             } else {
                 // Not the file it was: put back at once, and refused.
@@ -2575,8 +2576,9 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
                              ? core::Result<core::LocalSourceRevision>{record.expected_revision}
                              : core::observe_local_source_revision(record.source_raw_path);
     auto backup = core::observe_local_source_revision(record.backup_raw_path);
-    if (!backup_source || !backup || *backup_source != record.expected_revision ||
-        *backup != backup_identity(record)) {
+    if (!backup_source || !backup ||
+        !core::same_file(record.source_raw_path, record.expected_revision, *backup_source) ||
+        !core::same_file(record.backup_raw_path, backup_identity(record), *backup)) {
         const auto failure =
             !backup_source
                 ? backup_source.error()
@@ -2645,8 +2647,7 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     // The prepared file, renamed into place: on some filesystems with a new
     // inode number (ADR-0249). What is observed now is what is recorded.
     const bool published_identity =
-        published &&
-        core::same_file_after_rename(record.source_raw_path, prepared_revision, *published);
+        published && core::same_file(record.source_raw_path, prepared_revision, *published);
     if (!published_sync || !published_identity) {
         const auto failure =
             !published_sync
@@ -2829,7 +2830,9 @@ commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
                        const core::CancellationToken& cancellation) {
     if (source_plan.artwork && source_plan.artwork->folder_image) {
         if (!dependent_state_committer || !source_plan.ready() || !source_plan.observed_revision ||
-            source_plan.expected_revision != source_plan.observed_revision ||
+            !source_plan.expected_revision ||
+            !core::same_file(source_plan.raw_path, *source_plan.expected_revision,
+                             *source_plan.observed_revision) ||
             source_plan.raw_path != source_plan.artwork->raw_media_path ||
             source_plan.expected_revision != source_plan.artwork->expected_media_revision ||
             std::filesystem::path{source_plan.raw_path}.parent_path() !=
@@ -2878,7 +2881,8 @@ commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
         source_plan.raw_path.find('\0') != std::string::npos || !source_plan.ready() ||
         !metadata::is_qualified_text_adapter(source_plan.adapter_name) ||
         !source_plan.expected_revision || !source_plan.observed_revision ||
-        *source_plan.expected_revision != *source_plan.observed_revision ||
+        !core::same_file(source_plan.raw_path, *source_plan.expected_revision,
+                         *source_plan.observed_revision) ||
         (source_plan.changes.empty() && !source_plan.artwork)) {
         return std::unexpected(
             operation_error(core::ErrorCode::invalid_argument,
@@ -2921,7 +2925,8 @@ commit_metadata_source(const metadata::MetadataWritePlanSource& source_plan,
     if (!fresh) {
         return std::unexpected(std::move(fresh.error()));
     }
-    if (fresh->source_revision != *source_plan.observed_revision ||
+    if (!core::same_file(source_plan.raw_path, *source_plan.observed_revision,
+                         fresh->source_revision) ||
         fresh->adapter_name != source_plan.adapter_name) {
         return std::unexpected(operation_error(
             core::ErrorCode::conflict,
@@ -3698,8 +3703,8 @@ recover_metadata_operations(MetadataOperationJournal& journal,
         // and the original at the backup's: put back, and the new file goes.
         if (!*source_revision && *backup_revision &&
             (**backup_revision == backup_identity(record) ||
-             core::same_file_after_rename(record.backup_raw_path, record.expected_revision,
-                                          **backup_revision))) {
+             core::same_file(record.backup_raw_path, record.expected_revision,
+                             **backup_revision))) {
             std::optional<core::Error> issue;
             if (::rename(record.backup_raw_path.c_str(), record.source_raw_path.c_str()) != 0) {
                 issue = system_error("putting the moved original back failed", errno,
@@ -3740,8 +3745,7 @@ recover_metadata_operations(MetadataOperationJournal& journal,
         // this operation's own and unpublished, and goes by its path.
         if (*source_revision &&
             (**source_revision == record.expected_revision ||
-             core::same_file_after_rename(record.source_raw_path, backup_identity(record),
-                                          **source_revision))) {
+             core::same_file(record.source_raw_path, backup_identity(record), **source_revision))) {
             auto prepared_cleaned = unlink_if_matches(
                 record.prepared_raw_path, record.prepared_revision, record.source_raw_path,
                 record.id, record.state == State::planned && !record.prepared_revision);
@@ -3773,8 +3777,7 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             record.published_revision ? record.published_revision : record.prepared_revision;
         const bool published_candidate =
             *source_revision && recorded_candidate &&
-            core::same_file_after_rename(record.source_raw_path, *recorded_candidate,
-                                         **source_revision) &&
+            core::same_file(record.source_raw_path, *recorded_candidate, **source_revision) &&
             *backup_revision && **backup_revision == backup_identity(record);
         const auto candidate_revision = published_candidate ? *source_revision : recorded_candidate;
         if (!published_candidate || record.state == State::planned) {

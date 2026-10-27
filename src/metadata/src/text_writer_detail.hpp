@@ -150,16 +150,21 @@ class PreparedPathGuard final {
                         source_raw_path, prepared_raw_path);
 }
 
-[[nodiscard]] inline bool same_revision(const struct stat& observed,
+// ADR-0331: the open file is still the one `expected` describes -- on a
+// filesystem that numbers its files itself, perhaps under another number.
+[[nodiscard]] inline bool same_revision(const int descriptor, const struct stat& observed,
                                         const core::LocalSourceRevision& expected) {
     return observed.st_size >= 0 &&
-           static_cast<std::uint64_t>(observed.st_dev) == expected.device &&
-           static_cast<std::uint64_t>(observed.st_ino) == expected.inode &&
-           static_cast<std::uint64_t>(observed.st_size) == expected.size &&
-           static_cast<std::int64_t>(observed.st_mtim.tv_sec) ==
-               expected.modification_time_seconds &&
-           static_cast<std::int64_t>(observed.st_mtim.tv_nsec) ==
-               expected.modification_time_nanoseconds;
+           core::same_revision(
+               expected,
+               core::LocalSourceRevision{.device = static_cast<std::uint64_t>(observed.st_dev),
+                                         .inode = static_cast<std::uint64_t>(observed.st_ino),
+                                         .size = static_cast<std::uint64_t>(observed.st_size),
+                                         .modification_time_seconds =
+                                             static_cast<std::int64_t>(observed.st_mtim.tv_sec),
+                                         .modification_time_nanoseconds =
+                                             static_cast<std::int64_t>(observed.st_mtim.tv_nsec)},
+               descriptor);
 }
 
 [[nodiscard]] inline core::Result<mode_t> copy_source_exclusively(
@@ -177,7 +182,8 @@ class PreparedPathGuard final {
         return std::unexpected(system_error("observing opened " + label + " source failed", errno,
                                             source_raw_path, prepared_raw_path));
     }
-    if (!S_ISREG(source_status.st_mode) || !same_revision(source_status, expected_revision)) {
+    if (!S_ISREG(source_status.st_mode) ||
+        !same_revision(source.get(), source_status, expected_revision)) {
         return std::unexpected(writer_error(
             core::ErrorCode::conflict, label + " source changed after the write plan was previewed",
             source_raw_path, prepared_raw_path));

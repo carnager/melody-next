@@ -24,7 +24,7 @@ each, and a journal record marked for reconciliation.
 ## Decision
 
 - **After a rename by Trackknife, the inode is compared only where renames
-  keep it.** `core::same_file_after_rename(path, before, after)`: equal, or
+  keep it.** `core::same_file(path, before, after)` (named `same_file_after_rename` until ADR-0343): equal, or
   equal in all but the inode on a filesystem whose renames renumber files.
 - **The filesystem is asked, not assumed.** Only when an inode did change,
   once per device per process: a temporary file beside the path is created,

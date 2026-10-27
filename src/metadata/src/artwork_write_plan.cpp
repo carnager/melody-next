@@ -336,6 +336,11 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
         }
         source.observed_media_revision = inventory->media_revision;
         source.adapter_name = inventory->embedded_adapter_name;
+        // ADR-0343: renumbered by the client, it is the file inspected.
+        if (core::same_file(source.raw_media_path, *source.expected_media_revision,
+                            inventory->media_revision)) {
+            source.expected_media_revision = inventory->media_revision;
+        }
         if (inventory->media_revision != *source.expected_media_revision) {
             add_issue(source, ArtworkWritePlanIssueKind::source_changed,
                       plan_error(core::ErrorCode::conflict,

@@ -131,7 +131,7 @@ move_kept(const std::string& from, const core::LocalSourceRevision& kept, const 
     if (!*found) {
         return std::optional<Moved>{};
     }
-    if (!core::same_file_after_rename(from, kept, **found)) {
+    if (!core::same_file(from, kept, **found)) {
         return std::unexpected(core::Error{.code = core::ErrorCode::conflict,
                                            .message = "an undo copy has changed",
                                            .context = {{.key = "path", .value = from}}});

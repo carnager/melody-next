@@ -239,7 +239,7 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     const bool published =
         *current && record.prepared_revision &&
         // Renamed into place, perhaps renumbered by that rename (ADR-0249).
-        core::same_file_after_rename(record.source_raw_path, *record.prepared_revision, **current);
+        core::same_file(record.source_raw_path, *record.prepared_revision, **current);
     if (!unchanged && !published)
         return reconcile(error("Folder image changed outside this operation"));
     if (published) {

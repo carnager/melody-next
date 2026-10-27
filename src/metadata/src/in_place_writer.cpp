@@ -444,7 +444,7 @@ prepare_in_place_metadata_write(const MetadataWritePlanSource& source_plan,
     if (!before) {
         return std::unexpected(std::move(before.error()));
     }
-    if (before->source_revision != *source_plan.observed_revision ||
+    if (!core::same_file(path, *source_plan.observed_revision, before->source_revision) ||
         before->adapter_name != adapter) {
         return std::unexpected(in_place_error(
             core::ErrorCode::conflict, "the source changed after the write was planned", path));

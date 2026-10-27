@@ -1105,7 +1105,7 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
         [&saved_layouts, &saved_destinations](auto completion) {
             completion(saved_layouts, saved_destinations, QString{});
         },
-        preset_store, engineConversionRunner(engine_.socket()));
+        preset_store);
     dialog->show();
 
     auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
@@ -1335,9 +1335,8 @@ void BenchMainWindowTest::convertDialogFetchesFilesItCannotReach() {
             }
             return {};
         }};
-    auto* dialog = new ConvertDialog(
-        {std::move(item)}, [](auto completion) { completion({}, {}, QString{}); }, {},
-        engineConversionRunner(engine_.socket()));
+    auto* dialog = new ConvertDialog({std::move(item)},
+                                     [](auto completion) { completion({}, {}, QString{}); }, {});
     dialog->show();
     auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
     auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-destination"));
@@ -1419,8 +1418,7 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
                      ConvertPresetStore::Completion completion) { completion(QString{}); },
     };
     auto* dialog = new ConvertDialog(
-        {std::move(item)}, [](auto completion) { completion({}, {}, QString{}); }, preset_store,
-        engineConversionRunner(engine_.socket()));
+        {std::move(item)}, [](auto completion) { completion({}, {}, QString{}); }, preset_store);
     dialog->show();
     auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
     auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-destination"));

@@ -47,12 +47,6 @@ struct ConvertDialogItem {
         fetch;
 };
 
-// ADR-0336: the engine on this computer converting -- the one path a
-// conversion takes. Empty: there is no engine here to convert with.
-using ConversionRunner = std::function<core::Result<convert::ConversionScanResult>(
-    std::span<const convert::ConversionScanItem>, const convert::ConversionScanOptions&,
-    const convert::ConversionScanProgressCallback&, const core::CancellationToken&)>;
-
 // Loads the saved naming layouts and destination roots the rest of the app
 // already manages so the converter offers them as one-click choices.
 using ConvertProfilesLoader = std::function<void(
@@ -106,8 +100,7 @@ class ConvertJob final : public QObject {
     };
 
     ConvertJob(std::vector<ConvertDialogItem> items, ConvertProfilesLoader profiles = {},
-               ConvertPresetStore preset_store = {}, ConversionRunner runner = {},
-               QObject* parent = nullptr);
+               ConvertPresetStore preset_store = {}, QObject* parent = nullptr);
     ~ConvertJob() override;
 
     [[nodiscard]] QString title() const;
@@ -196,7 +189,6 @@ class ConvertJob final : public QObject {
 
     std::vector<ConvertDialogItem> items_;
     ConvertPresetStore preset_store_;
-    ConversionRunner runner_;
     std::vector<persistence::SavedOutputLayoutProfile> layout_catalog_;
     std::vector<persistence::SavedDestinationProfile> destination_catalog_;
     std::vector<persistence::SavedEncoderPreset> saved_presets_;

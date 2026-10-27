@@ -330,7 +330,8 @@ add_test(
 add_executable(trackknife_list_repository_tests list_repository_test.cpp)
 target_link_libraries(
     trackknife_list_repository_tests
-    PRIVATE Trackknife::Persistence trackknife_project_options trackknife_project_warnings
+    PRIVATE Trackknife::Persistence melody_cli_presets trackknife_project_options
+            trackknife_project_warnings
 )
 target_compile_definitions(
     trackknife_list_repository_tests

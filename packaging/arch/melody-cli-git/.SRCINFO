@@ -13,6 +13,7 @@ pkgbase = melody-cli-git
 	depends = gcc-libs
 	depends = glibc
 	depends = libutf8proc
+	depends = sqlite
 	optdepends = python: melody-musiclist, the album page
 	optdepends = openssh: melody-musiclist uploading it
 	provides = melody-cli

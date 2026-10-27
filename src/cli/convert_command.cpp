@@ -2,8 +2,9 @@
 
 #include "convert_command.hpp"
 
+#include "presets.hpp"
+
 #include "trackknife/core/engine_state.hpp"
-#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <unistd.h>
@@ -69,20 +70,15 @@ void usage() {
 
 // ADR-0339: Melody's naming layouts, as the window keeps them on this
 // computer -- the one place they are.
-[[nodiscard]] std::vector<persistence::SavedOutputLayoutProfile> melody_layouts() {
+[[nodiscard]] std::vector<NamingLayout> melody_layouts() {
     const auto path = core::presets_database_path();
-    std::error_code missing;
-    if (!std::filesystem::exists(path, missing)) {
+    auto layouts = read_naming_layouts(path);
+    if (!layouts && layouts.error().code == core::ErrorCode::not_found) {
         fail("Melody keeps no naming layouts on this computer yet (" + path.string() +
              "); make one in Melody, or give --layout-expression");
     }
-    auto presets = persistence::ListRepository::open(path);
-    if (!presets) {
-        fail("Melody's presets could not be read: " + presets.error().message);
-    }
-    auto layouts = presets->load_output_layout_profiles();
     if (!layouts) {
-        fail("Melody's naming layouts could not be read: " + layouts.error().message);
+        fail(layouts.error().message + " (" + path.string() + ")");
     }
     return std::move(*layouts);
 }
@@ -177,7 +173,7 @@ std::vector<std::string> album_track_paths(protocol::Client& client, const std::
 
 void print_layout_names(std::ostream& out) {
     for (const auto& saved : melody_layouts()) {
-        out << saved.profile.name << "\n";
+        out << saved.name << "\n";
     }
 }
 
@@ -318,13 +314,12 @@ int convert_command(protocol::Client& client, const bool json,
     } else if (!layout.empty()) {
         const auto layouts = melody_layouts();
         const auto found = std::ranges::find_if(
-            layouts, [&layout](const auto& saved) { return saved.profile.name == layout; });
+            layouts, [&layout](const auto& saved) { return saved.name == layout; });
         if (found == layouts.end()) {
             fail("Melody has no naming layout " + layout + " (melody-cli convert --layouts)");
         }
-        params["layout"] = Json{{"name", found->profile.name},
-                                {"directory", found->profile.relative_directory_expression},
-                                {"basename", found->profile.basename_expression}};
+        params["layout"] = Json{
+            {"name", found->name}, {"directory", found->directory}, {"basename", found->basename}};
     }
     const bool interactive = !json && ::isatty(STDERR_FILENO) == 1;
     auto outcome = client.run_job("convert.apply", params, [interactive](const Json& progress) {

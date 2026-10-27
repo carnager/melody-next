@@ -9,7 +9,7 @@ pkgdesc='Melody engines from the shell: playback, the queue, the library by word
 arch=(x86_64 aarch64)
 url='https://github.com/carnager/melody-next'
 license=(GPL-3.0-only)
-depends=(gcc-libs glibc libutf8proc)
+depends=(gcc-libs glibc libutf8proc sqlite)
 makedepends=(cmake git ninja nlohmann-json)
 optdepends=('python: melody-musiclist, the album page'
             'openssh: melody-musiclist uploading it')

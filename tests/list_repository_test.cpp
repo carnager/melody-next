@@ -2,6 +2,8 @@
 
 #include "trackknife/persistence/list_edits.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+
+#include "presets.hpp"
 #include <sqlite3.h>
 
 #include <iterator>
@@ -15,6 +17,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -2597,6 +2600,51 @@ void working_lists_are_retired_and_come_back() {
     std::filesystem::remove(path);
 }
 
+// ADR-0339: melody-cli reads the naming layouts Melody saves, by name, with
+// SQLite alone -- the same names and expressions, and nothing written.
+void melody_cli_reads_the_layouts_melody_saves() {
+    namespace core = trackknife::core;
+    namespace operations = trackknife::operations;
+    namespace persistence = trackknife::persistence;
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("trackknife-cli-presets-" + core::StableId::random().to_string());
+    std::filesystem::create_directories(directory);
+    const auto presets = directory / "presets.sqlite";
+    const auto missing = trackknife::cli::read_naming_layouts(presets);
+    require(!missing && missing.error().code == core::ErrorCode::not_found &&
+                !std::filesystem::exists(presets),
+            "no presets yet is not found, and nothing made");
+    {
+        auto repository = persistence::ListRepository::open(presets);
+        require(repository.has_value(), "Melody's presets open");
+        for (const auto& [name, folders, file] :
+             {std::tuple{"Opus copies", "%albumartist%/%album%", "%tracknumber% %title%"},
+              std::tuple{"Archive", "$if2(%albumartist%,Various)", "%title%"}}) {
+            const persistence::SavedOutputLayoutProfile layout{
+                .id = core::StableId::random(),
+                .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                           .name = name,
+                                                           .dialect = {},
+                                                           .relative_directory_expression = folders,
+                                                           .basename_expression = file,
+                                                           .sanitization_policy = {"linux", 1U}},
+            };
+            require(repository->upsert_output_layout_profile(layout).has_value(),
+                    "Melody saves a layout");
+        }
+    }
+    const auto before = std::filesystem::last_write_time(presets);
+    const auto read = trackknife::cli::read_naming_layouts(presets);
+    require(read && read->size() == 2U && (*read)[0].name == "Archive" &&
+                (*read)[0].directory == "$if2(%albumartist%,Various)" &&
+                (*read)[0].basename == "%title%" && (*read)[1].name == "Opus copies" &&
+                (*read)[1].directory == "%albumartist%/%album%" &&
+                (*read)[1].basename == "%tracknumber% %title%",
+            "melody-cli reads each by name, with its expressions");
+    require(std::filesystem::last_write_time(presets) == before, "and writes nothing");
+    std::filesystem::remove_all(directory);
+}
+
 int main() {
     a_workspace_save_writes_only_what_changed();
     saved_searches_are_persistent_and_conflict_checked();
@@ -2607,6 +2655,7 @@ int main() {
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();
     presets_are_adopted_once();
+    melody_cli_reads_the_layouts_melody_saves();
     encoder_presets_round_trip_transactionally();
     committed_metadata_refreshes_every_occurrence_idempotently();
     committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot();

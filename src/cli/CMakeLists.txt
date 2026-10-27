@@ -1,12 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
+# ADR-0339: Melody's naming layouts, read with SQLite alone -- melody-cli
+# builds without the media libraries the rest of persistence needs.
+add_library(melody_cli_presets STATIC presets.cpp)
+target_include_directories(melody_cli_presets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    melody_cli_presets
+    PUBLIC Trackknife::Core
+    PRIVATE PkgConfig::SQLITE3 trackknife_project_options trackknife_project_warnings
+)
+
 # melody-cli: an engine from the shell.
 add_executable(melody_cli main.cpp config_command.cpp convert_command.cpp help.cpp)
 set_target_properties(melody_cli PROPERTIES OUTPUT_NAME melody-cli)
 target_link_libraries(
     melody_cli
     PRIVATE trackknife_daemon_settings Trackknife::Protocol Trackknife::Discovery Trackknife::Core
-            Trackknife::Persistence
+            melody_cli_presets
             trackknife_project_options trackknife_project_warnings
 )
 

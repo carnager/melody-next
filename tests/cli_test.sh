@@ -102,7 +102,7 @@ engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.fi
 
 cli() { "${cli}" --server "${socket}" "$@"; }
 
-cli --help | matches "queue  album|track WORDS" || fail "--help says how to play an album"
+cli --help | matches "upnext  album|track WORDS" || fail "--help says how to play an album"
 cli --help | matches "^Which engine" || fail "--help says how the engine is chosen"
 cli help queue | matches "melody-cli play random tracks 50" \
     || fail "help COMMAND tells one command in full, with examples"
@@ -112,6 +112,17 @@ if cli nosuch 2> "${work}/nosuch.txt"; then
 fi
 matches "melody-cli help lists them" "${work}/nosuch.txt" || fail "and says where the commands are"
 # Which engine answered, beside where it plays.
+# ADR-0342: every command completion offers has its help.
+"${cli}" __complete commands | cut -f1 > "${work}/commands.txt"
+matches -x upnext "${work}/commands.txt" || fail "__complete commands lists them"
+while read -r command; do
+    "${cli}" help "${command}" > /dev/null || fail "help ${command}"
+done < "${work}/commands.txt"
+# config is this computer's file: an engine named on the line is refused.
+if cli config name 2>"${work}/config.txt"; then
+    fail "config with --server is refused"
+fi
+matches "this computer's melodyd.conf" "${work}/config.txt" || fail "and says why"
 cli status | matches " · engine " || fail "status names the engine that answered"
 # --local: this computer's engine, whatever $MELODY_SERVER says.
 XDG_RUNTIME_DIR="${work}" MELODY_SERVER=192.0.2.1:9 "${cli}" --local status | matches " · engine " \
@@ -310,12 +321,18 @@ cli status | matches "^playing: .*alpha" || fail "adding leaves what plays alone
 cli status | matches "queue 2" || fail "and appends"
 
 # Up Next, first and last.
-cli queue track beta 2>/dev/null > /dev/null
-cli next track gamma 2>/dev/null > /dev/null
+cli upnext track beta 2>/dev/null > /dev/null
+cli insert track gamma 2>/dev/null > /dev/null
 requests="$(engine '{"id":3,"method":"playback.requests"}')"
 [ "$(echo "${requests}" | python3 -c 'import json,sys; print(len(json.loads(sys.stdin.read())["result"]["entries"]))')" = "2" ] \
     || fail "two are asked for in Up Next"
 cli status | matches "up next 2" || fail "status counts them"
+
+# next only skips: with words it says what does that.
+if cli next track beta 2>"${work}/next.txt"; then
+    fail "next with words is refused"
+fi
+matches "melody-cli insert" "${work}/next.txt" || fail "and points to insert"
 
 # Skipping plays what was asked first: gamma.
 cli next | matches "^playing: .*gamma" || fail "next plays what Up Next has first"
@@ -329,7 +346,7 @@ position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys
 cli rating 7 | matches "^rated 7: .*gamma" || fail "rating rates what plays"
 [ "$(cli rating)" = "7" ] || fail "rating reads it back"
 [ "$(cli current --format '%rating%')" = "7" ] || fail "current's rating is the same 1-10"
-cli rate 10 > /dev/null || fail "rate is rating by another name"
+cli rating 10 > /dev/null || fail "rating rates again"
 cli --json rating | python3 -c 'import json,sys; assert json.load(sys.stdin)["rating"] == 10' \
     || fail "rating --json says the number"
 for wrong in 11 -1 3.5 five; do
@@ -348,11 +365,24 @@ cli albumrating 8 | matches "^rated 8: " || fail "albumrating rates the album"
 cli albumrating 0 | matches "^cleared: " || fail "0 clears the album's"
 [ "$(cli albumrating)" = "0" ] || fail "cleared, it says 0"
 
-# No Last.fm account here: love says why and fails.
-if cli love 2>"${work}/love.txt"; then
+# No Last.fm account here: lastfm love says why and fails.
+if cli lastfm love 2>"${work}/love.txt"; then
     fail "love without a Last.fm account fails"
 fi
 grep -q "lastfm.love" "${work}/love.txt" || fail "and says why"
+if cli lastfm 2>/dev/null; then
+    fail "lastfm wants love or unlove"
+fi
+
+# cover: none on these files, said and failed, into a file or a pipe.
+if cli cover > /dev/null 2>"${work}/cover.txt"; then
+    fail "cover of a file without one fails"
+fi
+matches "has no cover" "${work}/cover.txt" || fail "and says why"
+if cli cover --size none "${work}/cover.jpg" 2>"${work}/cover.txt"; then
+    fail "cover --size wants pixels"
+fi
+matches "a number of pixels" "${work}/cover.txt" || fail "and says so"
 
 # watch: a line as it starts, and one for each change.
 "${cli}" --server "${socket}" --json watch > "${work}/watch.txt" &
@@ -519,16 +549,31 @@ grep -q "^Road trip (2 tracks)$" "${work}/lists.txt" || fail "a saved list, by n
 # ADR-0286: a list saved without a kind is a saved playlist too.
 grep -q "^Road work (1 tracks)$" "${work}/lists.txt" || fail "every list is a saved playlist"
 # ADR-0296: and each is a file in the playlist folder, which is said and chosen.
-cli playlists | head -1 | grep -q "/music/Playlists (the default)$" || fail "playlists says the folder"
+cli lists folder | head -1 | grep -q "/music/Playlists (the default)$" || fail "lists folder says the folder"
 [ -f "${work}/music/Playlists/Road trip.m3u8" ] || fail "a saved list is its file"
 grep -q "^second/gamma.wav$" "${work}/music/Playlists/Road trip.m3u8" \
     || fail "its tracks named as MPD names them"
 mkdir -p "${work}/mpd-playlists"
-cli playlists folder "${work}/mpd-playlists" --style absolute | head -1 \
-    | grep -q "/mpd-playlists$" || fail "playlists folder chooses another"
+cli lists folder "${work}/mpd-playlists" --style absolute | head -1 \
+    | grep -q "/mpd-playlists$" || fail "lists folder chooses another"
 grep -q "^${work}/music/second/gamma.wav$" "${work}/mpd-playlists/Road trip.m3u8" \
     || fail "the lists written there, in the style chosen"
-cli playlists folder default > /dev/null || fail "and back to the default"
+cli lists folder default > /dev/null || fail "and back to the default"
+# ADR-0342: completion asks the engine for its lists and speakers.
+cli __complete lists | matches -x "Road trip" || fail "__complete lists names them"
+[ -n "$(cli __complete outputs)" ] || fail "__complete outputs names the speakers"
+completed() {
+    # What bash completes for the words given, the last the one typed.
+    PATH="$(dirname "${cli}"):${PATH}" MELODY_SERVER="${socket}" bash -c '
+        source "$1"; shift
+        COMP_WORDS=(melody-cli "$@"); COMP_CWORD=$#
+        _melody_cli; printf "%s\n" "${COMPREPLY[@]}"' completion "${completion}" "$@"
+}
+completion="$(dirname "$0")/../packaging/completions/melody-cli.bash"
+completed play list Road | matches -x -F 'Road\ trip' || fail "bash completes a list's name, one word"
+completed up | matches -x upnext || fail "bash completes a command"
+completed lastfm "" | matches -x unlove || fail "and a command's words"
+completed config pass | matches -x password-file || fail "and melodyd.conf's keys"
 cli --keys lists | matches -P "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
 cli play list trip 2>/dev/null | matches "^playing:" || fail "play list plays one by a word of its name"
 cli --json status | python3 -c '

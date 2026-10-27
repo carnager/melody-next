@@ -25,7 +25,7 @@ constexpr std::array<std::string_view, 7> groups{
     "Playing", "The queue",        "The library", "Playlists", "Your music's files",
     "Sharing", "Engines and setup"};
 
-const std::array<Entry, 27> entries{{
+const std::array<Entry, 25> entries{{
     {{"status"},
      "Playing",
      "status",
@@ -52,7 +52,7 @@ const std::array<Entry, 27> entries{{
      "the transport: play resumes, next skips",
      "  play resumes (or starts the queue), pause pauses, toggle switches between\n"
      "  the two, stop stops, next and prev skip.\n"
-     "  With words after them, play and next take something to play instead:\n"
+     "  With words after it, play takes something to play instead:\n"
      "  melody-cli help queue.\n"},
     {{"seek"},
      "Playing",
@@ -74,15 +74,16 @@ const std::array<Entry, 27> entries{{
      "  outputs lists the speakers this engine can play on: its own, agents on\n"
      "  other computers, phones, UPnP devices. output NAME moves playback there.\n"
      "    melody-cli output livingroom\n"},
-    {{"queue", "play", "add", "next", "random"},
+    {{"queue", "play", "add", "insert", "upnext", "random"},
      "The queue",
-     "play | add | next | queue  album|track WORDS...",
+     "play | add | insert | upnext  album|track WORDS...",
      "find something and play it, or add it",
      "  play replaces the queue with it and plays it; add appends it to the\n"
-     "  queue; next puts it first in Up Next; queue puts it last in Up Next.\n"
+     "  queue; insert puts it first in Up Next, to play after this track;\n"
+     "  upnext puts it last in Up Next.\n"
      "  Every word must appear in its artist, title, album or year:\n"
      "    melody-cli play album doors 1967\n"
-     "    melody-cli next track riders on the storm\n"
+     "    melody-cli insert track riders on the storm\n"
      "  Or name one exactly by the key `albums --keys` or `tracks --keys` give:\n"
      "    melody-cli add album --key KEY\n"
      "  Or let the engine choose -- an album of a random album artist, or COUNT\n"
@@ -133,16 +134,17 @@ const std::array<Entry, 27> entries{{
      "changes whenever the library does, for caches",
      "  A number that changes whenever the library does: a script keeps it and\n"
      "  asks again only when it changed.\n"},
-    {{"lists", "playlists"},
+    {{"lists", "playlists", "folder"},
      "Playlists",
-     "lists | playlists [folder DIR|default [--style S]]",
+     "lists | lists folder [DIR|default [--style S]]",
      "saved playlists, and where they are kept",
-     "  lists names the engine's saved playlists. playlists says where they are\n"
-     "  kept: a folder of the engine's, each playlist file there one list.\n"
-     "  playlists folder DIR keeps them in DIR (MPD's playlist_directory, say),\n"
-     "  default in Playlists in the music folder; --style root|playlist|absolute\n"
-     "  is how new files name their tracks.\n"},
-    {{"rating", "rate", "albumrating"},
+     "  lists names the engine's saved playlists (play list NAME plays one).\n"
+     "  lists folder says where they are kept: a folder of the engine's, each\n"
+     "  playlist file there one list. lists folder DIR keeps them in DIR (MPD's\n"
+     "  playlist_directory, say), default in Playlists in the music folder;\n"
+     "  --style root|playlist|absolute is how new files name their tracks.\n"
+     "    melody-cli lists folder /srv/mpd/playlists --style absolute\n"},
+    {{"rating", "albumrating"},
      "Your music's files",
      "rating | albumrating [0-10]",
      "say or set the playing track's rating",
@@ -168,16 +170,22 @@ const std::array<Entry, 27> entries{{
      "    melody-cli convert --to ~/Opus --since 1d\n"},
     {{"cover"},
      "Your music's files",
-     "cover FILE [SIZE]",
-     "write the playing track's cover to FILE",
-     "  SIZE pixels across at most, if given.\n"
-     "    melody-cli cover /tmp/cover.jpg 300\n"},
-    {{"love", "unlove", "fav", "unfav"},
+     "cover [--size PIXELS] [FILE|-]",
+     "the playing track's cover, into FILE or a pipe",
+     "  Into FILE, or to standard output without one (or with -) -- not to a\n"
+     "  terminal. --size: PIXELS across at most.\n"
+     "    melody-cli cover --size 300 /tmp/cover.jpg\n"
+     "    melody-cli cover | feh -\n"},
+    {{"fav", "unfav", "favorites"},
+     "Playlists",
+     "fav | unfav",
+     "the playing track into Favorites, or out",
+     "  Melody's Favorites playlist, the heart in Melody.\n"},
+    {{"lastfm", "love", "unlove"},
      "Sharing",
-     "love | unlove | fav | unfav",
-     "Last.fm love, or Melody's Favorites",
-     "  love and unlove mark the playing track on Last.fm; fav and unfav put it\n"
-     "  into Melody's Favorites playlist or take it out.\n"},
+     "lastfm love | unlove",
+     "love the playing track on Last.fm, or not",
+     "  With the engine's Last.fm account, the one it scrobbles with.\n"},
     {{"together"},
      "Sharing",
      "together host|join|leave|status|party|suggest|vote|remove",
@@ -217,8 +225,9 @@ const std::array<Entry, 27> entries{{
      "Engines and setup",
      "config [KEY [VALUE...]] | config --edit",
      "this computer's melodyd.conf",
-     "  This computer's engine settings -- not those of the engine --server\n"
-     "  names: all of them, one, or one changed, checked as melodyd reads them,\n"
+     "  This computer's engine settings, whichever engine $MELODY_SERVER names;\n"
+     "  refused with --server or --engine. All of them, one, or one changed, checked as melodyd "
+     "reads them,\n"
      "  comments kept. --engine NAME for an [engine NAME] section, --unset KEY,\n"
      "  --config FILE (default $MELODYD_CONFIG, else\n"
      "  ~/.config/melody/melodyd.conf). A new file starts from the commented\n"
@@ -241,7 +250,56 @@ constexpr std::string_view engine_choice =
     "$MELODY_PASSWORD) or --password-file FILE ($MELODY_PASSWORD_FILE) for an\n"
     "engine on the network; --json prints the engine's own answers.\n";
 
+struct Command final {
+    std::string_view name;
+    std::string_view summary;
+};
+
+// Every command run() knows, with what it does in a few words.
+constexpr std::array<Command, 34> commands{{
+    {"status", "what plays, where, and on which engine"},
+    {"current", "the playing track on one line"},
+    {"play", "resume, or play what words find"},
+    {"pause", "pause"},
+    {"toggle", "pause or resume"},
+    {"stop", "stop"},
+    {"next", "skip to the next track"},
+    {"prev", "back to the previous track"},
+    {"seek", "jump to a place, or forward and back"},
+    {"volume", "say or set the volume"},
+    {"outputs", "the speakers this engine can play on"},
+    {"output", "play on other speakers"},
+    {"add", "append to the queue"},
+    {"insert", "play after this track: first in Up Next"},
+    {"upnext", "last in Up Next"},
+    {"albums", "list albums, or those words find"},
+    {"tracks", "list tracks, or those words find"},
+    {"find", "tracks a query finds, formatted"},
+    {"latest", "the albums added most recently"},
+    {"update", "rescan the library, or these folders and files"},
+    {"revision", "changes whenever the library does, for caches"},
+    {"lists", "saved playlists, and where they are kept"},
+    {"fav", "the playing track into Favorites"},
+    {"unfav", "the playing track out of Favorites"},
+    {"rating", "say or set the playing track's rating"},
+    {"albumrating", "say or set its album's rating"},
+    {"replaygain", "measure loudness and write ReplayGain"},
+    {"convert", "convert tracks with Melody's converter"},
+    {"cover", "the playing track's cover, into a file or a pipe"},
+    {"lastfm", "love the playing track on Last.fm, or not"},
+    {"together", "listen along with friends"},
+    {"watch", "follow playback, or react to new albums"},
+    {"engines", "the engines nearby, and which one is in use"},
+    {"config", "this computer's melodyd.conf"},
+}};
+
 } // namespace
+
+void print_commands(std::ostream& out) {
+    for (const auto& command : commands) {
+        out << command.name << '\t' << command.summary << '\n';
+    }
+}
 
 void print_overview(std::ostream& out) {
     out << "usage: melody-cli [--local | --server HOST:PORT | --engine NAME] [--json]\n"

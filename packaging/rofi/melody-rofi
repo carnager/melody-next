@@ -93,7 +93,7 @@ action="$(printf '%s\n' 'Up Next' 'Add to the list' 'Replace and play' |
     rofi -dmenu -i -p "${name}")" || exit 0
 
 case "${action}" in
-    'Up Next') words=(queue "${kind}" --key "${key}") ;;
+    'Up Next') words=(upnext "${kind}" --key "${key}") ;;
     'Add to the list') words=(add "${kind}" --key "${key}") ;;
     'Replace and play') words=(play "${kind}" --key "${key}") ;;
     *) exit 0 ;;

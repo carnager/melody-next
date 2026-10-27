@@ -15,6 +15,8 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <string>
 
 namespace trackknife::cli {
@@ -142,6 +144,34 @@ int edit_command(const std::filesystem::path& path) {
 }
 
 } // namespace
+
+void print_config_keys(std::ostream& out) {
+    std::istringstream skeleton{std::string{daemon::config_skeleton()}};
+    // The comment above a key, up to its first sentence's end; a blank line
+    // starts another. A key an [engine NAME] section takes again is said
+    // once.
+    std::string said;
+    std::set<std::string> told;
+    for (std::string line; std::getline(skeleton, line);) {
+        if (line.empty()) {
+            said.clear();
+            continue;
+        }
+        const auto equals = line.find(" = ");
+        const auto key = equals == std::string::npos ? std::string{} : line.substr(1, equals - 1);
+        if (line.starts_with('#') && !key.empty() &&
+            key.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") == std::string::npos) {
+            if (told.insert(key).second) {
+                const auto end = said.find(". ");
+                out << key << '\t' << said.substr(0, end == std::string::npos ? end : end + 1)
+                    << '\n';
+            }
+            said.clear();
+        } else if (line.starts_with("# ")) {
+            said += (said.empty() ? "" : " ") + line.substr(2);
+        }
+    }
+}
 
 int config_command(const std::vector<std::string>& words) {
     std::optional<std::filesystem::path> given;

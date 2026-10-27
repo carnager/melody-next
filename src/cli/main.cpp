@@ -60,7 +60,7 @@ struct Options final {
     // --fields: what albums and tracks list, besides the key; empty, all.
     std::vector<std::string> fields;
     // --keys: each listed line ends in a tab and its key, for a picker to
-    // hand back to add/play/next/queue --key.
+    // hand back to play/add/insert/upnext --key.
     bool keys{false};
     // --format: how `current` and `find` print a track, in tkfmt-1.
     std::string format{"$if(%artist%,%artist% - )%title%"};
@@ -836,6 +836,51 @@ int watch_all(const Options& options) {
     }
 }
 
+// What the shell completion scripts ask: one candidate a line, nothing
+// and a failing exit when it cannot be told -- never a prompt, never a
+// wait for an engine that is not there.
+int complete(const Options& options) {
+    const auto& words = options.words;
+    const auto what = words.size() > 1U ? words[1] : std::string{};
+    if (what == "commands") {
+        trackknife::cli::print_commands(std::cout);
+        return EXIT_SUCCESS;
+    }
+    if (what == "config-keys") {
+        trackknife::cli::print_config_keys(std::cout);
+        return EXIT_SUCCESS;
+    }
+    if (what == "engines") {
+        for (const auto& engine : look_around()) {
+            std::cout << engine.instance << "\n";
+        }
+        return EXIT_SUCCESS;
+    }
+    if (what != "outputs" && what != "lists" && what != "presets" && what != "layouts") {
+        return EXIT_FAILURE;
+    }
+    auto client = connect(options);
+    const auto names = [](const Json& listed, const char* key) {
+        for (const auto& item : listed) {
+            if (const auto name = text_of(item, key); !name.empty()) {
+                std::cout << name << "\n";
+            }
+        }
+    };
+    if (what == "outputs") {
+        names(call(*client, "outputs.list").value("outputs", Json::array()), "name");
+    } else if (what == "lists") {
+        names(call(*client, "list.all").value("lists", Json::array()), "name");
+    } else if (what == "presets") {
+        names(call(*client, "convert.presets").value("presets", Json::array()), "id");
+    } else {
+        for (const auto& listed : call(*client, "layouts.list").value("layouts", Json::array())) {
+            names(Json::array({listed.value("profile", Json::object())}), "name");
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
 int run(const Options& options) {
     const auto& words = options.words;
     const auto command = words.front();
@@ -862,7 +907,16 @@ int run(const Options& options) {
     }
     // ADR-0286: this machine's file; no engine is asked.
     if (command == "config") {
+        // Named on the line, another engine is meant -- and this cannot
+        // reach its file.
+        if (!options.servers.empty() || !options.engine.empty()) {
+            fail("config is this computer's melodyd.conf; for another engine's, run melody-cli "
+                 "config on its computer");
+        }
         return trackknife::cli::config_command({words.begin() + 1, words.end()});
+    }
+    if (command == "__complete") {
+        return complete(options);
     }
     if (command == "engines") {
         const auto found = look_around();
@@ -1066,12 +1120,12 @@ int run(const Options& options) {
         if (!options.json) {
             std::cerr << "melody-cli: " << text_of(matches.front(), "name") << "\n";
         }
-    } else if (command == "playlists") {
+    } else if (command == "lists" && words.size() >= 2U && words[1] == "folder") {
         // ADR-0296: the playlist folder, said or chosen.
         Json answer;
-        if (words.size() == 1U) {
+        if (words.size() == 2U) {
             answer = call(*client, "playlists.folder");
-        } else if (words[1] == "folder" && words.size() >= 3U) {
+        } else {
             Json params = Json::object();
             const auto& where = words[2];
             if (where == "default") {
@@ -1086,12 +1140,10 @@ int run(const Options& options) {
                 if (words[at] == "--style" && at + 1 < words.size()) {
                     params["style"] = words[++at];
                 } else {
-                    fail("playlists folder takes DIR|default [--style root|playlist|absolute]");
+                    fail("lists folder takes DIR|default [--style root|playlist|absolute]");
                 }
             }
             answer = call(*client, "playlists.set_folder", params);
-        } else {
-            fail("playlists takes nothing, or folder DIR|default [--style STYLE]");
         }
         if (options.json) {
             std::cout << answer.dump() << "\n";
@@ -1113,6 +1165,9 @@ int run(const Options& options) {
                   << "\n";
         return EXIT_SUCCESS;
     } else if (command == "lists") {
+        if (words.size() > 1U) {
+            fail("lists takes nothing, or folder [DIR|default [--style STYLE]]");
+        }
         const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
         if (options.json) {
             std::cout << Json(lists).dump() << "\n";
@@ -1131,7 +1186,11 @@ int run(const Options& options) {
         }
         std::cout << lines;
         return lists.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
-    } else if ((command == "play" || command == "add" || command == "next" || command == "queue") &&
+    } else if (command == "next") {
+        fail("next only skips; to play something after this: melody-cli insert album|track "
+             "WORDS");
+    } else if ((command == "play" || command == "add" || command == "insert" ||
+                command == "upnext") &&
                words.size() >= 2U) {
         std::string chosen;
         auto entries = entries_for(*client, words[1], joined(words, 2), chosen);
@@ -1158,13 +1217,16 @@ int run(const Options& options) {
             for (const auto& entry : entries) {
                 asked.push_back(text_of(entry, "entry"));
             }
-            requests.insert(command == "next" ? requests.begin() : requests.end(), asked.begin(),
+            // insert: first, what plays after this one; upnext: last.
+            requests.insert(command == "insert" ? requests.begin() : requests.end(), asked.begin(),
                             asked.end());
             show(call(*client, "playback.set_requests", Json{{"entries", requests}}));
         }
         if (!options.json) {
             std::cerr << "melody-cli: " << chosen << "\n";
         }
+    } else if (command == "add" || command == "insert" || command == "upnext") {
+        fail(command + " wants album|track WORDS..., album|track --key KEY or random album|tracks");
     } else if (command == "convert") {
         return trackknife::cli::convert_command(*client, options.json, words);
     } else if (command == "latest" && std::ranges::any_of(words, [](const std::string& word) {
@@ -1464,7 +1526,7 @@ int run(const Options& options) {
                 last_line = std::move(line);
             }
         }
-    } else if (command == "rating" || command == "rate" || command == "albumrating") {
+    } else if (command == "rating" || command == "albumrating") {
         // As the engine keeps them: 1-10, 0 for none. The album's is keyed
         // by the album, found through the track that plays.
         const bool album = command == "albumrating";
@@ -1614,20 +1676,27 @@ int run(const Options& options) {
         std::cerr << "\n";
         return not_written > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
     } else if (command == "cover") {
-        // The playing track's cover, into a file -- for a bar widget, which
-        // shows a file. Written whole, then renamed into place, so what
-        // reads it never reads half of one.
-        if (words.size() < 2U || words.size() > 3U) {
-            fail("cover wants a file to write it to, and a size in pixels to have it smaller");
-        }
+        // The playing track's cover: into a file -- for a bar widget, which
+        // shows a file -- or to standard output for a pipe.
         int size = 0;
-        if (words.size() == 3U) {
-            const auto& given = words[2];
-            const auto* const end_of = given.data() + given.size();
-            if (const auto [rest, error] = std::from_chars(given.data(), end_of, size);
-                error != std::errc{} || rest != end_of || size <= 0) {
-                fail("cover's size is a number of pixels");
+        std::string file;
+        for (std::size_t at = 1; at < words.size(); ++at) {
+            if (words[at] == "--size" && at + 1 < words.size()) {
+                const auto& given = words[++at];
+                const auto* const end_of = given.data() + given.size();
+                if (const auto [rest, error] = std::from_chars(given.data(), end_of, size);
+                    error != std::errc{} || rest != end_of || size <= 0) {
+                    fail("cover's --size is a number of pixels");
+                }
+            } else if (file.empty() && (words[at] == "-" || !words[at].starts_with("--"))) {
+                file = words[at];
+            } else {
+                fail("cover takes [--size PIXELS] [FILE|-]");
             }
+        }
+        const bool to_output = file.empty() || file == "-";
+        if (to_output && isatty(STDOUT_FILENO) != 0) {
+            fail("cover writes an image; give a FILE, or send it into a pipe");
         }
         const auto path = text_of(state(), "path");
         if (path.empty()) {
@@ -1646,13 +1715,20 @@ int run(const Options& options) {
         if (!bytes) {
             fail("the engine sent a cover that does not decode");
         }
-        const std::filesystem::path target{words[1]};
+        if (to_output) {
+            std::cout.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
+            std::cout.flush();
+            return std::cout.good() ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+        // Written whole, then renamed into place, so what reads it never
+        // reads half of one.
+        const std::filesystem::path target{file};
         auto written = target;
         written += ".part";
         {
-            std::ofstream file{written, std::ios::binary | std::ios::trunc};
-            file.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
-            if (!file.good()) {
+            std::ofstream out{written, std::ios::binary | std::ios::trunc};
+            out.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
+            if (!out.good()) {
                 fail("cannot write " + written.string());
             }
         }
@@ -1814,7 +1890,10 @@ int run(const Options& options) {
         } else {
             fail("together is host, join, leave, status, party, suggest, vote or remove");
         }
-    } else if (command == "love" || command == "unlove") {
+    } else if (command == "lastfm") {
+        if (words.size() != 2U || (words[1] != "love" && words[1] != "unlove")) {
+            fail("lastfm takes love or unlove");
+        }
         const auto track = now_playing(*client, state());
         if (track.is_null()) {
             fail("nothing is playing");
@@ -1823,7 +1902,7 @@ int run(const Options& options) {
             fail("what plays has no artist for Last.fm to know it by");
         }
         // The engine's Last.fm account, the one it scrobbles with.
-        const bool loved = command == "love";
+        const bool loved = words[1] == "love";
         static_cast<void>(call(*client, "lastfm.love",
                                Json{{"artist", text_of(track, "artist")},
                                     {"title", text_of(track, "title")},

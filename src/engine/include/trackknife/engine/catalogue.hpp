@@ -150,6 +150,21 @@ class Catalogue {
     [[nodiscard]] virtual core::Result<std::vector<FoundTrack>>
     find(const query::CompiledTkq& compiled, const std::string& format, std::size_t limit,
          const core::CancellationToken& cancellation = {}) const;
+    // ADR-0344: entries of a queue, Up Next or a list, each one line in
+    // `format` (tkfmt-1), in order: formatted with the library's row for its
+    // file, or -- a file the library does not index -- with what the entry
+    // itself says of it (`known`).
+    struct EntryToFormat {
+        std::string raw_path;
+        persistence::TkqRowFacts known;
+    };
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    format_entries(const std::vector<EntryToFormat>& entries, const std::string& format,
+                   const core::CancellationToken& cancellation = {}) const;
+    // The same with no library: each from what the entry says of itself.
+    [[nodiscard]] static core::Result<std::vector<std::string>>
+    format_known(const std::vector<EntryToFormat>& entries, const std::string& format,
+                 const core::CancellationToken& cancellation = {});
     // ADR-0258: what a dynamic playlist's library rule picks -- at most 500
     // files, chosen where the library is, so the matches never travel whole.
     // Never what `exclude` names.

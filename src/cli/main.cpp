@@ -596,6 +596,74 @@ int watch_albums(Client& client, const Options& options, const std::vector<std::
     return text;
 }
 
+// The engine's list `words` name from `from` on: by its whole name, or by
+// every word found in one name. Fails, saying why, for none or several.
+[[nodiscard]] Json named_list(Client& client, const std::vector<std::string>& words,
+                              const std::size_t from) {
+    const auto wanted = joined(words, from);
+    const auto lists = call(client, "list.all").value("lists", std::vector<Json>{});
+    const auto lower = [](std::string text) {
+        std::ranges::transform(text, text.begin(), [](const unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return text;
+    };
+    std::vector<Json> matches;
+    for (const auto& list : lists) {
+        if (lower(text_of(list, "name")) == lower(wanted)) {
+            matches = {list};
+            break;
+        }
+        bool every = true;
+        for (std::size_t index = from; index < words.size() && every; ++index) {
+            every = lower(text_of(list, "name")).find(lower(words[index])) != std::string::npos;
+        }
+        if (every) {
+            matches.push_back(list);
+        }
+    }
+    if (matches.empty()) {
+        fail("no list is called " + wanted);
+    }
+    if (matches.size() > 1U) {
+        std::string names;
+        for (const auto& list : matches) {
+            names += "\n  " + text_of(list, "name");
+        }
+        fail("more than one list matches " + wanted + ":" + names);
+    }
+    return matches.front();
+}
+
+// ADR-0344: entries of the queue, Up Next or a list, one a line, as the
+// engine formatted them -- or, from an engine too old to, "Artist — Title"
+// from what each entry says. `playing` is marked with "> ", the rest "  ",
+// when `mark` is set.
+void print_entries(const std::vector<Json>& entries, const std::string& playing, const bool mark) {
+    std::string lines;
+    for (const auto& entry : entries) {
+        if (mark) {
+            lines += text_of(entry, "entry") == playing && !playing.empty() ? "> " : "  ";
+        }
+        if (entry.contains("text")) {
+            lines += text_of(entry, "text");
+        } else {
+            const auto group = entry.value("group", Json::object());
+            auto artist = text_of(entry, "artist");
+            if (artist.empty()) {
+                artist = first_text(group, "artist", "album_artist");
+            }
+            if (!artist.empty()) {
+                lines += artist;
+                lines += " — ";
+            }
+            lines += text_of(entry, "title");
+        }
+        lines += '\n';
+    }
+    std::cout << lines;
+}
+
 void print_state(const Json& state, Client& client) {
     const auto status = state.value("status", std::string{"stopped"});
     const auto track = now_playing(client, state);
@@ -1084,42 +1152,11 @@ int run(const Options& options) {
         show(call(*client, "playback.set_volume", Json{{"percent", std::clamp(percent, 0, 100)}}));
     } else if (command == "play" && words.size() >= 3U && words[1] == "list") {
         // ADR-0233: the engine's list, played there as the queue.
-        const auto wanted = joined(words, 2);
-        const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
-        const auto lower = [](std::string text) {
-            std::ranges::transform(text, text.begin(), [](const unsigned char c) {
-                return static_cast<char>(std::tolower(c));
-            });
-            return text;
-        };
-        std::vector<Json> matches;
-        for (const auto& list : lists) {
-            if (lower(text_of(list, "name")) == lower(wanted)) {
-                matches = {list};
-                break;
-            }
-            bool every = true;
-            for (std::size_t index = 2; index < words.size() && every; ++index) {
-                every = lower(text_of(list, "name")).find(lower(words[index])) != std::string::npos;
-            }
-            if (every) {
-                matches.push_back(list);
-            }
-        }
-        if (matches.empty()) {
-            fail("no list is called " + wanted);
-        }
-        if (matches.size() > 1U) {
-            std::string names;
-            for (const auto& list : matches) {
-                names += "\n  " + text_of(list, "name");
-            }
-            fail("more than one list matches " + wanted + ":" + names);
-        }
-        static_cast<void>(call(*client, "list.play", Json{{"id", text_of(matches.front(), "id")}}));
+        const auto list = named_list(*client, words, 2);
+        static_cast<void>(call(*client, "list.play", Json{{"id", text_of(list, "id")}}));
         show(started(call(*client, "playback.state")));
         if (!options.json) {
-            std::cerr << "melody-cli: " << text_of(matches.front(), "name") << "\n";
+            std::cerr << "melody-cli: " << text_of(list, "name") << "\n";
         }
     } else if (command == "lists" && words.size() >= 2U && words[1] == "folder") {
         // ADR-0296: the playlist folder, said or chosen.
@@ -1165,10 +1202,46 @@ int run(const Options& options) {
                                                                : "relative to the music folder")
                   << "\n";
         return EXIT_SUCCESS;
-    } else if (command == "lists") {
-        if (words.size() > 1U) {
-            fail("lists takes nothing, or folder [DIR|default [--style STYLE]]");
+    } else if (command == "lists" && words.size() > 1U) {
+        // ADR-0344: one list's tracks.
+        const auto list = named_list(*client, words, 1);
+        const auto answer = call(*client, "list.get",
+                                 Json{{"id", text_of(list, "id")}, {"format", options.format}});
+        if (options.json) {
+            std::cout << answer.dump() << "\n";
+            return EXIT_SUCCESS;
         }
+        print_entries(answer.value("items", std::vector<Json>{}), {}, false);
+    } else if (command == "queue") {
+        if (words.size() > 1U) {
+            fail("queue takes no words; to add: melody-cli add|insert|upnext album|track WORDS");
+        }
+        // ADR-0344: the queue, what plays marked, and the list it plays from.
+        const auto answer = call(*client, "playback.queue", Json{{"format", options.format}});
+        if (options.json) {
+            std::cout << answer.dump() << "\n";
+            return EXIT_SUCCESS;
+        }
+        if (const auto list = text_of(answer, "list"); !list.empty()) {
+            const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
+            const auto found = std::ranges::find_if(
+                lists, [&list](const Json& candidate) { return text_of(candidate, "id") == list; });
+            if (found != lists.end()) {
+                std::cerr << "melody-cli: from " << text_of(*found, "name") << "\n";
+            }
+        }
+        print_entries(answer.value("entries", std::vector<Json>{}), text_of(state(), "entry"),
+                      true);
+    } else if (command == "upnext" && words.size() == 1U) {
+        // ADR-0344: Up Next, in the order it plays.
+        const auto answer =
+            call(*client, "playback.requests", Json{{"details", true}, {"format", options.format}});
+        if (options.json) {
+            std::cout << answer.dump() << "\n";
+            return EXIT_SUCCESS;
+        }
+        print_entries(answer.value("entries", std::vector<Json>{}), {}, false);
+    } else if (command == "lists") {
         const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
         if (options.json) {
             std::cout << Json(lists).dump() << "\n";

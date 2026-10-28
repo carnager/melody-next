@@ -338,6 +338,21 @@ requests="$(engine '{"id":3,"method":"playback.requests"}')"
     || fail "two are asked for in Up Next"
 cli status | matches "up next 2" || fail "status counts them"
 
+# ADR-0344: the queue and Up Next, shown.
+[ "$(cli queue --format '%title%')" = "$(printf '> alpha\n  gamma')" ] \
+    || fail "queue lists the queue, what plays marked"
+[ "$(cli upnext --format '%title%|%length%')" = "$(printf 'gamma|0:30\nbeta|0:30')" ] \
+    || fail "upnext alone lists Up Next in order, formatted from the library"
+[ "$(cli queue | head -1)" = "> $(cli current)" ] || fail "queue formats as current does by default"
+cli --json queue | python3 -c '
+import json, sys
+answer = json.load(sys.stdin)
+assert answer["list"] is None and answer["entries"][0]["text"].endswith("alpha"), answer' \
+    || fail "queue --json is the engine's answer, with no list played from"
+if cli queue extra 2>/dev/null; then
+    fail "queue takes no words"
+fi
+
 # next only skips: with words it says what does that.
 if cli next track beta 2>"${work}/next.txt"; then
     fail "next with words is refused"
@@ -586,6 +601,18 @@ completed lastfm "" | matches -x unlove || fail "and a command's words"
 completed config pass | matches -x password-file || fail "and melodyd.conf's keys"
 cli --keys lists | matches -P "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
 cli play list trip 2>/dev/null | matches "^playing:" || fail "play list plays one by a word of its name"
+# ADR-0344: a list's tracks -- one the library does not index named by what
+# the list says of it -- and the queue says which list it plays from.
+mkdir -p "${work}/outside"
+cp "${work}/music/first/beta.wav" "${work}/outside/stray.wav"
+stray="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' "${work}/outside/stray.wav")"
+engine "{\"id\":22,\"method\":\"list.save\",\"params\":{\"name\":\"Strays\",\"items\":[{\"path\":\"${stray}\",\"title\":\"Stray title\"},{\"path\":\"${first}\"}]}}" > /dev/null
+[ "$(cli lists strays --format '%title%')" = "$(printf 'Stray title\nalpha')" ] \
+    || fail "a list's track outside the library is formatted from the list"
+[ "$(cli lists road trip --format '%title%')" = "$(printf 'gamma\nalpha')" ] \
+    || fail "lists NAME prints one list's tracks"
+cli queue 2>&1 >/dev/null | matches -x "melody-cli: from Road trip" \
+    || fail "queue says the list it plays from"
 cli --json status | python3 -c '
 import json, sys
 assert json.load(sys.stdin)["queue_size"] == 2' || fail "the whole list is the queue"

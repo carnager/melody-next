@@ -25,7 +25,7 @@ constexpr std::array<std::string_view, 7> groups{
     "Playing", "The queue",        "The library", "Playlists", "Your music's files",
     "Sharing", "Engines and setup"};
 
-const std::array<Entry, 25> entries{{
+const std::array<Entry, 26> entries{{
     {{"status"},
      "Playing",
      "status",
@@ -90,6 +90,15 @@ const std::array<Entry, 25> entries{{
      "  random tracks (default 25):\n"
      "    melody-cli play random album\n"
      "    melody-cli play random tracks 50\n"},
+    {{"queue", "upnext", "show"},
+     "The queue",
+     "queue | upnext [--format EXPR]",
+     "show the queue, or Up Next",
+     "  queue prints the queue, one track a line, what plays marked with >,\n"
+     "  and says on stderr which list it plays from. upnext alone prints Up\n"
+     "  Next in the order it plays. EXPR is as for current (melody-cli help\n"
+     "  current); --json prints the engine's answer.\n"
+     "    melody-cli queue --format '%tracknumber%. %title% [%length%]'\n"},
     {{"list", "play"},
      "The queue",
      "play list NAME...",
@@ -136,9 +145,11 @@ const std::array<Entry, 25> entries{{
      "  asks again only when it changed.\n"},
     {{"lists", "playlists", "folder"},
      "Playlists",
-     "lists | lists folder [DIR|default [--style S]]",
-     "saved playlists, and where they are kept",
-     "  lists names the engine's saved playlists (play list NAME plays one).\n"
+     "lists [NAME...] | lists folder [DIR|default [--style S]]",
+     "saved playlists, one's tracks, where they are kept",
+     "  lists names the engine's saved playlists (play list NAME plays one);\n"
+     "  lists NAME prints one's tracks, found as play list finds it, with\n"
+     "  --format EXPR as for current.\n"
      "  lists folder says where they are kept: a folder of the engine's, each\n"
      "  playlist file there one list. lists folder DIR keeps them in DIR (MPD's\n"
      "  playlist_directory, say), default in Playlists in the music folder;\n"
@@ -256,7 +267,7 @@ struct Command final {
 };
 
 // Every command run() knows, with what it does in a few words.
-constexpr std::array<Command, 34> commands{{
+constexpr std::array<Command, 35> commands{{
     {"status", "what plays, where, and on which engine"},
     {"current", "the playing track on one line"},
     {"play", "resume, or play what words find"},
@@ -271,14 +282,15 @@ constexpr std::array<Command, 34> commands{{
     {"output", "play on other speakers"},
     {"add", "append to the queue"},
     {"insert", "play after this track: first in Up Next"},
-    {"upnext", "last in Up Next"},
+    {"upnext", "show Up Next, or put something last in it"},
+    {"queue", "show the queue"},
     {"albums", "list albums, or those words find"},
     {"tracks", "list tracks, or those words find"},
     {"find", "tracks a query finds, formatted"},
     {"latest", "the albums added most recently"},
     {"update", "rescan the library, or these folders and files"},
     {"revision", "changes whenever the library does, for caches"},
-    {"lists", "saved playlists, and where they are kept"},
+    {"lists", "saved playlists, one's tracks, where they are kept"},
     {"fav", "the playing track into Favorites"},
     {"unfav", "the playing track out of Favorites"},
     {"rating", "say or set the playing track's rating"},

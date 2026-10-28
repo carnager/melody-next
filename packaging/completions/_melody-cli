@@ -117,6 +117,7 @@ _melody-cli() {
         lists)
             if (( count == 0 )); then
                 compadd folder
+                _melody_cli_names lists
             elif [[ "$first" == folder ]]; then
                 if (( count == 1 )); then
                     compadd default
@@ -164,7 +165,7 @@ _melody-cli() {
             fi ;;
         latest) compadd -- --since --folders ;;
         albums|tracks) compadd -- --fields --keys ;;
-        find|current) compadd -- --format ;;
+        find|current|queue) compadd -- --format ;;
         update) _files ;;
         help)
             if (( count == 0 )); then

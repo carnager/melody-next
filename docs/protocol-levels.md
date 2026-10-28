@@ -7,6 +7,19 @@ engine's level with its own and says once when the engine is older.
 
 ## Protocol 1
 
+### Level 28 (2026-10-28)
+
+ADR-0344: the queue, Up Next and a list, shown as lines.
+
+- `playback.queue`, `playback.requests` and `list.get` take `format`, a
+  tkfmt-1 expression: each entry (each item) then has `text`, formatted
+  with the library's row for its file as `catalogue.find` formats it, or,
+  for a file the library does not index, with what the entry says of
+  itself. `playback.requests` with a format answers the entries in full,
+  as with `details`. An older engine ignores `format`.
+- `playback.queue` answers `list`: the identity of the list the queue plays
+  from (ADR-0253), or null.
+
 ### Level 27 (2026-10-27)
 
 ADR-0339: naming layouts are Melody's.

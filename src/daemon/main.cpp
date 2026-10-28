@@ -535,7 +535,7 @@ int main(int argc, char** argv) {
         [&rating_tags](const std::string& hash, const bool album, const unsigned rating) {
             rating_tags.rated(hash, album, rating);
         });
-    trackknife::engine::register_playback_methods(dispatcher, *player);
+    trackknife::engine::register_playback_methods(dispatcher, *player, &catalogue);
     trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its
     // id, the one it is announced with, so a client that reaches it both

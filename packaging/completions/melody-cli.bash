@@ -143,6 +143,7 @@ _melody_cli() {
         lists)
             if ((count == 0)); then
                 _melody_cli_words folder
+                _melody_cli_offer < <(_melody_cli_ask lists)
             elif [[ "${first}" == folder ]]; then
                 if ((count == 1)); then
                     _melody_cli_words default
@@ -202,7 +203,7 @@ _melody_cli() {
         albums | tracks)
             _melody_cli_words --fields --keys
             ;;
-        find | current)
+        find | current | queue)
             _melody_cli_words --format
             ;;
         update)

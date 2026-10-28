@@ -7,6 +7,7 @@
 #include "trackknife/formats/artwork.hpp"
 
 #include <algorithm>
+#include <map>
 
 namespace trackknife::engine {
 
@@ -41,6 +42,76 @@ Catalogue::find(const query::CompiledTkq& compiled, const std::string& format,
         found.push_back({.raw_path = std::move(snapshot.raw_path), .text = std::move(*text)});
     }
     return found;
+}
+
+namespace {
+
+// ADR-0344: each entry formatted with the library's row for its file where
+// `indexed` has one, else with what the entry says of itself.
+[[nodiscard]] core::Result<std::vector<std::string>>
+format_each(const std::vector<Catalogue::EntryToFormat>& entries,
+            const std::map<std::string, persistence::TkqRowFacts>& indexed,
+            const std::string& format, const core::CancellationToken& cancellation) {
+    auto program = compile_client_format(format, titleformat::FormatContextKind::track_display);
+    if (!program) {
+        return std::unexpected(std::move(program.error()));
+    }
+    std::vector<std::string> texts;
+    texts.reserve(entries.size());
+    for (const auto& entry : entries) {
+        const auto found = indexed.find(entry.raw_path);
+        auto facts = found != indexed.end() ? found->second : entry.known;
+        name_by_file(facts, entry.raw_path);
+        auto text = persistence::tkq_format(*program, facts, track_fields(facts, entry.raw_path),
+                                            cancellation);
+        if (!text) {
+            return std::unexpected(std::move(text.error()));
+        }
+        texts.push_back(std::move(*text));
+    }
+    return texts;
+}
+
+} // namespace
+
+core::Result<std::vector<std::string>>
+Catalogue::format_entries(const std::vector<EntryToFormat>& entries, const std::string& format,
+                          const core::CancellationToken& cancellation) const {
+    // The library's rows, asked at once; a path it does not index fails
+    // that, and then each is asked alone.
+    std::vector<std::string> paths;
+    paths.reserve(entries.size());
+    for (const auto& entry : entries) {
+        paths.push_back(entry.raw_path);
+    }
+    std::map<std::string, persistence::TkqRowFacts> indexed;
+    const auto remember = [&indexed](std::vector<persistence::LibraryTrackSnapshot> snapshots) {
+        for (auto& snapshot : snapshots) {
+            indexed.insert_or_assign(std::move(snapshot.raw_path), std::move(snapshot.facts));
+        }
+    };
+    if (auto all = cached_tracks(paths, cancellation)) {
+        remember(std::move(*all));
+    } else {
+        for (const auto& path : paths) {
+            if (cancellation.is_cancellation_requested()) {
+                break;
+            }
+            if (indexed.contains(path)) {
+                continue;
+            }
+            if (auto one = cached_tracks({path}, cancellation)) {
+                remember(std::move(*one));
+            }
+        }
+    }
+    return format_each(entries, indexed, format, cancellation);
+}
+
+core::Result<std::vector<std::string>>
+Catalogue::format_known(const std::vector<EntryToFormat>& entries, const std::string& format,
+                        const core::CancellationToken& cancellation) {
+    return format_each(entries, {}, format, cancellation);
 }
 
 core::Result<DynamicSelected> Catalogue::select(const DynamicSelection& selection,

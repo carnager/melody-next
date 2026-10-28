@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/interruptible_pause.hpp"
 
 #include "trackknife/engine/job_registry.hpp"
@@ -28,8 +29,12 @@ namespace trackknife::engine {
 [[nodiscard]] protocol::Json to_json(const audio::PlaybackModes& modes);
 [[nodiscard]] audio::PlaybackModes modes_from_json(const protocol::Json& value);
 
-// Binds playback.*. The player must outlive the dispatcher.
-void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player);
+// Binds playback.*. The player must outlive the dispatcher; so must the
+// catalogue, when one is given -- it formats queue and Up Next entries for a
+// client that asks with a format (ADR-0344). Without one, an entry is
+// formatted from what it says of itself.
+void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player,
+                               const Catalogue* catalogue = nullptr);
 
 // ADR-0222: pushed state events, so a client learns a track changed without
 // asking. The engine samples its own player and emits when something a client

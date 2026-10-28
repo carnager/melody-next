@@ -176,6 +176,9 @@ melody-cli find 'genre IS jazz SORT BY %date%' --format '%date% %artist% - %titl
 melody-cli play album doors 1967      # every word must match
 melody-cli insert track riders storm  # plays after the current track
 melody-cli lists                      # the engine's lists, saved and working
+melody-cli lists road trip            # one list's tracks
+melody-cli queue                      # the queue, what plays marked
+melody-cli upnext                     # Up Next, in the order it plays
 melody-cli play list road trip        # one of them, by name or its words
 melody-cli output "Pixel 10 Pro"
 melody-cli rating 8                   # what plays, 1-10; 0 clears

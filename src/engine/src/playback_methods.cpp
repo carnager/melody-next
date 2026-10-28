@@ -13,6 +13,31 @@ namespace {
 
 using protocol::Json;
 
+// What an entry says of itself, for a file the library does not index.
+[[nodiscard]] persistence::TkqRowFacts known_of(const QueueEntry& entry) {
+    persistence::TkqRowFacts facts;
+    facts.title = entry.title;
+    facts.artist = entry.group.artist.empty() ? entry.group.album_artist : entry.group.artist;
+    facts.album = entry.group.album;
+    facts.date = entry.group.date;
+    facts.duration_ms = entry.duration_ms.value_or(-1);
+    return facts;
+}
+
+[[nodiscard]] core::Result<std::vector<std::string>>
+format_queue_entries(const Catalogue* catalogue, const std::vector<QueueEntry>& queue,
+                     const std::string& format) {
+    std::vector<Catalogue::EntryToFormat> entries;
+    entries.reserve(queue.size());
+    for (const auto& entry : queue) {
+        entries.push_back({.raw_path = entry.source.raw_path, .known = known_of(entry)});
+    }
+    if (catalogue != nullptr) {
+        return catalogue->format_entries(entries, format);
+    }
+    return Catalogue::format_known(entries, format);
+}
+
 [[nodiscard]] core::Error bad_params(std::string message, std::string member) {
     return core::Error{.code = core::ErrorCode::invalid_argument,
                        .message = std::move(message),
@@ -307,16 +332,44 @@ Json to_json(const Player::State& state) {
     return rendered;
 }
 
-void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player) {
+void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player,
+                               const Catalogue* catalogue) {
     dispatcher.on("playback.state",
                   [&player](const Json&) -> core::Result<Json> { return to_json(player.state()); });
 
-    dispatcher.on("playback.queue", [&player](const Json&) -> core::Result<Json> {
+    // ADR-0344: with a format, each entry also as one line of text.
+    const auto rendered = [catalogue](const std::vector<QueueEntry>& queue,
+                                      const Json& params) -> core::Result<Json> {
         auto entries = Json::array();
-        for (const auto& entry : player.queue()) {
+        for (const auto& entry : queue) {
             entries.push_back(to_json(entry));
         }
-        return Json{{"entries", std::move(entries)}};
+        const auto format = params.find("format");
+        if (format == params.end()) {
+            return entries;
+        }
+        if (!format->is_string()) {
+            return std::unexpected(bad_params("a format is a string", "format"));
+        }
+        auto texts = format_queue_entries(catalogue, queue, format->get<std::string>());
+        if (!texts) {
+            return std::unexpected(std::move(texts.error()));
+        }
+        for (std::size_t index = 0; index < queue.size(); ++index) {
+            entries[index]["text"] = protocol::displayable_text((*texts)[index]);
+        }
+        return entries;
+    };
+
+    dispatcher.on("playback.queue", [&player, rendered](const Json& params) -> core::Result<Json> {
+        auto entries = rendered(player.queue(), params);
+        if (!entries) {
+            return std::unexpected(std::move(entries.error()));
+        }
+        // ADR-0344: the list the queue plays from, if any (ADR-0253).
+        const auto list = player.queue_list();
+        return Json{{"entries", std::move(*entries)},
+                    {"list", list.empty() ? Json(nullptr) : Json(list)}};
     });
 
     dispatcher.on("playback.replace_queue", [&player](const Json& params) -> core::Result<Json> {
@@ -421,20 +474,22 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
     // The asks as identities; with {details: true}, as the entries they
     // name (ADR-0269) -- what a client shows as Up Next -- with the revision
     // they are at.
-    dispatcher.on("playback.requests", [&player](const Json& params) -> core::Result<Json> {
-        auto entries = Json::array();
-        if (params.value("details", false)) {
-            const auto revision = player.state().requests_revision;
-            for (const auto& entry : player.request_entries()) {
-                entries.push_back(to_json(entry));
-            }
-            return Json{{"entries", std::move(entries)}, {"revision", revision}};
-        }
-        for (const auto& entry_id : player.requests()) {
-            entries.push_back(entry_id.to_string());
-        }
-        return Json{{"entries", std::move(entries)}};
-    });
+    dispatcher.on("playback.requests",
+                  [&player, rendered](const Json& params) -> core::Result<Json> {
+                      auto entries = Json::array();
+                      if (params.value("details", false) || params.contains("format")) {
+                          const auto revision = player.state().requests_revision;
+                          auto details = rendered(player.request_entries(), params);
+                          if (!details) {
+                              return std::unexpected(std::move(details.error()));
+                          }
+                          return Json{{"entries", std::move(*details)}, {"revision", revision}};
+                      }
+                      for (const auto& entry_id : player.requests()) {
+                          entries.push_back(entry_id.to_string());
+                      }
+                      return Json{{"entries", std::move(entries)}};
+                  });
 
     dispatcher.on("playback.clear_requests", [&player](const Json&) -> core::Result<Json> {
         player.clear_requests();

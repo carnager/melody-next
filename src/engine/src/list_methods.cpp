@@ -440,7 +440,7 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         return Json{{"lists", std::move(rendered)}};
     });
 
-    dispatcher.on("list.get", [&workspace](const Json& params) -> core::Result<Json> {
+    dispatcher.on("list.get", [&workspace, catalogue](const Json& params) -> core::Result<Json> {
         auto id = required_id(params);
         if (!id) {
             return std::unexpected(std::move(id.error()));
@@ -459,6 +459,35 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         auto items = Json::array();
         for (const auto& item : (*list)->items) {
             items.push_back(item_json(item));
+        }
+        // ADR-0344: with a format, each item also as one line of text.
+        if (const auto format = params.find("format"); format != params.end()) {
+            if (!format->is_string()) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::invalid_argument,
+                                .message = "a format is a string",
+                                .context = {{.key = "param", .value = "format"}}});
+            }
+            std::vector<Catalogue::EntryToFormat> entries;
+            entries.reserve((*list)->items.size());
+            for (const auto& item : (*list)->items) {
+                persistence::TkqRowFacts known;
+                known.title = item.title;
+                known.artist = item.artist.empty() ? item.album_artist : item.artist;
+                known.album = item.album;
+                known.date = item.date;
+                known.duration_ms = item.duration_ms.value_or(-1);
+                entries.push_back({.raw_path = item.raw_path, .known = std::move(known)});
+            }
+            auto texts = catalogue != nullptr
+                             ? catalogue->format_entries(entries, format->get<std::string>())
+                             : Catalogue::format_known(entries, format->get<std::string>());
+            if (!texts) {
+                return std::unexpected(std::move(texts.error()));
+            }
+            for (std::size_t index = 0; index < items.size(); ++index) {
+                items[index]["text"] = protocol::displayable_text((*texts)[index]);
+            }
         }
         rendered["items"] = std::move(items);
         return rendered;

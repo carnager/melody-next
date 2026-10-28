@@ -57,6 +57,8 @@ data class PlaybackState(
     val modes: Modes = Modes(),
     val volume: Int = 100,
     val queueRevision: Long = 0,
+    /** Up Next's own revision: it changes when Up Next does, not the queue. */
+    val requestsRevision: Long = 0,
     val replayGain: String = "off",
     /** Why playing failed, when it did. */
     val error: String = "",
@@ -86,6 +88,7 @@ data class PlaybackState(
             modes = Modes.from(json.optJSONObject("modes")),
             volume = json.optInt("volume_percent", 100),
             queueRevision = json.optLong("queue_revision"),
+            requestsRevision = json.optLong("requests_revision"),
             replayGain = json.optJSONObject("replay_gain")?.optString("mode", "off") ?: "off",
             error = json.text("error"),
             speakersTakenBy = json.optJSONObject("output")?.text("taken_by") ?: "",
@@ -112,6 +115,29 @@ data class QueueEntry(val json: JSONObject) {
 
     /** Tracks of one release sit together; this says which release. */
     val albumGroup: String get() = "$albumArtist\u0000$album\u0000$date"
+
+    companion object {
+        /**
+         * What plays, as `playback.now_playing` describes it, in an entry's
+         * shape: a track from Up Next, gone from it once it plays, is in
+         * neither the queue nor Up Next.
+         */
+        fun described(track: JSONObject): QueueEntry = QueueEntry(
+            JSONObject()
+                .put("entry", track.text("entry"))
+                .put("path", track.text("path"))
+                .put("title", track.text("title"))
+                .put("duration_ms", track.optLong("duration_ms", -1))
+                .put(
+                    "group",
+                    JSONObject()
+                        .put("artist", track.text("artist"))
+                        .put("album_artist", track.text("album_artist"))
+                        .put("album", track.text("album"))
+                        .put("date", track.text("date")),
+                ),
+        )
+    }
 }
 
 enum class EntryKind(val wire: Int) { Artist(0), Album(1), Track(2) }

@@ -47,6 +47,7 @@ class EngineClient(
     private val _state = MutableStateFlow(PlaybackState())
     private val _queue = MutableStateFlow<List<QueueEntry>>(emptyList())
     private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
+    private val _playing = MutableStateFlow<QueueEntry?>(null)
     private val _outputs = MutableStateFlow<List<Output>>(emptyList())
     private val _problems = MutableSharedFlow<String>(extraBufferCapacity = 8)
     private val _ratings = MutableSharedFlow<RatingChange>(extraBufferCapacity = 16)
@@ -56,6 +57,12 @@ class EngineClient(
     val state: StateFlow<PlaybackState> = _state
     val queue: StateFlow<List<QueueEntry>> = _queue
     val upNext: StateFlow<List<QueueEntry>> = _upNext
+    /**
+     * The entry playing: found in the queue or Up Next, or -- a track from Up
+     * Next, which leaves Up Next as it starts -- as the engine describes it.
+     * Null only when nothing plays. What the player and the notification show.
+     */
+    val playing: StateFlow<QueueEntry?> = _playing
     val outputs: StateFlow<List<Output>> = _outputs
     /** Something asked for that failed, said for a person. */
     val problems: SharedFlow<String> = _problems
@@ -81,6 +88,7 @@ class EngineClient(
     private var session: Job? = null
     private var endpoint: Endpoint? = null
     private var queueRevision = -1L
+    private var requestsRevision = -1L
 
     /**
      * Connects, and keeps reconnecting until told otherwise -- at `to`, or
@@ -146,6 +154,7 @@ class EngineClient(
                         return
                     }
                     queueRevision = -1
+                    requestsRevision = -1
                     sequence = 0
                     adoptState(opened.call("playback.state"))
                     refreshOutputs()
@@ -238,9 +247,12 @@ class EngineClient(
         _state.value = next
         // The queue is fetched when it changed, anyone's change: the
         // revision says so, including another client's edit.
-        if (next.queueRevision != queueRevision) {
+        if (next.queueRevision != queueRevision || next.requestsRevision != requestsRevision) {
             queueRevision = next.queueRevision
+            requestsRevision = next.requestsRevision
             refreshQueue()
+        } else {
+            resolvePlaying()
         }
     }
 
@@ -248,7 +260,34 @@ class EngineClient(
         val connection = control ?: return
         runCatching {
             _queue.value = connection.call("playback.queue").optJSONArray("entries").objects().map(::QueueEntry)
-            _upNext.value = connection.call("playback.requests").optJSONArray("entries").objects().map(::QueueEntry)
+            // Without details the engine answers only the entries' ids.
+            _upNext.value = connection.call("playback.requests", JSONObject().put("details", true))
+                .optJSONArray("entries").objects().map(::QueueEntry)
+        }
+        resolvePlaying()
+    }
+
+    /** What plays, found or described (see [playing]). */
+    private suspend fun resolvePlaying() {
+        val now = _state.value
+        if (now.entry.isEmpty() || now.path.isEmpty()) {
+            _playing.value = null
+            return
+        }
+        val known = _queue.value.firstOrNull { it.entry == now.entry }
+            ?: _upNext.value.firstOrNull { it.entry == now.entry }
+        if (known != null) {
+            _playing.value = known
+            return
+        }
+        if (_playing.value?.entry == now.entry) return
+        // Named by its file meanwhile, and should the engine not say more.
+        _playing.value = QueueEntry(JSONObject().put("entry", now.entry).put("path", now.path))
+        val described = runCatching {
+            control?.call("playback.now_playing")?.optJSONObject("track")
+        }.getOrNull()
+        if (described != null && described.text("entry") == _state.value.entry) {
+            _playing.value = QueueEntry.described(described)
         }
     }
 

@@ -39,6 +39,10 @@ private class FakeEngine(private val password: String = "", port: Int = 0, priva
     val clients = CopyOnWriteArrayList<PrintWriter>()
     var state = JSONObject().put("status", "stopped").put("queue_revision", 1).put("queue_size", 1)
     var queue = JSONArray().put(entry("a", "Alpha"))
+    /** Up Next, as the engine holds it: only ids unless asked for details. */
+    var requests = JSONArray()
+    /** What `playback.now_playing` answers. */
+    var nowPlaying: JSONObject? = null
 
     init {
         thread(isDaemon = true) {
@@ -81,7 +85,15 @@ private class FakeEngine(private val password: String = "", port: Int = 0, priva
                 method == "engine.info" -> answer.put("result", JSONObject().put("name", "fake").put("protocol", 1).put("id", engineId))
                 method == "playback.state" -> answer.put("result", state)
                 method == "playback.queue" -> answer.put("result", JSONObject().put("entries", queue))
-                method == "playback.requests" -> answer.put("result", JSONObject().put("entries", JSONArray()))
+                method == "playback.requests" -> answer.put(
+                    "result",
+                    JSONObject().put(
+                        "entries",
+                        if (params.optBoolean("details")) requests
+                        else JSONArray((0 until requests.length()).map { requests.getJSONObject(it).getString("entry") }),
+                    ),
+                )
+                method == "playback.now_playing" -> answer.put("result", JSONObject().put("track", nowPlaying ?: JSONObject.NULL))
                 method == "outputs.list" -> answer.put("result", JSONObject().put("outputs", JSONArray()))
                 method == "playback.play" -> answer.put("error", JSONObject().put("code", "not_found").put("message", "no such entry"))
                 method == "catalogue.artwork" -> answer.put("result", JSONObject().put("image", JSONObject.NULL))
@@ -185,6 +197,56 @@ class EngineClientTest {
         assertEquals(null, nearby.nearer(saved, "E1"))
         assertEquals(null, nearby.nearer(saved.copy(host = "10.0.0.1"), null))
         assertEquals(saved, nearby.nearer(Endpoint("music.example", 443, "pw", Transport.WSS), "E1"))
+    }
+
+    // Up Next is asked for whole, not as ids; and a track from Up Next, gone
+    // from it as it plays, is what the engine describes -- so the player and
+    // the notification always know what plays.
+    @Test
+    fun upNextIsShownAndATrackPlayedFromItIsDescribed() = runBlocking {
+        FakeEngine().use { engine ->
+            val beta = FakeEngine.entry("b", "Beta")
+            engine.requests = JSONArray().put(beta)
+            engine.state = JSONObject(engine.state.toString()).put("requests_revision", 1).put("requests", 1)
+            val client = EngineClient(scope, clock = { 0L })
+            client.connect(engine.endpoint)
+            eventually("Up Next", { client.upNext.value.map { it.title } }) { it == listOf("Beta") }
+
+            // Alpha plays from the queue: found there.
+            val alpha = FakeEngine.entry("a", "Alpha")
+            engine.push(
+                "playback.changed",
+                JSONObject(engine.state.toString()).put("status", "playing").put("sequence", 1)
+                    .put("entry", alpha.getString("entry")).put("path", alpha.getString("path")),
+            )
+            eventually("Alpha playing", { client.playing.value?.title }) { it == "Alpha" }
+
+            // Beta's turn: it leaves Up Next and is in neither list.
+            engine.requests = JSONArray()
+            engine.nowPlaying = JSONObject().put("entry", beta.getString("entry")).put("path", beta.getString("path"))
+                .put("title", "Beta").put("artist", "Band").put("album", "Record").put("album_artist", JSONObject.NULL)
+                .put("date", "1999").put("duration_ms", 2000)
+            engine.push(
+                "playback.changed",
+                JSONObject(engine.state.toString()).put("status", "playing").put("sequence", 2)
+                    .put("requests_revision", 2).put("requests", 0)
+                    .put("entry", beta.getString("entry")).put("path", beta.getString("path")),
+            )
+            val described = eventually("Beta described", { client.playing.value }) { it?.title == "Beta" }!!
+            assertEquals("Band", described.artist)
+            assertEquals("Record", described.album)
+            assertEquals("Band", described.albumArtist)
+            assertTrue(client.upNext.value.isEmpty())
+
+            // Stopped: nothing plays.
+            engine.push(
+                "playback.changed",
+                JSONObject(engine.state.toString()).put("status", "stopped").put("sequence", 3)
+                    .put("requests_revision", 2).put("entry", JSONObject.NULL).put("path", JSONObject.NULL),
+            )
+            eventually("nothing playing", { client.playing.value }) { it == null }
+            client.disconnect()
+        }
     }
 
     @Test

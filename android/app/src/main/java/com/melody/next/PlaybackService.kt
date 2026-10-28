@@ -30,6 +30,14 @@ import kotlinx.coroutines.launch
  * the lock screen, a headset's buttons. It plays nothing on this phone; what
  * it is asked, it asks the engine.
  */
+/** What the notification is made from, as one value. */
+private data class Playing(
+    val state: PlaybackState,
+    val queue: List<QueueEntry>,
+    val upNext: List<QueueEntry>,
+    val playing: QueueEntry?,
+)
+
 @UnstableApi
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 private class EnginePlayer(
@@ -53,13 +61,14 @@ private class EnginePlayer(
     init {
         scope.launch {
             followed.flatMapLatest { engine ->
-                combine(engine.state, engine.queue, engine.upNext, speakerReconnecting) { state, queue, upNext, _ ->
-                    Triple(state, queue, upNext)
+                combine(engine.state, engine.queue, engine.upNext, engine.playing, speakerReconnecting) {
+                        state, queue, upNext, playing, _ ->
+                    Playing(state, queue, upNext, playing)
                 }
             }
-                .collect { (next, queue, upNext) ->
+                .collect { (next, queue, upNext, playing) ->
                     state = next
-                    current = queue.firstOrNull { it.entry == next.entry } ?: upNext.firstOrNull { it.entry == next.entry }
+                    current = playing
                     val row = queue.indexOfFirst { it.entry == next.entry }
                     // The engine decides what is next -- Up Next, random,
                     // repeat -- so these only say whether skipping means

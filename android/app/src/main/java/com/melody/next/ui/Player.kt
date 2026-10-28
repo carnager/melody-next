@@ -80,16 +80,12 @@ import com.melody.next.engine.QueueEntry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** The entry playing, found in the queue or Up Next -- it can be in either. */
+/** The entry playing, as the engine client resolves it: queue, Up Next, or described. */
 @Composable
 fun currentEntry(vm: MainViewModel): QueueEntry? {
     val engine by vm.app.followed.collectAsState()
-    val state by engine.state.collectAsState()
-    val queue by engine.queue.collectAsState()
-    val upNext by engine.upNext.collectAsState()
-    return remember(state.entry, queue, upNext) {
-        queue.firstOrNull { it.entry == state.entry } ?: upNext.firstOrNull { it.entry == state.entry }
-    }
+    val playing by engine.playing.collectAsState()
+    return playing
 }
 
 /** The position now, ticking while it plays: counted here, corrected by the engine. */

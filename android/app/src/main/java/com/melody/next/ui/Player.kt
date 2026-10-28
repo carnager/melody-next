@@ -119,6 +119,48 @@ fun ConnectionBanner(connection: ConnectionState) {
     }
 }
 
+/**
+ * Whether Melody may run in the background unrestricted, asked again each
+ * time the app comes to the front -- the setting is changed outside it.
+ */
+@Composable
+fun rememberUnrestricted(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var unrestricted by remember { androidx.compose.runtime.mutableStateOf(com.melody.next.Background.unrestricted(context)) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        unrestricted = com.melody.next.Background.unrestricted(context)
+        onPauseOrDispose {}
+    }
+    return unrestricted
+}
+
+/** This phone is a speaker, and Android may stop it in the background: said, with the way out. */
+@Composable
+fun BackgroundBanner(vm: MainViewModel) {
+    if (!vm.app.settings.speaker || rememberUnrestricted()) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Surface(color = MaterialTheme.colorScheme.errorContainer) {
+        Row(
+            Modifier.fillMaxWidth().clickable { com.melody.next.Background.ask(context) }
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Android may stop this speaker in the background",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Allow", style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+    }
+}
+
 @Composable
 fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
     val offline by vm.app.offlinePlayer.state.collectAsState()

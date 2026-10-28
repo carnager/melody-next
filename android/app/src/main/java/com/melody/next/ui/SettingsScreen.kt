@@ -76,6 +76,21 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                     })
                 },
             )
+            if (settings.speaker) {
+                val unrestricted = rememberUnrestricted()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                ListItem(
+                    headlineContent = { Text("Battery use") },
+                    supportingContent = {
+                        Text(
+                            if (unrestricted) "Unrestricted: it plays on with the screen off"
+                            else "Optimised: Android may stop it in the background, and the music stops and starts",
+                        )
+                    },
+                    trailingContent = if (unrestricted) null else ({ Text("Allow", color = MaterialTheme.colorScheme.primary) }),
+                    modifier = if (unrestricted) Modifier else Modifier.clickable { com.melody.next.Background.ask(context) },
+                )
+            }
             var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(settings.speakerName) }
             androidx.compose.material3.OutlinedTextField(
                 value = name,

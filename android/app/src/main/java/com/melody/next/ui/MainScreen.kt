@@ -123,6 +123,7 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
             bottomBar = {
                 Column {
                     ConnectionBanner(connection)
+                    BackgroundBanner(vm)
                     MiniPlayer(vm) { nowPlaying = true }
                     Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {

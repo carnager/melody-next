@@ -26,9 +26,10 @@ engine has, the same reason `current` and `find` are formatted there.
 - **`playback.queue` answers `list`**, the list the queue plays from, or
   null.
 - **melody-cli:**
-  - `queue [--format EXPR]` prints the queue, one entry a line, what plays
-    marked `> ` and the rest indented, and says on stderr which list it
-    plays from.
+  - `queue [--format EXPR]` prints the queue, one entry a line, and says on
+    stderr which list it plays from. When what plays is in the queue it is
+    marked `> ` and the rest indented to match; when it is not (a track
+    from Up Next, say), no line is marked or indented.
   - `upnext` alone prints Up Next in the order it plays; with words it
     adds, as before.
   - `lists NAME...` prints one list's tracks, found as `play list` finds

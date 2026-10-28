@@ -361,6 +361,13 @@ matches "melody-cli insert" "${work}/next.txt" || fail "and points to insert"
 
 # Skipping plays what was asked first: gamma.
 cli next | matches "^playing: .*gamma" || fail "next plays what Up Next has first"
+# What plays came from Up Next, not the queue: nothing marked, nothing indented.
+cli queue --format '%title%' > "${work}/queue.txt"
+if matches '^> ' "${work}/queue.txt"; then
+    matches -x '> gamma' "${work}/queue.txt" || fail "queue marks only what plays"
+else
+    matches '^  ' "${work}/queue.txt" && fail "queue indents only beside a mark"
+fi
 
 cli seek 10 > /dev/null
 position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["position_ms"])')"

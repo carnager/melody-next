@@ -637,13 +637,17 @@ int watch_albums(Client& client, const Options& options, const std::vector<std::
 
 // ADR-0344: entries of the queue, Up Next or a list, one a line, as the
 // engine formatted them -- or, from an engine too old to, "Artist — Title"
-// from what each entry says. `playing` is marked with "> ", the rest "  ",
-// when `mark` is set.
-void print_entries(const std::vector<Json>& entries, const std::string& playing, const bool mark) {
+// from what each entry says. When `playing` is one of them it is marked
+// with "> " and the rest indented to match; otherwise nothing is.
+void print_entries(const std::vector<Json>& entries, const std::string& playing) {
+    const bool mark =
+        !playing.empty() && std::ranges::any_of(entries, [&playing](const Json& entry) {
+            return text_of(entry, "entry") == playing;
+        });
     std::string lines;
     for (const auto& entry : entries) {
         if (mark) {
-            lines += text_of(entry, "entry") == playing && !playing.empty() ? "> " : "  ";
+            lines += text_of(entry, "entry") == playing ? "> " : "  ";
         }
         if (entry.contains("text")) {
             lines += text_of(entry, "text");
@@ -1211,7 +1215,7 @@ int run(const Options& options) {
             std::cout << answer.dump() << "\n";
             return EXIT_SUCCESS;
         }
-        print_entries(answer.value("items", std::vector<Json>{}), {}, false);
+        print_entries(answer.value("items", std::vector<Json>{}), {});
     } else if (command == "queue") {
         if (words.size() > 1U) {
             fail("queue takes no words; to add: melody-cli add|insert|upnext album|track WORDS");
@@ -1230,8 +1234,7 @@ int run(const Options& options) {
                 std::cerr << "melody-cli: from " << text_of(*found, "name") << "\n";
             }
         }
-        print_entries(answer.value("entries", std::vector<Json>{}), text_of(state(), "entry"),
-                      true);
+        print_entries(answer.value("entries", std::vector<Json>{}), text_of(state(), "entry"));
     } else if (command == "upnext" && words.size() == 1U) {
         // ADR-0344: Up Next, in the order it plays.
         const auto answer =
@@ -1240,7 +1243,7 @@ int run(const Options& options) {
             std::cout << answer.dump() << "\n";
             return EXIT_SUCCESS;
         }
-        print_entries(answer.value("entries", std::vector<Json>{}), {}, false);
+        print_entries(answer.value("entries", std::vector<Json>{}), {});
     } else if (command == "lists") {
         const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
         if (options.json) {

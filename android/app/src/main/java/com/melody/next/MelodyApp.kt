@@ -42,6 +42,7 @@ class MelodyApp : Application() {
     /** ADR-0234: this phone's speaker, offered to every engine listed, by its endpoint. */
     private var agents: Map<Endpoint, Speaking> = emptyMap()
     private var watchingAgents: Job? = null
+    private var watchingIds: Job? = null
     /** ADR-0234: a connection to each engine whose lists are shown besides the main one's. */
     val otherClients = kotlinx.coroutines.flow.MutableStateFlow<List<EngineClient>>(emptyList())
 
@@ -54,6 +55,13 @@ class MelodyApp : Application() {
         }
         if (followed.value !== client && followed.value !in otherClients.value) following.gone(followed.value, client)
         updateSpeaker()
+        // An engine's id is learnt on connecting: then it may turn out to be
+        // one the speaker already plays for, by another address.
+        watchingIds?.cancel()
+        watchingIds = scope.launch {
+            kotlinx.coroutines.flow.combine((listOf(client) + otherClients.value).map { it.engineId }) { it.toList() }
+                .collect { updateSpeaker() }
+        }
     }
 
     /** ADR-0234: the engine whose playback the phone shows and controls. */
@@ -234,8 +242,7 @@ class MelodyApp : Application() {
      * keeps its connection, and what plays on it goes on playing.
      */
     fun updateSpeaker() {
-        val wanted = if (!settings.speaker) emptyList()
-        else (listOfNotNull(settings.endpoint) + settings.otherEngines).distinctBy { it.host to it.port }
+        val wanted = if (!settings.speaker) emptyList() else speakerEndpoints()
         val kept = agents.filter { (endpoint, speaking) -> endpoint in wanted && speaking.name == settings.speakerName }
         (agents - kept.keys).values.forEach { speaking ->
             speaking.agent.stop()
@@ -263,6 +270,18 @@ class MelodyApp : Application() {
         scope.launch { agent.status.collect { Diagnostics.note("speaker for $endpoint: $it") } }
         return Speaking(agent, seat, settings.speakerName)
     }
+
+    /**
+     * The engines the speaker is offered to, each once: by address, and by
+     * id once known -- the chosen engine first. One engine listed under two
+     * addresses (at home, and through the proxy) offered this phone twice,
+     * and its two speakers took each other's place every two seconds, the
+     * track starting over each time.
+     */
+    private fun speakerEndpoints(): List<Endpoint> =
+        com.melody.next.speaker.oncePerEngine(listOfNotNull(settings.endpoint) + settings.otherEngines) { endpoint ->
+            clientAt(endpoint)?.engineId?.value ?: settings.engineId.takeIf { endpoint == settings.endpoint }
+        }
 
     /** The client for the engine saved at `endpoint`: the main one, or another listed. */
     private fun clientAt(endpoint: Endpoint): EngineClient? {

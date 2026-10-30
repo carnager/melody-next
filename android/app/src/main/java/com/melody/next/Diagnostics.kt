@@ -24,6 +24,8 @@ object Diagnostics {
     }
 
     fun note(what: String) {
+        // In the system's log too, to be followed over adb as it happens.
+        android.util.Log.i("Melody", what)
         val target = file ?: return
         synchronized(lock) {
             runCatching {
@@ -37,6 +39,18 @@ object Diagnostics {
     }
 
     fun read(): String = synchronized(lock) { runCatching { file?.readText() }.getOrNull() ?: "" }
+
+    /**
+     * The whole log as a file to share, in the folder the app's FileProvider
+     * hands out: shared as text it was too big -- Android refuses an
+     * intent over about a megabyte, and the chooser never opened.
+     */
+    fun export(context: Context): File? = synchronized(lock) {
+        runCatching {
+            val folder = File(context.cacheDir, "shared").apply { mkdirs() }
+            File(folder, "melody-connection-log.txt").apply { writeText(file?.readText() ?: "") }
+        }.getOrNull()
+    }
 
     fun clear() = synchronized(lock) { runCatching { file?.writeText("") } }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- What the app hands to another app as a file: only what it put in cache/shared. -->
+<paths>
+    <cache-path name="shared" path="shared/" />
+</paths>

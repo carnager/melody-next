@@ -21,6 +21,17 @@
         android:theme="@style/Theme.Melody"
         android:usesCleartextTraffic="true">
 
+        <!-- The connection log, shared as a file: too big for a shared text. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/shared_files" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

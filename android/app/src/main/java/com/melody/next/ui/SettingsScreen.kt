@@ -169,13 +169,19 @@ private fun Diagnostics() {
         headlineContent = { Text("Share the connection log") },
         supportingContent = { Text("When the engine was reached and lost, and what played -- no passwords") },
         modifier = Modifier.clickable {
-            // The newest of it: a shared text has a size limit.
-            val log = com.melody.next.Diagnostics.read().takeLast(200 * 1024)
+            // As a file: as text it was too big to hand over at all.
+            val log = com.melody.next.Diagnostics.export(context) ?: return@clickable
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", log)
             val send = android.content.Intent(android.content.Intent.ACTION_SEND)
                 .setType("text/plain")
                 .putExtra(android.content.Intent.EXTRA_SUBJECT, "Melody connection log")
-                .putExtra(android.content.Intent.EXTRA_TEXT, log)
-            context.startActivity(android.content.Intent.createChooser(send, "Share the connection log"))
+                .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            send.clipData = android.content.ClipData.newRawUri("Melody connection log", uri)
+            context.startActivity(
+                android.content.Intent.createChooser(send, "Share the connection log")
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
         },
     )
     ListItem(

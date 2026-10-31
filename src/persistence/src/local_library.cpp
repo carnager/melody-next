@@ -22,6 +22,11 @@
 #include <sqlite3.h>
 #include <sys/stat.h>
 
+#if defined(__APPLE__)
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -295,11 +300,8 @@ std::string unescape_mount_field(const std::string_view field) {
     return text;
 }
 
-// The mounts this process sees, from /proc/self/mountinfo -- or the table
-// MELODY_MOUNTINFO names, for tests.
-std::vector<Mount> read_mounts() {
-    const char* named = core::environment_variable("MELODY_MOUNTINFO");
-    std::ifstream stream{named != nullptr && *named != '\0' ? named : "/proc/self/mountinfo"};
+// A mountinfo table, as Linux lists its mounts.
+std::vector<Mount> read_mountinfo(std::istream& stream) {
     std::vector<Mount> mounts;
     std::string line;
     while (std::getline(stream, line)) {
@@ -317,6 +319,38 @@ std::vector<Mount> read_mounts() {
                           unescape_mount_field(*(separator + 2))});
     }
     return mounts;
+}
+
+// The mounts this process sees: from /proc/self/mountinfo on Linux, from
+// getfsstat() on macOS, which has no /proc -- or the table MELODY_MOUNTINFO
+// names, for tests. None known, no file is confirmed gone.
+std::vector<Mount> read_mounts() {
+    if (const char* named = core::environment_variable("MELODY_MOUNTINFO");
+        named != nullptr && *named != '\0') {
+        std::ifstream stream{named};
+        return read_mountinfo(stream);
+    }
+#if defined(__APPLE__)
+    // Asked twice: how many, then that many. Not getmntinfo(), whose buffer
+    // is shared by every thread; a mount added between the two asks shows
+    // next scan.
+    const int count = ::getfsstat(nullptr, 0, MNT_NOWAIT);
+    if (count <= 0) {
+        return {};
+    }
+    std::vector<struct statfs> table(static_cast<std::size_t>(count));
+    const int listed = ::getfsstat(
+        table.data(), static_cast<int>(table.size() * sizeof(struct statfs)), MNT_NOWAIT);
+    std::vector<Mount> mounts;
+    for (int at = 0; at < std::max(listed, 0); ++at) {
+        const auto& each = table[static_cast<std::size_t>(at)];
+        mounts.push_back({each.f_mntonname, each.f_fstypename, each.f_mntfromname});
+    }
+    return mounts;
+#else
+    std::ifstream stream{"/proc/self/mountinfo"};
+    return read_mountinfo(stream);
+#endif
 }
 
 bool at_or_below(const std::string& path, const std::string& point) {

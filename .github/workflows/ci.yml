@@ -160,3 +160,8 @@ jobs:
           cmake --preset macos -DPKG_CONFIG_EXECUTABLE="$(brew --prefix)/bin/pkg-config"
       - name: Build
         run: cmake --build --preset macos
+      # The library's own tests, which reach the filesystem and the mount
+      # table: deleted files were never confirmed gone on macOS, which has
+      # no /proc, and nothing here ran to see it.
+      - name: Library tests
+        run: ctest --test-dir build/macos -R '^local-library$' --output-on-failure

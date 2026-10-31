@@ -24,7 +24,10 @@ A refresh used device numbers twice:
 
 The kernel says what a folder is on: `/proc/self/mountinfo` names each
 mount point, its filesystem and its source (`cifs //nas/multimedia`,
-`fuse.sshfs host:/music`, `ext4 /dev/sda2`).
+`fuse.sshfs host:/music`, `ext4 /dev/sda2`). macOS has no `/proc`;
+there `getfsstat()` gives the same three (`apfs /dev/disk3s5`,
+`smbfs //user@nas/music`). With no table at all, no file is ever
+confirmed gone -- what macOS did until 2026-10-31.
 
 ## Decision
 

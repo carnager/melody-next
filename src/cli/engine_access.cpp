@@ -4,6 +4,7 @@
 
 #include "trackknife/core/environment.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "trackknife/protocol/message.hpp"
 #include "trackknife/protocol/version.hpp"
 
 #include <algorithm>
@@ -174,6 +175,11 @@ core::Result<std::vector<Json>> keyed_tracks(protocol::Client& client, const boo
             failure((album ? "no album has the key " : "no track has the key ") + key));
     }
     return tracks;
+}
+
+core::Result<std::vector<Json>> picked_tracks(protocol::Client& client, const bool album,
+                                              const std::string_view raw_key) {
+    return keyed_tracks(client, album, protocol::encode_raw_path(raw_key));
 }
 
 core::Result<Json> place(protocol::Client& client, const Placement placement,

@@ -515,7 +515,7 @@ add_test(
 add_executable(trackknife_remote_catalogue_tests remote_catalogue_test.cpp)
 target_link_libraries(
     trackknife_remote_catalogue_tests
-    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+    PRIVATE Trackknife::Engine Trackknife::Protocol melody_cli_engine Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests

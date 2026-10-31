@@ -5,6 +5,7 @@
 // than a hope -- the workspace programs against engine::Catalogue, so anything
 // the two implementations disagree about is a bug the workspace would see.
 
+#include "engine_access.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/remote_catalogue.hpp"
@@ -277,6 +278,35 @@ int main(int argc, char** argv) {
     }
     adding_and_scanning_a_folder_works(local, "local", music);
     adding_and_scanning_a_folder_works(remote, "remote", music);
+
+    // ADR-0346: what melody-pick picked -- a key as the catalogue hands it
+    // over, raw -- finds its tracks over the wire, album and track alike.
+    {
+        require(remote.add_root(music.string()).has_value(), "the folder is added again");
+        persistence::LibraryScanProgress progress;
+        require(remote.scan({}, progress).has_value(), "and scanned");
+        persistence::LibraryQuery albums;
+        albums.kind = persistence::LibraryEntryKind::album;
+        albums.limit = 10;
+        const auto found = remote.query(albums);
+        require(found.has_value() && !found->entries.empty(), "the library lists an album");
+        const auto album =
+            trackknife::cli::picked_tracks(**client, true, found->entries.front().key);
+        require(album.has_value() && !album->empty(),
+                "a picked album's raw key finds its tracks: " +
+                    (album ? std::string{} : album.error().message));
+        persistence::LibraryQuery tracks;
+        tracks.kind = persistence::LibraryEntryKind::track;
+        tracks.limit = 10;
+        const auto listed = remote.query(tracks);
+        require(listed.has_value() && !listed->entries.empty(), "the library lists a track");
+        const auto track =
+            trackknife::cli::picked_tracks(**client, false, listed->entries.front().key);
+        require(track.has_value() && track->size() == 1U,
+                "a picked track's raw path finds it: " +
+                    (track ? std::string{} : track.error().message));
+        require(remote.remove_root(music.string()).has_value(), "the folder is removed");
+    }
 
     history_crosses_with_its_sources(local, "local");
     history_crosses_with_its_sources(remote, "remote");

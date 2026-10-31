@@ -212,7 +212,7 @@ int run(int argc, char** argv) {
             });
             watcher->setFuture(QtConcurrent::run(
                 [client, albums, key = picked.front().key, placement = *placement]() -> QString {
-                    auto tracks = trackknife::cli::keyed_tracks(*client, albums, key);
+                    auto tracks = trackknife::cli::picked_tracks(*client, albums, key);
                     if (!tracks) {
                         return QString::fromStdString(tracks.error().message);
                     }

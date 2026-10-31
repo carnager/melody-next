@@ -56,6 +56,12 @@ connect_engine(const EngineChoice& choice, std::string_view program, std::string
 [[nodiscard]] core::Result<std::vector<Json>> keyed_tracks(protocol::Client& client, bool album,
                                                            const std::string& key);
 
+// The same for a key as the library hands it over -- an album key or a
+// path, raw bytes, as engine::Catalogue's entries carry it -- encoded for
+// the wire here. What melody-pick picked.
+[[nodiscard]] core::Result<std::vector<Json>> picked_tracks(protocol::Client& client, bool album,
+                                                            std::string_view raw_key);
+
 enum class Placement {
     // Instead of what is queued, and played.
     play,

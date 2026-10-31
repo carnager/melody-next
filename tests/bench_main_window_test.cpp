@@ -221,8 +221,8 @@ void BenchMainWindowTest::commandPaletteOffersEveryMenuEntry() {
     // The palette does not offer itself.
     filter->setText(QStringLiteral("Commands"));
     QCOMPARE(results->count(), 0);
-    // One engine to follow is no choice: the Engine menu stays out.
-    filter->setText(QStringLiteral("engine follow"));
+    // No engine elsewhere, no choice of where the library is.
+    filter->setText(QStringLiteral("library this computer"));
     QCOMPARE(results->count(), 0);
 }
 

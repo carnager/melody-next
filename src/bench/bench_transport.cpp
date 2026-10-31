@@ -493,16 +493,8 @@ void BenchMainWindow::buildTransport() {
     playback_menu->addAction(previous_action_);
     playback_menu->addAction(next_action_);
     playback_menu->addSeparator();
-    // ADR-0345: which engine the controls follow, and where it sounds --
-    // the output button's menu -- as menu entries, so the command palette
-    // finds them too.
-    engine_menu_ = playback_menu->addMenu(tr("Engine"));
-    engine_menu_->setObjectName(QStringLiteral("bench-engine-menu"));
-    engine_menu_->setToolTipsVisible(true);
-    // Drawn as the Playback menu opens: hidden with one engine, it would
-    // never be asked to show itself once a second connected.
-    connect(playback_menu, &QMenu::aboutToShow, this, &BenchMainWindow::rebuildEngineMenu);
-    rebuildEngineMenu();
+    // ADR-0345: where it sounds -- the output button's menu -- as menu
+    // entries, so the command palette finds them too.
     device_menu_->setTitle(tr("Output"));
     playback_menu->addMenu(device_menu_);
     playback_menu->addSeparator();
@@ -654,26 +646,6 @@ void BenchMainWindow::rebuildDeviceMenu() {
     auto* refresh = device_menu_->addAction(QStringLiteral("Refresh audio devices"));
     refresh->setObjectName(QStringLiteral("action-refresh-audio-devices"));
     connect(refresh, &QAction::triggered, &workspace_, &Workspace::refreshOutputs);
-}
-
-void BenchMainWindow::rebuildEngineMenu() {
-    engine_menu_->clear();
-    qDeleteAll(engine_menu_->findChildren<QActionGroup*>(Qt::FindDirectChildrenOnly));
-    auto* group = new QActionGroup(engine_menu_);
-    group->setExclusive(true);
-    const auto choices = workspace_.engineChoices();
-    for (const auto& choice : choices) {
-        auto* action = engine_menu_->addAction(tr("Follow %1").arg(choice.label));
-        action->setCheckable(true);
-        action->setChecked(choice.followed);
-        action->setEnabled(choice.reachable);
-        action->setToolTip(choice.reachable ? tr("Show and control what %1 plays").arg(choice.label)
-                                            : tr("%1 is not connected").arg(choice.label));
-        group->addAction(action);
-        connect(action, &QAction::triggered, this,
-                [this, key = choice.key] { workspace_.followEngine(key); });
-    }
-    engine_menu_->menuAction()->setVisible(choices.size() > 1);
 }
 
 QIcon BenchMainWindow::oneShotIcon(const QIcon& plain) const {

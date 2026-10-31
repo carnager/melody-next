@@ -2884,6 +2884,59 @@ void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() 
     saveRemoteEngines({});
 }
 
+// ADR-0345: Workspace › Library chooses the engine holding the library, as
+// Settings → Engines does -- through the palette too, as a laptop does
+// leaving home: the server's library there, its own transcodes away.
+void BenchMainWindowTest::theLibraryMenuMovesTheLibrary() {
+    const auto server = QStringLiteral("192.0.2.10:6603");
+    saveRemoteEngines({{.address = server,
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {},
+                        .stream_kbps = -1,
+                        .name = QStringLiteral("gemenon")}});
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_key),
+                         QLatin1String(SettingsDialog::library_engine_local));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+    QVERIFY(sources != nullptr);
+    QVERIFY(sources->isTabVisible(0));
+
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-library-engine-menu"));
+    QVERIFY(menu != nullptr);
+    window.rebuildLibraryMenu();
+    QVERIFY(menu->menuAction()->isVisible());
+    QCOMPARE(menu->actions().size(), 2);
+    QCOMPARE(menu->actions().front()->text(), QStringLiteral("This computer"));
+    QVERIFY(menu->actions().front()->isChecked());
+    QCOMPARE(menu->actions().back()->text(), QStringLiteral("gemenon"));
+
+    window.findChild<QAction*>(QStringLiteral("action-command-palette"))->trigger();
+    auto* palette = window.findChild<QDialog*>(QStringLiteral("command-palette"));
+    QVERIFY(palette != nullptr);
+    auto* filter = palette->findChild<QLineEdit*>(QStringLiteral("command-filter"));
+    auto* results = palette->findChild<QListWidget*>(QStringLiteral("command-results"));
+    filter->setText(QStringLiteral("library gemenon"));
+    QCOMPARE(results->count(), 1);
+    QCOMPARE(results->item(0)->text(), QStringLiteral("Library › gemenon"));
+    QTest::keyClick(filter, Qt::Key_Return);
+    QCOMPARE(libraryEngine(), server);
+    // This computer's library is no library now: its tab goes.
+    QVERIFY(!sources->isTabVisible(0));
+
+    // Home again -- away, rather: this computer's own.
+    window.rebuildLibraryMenu();
+    QVERIFY(menu->actions().back()->isChecked());
+    menu->actions().front()->trigger();
+    QCOMPARE(libraryEngine(), QLatin1String(SettingsDialog::library_engine_local));
+    QVERIFY(sources->isTabVisible(0));
+    saveRemoteEngines({});
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_key));
+}
+
 // ADR-0287: Help › About Melody shows the mascot, the release and the
 // licence.
 void BenchMainWindowTest::aboutShowsTheMascotAndTheRelease() {

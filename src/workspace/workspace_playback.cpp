@@ -531,29 +531,6 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     view_->refreshLocalPlaybackControls();
 }
 
-std::vector<Workspace::EngineChoice> Workspace::engineChoices() const {
-    std::vector<EngineChoice> choices;
-    for (const auto& engine : engines_) {
-        if (engine->playback == nullptr) {
-            continue;
-        }
-        choices.push_back(EngineChoice{.key = engine->key,
-                                       .label = engineName(engine->key),
-                                       .followed = engine->playback == transport_,
-                                       .reachable = engine->playback->active()});
-    }
-    return choices;
-}
-
-void Workspace::followEngine(const EngineKey& key) {
-    auto* playback = playbackOf(key);
-    if (playback == nullptr || playback == transport_ || !playback->active()) {
-        return;
-    }
-    followPlayback(playback, false);
-    reattachToEngine();
-}
-
 void Workspace::rememberEngineState(EnginePlayback* playback) {
     auto* engine = linkOf(playback);
     if (engine == nullptr) {

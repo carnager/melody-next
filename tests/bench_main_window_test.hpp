@@ -363,6 +363,7 @@ class BenchMainWindowTest final : public QObject {
     void theTabStoreKeepsWhatItCannotRead();
     void aPlayingTabsEditsReachTheQueueAsEdits();
     void thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere();
+    void theLibraryMenuMovesTheLibrary();
     void aboutShowsTheMascotAndTheRelease();
     void aPluginActionSharesWhatIsChosen();
     void manyPluginActionsGoInASubmenu();
@@ -451,7 +452,6 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
-    void theEngineMenuFollowsTheEngineChosen();
     void aNotificationWaitsForItsCover();
     void aPluginPanelIsToldWhatAnotherClientStarted();
     void theRemoteTabTakesTheNameItsEngineAnnounces();

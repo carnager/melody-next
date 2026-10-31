@@ -1,4 +1,4 @@
-# ADR-0345: The command palette offers every menu entry, and the engine followed is chosen
+# ADR-0345: The command palette offers every menu entry; the library's engine from a menu
 
 ## Status
 
@@ -12,9 +12,8 @@ names, modes and column labels as "parameter choices". The list fell behind:
 Repeat, Random, ReplayGain modes, the playback buffer, the speakers, Panels,
 Queue next and more were in the menus or on keys but not in the palette, and
 one entry named an action that no longer existed. Switching speaker, or
-which engine the controls follow, had no keyboard path at all: the window
-followed an engine only when one of its tabs played or another client
-started it.
+which engine holds the library, had no keyboard path at all: the library
+moved only in Settings → Engines.
 
 ## Decision
 
@@ -26,11 +25,16 @@ started it.
 - **A submenu's entry is named under it**, `Output › gemenon`,
   `Playback buffer › Resilient`; the menu bar's menu is searched but not
   shown. A submenu greyed out or hidden hides what it holds.
-- **Playback › Engine** names each engine with a playback connection,
-  `Follow this computer`, `Follow gemenon`, the followed one checked. Choosing
-  one follows it without stopping the other, as when another client starts
-  it (ADR-0227's one-engine-plays rule applies when something is played).
-  Hidden with one engine.
+- **Workspace › Library** names this computer and each engine added in
+  Settings → Engines, the one holding the library checked. Choosing one is
+  choosing it there and saving: a laptop takes the home server's library at
+  home and its own away (transcodes prepared for the road), from the
+  palette. Each engine keeps its own folders, so nothing is lost moving
+  back and forth. Hidden with no engine elsewhere.
+- Which engine the controls follow is not a menu choice: a tab plays on its
+  engine, and another client starting one is followed (ADR-0227). A first
+  build of this ADR offered it as Playback › Engine; it read as the library
+  and went.
 - **Playback › Output** is the output button's menu: the engines' speakers
   and the chosen one's devices. It replaces the Playback menu's own
   Refresh audio devices.
@@ -40,4 +44,4 @@ started it.
 ## Verification
 
 `commandPaletteOffersEveryMenuEntry`, `commandPaletteHidesWhatAGreyedMenuHolds`
-and `theEngineMenuFollowsTheEngineChosen` in the bench window tests.
+and `theLibraryMenuMovesTheLibrary` in the bench window tests.

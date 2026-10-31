@@ -2131,54 +2131,6 @@ printf '{"title": "About %s", "parts": []}' "$artist"
     QDir{folder}.removeRecursively();
 }
 
-// ADR-0345: Playback > Engine names each engine the controls can follow;
-// choosing one follows it without stopping the other, and the palette
-// offers the same entries.
-void BenchMainWindowTest::theEngineMenuFollowsTheEngineChosen() {
-    QTemporaryDir remote_state;
-    QVERIFY(remote_state.isValid());
-    testing::TestEngine remote;
-    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
-
-    BenchMainWindow window;
-    window.show();
-    QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
-    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
-    QVERIFY(window.transport_ == window.localPlayback());
-
-    auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-engine-menu"));
-    QVERIFY(menu != nullptr);
-    window.rebuildEngineMenu();
-    QVERIFY(menu->menuAction()->isVisible());
-    const auto entries = menu->actions();
-    QCOMPARE(entries.size(), 2);
-    QCOMPARE(entries.front()->text(), QStringLiteral("Follow this computer"));
-    QVERIFY(entries.front()->isChecked());
-    QVERIFY(!entries.back()->isChecked());
-    // The palette draws the menu anew as it opens.
-    const auto remote_entry = entries.back()->text();
-
-    // Through the palette, as a key would.
-    window.findChild<QAction*>(QStringLiteral("action-command-palette"))->trigger();
-    auto* palette = window.findChild<QDialog*>(QStringLiteral("command-palette"));
-    QVERIFY(palette != nullptr);
-    auto* filter = palette->findChild<QLineEdit*>(QStringLiteral("command-filter"));
-    auto* results = palette->findChild<QListWidget*>(QStringLiteral("command-results"));
-    filter->setText(QStringLiteral("engine follow"));
-    QCOMPARE(results->count(), 2);
-    filter->setText(QStringLiteral("engine ") + remote_entry);
-    QCOMPARE(results->count(), 1);
-    QVERIFY(results->item(0)->text().startsWith(QStringLiteral("Engine › Follow ")));
-    QTest::keyClick(filter, Qt::Key_Return);
-    QCOMPARE(window.transport_, window.remotePlayback());
-
-    window.rebuildEngineMenu();
-    QVERIFY(menu->actions().back()->isChecked());
-    menu->actions().front()->trigger();
-    QCOMPARE(window.transport_, window.localPlayback());
-}
-
 void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

@@ -432,6 +432,15 @@ void BenchMainWindow::buildWorkspace() {
     commands->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
     connect(commands, &QAction::triggered, this, &BenchMainWindow::showCommandPalette);
     workspace_menu->addSeparator();
+    // ADR-0345: the engine holding the library, as Settings → Engines
+    // chooses it -- the home server's at home, this computer's away.
+    library_menu_ = workspace_menu->addMenu(tr("Library"));
+    library_menu_->setObjectName(QStringLiteral("bench-library-engine-menu"));
+    // Drawn as the Workspace menu opens: hidden with no engine elsewhere,
+    // it would never be asked to show itself once one was added.
+    connect(workspace_menu, &QMenu::aboutToShow, this, &BenchMainWindow::rebuildLibraryMenu);
+    rebuildLibraryMenu();
+    workspace_menu->addSeparator();
     auto* jump_playing = workspace_menu->addAction(tr("Jump to playing"));
     jump_playing->setObjectName(QStringLiteral("action-jump-to-playing"));
     jump_playing->setShortcut(QKeySequence(QStringLiteral("Ctrl+J")));
@@ -587,6 +596,40 @@ void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind)
     popup->popUp(centralWidget() != nullptr ? centralWidget() : this);
 }
 
+void trackknife::bench::BenchMainWindow::rebuildLibraryMenu() {
+    library_menu_->clear();
+    qDeleteAll(library_menu_->findChildren<QActionGroup*>(Qt::FindDirectChildrenOnly));
+    auto* group = new QActionGroup(library_menu_);
+    group->setExclusive(true);
+    const auto chosen = libraryEngine();
+    const auto add = [this, group, &chosen](const QString& label, const QString& address) {
+        auto* action = library_menu_->addAction(label);
+        action->setCheckable(true);
+        action->setChecked(address == chosen);
+        action->setToolTip(tr("Show the library of %1").arg(label));
+        group->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [this, address] { chooseLibraryEngine(address); });
+    };
+    add(tr("This computer"), QString::fromLatin1(SettingsKeys::library_engine_local));
+    const auto engines = loadRemoteEngines();
+    for (const auto& engine : engines) {
+        if (!engine.address.isEmpty()) {
+            add(engine.label(), engine.address);
+        }
+    }
+    library_menu_->menuAction()->setVisible(!engines.empty());
+}
+
+void trackknife::bench::BenchMainWindow::chooseLibraryEngine(const QString& address) {
+    if (address == libraryEngine()) {
+        return;
+    }
+    const auto before = localEngineSharing();
+    QSettings{}.setValue(QLatin1String(SettingsKeys::library_engine_key), address);
+    applySavedSettings(before);
+}
+
 void trackknife::bench::BenchMainWindow::showCommandPalette() {
     for (auto* existing : findChildren<ui::CommandPalette*>()) {
         if (existing->isVisible()) {
@@ -596,11 +639,37 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
         }
     }
     // ADR-0345: every command the menus hold, and the window's keys; the
-    // engines as they are now.
-    rebuildEngineMenu();
+    // engines the library can be on as they are now.
+    rebuildLibraryMenu();
     auto* palette = new ui::CommandPalette(ui::windowCommands(*this), this);
     palette->setAttribute(Qt::WA_DeleteOnClose);
     palette->open();
+}
+
+// Settings saved -- by its dialog, or a choice the menus make of it.
+void trackknife::bench::BenchMainWindow::applySavedSettings(const LocalEngineSharing& before) {
+    workspace_.settingsSaved(before);
+    // ADR-0291: a plugin enabled or turned off brings or takes its panels.
+    buildPluginPanels();
+    buildPluginTriggers();
+    applyLocalLibraryVisibility();
+    for (auto* library : findChildren<LocalLibraryPanel*>()) {
+        library->applyAppearance();
+    }
+    // ADR-0286: which engine holds the library decides how tabs are
+    // marked and ordered.
+    for (const auto& tab : list_tabs_) {
+        refreshTabChrome(*tab);
+        refreshEmptyMessage(*tab);
+    }
+    keepTabGroupsTogether();
+    // The playlists shown are the library's, wherever it now is.
+    followLibraryPlaylists();
+    if (notifications_action_)
+        notifications_action_->setChecked(
+            QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
+    for (auto* section : findChildren<MetadataArtworkSection*>())
+        section->refreshStoragePolicy();
 }
 
 trackknife::bench::SettingsDialog*
@@ -759,30 +828,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             properties->reloadOutputProfiles();
         }
     });
-    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
-        workspace_.settingsSaved(sharing);
-        // ADR-0291: a plugin enabled or turned off brings or takes its panels.
-        buildPluginPanels();
-        buildPluginTriggers();
-        applyLocalLibraryVisibility();
-        for (auto* library : findChildren<LocalLibraryPanel*>()) {
-            library->applyAppearance();
-        }
-        // ADR-0286: which engine holds the library decides how tabs are
-        // marked and ordered.
-        for (const auto& tab : list_tabs_) {
-            refreshTabChrome(*tab);
-            refreshEmptyMessage(*tab);
-        }
-        keepTabGroupsTogether();
-        // The playlists shown are the library's, wherever it now is.
-        followLibraryPlaylists();
-        if (notifications_action_)
-            notifications_action_->setChecked(
-                QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
-        for (auto* section : findChildren<MetadataArtworkSection*>())
-            section->refreshStoragePolicy();
-    });
+    connect(dialog, &QDialog::accepted, this,
+            [this, sharing = localEngineSharing()] { applySavedSettings(sharing); });
     dialog->showPage(page);
     dialog->open();
     return dialog;

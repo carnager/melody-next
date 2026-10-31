@@ -28,14 +28,14 @@ pkgver() {
 
 build() {
   cd melody-next
-  # Only the window: the engine comes from melodyd-git. Warnings-as-errors
+  # Only the window, and melody-pick: the engine comes from melodyd-git. Warnings-as-errors
   # stays off so packaging never fails on warnings a future compiler invents.
   # UPnP on, as in melodyd-git: the window's setting for it is greyed out in
   # a build without.
   cmake --preset release -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_TESTING=OFF -DMELODY_BUILD_BENCHMARKS=OFF -DMELODY_WARNINGS_AS_ERRORS=OFF \
     -DMELODY_ENABLE_UPNP=ON
-  cmake --build build/release --target trackknife trackknife_titleformat_cli
+  cmake --build build/release --target trackknife melody_pick trackknife_titleformat_cli
 }
 
 package() {

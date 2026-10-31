@@ -1,4 +1,4 @@
-# ADR-0345: The command palette offers every menu entry; the library's engine from a menu
+# ADR-0345: The command palette offers every menu entry; the library engine from a menu
 
 ## Status
 
@@ -25,12 +25,14 @@ moved only in Settings → Engines.
 - **A submenu's entry is named under it**, `Output › gemenon`,
   `Playback buffer › Resilient`; the menu bar's menu is searched but not
   shown. A submenu greyed out or hidden hides what it holds.
-- **Workspace › Library** names this computer and each engine added in
+- **Workspace › Library engine** names this computer and each engine added in
   Settings → Engines, the one holding the library checked. Choosing one is
   choosing it there and saving: a laptop takes the home server's library at
   home and its own away (transcodes prepared for the road), from the
   palette. Each engine keeps its own folders, so nothing is lost moving
-  back and forth. Hidden with no engine elsewhere.
+  back and forth. Hidden with no engine elsewhere. Named *Library engine*,
+  the term of Settings → Engines: plain *Library › gemenon* read as one
+  library of several.
 - Which engine the controls follow is not a menu choice: a tab plays on its
   engine, and another client starting one is followed (ADR-0227). A first
   build of this ADR offered it as Playback › Engine; it read as the library

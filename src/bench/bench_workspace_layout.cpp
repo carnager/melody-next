@@ -434,7 +434,7 @@ void BenchMainWindow::buildWorkspace() {
     workspace_menu->addSeparator();
     // ADR-0345: the engine holding the library, as Settings → Engines
     // chooses it -- the home server's at home, this computer's away.
-    library_menu_ = workspace_menu->addMenu(tr("Library"));
+    library_menu_ = workspace_menu->addMenu(tr("Library engine"));
     library_menu_->setObjectName(QStringLiteral("bench-library-engine-menu"));
     // Drawn as the Workspace menu opens: hidden with no engine elsewhere,
     // it would never be asked to show itself once one was added.

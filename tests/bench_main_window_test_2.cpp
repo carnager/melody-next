@@ -2884,7 +2884,7 @@ void BenchMainWindowTest::thisComputersTabsAreMarkedWhenTheLibraryIsElsewhere() 
     saveRemoteEngines({});
 }
 
-// ADR-0345: Workspace › Library chooses the engine holding the library, as
+// ADR-0345: Workspace › Library engine chooses the engine holding the library, as
 // Settings → Engines does -- through the palette too, as a laptop does
 // leaving home: the server's library there, its own transcodes away.
 void BenchMainWindowTest::theLibraryMenuMovesTheLibrary() {
@@ -2921,7 +2921,7 @@ void BenchMainWindowTest::theLibraryMenuMovesTheLibrary() {
     auto* results = palette->findChild<QListWidget*>(QStringLiteral("command-results"));
     filter->setText(QStringLiteral("library gemenon"));
     QCOMPARE(results->count(), 1);
-    QCOMPARE(results->item(0)->text(), QStringLiteral("Library › gemenon"));
+    QCOMPARE(results->item(0)->text(), QStringLiteral("Library engine › gemenon"));
     QTest::keyClick(filter, Qt::Key_Return);
     QCOMPARE(libraryEngine(), server);
     // This computer's library is no library now: its tab goes.

@@ -141,6 +141,17 @@ target_link_libraries(
 )
 set_target_properties(trackknife PROPERTIES OUTPUT_NAME melody)
 
+# ADR-0346: melody-pick, Quick album and Quick track on their own -- the
+# window's picker over any engine melody-cli would use.
+qt_add_executable(melody_pick pick_main.cpp)
+target_link_libraries(
+    melody_pick
+    PRIVATE Trackknife::BenchUi melody_cli_engine Qt6::Concurrent Qt6::Widgets
+            trackknife_project_options trackknife_project_warnings
+)
+set_target_properties(melody_pick PROPERTIES OUTPUT_NAME melody-pick)
+install(TARGETS melody_pick RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
+
 # Packaged as "app": the window, its desktop entry, and the documents.
 install(TARGETS trackknife RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
 # ADR-0302: and melody:// links -- an invite to listen together -- apart,

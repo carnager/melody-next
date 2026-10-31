@@ -6,6 +6,7 @@
 
 #include "config_command.hpp"
 #include "convert_command.hpp"
+#include "engine_access.hpp"
 #include "help.hpp"
 #include "trackknife/core/environment.hpp"
 #include "trackknife/core/local_sources.hpp"
@@ -85,98 +86,25 @@ struct Options final {
     std::exit(EXIT_FAILURE); // NOLINT(concurrency-mt-unsafe)
 }
 
-[[nodiscard]] std::filesystem::path local_socket() {
-    if (const char* runtime = trackknife::core::environment_variable("XDG_RUNTIME_DIR");
-        runtime != nullptr && *runtime != '\0') {
-        return std::filesystem::path{runtime} / "melodyd.sock";
-    }
-    return std::filesystem::temp_directory_path() / "melodyd.sock";
-}
-
-// The engines on the network. Their answers come within a second, so that
-// long is waited for -- unless one is wanted by name, which ends the wait
-// as soon as it has answered.
-[[nodiscard]] std::vector<trackknife::discovery::Found>
-look_around(const std::string& wanted = {}) {
-    auto browser = trackknife::discovery::Browser::start();
-    if (!browser) {
-        return {};
-    }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{1'200};
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (!wanted.empty() &&
-            std::ranges::any_of((*browser)->found(), [&wanted](const auto& engine) {
-                return engine.instance == wanted;
-            })) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds{20});
-    }
-    return (*browser)->found();
-}
+using trackknife::cli::local_socket;
+using trackknife::cli::look_around;
+using trackknife::cli::queue_entries;
 
 [[nodiscard]] std::unique_ptr<Client> connect(const Options& options) {
-    const auto open = [](const Endpoint& endpoint) {
-        auto client = Client::connect(endpoint);
-        if (!client) {
-            fail("cannot reach the engine at " + endpoint.describe() + ": " +
-                 client.error().message);
-        }
-        // ADR-0260: another protocol is not used; an older engine is, and
-        // said so.
-        if (auto info = (*client)->call("engine.info")) {
-            const auto peer = trackknife::protocol::peer_version(*info);
-            const auto said = trackknife::protocol::compatibility_message(
-                peer, text_of(*info, "name"), "melody-cli");
-            if (trackknife::protocol::compatibility(peer) ==
-                trackknife::protocol::Compatibility::incompatible) {
-                fail(said);
-            }
-            if (!said.empty()) {
-                std::cerr << "melody-cli: " << said << "\n";
-            }
-        }
-        return std::move(*client);
-    };
-    if (options.local) {
-        const auto socket = local_socket();
-        if (!std::filesystem::exists(socket)) {
-            fail("this computer's engine is not running (no " + socket.string() + ")");
-        }
-        return open(Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}});
+    std::string notice;
+    auto client =
+        trackknife::cli::connect_engine(trackknife::cli::EngineChoice{.server = options.server,
+                                                                      .password = options.password,
+                                                                      .engine = options.engine,
+                                                                      .local = options.local},
+                                        "melody-cli", notice);
+    if (!client) {
+        fail(client.error().message);
     }
-    if (!options.server.empty()) {
-        const auto endpoint = Endpoint::parse(options.server, options.password);
-        if (!endpoint) {
-            fail("--server wants HOST:PORT or a socket path");
-        }
-        return open(*endpoint);
+    if (!notice.empty()) {
+        std::cerr << "melody-cli: " << notice << "\n";
     }
-    if (options.engine.empty()) {
-        if (const auto socket = local_socket(); std::filesystem::exists(socket)) {
-            return open(Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}});
-        }
-    }
-    auto found = look_around(options.engine);
-    if (!options.engine.empty()) {
-        std::erase_if(found,
-                      [&options](const auto& engine) { return engine.instance != options.engine; });
-    }
-    if (found.empty()) {
-        fail(options.engine.empty() ? "no engine here or on the network; name one with --server"
-                                    : "no engine called \"" + options.engine + "\" was found");
-    }
-    if (found.size() > 1U) {
-        std::string names;
-        for (const auto& engine : found) {
-            names += "\n  " + engine.instance;
-        }
-        fail("several engines were found; choose one with --engine:" + names);
-    }
-    return open(Endpoint{.socket = {},
-                         .host = found.front().address,
-                         .port = found.front().port,
-                         .token = options.password});
+    return std::move(*client);
 }
 
 [[nodiscard]] Json call(Client& client, const std::string& method,
@@ -413,24 +341,6 @@ int watch_albums(Client& client, const Options& options, const std::vector<std::
 
 // What the engine is given to hold for these library tracks, each with an
 // identity of its own.
-[[nodiscard]] std::vector<Json> queue_entries(const std::vector<Json>& tracks) {
-    std::vector<Json> entries;
-    for (const auto& track : tracks) {
-        entries.push_back(Json{{"entry", trackknife::core::StableId::random().to_string()},
-                               {"path", text_of(track, "key")},
-                               {"title", first_text(track, "title", "label")},
-                               {"group", Json{{"album_artist", text_of(track, "artist")},
-                                              {"artist", text_of(track, "artist")},
-                                              {"album", text_of(track, "album")},
-                                              {"date", text_of(track, "date")}}}});
-        // Known to the library, so the engine can show how long it is.
-        if (const auto duration = track.value("duration_ms", std::int64_t{-1}); duration >= 0) {
-            entries.back()["duration_ms"] = duration;
-        }
-    }
-    return entries;
-}
-
 // What the engine is given to hold: the tracks of the album or the track
 // these words find first, each with an identity of its own.
 [[nodiscard]] std::vector<Json> entries_for(Client& client, const std::string& kind,
@@ -489,31 +399,16 @@ int watch_albums(Client& client, const Options& options, const std::vector<std::
     if (words.empty()) {
         fail("which " + kind + "? Give words from its artist, title, album or year");
     }
-    // One track by its key -- its path -- as a picker showed it.
-    if (!album && words.starts_with("--key ")) {
-        const auto key = words.substr(6);
-        auto tracks = call(client, "catalogue.query",
-                           Json{{"kind", 2}, {"text", ""}, {"path", key}, {"limit", 1}})
-                          .value("entries", std::vector<Json>{});
-        if (tracks.empty()) {
-            fail("no track has the key " + key);
+    // One album or track by its key -- an album's key, a track's path --
+    // exactly the one a picker showed, not the first the words happen to
+    // find.
+    if (words.starts_with("--key ")) {
+        auto tracks = trackknife::cli::keyed_tracks(client, album, words.substr(6));
+        if (!tracks) {
+            fail(tracks.error().message);
         }
-        chosen = describe_found(tracks.front(), false);
-        return queue_entries(tracks);
-    }
-    // One album by its key: exactly the one a picker showed, not the first
-    // that the words happen to find.
-    if (album && words.starts_with("--key ")) {
-        const auto key = words.substr(6);
-        const auto page = call(
-            client, "catalogue.query",
-            Json{{"kind", 2}, {"text", ""}, {"album_key", key}, {"offset", 0}, {"limit", 5'000}});
-        auto tracks = page.value("entries", std::vector<Json>{});
-        if (tracks.empty()) {
-            fail("no album has the key " + key);
-        }
-        chosen = describe_found(tracks.front(), true);
-        return queue_entries(tracks);
+        chosen = describe_found(tracks->front(), album);
+        return queue_entries(*tracks);
     }
     const auto found = find(client, album, words, 1);
     if (found.empty()) {
@@ -1274,31 +1169,16 @@ int run(const Options& options) {
         if (entries.empty()) {
             fail("nothing to play in " + chosen);
         }
-        if (command == "play") {
-            static_cast<void>(call(*client, "playback.replace_queue", Json{{"entries", entries}}));
-            show(started(call(*client, "playback.play",
-                              Json{{"entry", text_of(entries.front(), "entry")}})));
-        } else if (command == "add") {
-            // After what is there, which keeps its identities: what plays
-            // now plays on.
-            auto queue = call(*client, "playback.queue").value("entries", std::vector<Json>{});
-            queue.insert(queue.end(), entries.begin(), entries.end());
-            show(call(*client, "playback.replace_queue", Json{{"entries", queue}}));
-        } else {
-            // Up Next: handed to the engine to hold, then asked for in order.
-            static_cast<void>(call(*client, "playback.enqueue", Json{{"entries", entries}}));
-            auto requests =
-                call(*client, "playback.requests").value("entries", std::vector<Json>{});
-            std::vector<Json> asked;
-            asked.reserve(entries.size());
-            for (const auto& entry : entries) {
-                asked.push_back(text_of(entry, "entry"));
-            }
-            // insert: first, what plays after this one; upnext: last.
-            requests.insert(command == "insert" ? requests.begin() : requests.end(), asked.begin(),
-                            asked.end());
-            show(call(*client, "playback.set_requests", Json{{"entries", requests}}));
+        using trackknife::cli::Placement;
+        const auto placement = command == "play"     ? Placement::play
+                               : command == "add"    ? Placement::add
+                               : command == "insert" ? Placement::insert
+                                                     : Placement::upnext;
+        auto placed = trackknife::cli::place(*client, placement, entries);
+        if (!placed) {
+            fail(placed.error().message);
         }
+        show(placement == Placement::play ? started(*placed) : *placed);
         if (!options.json) {
             std::cerr << "melody-cli: " << chosen << "\n";
         }

@@ -10,13 +10,23 @@ target_link_libraries(
     PRIVATE PkgConfig::SQLITE3 trackknife_project_options trackknife_project_warnings
 )
 
+# ADR-0346: which engine, and how a pick is queued -- melody-cli's and
+# melody-pick's alike.
+add_library(melody_cli_engine STATIC engine_access.cpp)
+target_include_directories(melody_cli_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    melody_cli_engine
+    PUBLIC Trackknife::Protocol Trackknife::Discovery Trackknife::Core
+    PRIVATE trackknife_project_options trackknife_project_warnings
+)
+
 # melody-cli: an engine from the shell.
 add_executable(melody_cli main.cpp config_command.cpp convert_command.cpp help.cpp)
 set_target_properties(melody_cli PROPERTIES OUTPUT_NAME melody-cli)
 target_link_libraries(
     melody_cli
     PRIVATE trackknife_daemon_settings Trackknife::Protocol Trackknife::Discovery Trackknife::Core
-            melody_cli_presets
+            melody_cli_presets melody_cli_engine
             trackknife_project_options trackknife_project_warnings
 )
 

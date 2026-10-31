@@ -894,6 +894,41 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
                 .startsWith(QStringLiteral("Recently added")));
     QTest::keyClick(popup->input(), Qt::Key_Escape);
 
+    // ADR-0346: alone, as melody-pick shows it -- a window of its own, no
+    // tab for Alt+Enter to open, and open until what was chosen is queued.
+    {
+        auto* alone =
+            new QuickPickPopup(QuickPickKind::album,
+                               std::shared_ptr<engine::Catalogue>{window.localCatalogue()->open()},
+                               QStringLiteral("test"), nullptr, true);
+        const QPointer<QuickPickPopup> held{alone};
+        QVERIFY(alone->isWindow());
+        QVERIFY(!alone->windowFlags().testFlag(Qt::Popup));
+        QVERIFY(!alone->findChild<QLabel*>(QStringLiteral("bench-quick-album-keys"))
+                     ->text()
+                     .contains(QStringLiteral("new tab")));
+        std::vector<LocalLibraryAction> asked;
+        connect(alone, &QuickPickPopup::chosen, this,
+                [&asked](const std::vector<persistence::LibraryEntry>& picked,
+                         const LocalLibraryAction action) {
+                    if (picked.size() == 1U) {
+                        asked.push_back(action);
+                    }
+                });
+        alone->showAlone();
+        QTRY_COMPARE(alone->results()->count(), 2);
+        QTest::keyClick(alone->input(), Qt::Key_Return, Qt::AltModifier);
+        QVERIFY(asked.empty());
+        QTest::keyClick(alone->input(), Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(asked, std::vector{LocalLibraryAction::replace});
+        QVERIFY(alone->isVisible());
+        alone->say(QStringLiteral("no engine"));
+        QCOMPARE(alone->findChild<QLabel*>(QStringLiteral("bench-quick-album-status"))->text(),
+                 QStringLiteral("no engine"));
+        QTest::keyClick(alone->input(), Qt::Key_Escape);
+        QTRY_VERIFY(held.isNull());
+    }
+
     // The library panel's Recently added -- a view (ADR-0254): albums, the
     // new one first.
     window.localLibrary()->refreshLibrary();

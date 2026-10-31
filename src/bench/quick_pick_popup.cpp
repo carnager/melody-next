@@ -2,12 +2,14 @@
 
 #include "bench/quick_pick_popup.hpp"
 
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
+#include <QScreen>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
@@ -66,9 +68,9 @@ class AlbumRowDelegate final : public QStyledItemDelegate {
 
 QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
                                std::shared_ptr<engine::Catalogue> catalogue, const QString& scope,
-                               QWidget* parent)
-    : QFrame(parent, Qt::Popup),
-      session_(new QuickPickSession(kind, std::move(catalogue), scope, this)) {
+                               QWidget* parent, const bool alone)
+    : QFrame(parent, alone ? Qt::Window | Qt::FramelessWindowHint : Qt::Popup),
+      session_(new QuickPickSession(kind, std::move(catalogue), scope, this)), alone_(alone) {
     const bool albums = kind == QuickPickKind::album;
     setObjectName(albums ? QStringLiteral("bench-quick-album")
                          : QStringLiteral("bench-quick-track"));
@@ -111,7 +113,7 @@ QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
     status_->setObjectName(QStringLiteral("bench-quick-album-status"));
     status_->setForegroundRole(QPalette::PlaceholderText);
     layout->addWidget(status_);
-    auto* keys = new QLabel(QuickPickSession::keysText(), this);
+    auto* keys = new QLabel(QuickPickSession::keysText(!alone), this);
     keys->setObjectName(QStringLiteral("bench-quick-album-keys"));
     keys->setForegroundRole(QPalette::PlaceholderText);
     keys->setWordWrap(true);
@@ -126,8 +128,15 @@ QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
     connect(session_, &QuickPickSession::chosen, this,
             [this](std::vector<persistence::LibraryEntry> picked, LocalLibraryAction action) {
                 emit chosen(std::move(picked), action);
-                close();
+                // Alone, it stays until the choice is queued: what fails is
+                // said here.
+                if (!alone_) {
+                    close();
+                }
             });
+    if (alone) {
+        setWindowTitle(albums ? tr("Quick album") : tr("Quick track"));
+    }
 }
 
 QuickPickPopup::~QuickPickPopup() = default;
@@ -143,6 +152,34 @@ void QuickPickPopup::popUp(const QWidget* over) {
     show();
     input_->setFocus(Qt::PopupFocusReason);
     session_->search();
+}
+
+void QuickPickPopup::showAlone() {
+    resize(640, 420);
+    if (const auto* screen = QGuiApplication::primaryScreen()) {
+        const auto area = screen->availableGeometry();
+        move(area.x() + (area.width() - width()) / 2, area.y() + (area.height() - height()) / 3);
+    }
+    show();
+    raise();
+    activateWindow();
+    input_->setFocus(Qt::ActiveWindowFocusReason);
+    session_->search();
+}
+
+void QuickPickPopup::say(const QString& text) { status_->setText(text); }
+
+void QuickPickPopup::changeEvent(QEvent* event) {
+    QFrame::changeEvent(event);
+    if (!alone_ || event->type() != QEvent::ActivationChange) {
+        return;
+    }
+    // Like a launcher: clicking elsewhere is leaving.
+    if (isActiveWindow()) {
+        focused_ = true;
+    } else if (focused_) {
+        close();
+    }
 }
 
 void QuickPickPopup::showResults() {
@@ -197,6 +234,11 @@ bool QuickPickPopup::eventFilter(QObject* watched, QEvent* event) {
         return true;
     case Qt::Key_Return:
     case Qt::Key_Enter:
+        // Alone there are no tabs for Alt+Enter to open one in.
+        if (alone_ &&
+            QuickPickSession::actionFor(key->modifiers()) == LocalLibraryAction::new_list) {
+            return true;
+        }
         session_->choose(results_->currentRow(), QuickPickSession::actionFor(key->modifiers()));
         return true;
     default:

@@ -25,13 +25,18 @@ class QuickPickPopup final : public QFrame {
 
   public:
     // `catalogue` is the library searched -- this computer's or the remote's,
-    // named by `scope`.
+    // named by `scope`. `alone`: a window of its own, as melody-pick shows
+    // it (ADR-0346) -- no tabs to open, and gone when it loses the focus.
     QuickPickPopup(QuickPickKind kind, std::shared_ptr<engine::Catalogue> catalogue,
-                   const QString& scope, QWidget* parent = nullptr);
+                   const QString& scope, QWidget* parent = nullptr, bool alone = false);
     ~QuickPickPopup() override;
 
     // Shows the popup below the top edge of `over`, centred.
     void popUp(const QWidget* over);
+    // Shows it as a window of its own, in the middle of the screen.
+    void showAlone();
+    // Said in place of the status line: what went wrong with a choice.
+    void say(const QString& text);
     [[nodiscard]] QLineEdit* input() const noexcept { return input_; }
     [[nodiscard]] QListWidget* results() const noexcept { return results_; }
 
@@ -40,6 +45,7 @@ class QuickPickPopup final : public QFrame {
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
   private:
     void showResults();
@@ -48,6 +54,9 @@ class QuickPickPopup final : public QFrame {
     QLineEdit* input_{nullptr};
     QListWidget* results_{nullptr};
     QLabel* status_{nullptr};
+    const bool alone_;
+    // Alone: it has had the focus, so losing it now means the user left.
+    bool focused_{false};
 };
 
 } // namespace trackknife::bench

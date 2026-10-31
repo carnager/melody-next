@@ -62,9 +62,11 @@ QString QuickPickSession::placeholder() const {
                                          : tr("Title, artist, album or year — e.g. crystal doors");
 }
 
-QString QuickPickSession::keysText() {
-    return tr("Enter add · Shift+Enter replace and play · Ctrl+Enter play next · "
-              "Ctrl+Shift+Enter add to Up Next · Alt+Enter new tab");
+QString QuickPickSession::keysText(const bool tabs) {
+    return tabs ? tr("Enter add · Shift+Enter replace and play · Ctrl+Enter play next · "
+                     "Ctrl+Shift+Enter add to Up Next · Alt+Enter new tab")
+                : tr("Enter add · Shift+Enter replace and play · Ctrl+Enter play next · "
+                     "Ctrl+Shift+Enter add to Up Next");
 }
 
 void QuickPickSession::setText(const QString& text) {

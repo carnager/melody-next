@@ -43,7 +43,9 @@ class QuickPickSession final : public QObject {
     [[nodiscard]] QuickPickKind kind() const { return kind_; }
     [[nodiscard]] QString scope() const { return scope_; }
     [[nodiscard]] QString placeholder() const;
-    [[nodiscard]] static QString keysText();
+    // The keys, and Alt+Enter's new tab only where there are tabs -- not in
+    // melody-pick (ADR-0346).
+    [[nodiscard]] static QString keysText(bool tabs = true);
     [[nodiscard]] const std::vector<Row>& rows() const { return rows_; }
     [[nodiscard]] QString status() const { return status_; }
 

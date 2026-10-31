@@ -217,6 +217,13 @@ with `melody-rofi tracks`, a track) in rofi and puts it in Up Next, adds it to
 the list that plays, or replaces that list and plays it (`melody-rofi tracks
 --engine gemenon` for a particular engine).
 
+`melody-pick` does the same without rofi -- on macOS too -- with the
+window's own Quick album picker, in a window of its own (ADR-0346):
+`melody-pick` for albums, `melody-pick tracks` for tracks, and `melody-cli`'s
+engine options (`--engine gemenon`, `--server HOST:PORT`, `--local`). Enter
+adds, Shift+Enter replaces and plays, Ctrl+Enter plays next,
+Ctrl+Shift+Enter adds to Up Next, Escape leaves. Bind it to a key.
+
 ## melody-musiclist
 
 Every album of an engine's library with its rating, as one sortable HTML

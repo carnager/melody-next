@@ -18,6 +18,7 @@ PluginComponent {
     property string cli: String(pluginData.cli || "melody-cli").trim() || "melody-cli"
     property string engine: String(pluginData.engine || "").trim()
     property string password: String(pluginData.password || "")
+    readonly property var passwordEnvironment: password.length > 0 ? ({ "MELODY_PASSWORD": password }) : ({})
     property int maxWidthSetting: Math.max(0, parseInt(String(pluginData.maxWidth || "320"), 10) || 0)
 
     // The engine the last line was about, when following all of them: what
@@ -56,8 +57,6 @@ PluginComponent {
             else
                 args.push("--engine", engine);
         }
-        if (password.length > 0)
-            args.push("--password", password);
         return args;
     }
 
@@ -128,7 +127,7 @@ PluginComponent {
         shownServer = "";
         watcher.command = engine.length > 0
             ? [cli].concat(engineArguments(), ["--json", "watch"])
-            : [cli].concat(password.length > 0 ? ["--password", password] : [], ["--json", "watch", "--all"]);
+            : [cli, "--json", "watch", "--all"];
         watcher.running = true;
     }
 
@@ -142,6 +141,10 @@ PluginComponent {
     Process {
         id: watcher
 
+        // The password goes in the environment: on the command line, any
+        // user on the machine could read it with ps.
+        environment: root.passwordEnvironment
+
         running: false
 
         stdout: SplitParser {
@@ -151,8 +154,10 @@ PluginComponent {
                     const state = JSON.parse(String(data));
                     root.connected = true;
                     root.status = String(state.status || "stopped");
-                    root.track = state.track || null;
+                    // The engine first: a new track fetches its cover from
+                    // the engine shown, which must be this line's.
                     root.shownServer = state.engine && state.engine.server ? String(state.engine.server) : "";
+                    root.track = state.track || null;
                 } catch (error) {
                 }
             }
@@ -178,6 +183,7 @@ PluginComponent {
 
     Process {
         id: coverFetch
+        environment: root.passwordEnvironment
 
         property string target: ""
 
@@ -196,6 +202,7 @@ PluginComponent {
 
     Process {
         id: action
+        environment: root.passwordEnvironment
 
         running: false
 

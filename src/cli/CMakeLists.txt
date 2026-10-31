@@ -40,3 +40,9 @@ install(FILES ${PROJECT_SOURCE_DIR}/packaging/completions/melody-cli.bash
         COMPONENT cli)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/completions/_melody-cli
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions COMPONENT cli)
+# The DankMaterialShell bar widget, built on melody-cli: where the shell
+# looks for plugins installed for every user.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/packaging/dms/melody
+            DESTINATION /etc/xdg/quickshell/dms-plugins COMPONENT cli)
+endif()

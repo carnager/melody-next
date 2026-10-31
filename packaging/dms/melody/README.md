@@ -10,11 +10,10 @@ same controls, and five stars to rate it on the 0-10 scale every Melody
 client uses -- the left half of a star gives the half, the rating already
 set, clicked, clears it.
 
-It runs `melody-cli`, so that has to be installed.
-
-```sh
-ln -s "$PWD" ~/.config/DankMaterialShell/plugins/melody
-```
+It runs `melody-cli`, and comes with it: the `melody-cli-git` package (or
+`cmake --install` of the `cli` component on Linux) puts it in
+`/etc/xdg/quickshell/dms-plugins/melody`, where the shell finds plugins
+installed for every user. Nothing is copied or linked into your own config.
 
 Then enable it under **Settings → Plugins** and add it to the bar. Left as
 it is, it follows whichever engine is playing, on this computer or on the

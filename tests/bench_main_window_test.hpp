@@ -159,6 +159,7 @@
 #include <QTreeView>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#include <QWidgetAction>
 #include <QtTest>
 
 #include <array>
@@ -332,6 +333,8 @@ class BenchMainWindowTest final : public QObject {
     void followPlaybackAndJumpRespectBrowsing();
     void commandPaletteFindsAndRunsRegisteredActions();
     void commandPaletteTracksAvailabilityAndLifetime();
+    void commandPaletteOffersEveryMenuEntry();
+    void commandPaletteHidesWhatAGreyedMenuHolds();
     void localListeningColumnsLoadRefreshAndRespectAuthority();
     void shortcutSettingsValidateSaveAndCancel();
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
@@ -448,6 +451,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
+    void theEngineMenuFollowsTheEngineChosen();
     void aNotificationWaitsForItsCover();
     void aPluginPanelIsToldWhatAnotherClientStarted();
     void theRemoteTabTakesTheNameItsEngineAnnounces();

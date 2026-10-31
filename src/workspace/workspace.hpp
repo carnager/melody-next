@@ -780,6 +780,18 @@ class Workspace final : public QObject {
     void followPlayback(EnginePlayback* playback, bool stop_other = true);
     // Another client started the engine not followed: followed now.
     void followIfStartedElsewhere(EnginePlayback* playback);
+    // ADR-0345: the engines the transport can follow, by name, and the one
+    // it follows; and following one by choice. Nothing is stopped: the
+    // window looks at that engine and controls it, as when another client
+    // started it.
+    struct EngineChoice {
+        EngineKey key;
+        QString label;
+        bool followed{false};
+        bool reachable{false};
+    };
+    [[nodiscard]] std::vector<EngineChoice> engineChoices() const;
+    void followEngine(const EngineKey& key);
     void rememberEngineState(EnginePlayback* playback);
     // Adopts whatever the engine is already playing -- after a restart of
     // the window, the music is still going.

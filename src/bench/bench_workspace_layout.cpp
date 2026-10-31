@@ -595,12 +595,10 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
             return;
         }
     }
-    QList<QAction*> commands;
-    for (const auto* id : workspace_command_ids) {
-        if (auto* action = findChild<QAction*>(QString::fromLatin1(id)))
-            commands.append(action);
-    }
-    auto* palette = new ui::CommandPalette(std::move(commands), this);
+    // ADR-0345: every command the menus hold, and the window's keys; the
+    // engines as they are now.
+    rebuildEngineMenu();
+    auto* palette = new ui::CommandPalette(ui::windowCommands(*this), this);
     palette->setAttribute(Qt::WA_DeleteOnClose);
     palette->open();
 }

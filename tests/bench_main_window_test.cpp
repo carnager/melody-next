@@ -96,8 +96,10 @@ void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
     auto* command = window.findChild<QAction*>(QStringLiteral("action-command-palette"));
     QVERIFY(command != nullptr);
     QCOMPARE(command->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+P")));
-    // Parameter choices and transient actions must not leak into command discovery.
-    QAction device(QStringLiteral("caprica"), &window);
+    // Actions in no menu and not the window's own -- transient choices --
+    // are not commands. Named so no real speaker matches: the menus' are
+    // offered (ADR-0345), and this computer's is named after it.
+    QAction device(QStringLiteral("stray-device-choice"), &window);
     device.setObjectName(QStringLiteral("action-output-123"));
     QAction rating(QStringLiteral("1"), &window);
     rating.setObjectName(QStringLiteral("action-local-rate-1"));
@@ -111,7 +113,7 @@ void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
     QVERIFY(filter != nullptr);
     QVERIFY(results != nullptr);
     QVERIFY(run != nullptr);
-    filter->setText(QStringLiteral("caprica"));
+    filter->setText(QStringLiteral("stray-device-choice"));
     QCOMPARE(results->count(), 0);
     filter->setText(QStringLiteral("queue-rate"));
     QCOMPARE(results->count(), 0);
@@ -168,6 +170,95 @@ void BenchMainWindowTest::commandPaletteTracksAvailabilityAndLifetime() {
     QTest::keyClick(filter, Qt::Key_Return);
     QCOMPARE(triggered.count(), 1);
     QVERIFY(!palette.isVisible());
+}
+
+// ADR-0345: the palette offers what the menus hold, submenus included, and
+// the window's own keys -- nothing kept in a list of its own to forget.
+void BenchMainWindowTest::commandPaletteOffersEveryMenuEntry() {
+    BenchMainWindow window;
+    window.show();
+    const auto commands = ui::windowCommands(window);
+    const auto offered = [&commands](const QAction* action) {
+        return std::ranges::any_of(commands, [action](const ui::PaletteCommand& command) {
+            return command.action == action;
+        });
+    };
+    // Everything the old list named is still there.
+    for (const auto* id : workspace_command_ids) {
+        auto* action = window.findChild<QAction*>(QString::fromLatin1(id));
+        QVERIFY2(action != nullptr, id);
+        QVERIFY2(offered(action), id);
+    }
+    // And each command once.
+    QSet<const QAction*> once;
+    for (const auto& command : commands) {
+        QVERIFY(!once.contains(command.action.data()));
+        once.insert(command.action.data());
+    }
+
+    window.findChild<QAction*>(QStringLiteral("action-command-palette"))->trigger();
+    auto* palette = window.findChild<QDialog*>(QStringLiteral("command-palette"));
+    QVERIFY(palette != nullptr);
+    auto* filter = palette->findChild<QLineEdit*>(QStringLiteral("command-filter"));
+    auto* results = palette->findChild<QListWidget*>(QStringLiteral("command-results"));
+    const auto shown = [results] {
+        QStringList texts;
+        for (int row = 0; row < results->count(); ++row) {
+            texts.append(results->item(row)->text());
+        }
+        return texts;
+    };
+    // The modes, only in the Playback menu and on the status bar before.
+    filter->setText(QStringLiteral("repeat"));
+    QVERIFY(shown().contains(QStringLiteral("Repeat")));
+    // A submenu's entry is named under it; the menu bar's menu is searched
+    // but not shown.
+    filter->setText(QStringLiteral("playback output refresh"));
+    QCOMPARE(shown(), QStringList{QStringLiteral("Output › Refresh audio devices")});
+    filter->setText(QStringLiteral("buffer resilient"));
+    QCOMPARE(shown().size(), 1);
+    QVERIFY(shown().front().startsWith(QStringLiteral("Playback buffer › Resilient")));
+    // The palette does not offer itself.
+    filter->setText(QStringLiteral("Commands"));
+    QCOMPARE(results->count(), 0);
+    // One engine to follow is no choice: the Engine menu stays out.
+    filter->setText(QStringLiteral("engine follow"));
+    QCOMPARE(results->count(), 0);
+}
+
+void BenchMainWindowTest::commandPaletteHidesWhatAGreyedMenuHolds() {
+    QMainWindow window;
+    auto* menu = window.menuBar()->addMenu(QStringLiteral("&Edit"));
+    auto* sort = menu->addMenu(QStringLiteral("Sort list"));
+    auto* by_artist = sort->addAction(QStringLiteral("By artist"));
+    menu->addSeparator();
+    auto* heading = new QWidgetAction(menu);
+    heading->setDefaultWidget(new QLabel(QStringLiteral("Heading")));
+    menu->addAction(heading);
+    auto* key_only = new QAction(QStringLiteral("Focus search"), &window);
+    window.addAction(key_only);
+    QSignalSpy triggered{by_artist, &QAction::triggered};
+
+    const auto commands = ui::windowCommands(window);
+    QCOMPARE(commands.size(), 2);
+    QCOMPARE(commands.front().action.data(), by_artist);
+    QCOMPARE(commands.front().path,
+             (QStringList{QStringLiteral("Edit"), QStringLiteral("Sort list")}));
+    QCOMPARE(commands.back().action.data(), key_only);
+
+    ui::CommandPalette palette(commands);
+    palette.show();
+    auto* filter = palette.findChild<QLineEdit*>(QStringLiteral("command-filter"));
+    auto* results = palette.findChild<QListWidget*>(QStringLiteral("command-results"));
+    filter->setText(QStringLiteral("sort"));
+    QCOMPARE(results->count(), 1);
+    QCOMPARE(results->item(0)->text(), QStringLiteral("Sort list › By artist"));
+    sort->setEnabled(false);
+    QCOMPARE(results->count(), 0);
+    sort->setEnabled(true);
+    QCOMPARE(results->count(), 1);
+    QTest::keyClick(filter, Qt::Key_Return);
+    QCOMPARE(triggered.count(), 1);
 }
 
 // ADR-0282: the play count and last played columns are the list's engine's

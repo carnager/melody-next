@@ -10,12 +10,16 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMainWindow>
 #include <QMenu>
+#include <QMenuBar>
 #include <QPainter>
 #include <QPushButton>
+#include <QSet>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include <algorithm>
 
@@ -63,17 +67,66 @@ QString commandName(const QAction* action) {
     name.remove(QLatin1Char('&'));
     return name.trimmed();
 }
+
+// What the list shows: the command, under the submenus it is in -- not the
+// menu bar's own menu, which only the search looks at.
+QString shownName(const PaletteCommand& command) {
+    auto parts = command.path.mid(1);
+    parts.append(commandName(command.action));
+    return parts.join(QStringLiteral(" › "));
+}
+
+void collect(const QList<QAction*>& actions, const QStringList& path,
+             const QList<QPointer<QAction>>& menus, QList<PaletteCommand>& into,
+             QSet<const QAction*>& seen) {
+    for (auto* action : actions) {
+        // Separators, and headings drawn as widgets, are not commands.
+        if (action == nullptr || action->isSeparator() ||
+            qobject_cast<QWidgetAction*>(action) != nullptr || seen.contains(action)) {
+            continue;
+        }
+        seen.insert(action);
+        if (const auto* menu = action->menu(); menu != nullptr) {
+            auto below = menus;
+            below.append(action);
+            collect(menu->actions(), path + QStringList{commandName(action)}, below, into, seen);
+            continue;
+        }
+        // The palette's own entry would only open it again.
+        if (commandName(action).isEmpty() ||
+            action->objectName() == QStringLiteral("action-command-palette")) {
+            continue;
+        }
+        into.append(PaletteCommand{.action = action, .path = path, .menus = menus});
+    }
+}
 } // namespace
 
-CommandPalette::CommandPalette(QList<QAction*> actions, QWidget* parent) : QDialog(parent) {
-    for (auto* action : actions) {
-        if (action && !action->isSeparator() && !action->menu() &&
-            !action->objectName().isEmpty() && !commandName(action).isEmpty() &&
-            !actions_.contains(action))
-            actions_.append(action);
+QList<PaletteCommand> windowCommands(const QMainWindow& window) {
+    QList<PaletteCommand> commands;
+    QSet<const QAction*> seen;
+    if (const auto* bar = window.menuBar(); bar != nullptr) {
+        collect(bar->actions(), {}, {}, commands, seen);
     }
-    std::ranges::sort(actions_, {},
-                      [](const auto& action) { return commandName(action).toCaseFolded(); });
+    collect(window.actions(), {}, {}, commands, seen);
+    return commands;
+}
+
+CommandPalette::CommandPalette(const QList<QAction*>& actions, QWidget* parent)
+    : CommandPalette(
+          [&actions] {
+              QList<PaletteCommand> commands;
+              QSet<const QAction*> seen;
+              collect(actions, {}, {}, commands, seen);
+              return commands;
+          }(),
+          parent) {}
+
+CommandPalette::CommandPalette(QList<PaletteCommand> commands, QWidget* parent)
+    : QDialog(parent), commands_(std::move(commands)) {
+    commands_.removeIf([](const PaletteCommand& command) { return !command.action; });
+    std::ranges::sort(commands_, {},
+                      [](const auto& command) { return shownName(command).toCaseFolded(); });
     setObjectName(QStringLiteral("command-palette"));
     setWindowTitle(tr("Commands"));
     resize(620, 480);
@@ -109,15 +162,32 @@ CommandPalette::CommandPalette(QList<QAction*> actions, QWidget* parent) : QDial
     connect(results_, &QListWidget::itemActivated, this, [this] { runCurrent(); });
     connect(run_, &QPushButton::clicked, this, &CommandPalette::runCurrent);
     connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    for (const auto& action : actions_) {
-        connect(action, &QAction::changed, this, &CommandPalette::rebuild);
-        connect(action, &QObject::destroyed, this, [this, pointer = action.data()] {
-            // Keep indexes stable until rebuild has discarded the old result items.
-            for (auto& item : actions_)
-                if (item == pointer)
-                    item.clear();
-            rebuild();
-        });
+    // A command, or a menu it is in, greyed out, hidden or gone changes
+    // what is offered. The pointers clear themselves; indexes stay.
+    QSet<const QAction*> watched;
+    for (const auto& command : commands_) {
+        auto watch = command.menus;
+        watch.append(command.action);
+        for (const auto& action : watch) {
+            if (!action || watched.contains(action.data())) {
+                continue;
+            }
+            watched.insert(action.data());
+            connect(action, &QAction::changed, this, &CommandPalette::rebuild);
+            connect(action, &QObject::destroyed, this, [this, pointer = action.data()] {
+                for (auto& each : commands_) {
+                    if (each.action == pointer) {
+                        each.action.clear();
+                    }
+                    for (auto& menu : each.menus) {
+                        if (menu == pointer) {
+                            menu.clear();
+                        }
+                    }
+                }
+                rebuild();
+            });
+        }
     }
     rebuild();
     filter_->setFocus();
@@ -127,15 +197,18 @@ void CommandPalette::rebuild() {
     const QPointer<QAction> selected = currentAction();
     results_->clear();
     int selected_row = -1;
-    for (qsizetype index = 0; index < actions_.size(); ++index) {
-        const auto& action = actions_[index];
-        if (!action || !action->isVisible() || !action->isEnabled())
+    for (qsizetype index = 0; index < commands_.size(); ++index) {
+        const auto& command = commands_[index];
+        if (!available(command))
             continue;
+        const auto& action = command.action;
         const auto shortcut = action->shortcut().toString(QKeySequence::NativeText);
-        const auto name = commandName(action);
-        if (!bench::commandMatches(filter_->text(), name, shortcut, action->objectName()))
+        auto label = shownName(command);
+        // The menu bar's menu is searched too: "playback output" finds the
+        // speakers.
+        const auto searched = command.path.join(QLatin1Char(' ')) + QLatin1Char(' ') + label;
+        if (!bench::commandMatches(filter_->text(), searched, shortcut, action->objectName()))
             continue;
-        auto label = name;
         if (action->isCheckable() && action->isChecked())
             label += tr(" · On");
         auto* item = new QListWidgetItem(action->icon(), label, results_);
@@ -156,7 +229,15 @@ QAction* CommandPalette::currentAction() const {
     if (!item)
         return nullptr;
     const auto index = item->data(Qt::UserRole).toLongLong();
-    return index >= 0 && index < actions_.size() ? actions_[index].data() : nullptr;
+    return index >= 0 && index < commands_.size() ? commands_[index].action.data() : nullptr;
+}
+
+bool CommandPalette::available(const PaletteCommand& command) const {
+    const auto usable = [](const QPointer<QAction>& action) {
+        return action && action->isVisible() && action->isEnabled();
+    };
+    // A menu gone took its commands with it.
+    return usable(command.action) && std::ranges::all_of(command.menus, usable);
 }
 
 void CommandPalette::updateSelection() {

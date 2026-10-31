@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, 2026-09-21.
+Accepted, 2026-09-21. The curated inventory is superseded by ADR-0345.
 
 ## Decision
 

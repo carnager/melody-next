@@ -738,6 +738,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void buildMprisService();
     void publishMprisState() { workspace_.publishDesktopState(); }
     void rebuildDeviceMenu();
+    // ADR-0345: the engines the controls can follow, one entry each.
+    void rebuildEngineMenu();
     // A mode's icon marked as one-shot: on for one track, then off.
     [[nodiscard]] QIcon oneShotIcon(const QIcon& plain) const;
     void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms) {
@@ -828,6 +830,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QSlider* volume_{nullptr};
     QToolButton* device_button_{nullptr};
     QMenu* device_menu_{nullptr};
+    QMenu* engine_menu_{nullptr};
     QActionGroup* device_group_{nullptr};
     QMenu* buffer_menu_{nullptr};
     QActionGroup* buffer_group_{nullptr};

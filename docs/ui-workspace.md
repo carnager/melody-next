@@ -595,9 +595,9 @@ Neither navigation action changes playback or the sticky Active marker.
 
 ## Keyboard shortcuts
 
-Settings → Shortcuts lists every action with a default key, and every command
-the command palette offers, with or without one, so Convert, ReplayGain and
-the rest can be given a key. Save applies and persists them; Cancel leaves
+Settings → Shortcuts lists every action with a default key, and every
+workspace command with or without one, so Convert, ReplayGain and the rest
+can be given a key. The command palette offers every menu entry (ADR-0345). Save applies and persists them; Cancel leaves
 current bindings alone. Restore defaults edits the form until Save. Empty
 bindings disable a shortcut. Duplicate and chord-prefix conflicts are
 rejected; `Ctrl+L` is an ordinary binding like the others.

@@ -1003,6 +1003,13 @@ if(MELODY_BUILD_UI)
     add_test(NAME local-library COMMAND trackknife_local_library_tests)
     set_tests_properties(local-library PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+    # ADR-0321: deleted files confirmed gone through the real mount table;
+    # what the macOS CI job runs.
+    add_test(NAME local-library-mounts COMMAND trackknife_local_library_tests
+        deletedSubfoldersArePrunedEvenByIncompleteScans aShareNotMountedKeepsItsFiles
+        missingFilesOnARemountedShareArePruned)
+    set_tests_properties(local-library-mounts PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
     target_compile_definitions(
         trackknife_bench_main_window_tests
         PRIVATE MELODY_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"

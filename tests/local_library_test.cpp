@@ -467,7 +467,9 @@ void LocalLibraryTest::refreshDropsAVanishedFolderAndInventoryPages() {
 
 void LocalLibraryTest::deletedSubfoldersArePrunedEvenByIncompleteScans() {
     QTemporaryDir temporary;
-    const std::filesystem::path base{temporary.path().toStdString()};
+    // As the library spells it: macOS's temporary folder is below a link
+    // (/var to /private/var).
+    const auto base = std::filesystem::canonical(temporary.path().toStdString());
     const auto root = base / "music";
     const auto removed = fixture(root / "removed", "01.flac", "Deleted", "Deleted album");
     const auto retained = fixture(root / "retained", "01.flac", "Kept", "Kept album");
@@ -551,7 +553,9 @@ struct MountTable {
 // there, a file missing from it goes too.
 void LocalLibraryTest::aShareNotMountedKeepsItsFiles() {
     QTemporaryDir temporary;
-    const std::filesystem::path base{temporary.path().toStdString()};
+    // As the library spells it: macOS's temporary folder is below a link
+    // (/var to /private/var).
+    const auto base = std::filesystem::canonical(temporary.path().toStdString());
     const auto root = base / "music";
     const auto kept = fixture(root / "album", "01.flac", "Kept", "Album");
     const auto deleted = fixture(root / "album", "02.flac", "Deleted", "Album");
@@ -600,7 +604,9 @@ void LocalLibraryTest::aShareNotMountedKeepsItsFiles() {
 // it -- where nothing of the old device is seen, nothing is.
 void LocalLibraryTest::missingFilesOnARemountedShareArePruned() {
     QTemporaryDir temporary;
-    const std::filesystem::path base{temporary.path().toStdString()};
+    // As the library spells it: macOS's temporary folder is below a link
+    // (/var to /private/var).
+    const auto base = std::filesystem::canonical(temporary.path().toStdString());
     const auto root = base / "music";
     const auto kept = fixture(root / "album" / "CD 1", "01.flac", "Kept", "Album");
     const auto gone = fixture(root / "album" / "CD 2", "01.flac", "Gone", "Album");
